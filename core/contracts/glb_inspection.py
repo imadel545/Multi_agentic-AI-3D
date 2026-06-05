@@ -31,6 +31,10 @@ class PreviewInspectionReport(StrictModel):
     height: int = Field(default=0, ge=0)
     format: str | None = None
     minimum_resolution_valid: bool = False
+    luminance_mean: float | None = None
+    luminance_stddev: float | None = None
+    non_dark_pixel_ratio: float | None = None
+    visual_quality_valid: bool = False
     checks: dict[str, bool] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     critical_errors: list[str] = Field(default_factory=list)

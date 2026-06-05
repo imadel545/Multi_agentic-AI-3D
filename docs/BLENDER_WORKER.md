@@ -75,5 +75,6 @@ Metadata fields:
 Known limitations:
 
 - The worker currently generates procedural primitives, not imported vendor GLB assets.
+- `GET /assets/inventory` exposes whether manifests have real GLB files available for import.
 - GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and
   bounding-box reasonableness, not visual aesthetics or material quality.

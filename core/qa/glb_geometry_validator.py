@@ -87,7 +87,8 @@ def _count(normalized_names: list[str], prefixes: tuple[str, ...]) -> int:
     return sum(
         1
         for name in normalized_names
-        if any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
+        if not _is_auxiliary_object(name)
+        and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
     )
 
 
@@ -128,9 +129,14 @@ def _has_sector_object(
 ) -> bool:
     return any(
         sector_token in name
+        and not _is_auxiliary_object(name)
         and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
         for name in normalized_names
     )
+
+
+def _is_auxiliary_object(normalized_name: str) -> bool:
+    return "_head_" in normalized_name or normalized_name.endswith("_head")
 
 
 def _object_names_match_scene(

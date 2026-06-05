@@ -36,6 +36,8 @@ class GenerationQA:
             == [sector.azimuth_deg for sector in scene.sectors],
             "metadata_antenna_heights_valid": metadata.get("antenna_heights_m")
             == [sector.install_height_m for sector in scene.sectors],
+            "metadata_preview_camera_valid": isinstance(metadata.get("preview_camera"), dict)
+            and bool(metadata["preview_camera"].get("camera")),
             "generation_completed_or_fallback": generation.status in {"generated", "fallback"},
             "glb_inspection_available": glb_inspection.inspection_mode
             in {"glb_parse", "metadata_fallback"},
@@ -45,6 +47,8 @@ class GenerationQA:
             ),
             "preview_inspection_available": preview_inspection.inspection_mode == "png_parse",
             "preview_resolution_valid": preview_inspection.minimum_resolution_valid,
+            "preview_visual_quality_valid": generation.mode != "real_blender"
+            or preview_inspection.visual_quality_valid,
             "geometry_validation_valid": geometry_validation.status == "passed",
         }
         warnings = []

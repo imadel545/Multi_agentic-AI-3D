@@ -18,6 +18,7 @@ from core.llm import GroqStructuredClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
 from core.rag import RagService
+from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 
@@ -35,6 +36,7 @@ app = FastAPI(
 )
 
 registry = AssetRegistry(settings.manifests_dir)
+asset_inventory_service = AssetInventoryService(settings.project_root, registry)
 rag_service = RagService(
     project_root=settings.project_root,
     qdrant_path=settings.local_qdrant_path,
@@ -115,6 +117,11 @@ def validate_scene_spec_endpoint(scene: SceneSpec) -> ValidationReport:
 @app.get("/assets")
 def list_assets() -> list[dict]:
     return [asset.model_dump() for asset in registry.list_assets()]
+
+
+@app.get("/assets/inventory")
+def asset_inventory() -> dict:
+    return asset_inventory_service.inspect()
 
 
 @app.get("/memory/stats")

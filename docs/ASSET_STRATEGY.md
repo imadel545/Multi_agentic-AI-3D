@@ -5,6 +5,7 @@
 Implemented:
 
 - Manifest-first registry under `assets/manifests`.
+- Asset inventory endpoint through `GET /assets/inventory`.
 - Validated manifest IDs for:
   - `TOWER_LATTICE_30M`
   - `TOWER_MONOPOLE_30M`
@@ -21,6 +22,8 @@ Known limitation:
 
 - The repository currently contains manifests only. The referenced GLB files under
   `assets/towers`, `assets/antennas`, and `assets/radios` are not present.
+- `GET /assets/inventory` currently reports `status = manifest_only`,
+  `real_glb_asset_count = 0`, and `procedural_generation_required = true`.
 
 ## Procedural Generation
 

@@ -30,17 +30,20 @@ def main() -> int:
     procedural_objects: list[str] = []
     _reset_scene(bpy)
     _configure_scene(bpy, scene)
+    _create_ground_plane(bpy, scene)
     _create_tower(bpy, scene, procedural_objects)
     _create_height_marker(bpy, scene, procedural_objects)
     _create_sectors(bpy, scene, procedural_objects)
-    _create_camera_and_light(bpy, scene)
+    camera_metadata = _create_camera_and_light(bpy, scene)
 
     glb_path = output_dir / "design.glb"
     preview_path = output_dir / "preview.png"
     bpy.ops.export_scene.gltf(filepath=str(glb_path), export_format="GLB")
+    _create_preview_backdrop(bpy, scene)
+    camera_metadata["render_backdrop"] = "preview_only_light_plane"
     bpy.context.scene.render.filepath = str(preview_path)
     bpy.ops.render.render(write_still=True)
-    _write_metadata(scene, output_dir, "real_blender", procedural_objects, [])
+    _write_metadata(scene, output_dir, "real_blender", procedural_objects, [], camera_metadata)
     return 0
 
 
@@ -64,13 +67,45 @@ def _configure_scene(bpy, scene: dict) -> None:
     engines = {
         item.identifier for item in bpy.context.scene.render.bl_rna.properties["engine"].enum_items
     }
-    for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
+    for engine in ("BLENDER_WORKBENCH", "BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
         if engine in engines:
             bpy.context.scene.render.engine = engine
             break
     width, height = scene["preview"]["resolution"]
     bpy.context.scene.render.resolution_x = int(width)
     bpy.context.scene.render.resolution_y = int(height)
+    bpy.context.scene.world = bpy.context.scene.world or bpy.data.worlds.new("World")
+    bpy.context.scene.world.color = (0.94, 0.96, 0.98)
+    bpy.context.scene.render.film_transparent = False
+    if bpy.context.scene.render.engine == "BLENDER_WORKBENCH":
+        shading = bpy.context.scene.display.shading
+        shading.light = "STUDIO"
+        shading.color_type = "MATERIAL"
+        shading.background_type = "COLOR"
+        shading.background_color = (0.94, 0.96, 0.98)
+    if hasattr(bpy.context.scene, "eevee"):
+        if hasattr(bpy.context.scene.eevee, "use_gtao"):
+            bpy.context.scene.eevee.use_gtao = True
+        if hasattr(bpy.context.scene.eevee, "gtao_distance"):
+            bpy.context.scene.eevee.gtao_distance = 4
+        if hasattr(bpy.context.scene.eevee, "gtao_factor"):
+            bpy.context.scene.eevee.gtao_factor = 0.8
+    bpy.context.scene.view_settings.view_transform = "Standard"
+    try:
+        bpy.context.scene.view_settings.look = "None"
+    except TypeError:
+        bpy.context.scene.view_settings.look = "Medium High Contrast"
+    bpy.context.scene.view_settings.exposure = 0.25
+    bpy.context.scene.view_settings.gamma = 1
+
+
+def _create_ground_plane(bpy, scene: dict) -> None:
+    height = float(scene["tower"]["height_m"])
+    size = max(14.0, height * 0.6)
+    bpy.ops.mesh.primitive_plane_add(size=size, location=(0, 0, -0.02))
+    ground = bpy.context.object
+    ground.name = "technical_ground_plane"
+    ground.data.materials.append(_material(bpy, "matte_ground", (0.72, 0.74, 0.74, 1)))
 
 
 def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
@@ -86,7 +121,7 @@ def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
         )
         obj = bpy.context.object
         obj.name = f"tower_{scene['tower']['asset_id']}"
-        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.55, 0.58, 0.6, 1)))
+        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
         procedural_objects.append("tower:monopole_procedural")
     else:
         bpy.ops.mesh.primitive_cylinder_add(
@@ -94,13 +129,13 @@ def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
         )
         obj = bpy.context.object
         obj.name = f"tower_{scene['tower']['asset_id']}"
-        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.55, 0.58, 0.6, 1)))
+        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
         procedural_objects.append("tower:generic_procedural")
     _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
 
 def _create_lattice_tower(bpy, height: float, characteristics: dict) -> None:
-    material = _material(bpy, "galvanized_steel", (0.55, 0.58, 0.6, 1))
+    material = _material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1))
     base = float(characteristics.get("base_width_m") or 4.0)
     top = float(characteristics.get("top_width_m") or 1.0)
     leg_count = int(characteristics.get("leg_count") or 4)
@@ -279,16 +314,29 @@ def _create_cable(
 
 
 def _create_beam(bpy, sector_id: str, azimuth: float, z: float, radius: float) -> None:
-    x = math.sin(azimuth) * radius / 2
-    y = math.cos(azimuth) * radius / 2
-    bpy.ops.mesh.primitive_cone_add(
-        vertices=32, radius1=radius / 2, radius2=0.1, depth=radius, location=(x, y, z)
+    visual_length = min(radius, 4.5)
+    start_radius = 1.55
+    start = (
+        math.sin(azimuth) * start_radius,
+        math.cos(azimuth) * start_radius,
+        z + 0.15,
     )
-    beam = bpy.context.object
-    beam.name = f"sector_beam_{sector_id}"
-    beam.rotation_euler[0] = math.radians(90)
-    beam.rotation_euler[2] = -azimuth
-    beam.data.materials.append(_material(bpy, "beam_translucent", (0.1, 0.5, 1.0, 0.22)))
+    end = (
+        math.sin(azimuth) * (start_radius + visual_length),
+        math.cos(azimuth) * (start_radius + visual_length),
+        z + 0.15,
+    )
+    material = _material(bpy, "beam_direction_blue", (0.05, 0.45, 1.0, 0.62))
+    _create_cylinder_between(bpy, start, end, 0.035, f"sector_beam_{sector_id}", material)
+    bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=0.14, depth=0.3, location=end)
+    head = bpy.context.object
+    head.name = f"sector_beam_head_{sector_id}"
+    head.rotation_euler = _direction_to_euler(
+        end[0] - start[0],
+        end[1] - start[1],
+        end[2] - start[2],
+    )
+    head.data.materials.append(material)
 
 
 def _create_azimuth_arrow(bpy, sector_id: str, azimuth: float, z: float) -> None:
@@ -311,14 +359,63 @@ def _create_height_marker(bpy, scene: dict, procedural_objects: list[str]) -> No
     procedural_objects.append("height_marker")
 
 
-def _create_camera_and_light(bpy, scene: dict) -> None:
+def _create_camera_and_light(bpy, scene: dict) -> dict:
     tower_height = float(scene["tower"]["height_m"])
-    bpy.ops.object.light_add(type="SUN", location=(5, -5, tower_height + 10))
-    bpy.context.object.name = "sun_key"
-    bpy.ops.object.camera_add(
-        location=(tower_height, -tower_height, tower_height * 0.8), rotation=(1.1, 0, 0.78)
+    base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
+    target = (0.0, 0.0, tower_height * 0.52)
+    distance = max(38.0, tower_height * 1.55)
+    camera_location = (0.0, -distance, target[2])
+    preview_width, preview_height = scene["preview"]["resolution"]
+    aspect_ratio = float(preview_width) / max(float(preview_height), 1.0)
+
+    bpy.ops.object.light_add(type="SUN", location=(8, -6, tower_height + 12))
+    sun = bpy.context.object
+    sun.name = "sun_key"
+    sun.data.energy = 1.8
+    bpy.ops.object.light_add(
+        type="AREA",
+        location=(distance * 0.25, -distance * 0.45, tower_height),
     )
-    bpy.context.scene.camera = bpy.context.object
+    fill = bpy.context.object
+    fill.name = "area_fill"
+    fill.data.energy = 650
+    fill.data.size = max(6, tower_height * 0.35)
+
+    bpy.ops.object.camera_add(
+        location=camera_location,
+    )
+    camera = bpy.context.object
+    camera.name = "camera_technical_front_full_tower"
+    camera.data.type = "ORTHO"
+    camera.data.ortho_scale = max(tower_height * 1.5 * aspect_ratio, base_width * 6.0, 24.0)
+    camera.rotation_euler = (math.radians(90), 0, 0)
+    bpy.context.scene.camera = camera
+    return {
+        "camera": camera.name,
+        "camera_type": "ORTHO",
+        "camera_location": [round(value, 3) for value in camera_location],
+        "target": [round(value, 3) for value in target],
+        "ortho_scale": round(float(camera.data.ortho_scale), 3),
+        "background": "light_technical_world",
+        "framing": "full_tower_front",
+    }
+
+
+def _create_preview_backdrop(bpy, scene: dict) -> None:
+    tower_height = float(scene["tower"]["height_m"])
+    width = max(tower_height * 2.8, 70.0)
+    height = max(tower_height * 1.9, 48.0)
+    bpy.ops.mesh.primitive_plane_add(
+        size=1,
+        location=(0, 9.0, tower_height * 0.52),
+        rotation=(math.radians(90), 0, 0),
+    )
+    backdrop = bpy.context.object
+    backdrop.name = "technical_preview_backdrop"
+    backdrop.dimensions = (width, height, 1)
+    backdrop.data.materials.append(
+        _emission_material(bpy, "preview_backdrop_light", (0.9, 0.93, 0.96, 1), 0.65)
+    )
 
 
 def _create_cylinder_between(
@@ -353,7 +450,40 @@ def _direction_to_euler(dx: float, dy: float, dz: float) -> tuple[float, float, 
 def _material(bpy, name: str, color: tuple[float, float, float, float]):
     material = bpy.data.materials.new(name)
     material.diffuse_color = color
+    if color[3] < 1:
+        material.use_nodes = True
+        material.blend_method = "BLEND"
+        material.show_transparent_back = False
+        principled = _first_node_by_type(material, "ShaderNodeBsdfPrincipled")
+        if principled:
+            principled.inputs["Base Color"].default_value = color
+            principled.inputs["Alpha"].default_value = color[3]
     return material
+
+
+def _emission_material(
+    bpy,
+    name: str,
+    color: tuple[float, float, float, float],
+    strength: float,
+):
+    material = _material(bpy, name, color)
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    nodes.clear()
+    emission = nodes.new(type="ShaderNodeEmission")
+    output = nodes.new(type="ShaderNodeOutputMaterial")
+    emission.inputs["Color"].default_value = color
+    emission.inputs["Strength"].default_value = strength
+    material.node_tree.links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    return material
+
+
+def _first_node_by_type(material, bl_idname: str):
+    return next(
+        (node for node in material.node_tree.nodes if node.bl_idname == bl_idname),
+        None,
+    )
 
 
 def _write_non_blender_fallback(scene: dict, output_dir: Path) -> None:
@@ -368,6 +498,7 @@ def _write_non_blender_fallback(scene: dict, output_dir: Path) -> None:
         "fallback_no_blender",
         _procedural_objects_from_scene(scene),
         ["Blender Python API not available; worker fallback artifact created."],
+        _fallback_camera_metadata(scene),
     )
 
 
@@ -377,6 +508,7 @@ def _write_metadata(
     generation_mode: str,
     procedural_objects: list[str],
     warnings: list[str],
+    camera_metadata: dict,
 ) -> None:
     (output_dir / "scene_metadata.json").write_text(
         json.dumps(
@@ -392,6 +524,7 @@ def _write_metadata(
                 "tower_characteristics": scene["tower"].get("characteristics", {}),
                 "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
                 "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
+                "preview_camera": camera_metadata,
                 "warnings": warnings,
             },
             indent=2,
@@ -440,14 +573,31 @@ def _procedural_objects_from_scene(scene: dict) -> list[str]:
     return objects
 
 
+def _fallback_camera_metadata(scene: dict) -> dict:
+    tower_height = float(scene["tower"]["height_m"])
+    return {
+        "camera": "fallback_preview",
+        "camera_type": "not_rendered",
+        "target": [0.0, 0.0, round(tower_height * 0.52, 3)],
+        "ortho_scale": round(max(tower_height * 1.28, 18.0), 3),
+        "background": "fallback_png",
+    }
+
+
 def _minimal_png(width: int, height: int) -> bytes:
     def chunk(chunk_type: bytes, payload: bytes) -> bytes:
         checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
         return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
 
     header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
-    row = b"\x00" + (b"\xff\xff\xff" * width)
-    image = zlib.compress(row * height, level=9)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            gradient = 205 - int(42 * y / max(height - 1, 1)) + int(18 * x / max(width - 1, 1))
+            row.extend((gradient, gradient, min(255, gradient + 8)))
+        rows.append(bytes(row))
+    image = zlib.compress(b"".join(rows), level=9)
     return (
         b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
     )

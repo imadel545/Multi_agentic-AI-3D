@@ -118,6 +118,9 @@ def evaluate_post_blender_gate(
         and geometry_validation.status == "passed",
         "preview_resolution_valid": preview_inspection is not None
         and preview_inspection.minimum_resolution_valid,
+        "preview_visual_quality_valid": generation is not None
+        and preview_inspection is not None
+        and (generation.mode != "real_blender" or preview_inspection.visual_quality_valid),
     }
     critical_errors = [name for name, passed in checks.items() if not passed]
     warnings = [warning.code for warning in qa_report.warnings] if qa_report else []

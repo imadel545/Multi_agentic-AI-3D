@@ -54,6 +54,44 @@ def test_geometry_validation_missing_beam_fails(tmp_path: Path) -> None:
     assert "beam:S2" in report.missing_objects
 
 
+def test_geometry_validation_ignores_auxiliary_heads_for_required_counts(tmp_path: Path) -> None:
+    scene = _scene()
+    names = _object_names(scene) + [
+        "sector_beam_head_S1",
+        "sector_beam_head_S2",
+        "azimuth_arrow_head_S1",
+    ]
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(names),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert report.status == "passed"
+    assert report.object_counts["beam"] == 3
+    assert report.object_counts["azimuth_arrow"] == 3
+
+
+def test_geometry_validation_auxiliary_head_does_not_replace_missing_beam(
+    tmp_path: Path,
+) -> None:
+    scene = _scene()
+    names = [name for name in _object_names(scene) if not name.startswith("sector_beam_S2")] + [
+        "sector_beam_head_S2"
+    ]
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(names),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert report.status == "failed"
+    assert report.checks["beam_count_valid"] is False
+    assert "beam:S2" in report.missing_objects
+
+
 def test_geometry_validation_respects_no_cables_option(tmp_path: Path) -> None:
     scene = _scene("Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Sans câbles.")
     names = _object_names(scene)

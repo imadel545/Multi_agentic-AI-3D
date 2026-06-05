@@ -42,6 +42,8 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     assert metadata["azimuths_deg"] == [0, 120, 240]
     assert metadata["tower_characteristics"]["structure"] == "lattice"
     assert metadata["tower_characteristics"]["base_width_m"] == 4.0
+    assert metadata["preview_camera"]["camera"] == "fallback_preview"
+    assert metadata["preview_camera"]["ortho_scale"] >= 18
     assert "TOWER_LATTICE_30M" in metadata["assets_used"]
 
 
@@ -74,4 +76,8 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
     assert metadata["generation_mode"] == "real_blender"
     assert metadata["tower_characteristics"]["structure"] == "lattice"
+    assert metadata["preview_camera"]["camera"] == "camera_technical_front_full_tower"
+    assert metadata["preview_camera"]["camera_type"] == "ORTHO"
+    assert metadata["preview_camera"]["framing"] == "full_tower_front"
+    assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
     assert metadata["procedural_objects_created"]

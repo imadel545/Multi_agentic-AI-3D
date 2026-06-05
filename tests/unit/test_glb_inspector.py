@@ -92,7 +92,22 @@ def test_preview_inspector_valid_png(tmp_path: Path) -> None:
     assert report.height == 1080
     assert report.format == "png"
     assert report.minimum_resolution_valid is True
+    assert report.visual_quality_valid is True
+    assert report.checks["preview_visual_quality_valid"] is True
     assert report.preview_qa_passed is True
+
+
+def test_preview_inspector_rejects_dark_flat_png(tmp_path: Path) -> None:
+    scene = _scene()
+    preview_path = tmp_path / "preview.png"
+    preview_path.write_bytes(_png_bytes(1920, 1080, color=(24, 24, 24)))
+
+    report = PreviewInspector().inspect(preview_path, scene)
+
+    assert report.minimum_resolution_valid is True
+    assert report.visual_quality_valid is False
+    assert report.preview_qa_passed is False
+    assert "PREVIEW_VISUAL_QUALITY_INVALID" in report.critical_errors
 
 
 def test_preview_inspector_missing_png(tmp_path: Path) -> None:
@@ -152,14 +167,27 @@ def _write_test_glb(path: Path, object_names: list[str]) -> None:
     )
 
 
-def _png_bytes(width: int, height: int) -> bytes:
+def _png_bytes(
+    width: int,
+    height: int,
+    color: tuple[int, int, int] | None = None,
+) -> bytes:
     def chunk(chunk_type: bytes, payload: bytes) -> bytes:
         checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
         return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
 
     header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
-    row = b"\x00" + (b"\xff\xff\xff" * width)
-    image = zlib.compress(row * height, level=9)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            if color is None:
+                gradient = 205 - int(42 * y / max(height - 1, 1)) + int(18 * x / max(width - 1, 1))
+                row.extend((gradient, gradient, min(255, gradient + 8)))
+            else:
+                row.extend(color)
+        rows.append(bytes(row))
+    image = zlib.compress(b"".join(rows), level=9)
     return (
         b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
     )

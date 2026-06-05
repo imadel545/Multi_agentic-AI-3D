@@ -304,6 +304,10 @@ def _preview_inspection_summary(result: OrchestratorResult) -> dict | None:
         "height": result.preview_inspection.height,
         "format": result.preview_inspection.format,
         "minimum_resolution_valid": result.preview_inspection.minimum_resolution_valid,
+        "visual_quality_valid": result.preview_inspection.visual_quality_valid,
+        "luminance_mean": result.preview_inspection.luminance_mean,
+        "luminance_stddev": result.preview_inspection.luminance_stddev,
+        "non_dark_pixel_ratio": result.preview_inspection.non_dark_pixel_ratio,
         "preview_qa_passed": result.preview_inspection.preview_qa_passed,
         "critical_errors": result.preview_inspection.critical_errors,
     }

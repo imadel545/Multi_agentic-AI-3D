@@ -66,7 +66,7 @@ Implemented:
 - Empty, missing, or malformed GLB files fail structural QA unless explicit metadata fallback is
   available.
 - `PreviewInspector` parses PNG headers and verifies width/height against SceneSpec preview
-  resolution.
+  resolution, luminance, contrast, and non-dark pixel ratio.
 - `glb_inspection.json` and `preview_inspection.json` are written for completed generation runs.
 - `geometry_validation.json` is written for completed generation runs.
 
@@ -110,7 +110,8 @@ Future:
 Known limitations:
 
 - GLB parsing currently inspects JSON structure only.
-- Preview inspection validates PNG dimensions, not aesthetic quality or visual correctness.
+- Preview inspection validates PNG dimensions and basic visibility metrics, not full aesthetic or
+  semantic visual correctness.
 
 ## Golden Scenes
 

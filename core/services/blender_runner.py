@@ -191,6 +191,7 @@ class BlenderRunner:
                     "tower_characteristics": scene.tower.characteristics.model_dump(),
                     "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                     "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
+                    "preview_camera": _preview_camera_metadata(scene),
                     "warnings": [_blender_install_hint()],
                 },
                 indent=2,
@@ -205,8 +206,14 @@ def _minimal_png(width: int, height: int) -> bytes:
         return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
 
     header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
-    row = b"\x00" + (b"\xff\xff\xff" * width)
-    image = zlib.compress(row * height, level=9)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            gradient = 205 - int(42 * y / max(height - 1, 1)) + int(18 * x / max(width - 1, 1))
+            row.extend((gradient, gradient, min(255, gradient + 8)))
+        rows.append(bytes(row))
+    image = zlib.compress(b"".join(rows), level=9)
     return (
         b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
     )
@@ -246,6 +253,17 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
     if scene.visual_elements.include_labels:
         objects.append("labels_metadata")
     return objects
+
+
+def _preview_camera_metadata(scene: SceneSpec) -> dict:
+    tower_height = scene.tower.height_m
+    return {
+        "camera": "fallback_preview",
+        "camera_type": "not_rendered",
+        "target": [0.0, 0.0, round(tower_height * 0.52, 3)],
+        "ortho_scale": round(max(tower_height * 1.28, 18.0), 3),
+        "background": "fallback_png",
+    }
 
 
 def _blender_install_hint() -> str:
