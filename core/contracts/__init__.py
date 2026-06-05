@@ -6,6 +6,7 @@ from core.contracts.quality import QualityGateCheck, QualityGateReport
 from core.contracts.repair import RepairEvent, RepairReport
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
+from core.contracts.tower import TowerCharacteristics
 from core.contracts.validation import ValidationIssue, ValidationReport
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "RepairReport",
     "RequirementSpec",
     "SceneSpec",
+    "TowerCharacteristics",
     "ValidationIssue",
     "ValidationReport",
 ]

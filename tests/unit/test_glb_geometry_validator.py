@@ -20,6 +20,7 @@ def test_geometry_validation_valid_5g_scene(tmp_path: Path) -> None:
     assert report.checks["antenna_count_valid"] is True
     assert report.checks["rru_count_valid"] is True
     assert report.checks["cable_count_valid"] is True
+    assert report.checks["tower_characteristics_metadata_valid"] is True
     assert report.checks["azimuth_metadata_valid"] is True
 
 
@@ -119,6 +120,7 @@ def _metadata_path(tmp_path: Path, scene) -> Path:
                 "scene_id": scene.scene_id,
                 "assets_used": sorted(set(assets)),
                 "tower_height_m": scene.tower.height_m,
+                "tower_characteristics": scene.tower.characteristics.model_dump(),
                 "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                 "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
             }

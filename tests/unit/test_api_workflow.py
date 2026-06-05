@@ -38,6 +38,8 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["generation_mode"] in {"real_blender", "fallback_no_blender"}
         assert status["blender_available"] in {True, False}
         assert status["qa_score"] == 1.0
+        assert status["tower_characteristics_summary"]["structure"] == "lattice"
+        assert status["tower_characteristics_summary"]["base_width_m"] == 4.0
         assert status["structural_qa_passed"] is True
         assert status["expected_objects_present"] is True
         assert status["glb_inspection_summary"]["structural_qa_passed"] is True

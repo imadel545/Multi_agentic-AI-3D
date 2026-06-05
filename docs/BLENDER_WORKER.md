@@ -11,6 +11,7 @@ Completed:
 - `apps/blender_worker/generate_scene.py` consumes only `SceneSpec`.
 - The worker creates controlled procedural geometry:
   - lattice/monopole/generic tower;
+  - tower platforms, ladder, lightning rod, and aviation light when present in SceneSpec;
   - panel antennas;
   - microwave dish antenna;
   - RRU boxes;
@@ -66,6 +67,7 @@ Metadata fields:
 - `sector_count`
 - `network_type`
 - `tower_height_m`
+- `tower_characteristics`
 - `azimuths_deg`
 - `antenna_heights_m`
 - `warnings`

@@ -43,6 +43,10 @@ class GLBGeometryValidator:
                 missing_objects,
             ),
             "approx_tower_height_valid": _approx_tower_height_valid(scene, metadata),
+            "tower_characteristics_metadata_valid": _tower_characteristics_metadata_valid(
+                scene,
+                metadata,
+            ),
             "approx_antenna_height_valid": _approx_antenna_heights_valid(scene, metadata),
             "azimuth_metadata_valid": _azimuths_valid(scene, metadata),
             "bounding_box_reasonable": _bounding_box_reasonable(
@@ -154,6 +158,14 @@ def _object_names_match_scene(
 def _approx_tower_height_valid(scene: SceneSpec, metadata: dict) -> bool:
     value = _number(metadata.get("tower_height_m"))
     return value is not None and abs(value - scene.tower.height_m) <= HEIGHT_TOLERANCE_M
+
+
+def _tower_characteristics_metadata_valid(scene: SceneSpec, metadata: dict) -> bool:
+    value = metadata.get("tower_characteristics")
+    if not isinstance(value, dict):
+        return False
+    expected = scene.tower.characteristics.model_dump()
+    return all(value.get(key) == expected_value for key, expected_value in expected.items())
 
 
 def _approx_antenna_heights_valid(scene: SceneSpec, metadata: dict) -> bool:

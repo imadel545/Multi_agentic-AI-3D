@@ -75,9 +75,10 @@ def _configure_scene(bpy, scene: dict) -> None:
 
 def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
     height = float(scene["tower"]["height_m"])
+    characteristics = scene["tower"].get("characteristics", {})
     tower_type = scene["tower"]["asset_id"].lower()
     if "lattice" in tower_type:
-        _create_lattice_tower(bpy, height)
+        _create_lattice_tower(bpy, height, characteristics)
         procedural_objects.append("tower:lattice_procedural")
     elif "monopole" in tower_type:
         bpy.ops.mesh.primitive_cylinder_add(
@@ -95,34 +96,109 @@ def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
         obj.name = f"tower_{scene['tower']['asset_id']}"
         obj.data.materials.append(_material(bpy, "galvanized_steel", (0.55, 0.58, 0.6, 1)))
         procedural_objects.append("tower:generic_procedural")
+    _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
 
-def _create_lattice_tower(bpy, height: float) -> None:
+def _create_lattice_tower(bpy, height: float, characteristics: dict) -> None:
     material = _material(bpy, "galvanized_steel", (0.55, 0.58, 0.6, 1))
-    base = 2.0
-    top = 0.8
+    base = float(characteristics.get("base_width_m") or 4.0)
+    top = float(characteristics.get("top_width_m") or 1.0)
+    leg_count = int(characteristics.get("leg_count") or 4)
     levels = 8
     for index in range(levels):
         z0 = height * index / levels
         z1 = height * (index + 1) / levels
         width0 = base - (base - top) * index / levels
         width1 = base - (base - top) * (index + 1) / levels
-        corners0 = _square_corners(width0, z0)
-        corners1 = _square_corners(width1, z1)
+        corners0 = _tower_corners(width0, z0, leg_count)
+        corners1 = _tower_corners(width1, z1, leg_count)
         for c0, c1 in zip(corners0, corners1, strict=True):
             _create_cylinder_between(bpy, c0, c1, 0.045, "tower_leg", material)
-        for side in range(4):
+        for side in range(len(corners0)):
             _create_cylinder_between(
-                bpy, corners0[side], corners1[(side + 1) % 4], 0.025, "tower_brace", material
+                bpy,
+                corners0[side],
+                corners1[(side + 1) % len(corners1)],
+                0.025,
+                "tower_brace",
+                material,
             )
             _create_cylinder_between(
-                bpy, corners0[(side + 1) % 4], corners1[side], 0.025, "tower_brace", material
+                bpy,
+                corners0[(side + 1) % len(corners0)],
+                corners1[side],
+                0.025,
+                "tower_brace",
+                material,
             )
 
 
-def _square_corners(width: float, z: float) -> list[tuple[float, float, float]]:
+def _tower_corners(width: float, z: float, leg_count: int) -> list[tuple[float, float, float]]:
+    if leg_count == 3:
+        radius = width / 2
+        return [
+            (
+                math.sin((2 * math.pi * index) / 3) * radius,
+                math.cos((2 * math.pi * index) / 3) * radius,
+                z,
+            )
+            for index in range(3)
+        ]
     half = width / 2
     return [(-half, -half, z), (half, -half, z), (half, half, z), (-half, half, z)]
+
+
+def _create_tower_accessories(
+    bpy,
+    height: float,
+    characteristics: dict,
+    procedural_objects: list[str],
+) -> None:
+    steel = _material(bpy, "accessory_steel", (0.42, 0.44, 0.46, 1))
+    if characteristics.get("has_platform"):
+        count = max(1, int(characteristics.get("platform_count") or 1))
+        for index in range(count):
+            z = height * (0.55 + (0.35 * index / max(count, 1)))
+            bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, z))
+            platform = bpy.context.object
+            platform.name = f"tower_platform_{index + 1}"
+            platform.dimensions = (2.2, 2.2, 0.08)
+            platform.data.materials.append(steel)
+            procedural_objects.append(f"tower_platform:{index + 1}")
+    if characteristics.get("has_ladder"):
+        _create_cylinder_between(
+            bpy,
+            (-1.9, 0, 0.5),
+            (-1.9, 0, height - 0.5),
+            0.018,
+            "tower_ladder",
+            steel,
+        )
+        _create_cylinder_between(
+            bpy,
+            (-1.75, 0, 0.5),
+            (-1.75, 0, height - 0.5),
+            0.018,
+            "tower_ladder",
+            steel,
+        )
+        procedural_objects.append("tower_ladder")
+    if characteristics.get("has_lightning_rod"):
+        _create_cylinder_between(
+            bpy, (0, 0, height), (0, 0, height + 1.2), 0.025, "tower_lightning_rod", steel
+        )
+        procedural_objects.append("tower_lightning_rod")
+    if characteristics.get("has_aviation_light"):
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=16,
+            ring_count=8,
+            radius=0.16,
+            location=(0, 0, height + 0.25),
+        )
+        light = bpy.context.object
+        light.name = "tower_aviation_light"
+        light.data.materials.append(_material(bpy, "aviation_red", (1.0, 0.02, 0.02, 1)))
+        procedural_objects.append("tower_aviation_light")
 
 
 def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
@@ -313,6 +389,7 @@ def _write_metadata(
                 "sector_count": len(scene["sectors"]),
                 "network_type": scene["network_type"],
                 "tower_height_m": scene["tower"]["height_m"],
+                "tower_characteristics": scene["tower"].get("characteristics", {}),
                 "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
                 "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
                 "warnings": warnings,
@@ -334,6 +411,18 @@ def _assets_used(scene: dict) -> list[str]:
 
 def _procedural_objects_from_scene(scene: dict) -> list[str]:
     objects = ["tower"]
+    characteristics = scene["tower"].get("characteristics", {})
+    if characteristics.get("has_platform"):
+        objects.extend(
+            f"tower_platform:{index + 1}"
+            for index in range(int(characteristics.get("platform_count") or 1))
+        )
+    if characteristics.get("has_ladder"):
+        objects.append("tower_ladder")
+    if characteristics.get("has_lightning_rod"):
+        objects.append("tower_lightning_rod")
+    if characteristics.get("has_aviation_light"):
+        objects.append("tower_aviation_light")
     for sector in scene["sectors"]:
         objects.append(f"antenna:{sector['sector_id']}")
         if sector.get("radio_asset_id"):

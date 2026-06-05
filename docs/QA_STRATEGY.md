@@ -84,6 +84,7 @@ Implemented:
   - sector object presence
   - object names/metadata match the SceneSpec assets
   - tower height within `0.5m`
+  - tower characteristics metadata matches the SceneSpec
   - antenna heights within `0.5m`
   - azimuth metadata within `5deg`
   - bounding box reasonableness

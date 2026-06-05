@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
+from core.contracts.tower import TowerCharacteristics
 from core.services.requirement_parser import parse_requirements_text
 
 REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
@@ -19,6 +20,45 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
             "enum": ["lattice_tower", "monopole", "rooftop_mast", "small_cell_pole"],
         },
         "tower_height_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 150},
+        "tower_characteristics": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "structure": {
+                    "type": "string",
+                    "enum": ["lattice", "monopole", "rooftop_mast", "small_cell_pole"],
+                },
+                "leg_count": {"type": "integer", "minimum": 1, "maximum": 4},
+                "base_width_m": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 30},
+                "top_width_m": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 30},
+                "foundation_type": {
+                    "type": "string",
+                    "enum": ["concrete_pad", "rooftop_anchored", "pole_base", "unknown"],
+                },
+                "has_platform": {"type": "boolean"},
+                "platform_count": {"type": "integer", "minimum": 0, "maximum": 12},
+                "has_ladder": {"type": "boolean"},
+                "has_lightning_rod": {"type": "boolean"},
+                "has_aviation_light": {"type": "boolean"},
+                "material": {
+                    "type": "string",
+                    "enum": ["galvanized_steel", "painted_steel", "concrete", "unknown"],
+                },
+            },
+            "required": [
+                "structure",
+                "leg_count",
+                "base_width_m",
+                "top_width_m",
+                "foundation_type",
+                "has_platform",
+                "platform_count",
+                "has_ladder",
+                "has_lightning_rod",
+                "has_aviation_light",
+                "material",
+            ],
+        },
         "sector_count": {"type": "integer", "minimum": 1, "maximum": 12},
         "antenna_type": {"type": "string"},
         "antenna_install_height_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 150},
@@ -53,6 +93,7 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "site_type",
         "tower_type",
         "tower_height_m",
+        "tower_characteristics",
         "sector_count",
         "antenna_type",
         "antenna_install_height_m",
@@ -95,6 +136,9 @@ class GroqStructuredClient:
                     "add a warning with a stable code and concise message. "
                     "azimuths_deg must always be an array of separate JSON numbers, "
                     "for example [0, 120, 240], never a string and never concatenated. "
+                    "Extract tower_characteristics from explicit pylon details such as "
+                    "leg count, base/top width, foundation, platforms, ladder, lightning rod, "
+                    "aviation light, and material. "
                     "Preserve the deterministic baseline values unless the user text "
                     "explicitly contradicts them. "
                     "Do not include explanatory text outside JSON."
@@ -186,6 +230,20 @@ def _repair_and_validate(raw: dict[str, Any], baseline: RequirementSpec) -> Requ
     ):
         candidate["antenna_install_height_m"] = baseline.antenna_install_height_m
         repaired_fields.append("antenna_install_height_m")
+    try:
+        tower_characteristics = TowerCharacteristics.model_validate(
+            candidate.get("tower_characteristics")
+        )
+    except ValidationError:
+        candidate["tower_characteristics"] = baseline.tower_characteristics.model_dump()
+        repaired_fields.append("tower_characteristics")
+    else:
+        baseline_characteristics = baseline.tower_characteristics
+        if tower_characteristics.material != baseline_characteristics.material:
+            candidate["tower_characteristics"] = tower_characteristics.model_copy(
+                update={"material": baseline_characteristics.material}
+            ).model_dump()
+            repaired_fields.append("tower_characteristics.material")
     warnings = [
         WarningItem.model_validate(warning).model_dump()
         for warning in candidate.get("warnings", [])

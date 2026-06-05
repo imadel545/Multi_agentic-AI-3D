@@ -28,6 +28,9 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
     assert payload["temperature"] == 0
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
+    schema = payload["response_format"]["json_schema"]["schema"]
+    assert "tower_characteristics" in schema["required"]
+    assert schema["properties"]["tower_characteristics"]["additionalProperties"] is False
 
 
 def test_groq_client_retries_json_object_mode_after_schema_400(monkeypatch) -> None:
@@ -66,6 +69,19 @@ def _requirements_content() -> str:
             "site_type": "telecom_site",
             "tower_type": "lattice_tower",
             "tower_height_m": 30,
+            "tower_characteristics": {
+                "structure": "lattice",
+                "leg_count": 4,
+                "base_width_m": 4.0,
+                "top_width_m": 1.0,
+                "foundation_type": "concrete_pad",
+                "has_platform": True,
+                "platform_count": 1,
+                "has_ladder": True,
+                "has_lightning_rod": True,
+                "has_aviation_light": True,
+                "material": "galvanized_steel",
+            },
             "sector_count": 3,
             "antenna_type": "panel_5g",
             "antenna_install_height_m": 24,

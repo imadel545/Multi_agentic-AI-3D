@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from core.contracts.common import NetworkType, StrictModel
+from core.contracts.tower import TowerCharacteristics
 
 
 class SceneAssetPlacement(StrictModel):
@@ -11,6 +12,16 @@ class SceneAssetPlacement(StrictModel):
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
     height_m: float = Field(gt=0)
+    characteristics: TowerCharacteristics = Field(
+        default_factory=lambda: TowerCharacteristics(
+            structure="lattice",
+            leg_count=4,
+            base_width_m=4.0,
+            top_width_m=1.0,
+            foundation_type="concrete_pad",
+            material="galvanized_steel",
+        )
+    )
 
 
 class SectorSpec(StrictModel):

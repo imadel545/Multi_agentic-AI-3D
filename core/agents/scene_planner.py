@@ -36,6 +36,7 @@ class ScenePlanner:
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],
                 height_m=requirements.tower_height_m,
+                characteristics=requirements.tower_characteristics,
             ),
             sectors=sectors,
             visual_elements=VisualElements(

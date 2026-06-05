@@ -33,6 +33,8 @@ Completed:
 - Real Groq provider integration.
 - API workflow tests proving `use_llm=true` calls the configured provider and `use_llm=false`
   bypasses it.
+- Strict schema extraction of `tower_characteristics`, including structure, leg count,
+  base/top width, foundation, platforms, ladder, lightning rod, aviation light, and material.
 - Deterministic fallback when key/API/validation fails.
 - Controlled field repair with `LLM_FIELD_REPAIRED`.
 - `extraction_report.json` per workflow.

@@ -32,6 +32,7 @@ class WorkflowStatus(BaseModel):
     generation_mode: str | None = None
     blender_available: bool | None = None
     qa_score: float | None = None
+    tower_characteristics_summary: dict | None = None
     glb_inspection_summary: dict | None = None
     geometry_validation_summary: dict | None = None
     preview_inspection_summary: dict | None = None

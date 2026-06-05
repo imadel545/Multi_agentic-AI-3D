@@ -18,6 +18,7 @@ Required properties:
 Core validation rules:
 
 - Antenna install height must not exceed tower height.
+- Tower characteristics are typed and attached to `tower.characteristics`.
 - Each sector has a valid antenna asset.
 - Azimuths are in `[0, 360)`.
 - Units are meters.
@@ -25,6 +26,7 @@ Core validation rules:
 - Cables are optional and valid when all sectors consistently disable them.
 
 Geometry QA derives expected antennas, RRUs, cables, beams, azimuth arrows, heights, and azimuth
-metadata from the SceneSpec.
+metadata from the SceneSpec. Tower metadata also carries structure, leg count, base/top width,
+foundation, platforms, ladder, lightning rod, aviation light, and material.
 
 See `core/contracts/scene.py` for the executable schema.

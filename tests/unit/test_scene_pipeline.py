@@ -25,4 +25,6 @@ def test_requirement_to_valid_scene_spec() -> None:
     assert requirement_report.status == "passed"
     assert scene_report.status == "passed"
     assert scene.tower.asset_id == "TOWER_LATTICE_30M"
+    assert scene.tower.characteristics.structure == "lattice"
+    assert scene.tower.characteristics.base_width_m == 4.0
     assert [sector.azimuth_deg for sector in scene.sectors] == [0, 120, 240]

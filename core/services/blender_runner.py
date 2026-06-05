@@ -188,6 +188,7 @@ class BlenderRunner:
                     "sector_count": len(scene.sectors),
                     "network_type": scene.network_type,
                     "tower_height_m": scene.tower.height_m,
+                    "tower_characteristics": scene.tower.characteristics.model_dump(),
                     "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                     "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
                     "warnings": [_blender_install_hint()],
@@ -222,6 +223,17 @@ def _assets_used(scene: SceneSpec) -> list[str]:
 
 def _procedural_objects(scene: SceneSpec) -> list[str]:
     objects = ["tower"]
+    if scene.tower.characteristics.has_platform:
+        objects.extend(
+            f"tower_platform:{index + 1}"
+            for index in range(scene.tower.characteristics.platform_count)
+        )
+    if scene.tower.characteristics.has_ladder:
+        objects.append("tower_ladder")
+    if scene.tower.characteristics.has_lightning_rod:
+        objects.append("tower_lightning_rod")
+    if scene.tower.characteristics.has_aviation_light:
+        objects.append("tower_aviation_light")
     objects.extend(f"antenna:{sector.sector_id}" for sector in scene.sectors)
     objects.extend(f"radio:{sector.sector_id}" for sector in scene.sectors if sector.radio_asset_id)
     objects.extend(f"cable:{sector.sector_id}" for sector in scene.sectors if sector.include_cable)

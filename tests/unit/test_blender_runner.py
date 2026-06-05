@@ -40,6 +40,8 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     assert metadata["scene_id"] == "wf_blender"
     assert metadata["sector_count"] == 3
     assert metadata["azimuths_deg"] == [0, 120, 240]
+    assert metadata["tower_characteristics"]["structure"] == "lattice"
+    assert metadata["tower_characteristics"]["base_width_m"] == 4.0
     assert "TOWER_LATTICE_30M" in metadata["assets_used"]
 
 
@@ -71,4 +73,5 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert Path(result.artifacts["preview"]).stat().st_size > 1000
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
     assert metadata["generation_mode"] == "real_blender"
+    assert metadata["tower_characteristics"]["structure"] == "lattice"
     assert metadata["procedural_objects_created"]

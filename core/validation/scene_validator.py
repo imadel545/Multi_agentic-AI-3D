@@ -9,6 +9,7 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
         "tower_asset_valid": scene.tower.asset_id in assets_by_id
         and assets_by_id[scene.tower.asset_id].is_validated,
         "tower_height_valid": scene.tower.height_m > 0,
+        "tower_characteristics_valid": bool(scene.tower.characteristics.structure),
         "sector_count_valid": len(scene.sectors) > 0,
         "antenna_height_valid": all(
             sector.install_height_m <= scene.tower.height_m for sector in scene.sectors

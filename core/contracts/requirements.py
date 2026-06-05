@@ -2,6 +2,7 @@ from pydantic import Field, field_validator, model_validator
 
 from core.contracts.common import DetailLevel, NetworkType, StrictModel, WarningItem
 from core.contracts.repair import RepairEvent
+from core.contracts.tower import TowerCharacteristics
 
 
 class RequirementSpec(StrictModel):
@@ -9,6 +10,16 @@ class RequirementSpec(StrictModel):
     site_type: str = "telecom_site"
     tower_type: str = Field(min_length=1)
     tower_height_m: float = Field(gt=0, le=150)
+    tower_characteristics: TowerCharacteristics = Field(
+        default_factory=lambda: TowerCharacteristics(
+            structure="lattice",
+            leg_count=4,
+            base_width_m=4.0,
+            top_width_m=1.0,
+            foundation_type="concrete_pad",
+            material="galvanized_steel",
+        )
+    )
     sector_count: int = Field(ge=1, le=12)
     antenna_type: str = "panel_5g"
     antenna_install_height_m: float = Field(gt=0, le=150)

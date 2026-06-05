@@ -7,6 +7,8 @@ This repository currently implements the local-first controlled generation pipel
 
 - Pydantic contracts for `RequirementSpec`, `AssetManifest`, `SceneSpec`, and validation reports.
 - Deterministic requirement normalization for common telecom prompts.
+- Typed pylon characteristics extraction for structure, legs, base/top width, foundation,
+  platforms, ladder, lightning rod, aviation light, and material.
 - Groq structured extraction with strict JSON Schema and deterministic fallback.
 - LangGraph orchestration with typed trace nodes, timings, and workflow metrics.
 - Durable SQLite memory for workflow recall and writeback.

@@ -97,6 +97,7 @@ class WorkflowService:
             "generation_mode": result.generation.mode if result.generation else None,
             "blender_available": result.generation.blender_available if result.generation else None,
             "qa_score": result.qa_report.score if result.qa_report else None,
+            "tower_characteristics_summary": _tower_characteristics_summary(result),
             "glb_inspection_summary": _glb_inspection_summary(result),
             "geometry_validation_summary": _geometry_validation_summary(result),
             "preview_inspection_summary": _preview_inspection_summary(result),
@@ -191,6 +192,7 @@ class WorkflowService:
                     f"- Network: {scene.network_type if scene else 'not_planned'}",
                     f"- Tower asset: {scene.tower.asset_id if scene else 'not_planned'}",
                     f"- Tower height: {scene.tower.height_m if scene else 'not_planned'} m",
+                    f"- Tower characteristics: {_tower_characteristics_text(result)}",
                     f"- Sectors: {len(scene.sectors) if scene else 0}",
                     "",
                     "## Generation",
@@ -260,6 +262,23 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
         "expected_objects_present": result.glb_inspection.checks.get("expected_objects_present"),
         "critical_errors": result.glb_inspection.critical_errors,
     }
+
+
+def _tower_characteristics_summary(result: OrchestratorResult) -> dict | None:
+    if result.scene is None:
+        return None
+    return result.scene.tower.characteristics.model_dump()
+
+
+def _tower_characteristics_text(result: OrchestratorResult) -> str:
+    summary = _tower_characteristics_summary(result)
+    if summary is None:
+        return "not_planned"
+    return (
+        f"{summary['structure']}, {summary['leg_count']} legs, "
+        f"base {summary['base_width_m']}m, top {summary['top_width_m']}m, "
+        f"foundation {summary['foundation_type']}"
+    )
 
 
 def _geometry_validation_summary(result: OrchestratorResult) -> dict | None:
