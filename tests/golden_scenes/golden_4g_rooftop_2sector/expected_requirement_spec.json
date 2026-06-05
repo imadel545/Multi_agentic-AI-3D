@@ -1,0 +1,14 @@
+{
+  "network_type": "4G",
+  "tower_type": "rooftop_mast",
+  "tower_height_m": 12,
+  "sector_count": 2,
+  "antenna_type": "panel_4g",
+  "antenna_install_height_m": 10,
+  "azimuths_deg": [45, 225],
+  "include_rru": true,
+  "include_cables": true,
+  "include_beams": true,
+  "include_labels": true,
+  "detail_level": "medium"
+}

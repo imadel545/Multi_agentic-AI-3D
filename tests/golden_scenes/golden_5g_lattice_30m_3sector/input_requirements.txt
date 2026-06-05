@@ -1,0 +1,6 @@
+Créer un site 5G sur pylône treillis 30m.
+Installer 3 secteurs à 24m.
+Azimuts : 0°, 120°, 240°.
+Ajouter une RRU sous chaque antenne.
+Ajouter câbles, faisceaux sectoriels et labels techniques.
+Niveau de détail : élevé.

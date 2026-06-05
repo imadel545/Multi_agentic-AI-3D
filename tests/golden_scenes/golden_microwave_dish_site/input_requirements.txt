@@ -1,0 +1,4 @@
+Créer un site MW microwave dish sur pylône treillis 30m.
+Installer 2 secteurs à 22m.
+Azimuths: 80/260.
+Ajouter câbles, faisceaux et labels techniques.

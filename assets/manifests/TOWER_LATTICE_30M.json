@@ -1,0 +1,22 @@
+{
+  "asset_id": "TOWER_LATTICE_30M",
+  "type": "tower",
+  "file": "assets/towers/tower_lattice_30m.glb",
+  "height_m": 30,
+  "dimensions_m": {
+    "width": 4,
+    "depth": 4,
+    "height": 30
+  },
+  "compatible_networks": ["4G", "5G", "MW"],
+  "compatible_tower_types": ["lattice_tower"],
+  "mount_zones": [
+    {
+      "name": "upper_mount_zone",
+      "min_height_m": 20,
+      "max_height_m": 29
+    }
+  ],
+  "status": "validated",
+  "version": "1.0.0"
+}

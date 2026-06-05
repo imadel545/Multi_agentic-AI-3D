@@ -1,0 +1,80 @@
+# Performance
+
+## Implemented
+
+Workflow trace metrics include:
+
+- `total_workflow_duration_ms`
+- `rag_duration_ms`
+- `planning_duration_ms`
+- `blender_duration_ms`
+- `qa_duration_ms`
+- `memory_duration_ms`
+- `memory_hits`
+- `memory_context_count`
+- `artifact_size_bytes`
+- `requirements_hash`
+- `scene_spec_hash`
+- `asset_manifest_hash`
+- `knowledge_index_hash`
+- `asset_cache_hits`
+- `asset_cache_misses`
+- `rag_cache_hits`
+- `rag_cache_misses`
+- `cache_hits`
+- `cache_misses`
+
+Compatibility fields are still present:
+
+- `total_duration_ms`
+- `generation_duration_ms`
+- per-artifact byte counts such as `glb_bytes`, `preview_bytes`, and `metadata_bytes`
+
+## Measurement Sources
+
+- RAG duration comes from `retrieve_rag_context`.
+- Planning duration includes asset selection, requirement validation, scene planning,
+  scene validation, and corrective planning handlers.
+- Blender duration uses `GenerationResult.duration_ms` when generation runs.
+- QA duration includes generation QA and QA failure handling.
+- Memory duration includes recall and writeback.
+- Artifact size is the sum of generated artifact paths that exist on disk.
+- Repair and asset fallback handler durations are included in `planning_duration_ms`.
+- Requirement and SceneSpec hashes are canonical JSON SHA-256 hashes.
+- Asset manifest hash is based on all JSON manifests under `assets/manifests`.
+- Knowledge index hash is based on markdown knowledge sources under `data/knowledge` and `docs`.
+- RAG cache keys include query, limit, collection, filters, embedding provider, and knowledge hash.
+
+## Cache
+
+Implemented cache surfaces:
+
+- Asset registry manifest cache with hash-based invalidation.
+- RAG query TTL cache with default 30 second TTL.
+- Runtime memory collections (`design_memory`, `error_memory`) are not query-cached, and runtime
+  memory upserts clear the RAG query cache.
+
+The cache does not bypass validation. Requirement rules, SceneSpec validation, quality gates,
+Blender execution, QA, and memory writeback still run on each workflow.
+
+## Fallback
+
+- Missing Blender still reports fallback generation duration.
+- Missing RAG service reports zero RAG results and a skipped or failed RAG trace step.
+- Failed Qdrant memory indexing is reported in memory writeback but does not fail the workflow.
+- Expired or invalidated cache entries are treated as misses.
+
+## Future
+
+- Add p95/p99 aggregation across workflows.
+- Add SQLite query timings.
+- Add Qdrant indexing duration split from SQLite writeback duration.
+- Add cache eviction metrics and bounded cache size.
+
+## Known Limitations
+
+- Metrics are local process timings, not distributed tracing.
+- Qdrant local lock contention appears as RAG or memory indexing errors.
+- File size metrics only include artifacts known to `GenerationResult`.
+- The RAG cache is process-local.
+- The asset cache re-hashes manifest files before reuse.

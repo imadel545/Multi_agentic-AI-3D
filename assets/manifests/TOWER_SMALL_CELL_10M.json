@@ -1,0 +1,22 @@
+{
+  "asset_id": "TOWER_SMALL_CELL_10M",
+  "type": "tower",
+  "file": "assets/towers/tower_small_cell_10m.glb",
+  "height_m": 10,
+  "dimensions_m": {
+    "width": 0.6,
+    "depth": 0.6,
+    "height": 10
+  },
+  "compatible_networks": ["4G", "5G"],
+  "compatible_tower_types": ["small_cell_pole"],
+  "mount_zones": [
+    {
+      "name": "small_cell_mount_zone",
+      "min_height_m": 4,
+      "max_height_m": 9.5
+    }
+  ],
+  "status": "validated",
+  "version": "1.0.0"
+}

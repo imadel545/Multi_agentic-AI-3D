@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.egg-info/
+*.log
+*.pid
+outputs/temp/*
+!outputs/temp/.gitkeep
+data/sqlite/
+data/qdrant/

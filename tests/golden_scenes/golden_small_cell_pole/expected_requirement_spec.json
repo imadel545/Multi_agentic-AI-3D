@@ -1,0 +1,14 @@
+{
+  "network_type": "5G",
+  "tower_type": "small_cell_pole",
+  "tower_height_m": 10,
+  "sector_count": 1,
+  "antenna_type": "panel_5g",
+  "antenna_install_height_m": 8,
+  "azimuths_deg": [90],
+  "include_rru": false,
+  "include_cables": true,
+  "include_beams": true,
+  "include_labels": true,
+  "detail_level": "high"
+}

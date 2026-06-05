@@ -1,0 +1,10 @@
+{
+  "network_type": "4G",
+  "tower_asset_id": "TOWER_ROOFTOP_12M",
+  "tower_height_m": 12,
+  "sector_count": 2,
+  "antenna_asset_id": "ANT_PANEL_4G_001",
+  "radio_asset_id": "RRU_SMALL_001",
+  "install_height_m": 10,
+  "azimuths_deg": [45, 225]
+}

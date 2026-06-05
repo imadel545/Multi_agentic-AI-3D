@@ -1,0 +1,184 @@
+import json
+import sqlite3
+from pathlib import Path
+
+from core.agents.scene_planner import ScenePlanner
+from core.contracts.requirements import RequirementSpec
+from core.contracts.validation import ValidationIssue, ValidationReport
+from core.memory import MemoryService
+from core.rag import RagService
+from core.services.asset_registry import AssetRegistry
+from core.services.blender_runner import GenerationResult
+
+
+def test_memory_writeback(tmp_path: Path) -> None:
+    service = MemoryService(tmp_path / "telecom_memory.db")
+    requirements, scene, report, generation = _memory_inputs("wf_memory")
+
+    summary = service.write_workflow_summary(
+        workflow_id="wf_memory",
+        requirements=requirements,
+        scene=scene,
+        report=report,
+        generation=generation,
+        scene_spec_path=tmp_path / "scene_spec.json",
+        validation_report_path=tmp_path / "validation_report.json",
+    )
+
+    assert summary is not None
+    assert summary.validation_report_path.endswith("validation_report.json")
+    with sqlite3.connect(tmp_path / "telecom_memory.db") as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT workflow_id, network_type, tower_type, sector_count, generation_mode,
+                   qa_score, warnings_json, scene_spec_path, validation_report_path,
+                   reusable_pattern, created_at
+            FROM workflow_memory
+            WHERE workflow_id = ?
+            """,
+            ("wf_memory",),
+        ).fetchone()
+    payload = dict(row)
+    assert payload["workflow_id"] == "wf_memory"
+    assert payload["network_type"] == "5G"
+    assert payload["tower_type"] == "lattice_tower"
+    assert payload["sector_count"] == 3
+    assert payload["generation_mode"] == "fallback_no_blender"
+    assert payload["qa_score"] == 1.0
+    assert json.loads(payload["warnings_json"])[0]["code"] == "FALLBACK_GENERATION"
+    assert payload["scene_spec_path"].endswith("scene_spec.json")
+    assert payload["validation_report_path"].endswith("validation_report.json")
+    assert payload["reusable_pattern"] == 1
+    assert payload["created_at"] > 0
+
+
+def test_memory_recall(tmp_path: Path) -> None:
+    service = MemoryService(tmp_path / "telecom_memory.db")
+    requirements, scene, report, generation = _memory_inputs("wf_reusable")
+    report = report.model_copy(update={"warnings": []})
+    different_sector_requirements = requirements.model_copy(
+        update={"sector_count": 2, "azimuths_deg": [0, 180]}
+    )
+    different_scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_different_sector",
+        requirements=different_sector_requirements,
+        tower=AssetRegistry(Path("assets/manifests")).select_tower("lattice_tower", "5G", 30),
+        antenna=AssetRegistry(Path("assets/manifests")).select_asset(
+            "antenna", "5G", "lattice_tower"
+        ),
+        radio=AssetRegistry(Path("assets/manifests")).select_asset("radio", "5G", "lattice_tower"),
+    )
+
+    service.write_workflow_summary(
+        workflow_id="wf_reusable",
+        requirements=requirements,
+        scene=scene,
+        report=report,
+        generation=generation,
+        scene_spec_path=tmp_path / "wf_reusable_scene.json",
+        validation_report_path=tmp_path / "wf_reusable_validation.json",
+    )
+    service.write_workflow_summary(
+        workflow_id="wf_different_sector",
+        requirements=different_sector_requirements,
+        scene=different_scene,
+        report=report,
+        generation=generation,
+        scene_spec_path=tmp_path / "wf_different_scene.json",
+        validation_report_path=tmp_path / "wf_different_validation.json",
+    )
+
+    recall = service.recall(requirements)
+    assert recall.memory_hits == 1
+    assert recall.memory_context_count == 1
+    assert [row["workflow_id"] for row in recall.similar_workflows] == ["wf_reusable"]
+    assert recall.similar_workflows[0]["reusable_pattern"] is True
+
+
+def test_memory_does_not_store_large_artifacts(tmp_path: Path) -> None:
+    rag_service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    requirements, scene, report, generation = _memory_inputs("wf_no_large_outputs")
+    generation = generation.model_copy(
+        update={
+            "artifacts": {
+                "glb": str(tmp_path / "design.glb"),
+                "preview": str(tmp_path / "preview.png"),
+                "download": str(tmp_path / "artifacts.zip"),
+            }
+        }
+    )
+
+    service.write_workflow_summary(
+        workflow_id="wf_no_large_outputs",
+        requirements=requirements,
+        scene=scene,
+        report=report,
+        generation=generation,
+        scene_spec_path=tmp_path / "scene_spec.json",
+        validation_report_path=tmp_path / "validation_report.json",
+    )
+
+    with sqlite3.connect(tmp_path / "telecom_memory.db") as conn:
+        sqlite_dump = "\n".join(conn.iterdump())
+    qdrant_results = rag_service.search(
+        query="wf_no_large_outputs 5G lattice",
+        collection="design_memory",
+        limit=1,
+    )
+    indexed_dump = json.dumps(
+        [result.model_dump() for result in qdrant_results],
+        ensure_ascii=False,
+    )
+    for forbidden in ["design.glb", "preview.png", "artifacts.zip"]:
+        assert forbidden not in sqlite_dump
+        assert forbidden not in indexed_dump
+    assert service.last_index_result.status == "indexed"
+    assert service.last_index_result.indexed_collections["design_memory"] == 1
+
+
+def _memory_inputs(
+    workflow_id: str,
+) -> tuple[RequirementSpec, object, ValidationReport, GenerationResult]:
+    requirements = RequirementSpec(
+        network_type="5G",
+        tower_type="lattice_tower",
+        tower_height_m=30,
+        sector_count=3,
+        antenna_install_height_m=24,
+        azimuths_deg=[0, 120, 240],
+        detail_level="high",
+    )
+    registry = AssetRegistry(Path("assets/manifests"))
+    tower = registry.select_tower("lattice_tower", "5G", 30)
+    antenna = registry.select_asset("antenna", "5G", "lattice_tower")
+    radio = registry.select_asset("radio", "5G", "lattice_tower")
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id=workflow_id,
+        requirements=requirements,
+        tower=tower,
+        antenna=antenna,
+        radio=radio,
+    )
+    report = ValidationReport(
+        design_id=workflow_id,
+        status="passed",
+        score=1.0,
+        checks={"qa": True},
+        warnings=[
+            ValidationIssue(
+                code="FALLBACK_GENERATION",
+                message="Fallback generation used.",
+                severity="warning",
+            )
+        ],
+    )
+    generation = GenerationResult(
+        status="fallback",
+        mode="fallback_no_blender",
+        blender_available=False,
+        duration_ms=1,
+        artifacts={},
+    )
+    return requirements, scene, report, generation

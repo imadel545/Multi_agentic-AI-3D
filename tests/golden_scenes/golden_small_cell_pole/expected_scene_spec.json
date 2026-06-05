@@ -1,0 +1,10 @@
+{
+  "network_type": "5G",
+  "tower_asset_id": "TOWER_SMALL_CELL_10M",
+  "tower_height_m": 10,
+  "sector_count": 1,
+  "antenna_asset_id": "ANT_PANEL_5G_001",
+  "radio_asset_id": null,
+  "install_height_m": 8,
+  "azimuths_deg": [90]
+}

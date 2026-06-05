@@ -1,0 +1,5 @@
+Create a 5G small-cell pole 10m.
+Install one sector at 8m.
+Azimuths: 90°.
+Add cables and labels, no RRU.
+Detail level high.

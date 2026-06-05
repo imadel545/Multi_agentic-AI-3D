@@ -1,0 +1,10 @@
+{
+  "network_type": "MW",
+  "tower_asset_id": "TOWER_LATTICE_30M",
+  "tower_height_m": 30,
+  "sector_count": 2,
+  "antenna_asset_id": "ANT_MICROWAVE_DISH_001",
+  "radio_asset_id": null,
+  "install_height_m": 22,
+  "azimuths_deg": [80, 260]
+}

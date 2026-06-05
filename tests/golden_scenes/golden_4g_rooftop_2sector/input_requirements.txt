@@ -1,0 +1,5 @@
+Créer un site 4G rooftop 12m.
+Installer 2 secteurs à 10m.
+Azimuts : 45°, 225°.
+Ajouter RRU, câbles et labels techniques.
+Niveau de détail : moyen.

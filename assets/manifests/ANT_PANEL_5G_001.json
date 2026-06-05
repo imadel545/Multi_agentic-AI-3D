@@ -1,0 +1,16 @@
+{
+  "asset_id": "ANT_PANEL_5G_001",
+  "type": "antenna",
+  "file": "assets/antennas/ant_panel_5g_001.glb",
+  "height_m": 1.6,
+  "dimensions_m": {
+    "width": 0.45,
+    "depth": 0.18,
+    "height": 1.6
+  },
+  "compatible_networks": ["5G"],
+  "compatible_tower_types": ["lattice_tower", "monopole", "rooftop_mast", "small_cell_pole"],
+  "mount_zones": [],
+  "status": "validated",
+  "version": "1.0.0"
+}

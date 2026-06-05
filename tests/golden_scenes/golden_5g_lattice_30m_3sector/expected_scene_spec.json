@@ -1,0 +1,10 @@
+{
+  "network_type": "5G",
+  "tower_asset_id": "TOWER_LATTICE_30M",
+  "tower_height_m": 30,
+  "sector_count": 3,
+  "antenna_asset_id": "ANT_PANEL_5G_001",
+  "radio_asset_id": "RRU_SMALL_001",
+  "install_height_m": 24,
+  "azimuths_deg": [0, 120, 240]
+}

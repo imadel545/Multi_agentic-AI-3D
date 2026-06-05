@@ -1,0 +1,46 @@
+[project]
+name = "agentic-ai-3d-telecom-studio"
+version = "0.1.0"
+description = "Local-first agentic AI pipeline for controlled telecom 3D scene generation."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.111.0",
+  "httpx>=0.28.0",
+  "langgraph>=1.2.0",
+  "pydantic>=2.7.0",
+  "pydantic-settings>=2.2.0",
+  "qdrant-client>=1.18.0",
+  "sqlalchemy>=2.0.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx2>=0.28.0",
+  "pytest>=8.2.0",
+  "ruff>=0.5.0",
+]
+rag = [
+  "fastembed>=0.3.0",
+]
+agents = [
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["apps*", "core*"]
+exclude = ["assets*", "data*", "docs*", "infra*", "outputs*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

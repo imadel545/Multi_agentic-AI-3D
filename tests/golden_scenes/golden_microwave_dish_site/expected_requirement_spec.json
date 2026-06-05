@@ -1,0 +1,14 @@
+{
+  "network_type": "MW",
+  "tower_type": "lattice_tower",
+  "tower_height_m": 30,
+  "sector_count": 2,
+  "antenna_type": "microwave_dish",
+  "antenna_install_height_m": 22,
+  "azimuths_deg": [80, 260],
+  "include_rru": false,
+  "include_cables": true,
+  "include_beams": true,
+  "include_labels": true,
+  "detail_level": "high"
+}

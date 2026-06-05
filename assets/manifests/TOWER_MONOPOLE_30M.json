@@ -1,0 +1,22 @@
+{
+  "asset_id": "TOWER_MONOPOLE_30M",
+  "type": "tower",
+  "file": "assets/towers/tower_monopole_30m.glb",
+  "height_m": 30,
+  "dimensions_m": {
+    "width": 1.2,
+    "depth": 1.2,
+    "height": 30
+  },
+  "compatible_networks": ["4G", "5G"],
+  "compatible_tower_types": ["monopole"],
+  "mount_zones": [
+    {
+      "name": "upper_pole_zone",
+      "min_height_m": 18,
+      "max_height_m": 29
+    }
+  ],
+  "status": "validated",
+  "version": "1.0.0"
+}

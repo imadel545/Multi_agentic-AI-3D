@@ -1,0 +1,14 @@
+{
+  "network_type": "5G",
+  "tower_type": "lattice_tower",
+  "tower_height_m": 30,
+  "sector_count": 3,
+  "antenna_type": "panel_5g",
+  "antenna_install_height_m": 24,
+  "azimuths_deg": [0, 120, 240],
+  "include_rru": true,
+  "include_cables": true,
+  "include_beams": true,
+  "include_labels": true,
+  "detail_level": "high"
+}

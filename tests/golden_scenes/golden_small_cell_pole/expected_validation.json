@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "required_checks": [
+    "antenna_height_within_tower",
+    "sector_count_matches_azimuths",
+    "assets_validated",
+    "radio_asset_valid",
+    "metadata_generation_mode_valid"
+  ]
+}

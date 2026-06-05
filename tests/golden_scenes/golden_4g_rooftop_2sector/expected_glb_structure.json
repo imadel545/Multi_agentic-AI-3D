@@ -1,0 +1,12 @@
+{
+  "min_node_count": 11,
+  "min_mesh_count": 4,
+  "expected": {
+    "has_tower": true,
+    "has_antennas": true,
+    "has_radios_or_rru": true,
+    "has_cables": true,
+    "has_sector_beams": true,
+    "has_azimuth_arrows": true
+  }
+}
