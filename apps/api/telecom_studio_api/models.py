@@ -5,7 +5,6 @@ from pydantic import BaseModel, Field
 
 class DesignOptions(BaseModel):
     detail_level: Literal["low", "medium", "high"] = "high"
-    generate_variants: bool = False
     use_llm: bool | None = None
 
 
@@ -34,6 +33,7 @@ class WorkflowStatus(BaseModel):
     blender_available: bool | None = None
     qa_score: float | None = None
     glb_inspection_summary: dict | None = None
+    geometry_validation_summary: dict | None = None
     preview_inspection_summary: dict | None = None
     structural_qa_passed: bool | None = None
     expected_objects_present: bool | None = None

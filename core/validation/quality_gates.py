@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.contracts.assets import AssetManifest
+from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
@@ -46,8 +47,7 @@ def evaluate_pre_blender_gate(
     checks["scene_report_valid"] = scene_report is not None and scene_report.status == "passed"
     checks["repair_attempts_valid"] = repair_attempts <= max_repair_attempts
     checks["no_critical_errors"] = not (
-        (requirement_report and requirement_report.errors)
-        or (scene_report and scene_report.errors)
+        (requirement_report and requirement_report.errors) or (scene_report and scene_report.errors)
     )
 
     for name, passed in checks.items():
@@ -72,6 +72,7 @@ def evaluate_post_blender_gate(
     qa_report: ValidationReport | None,
     glb_inspection: GlbInspectionReport | None = None,
     preview_inspection: PreviewInspectionReport | None = None,
+    geometry_validation: GeometryValidationReport | None = None,
 ) -> QualityGateReport:
     started = time.perf_counter()
     artifacts = generation.artifacts if generation else {}
@@ -99,12 +100,22 @@ def evaluate_post_blender_gate(
             for warning in (qa_report.warnings if qa_report else [])
             if warning.severity == "error"
         ],
-        "glb_structure_valid": glb_inspection is not None
-        and glb_inspection.structural_qa_passed,
+        "glb_structure_valid": glb_inspection is not None and glb_inspection.structural_qa_passed,
         "expected_objects_present": glb_inspection is not None
         and glb_inspection.checks.get("expected_objects_present", False),
         "minimum_node_count_valid": glb_inspection is not None
         and glb_inspection.checks.get("minimum_node_count_valid", False),
+        "real_blender_glb_parse_required": generation is not None
+        and (
+            generation.mode != "real_blender"
+            or (
+                glb_inspection is not None
+                and glb_inspection.inspection_mode == "glb_parse"
+                and glb_inspection.format_valid
+            )
+        ),
+        "geometry_validation_valid": geometry_validation is not None
+        and geometry_validation.status == "passed",
         "preview_resolution_valid": preview_inspection is not None
         and preview_inspection.minimum_resolution_valid,
     }
@@ -112,10 +123,13 @@ def evaluate_post_blender_gate(
     warnings = [warning.code for warning in qa_report.warnings] if qa_report else []
     if glb_inspection:
         warnings.extend(glb_inspection.warnings)
+    if geometry_validation:
+        warnings.extend(geometry_validation.warnings)
     if preview_inspection:
         warnings.extend(preview_inspection.warnings)
     details = {
         "glb_inspection": glb_inspection.model_dump() if glb_inspection else None,
+        "geometry_validation": geometry_validation.model_dump() if geometry_validation else None,
         "preview_inspection": preview_inspection.model_dump() if preview_inspection else None,
     }
     return QualityGateReport(

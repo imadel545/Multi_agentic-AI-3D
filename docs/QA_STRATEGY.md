@@ -8,6 +8,7 @@ Current checks:
 - Artifact presence through local workflow output generation.
 - Generation QA for GLB, preview, metadata, sector count, and generation fallback warnings.
 - GLB structural inspection through `core/qa/glb_inspector.py`.
+- GLB geometry validation through `core/qa/glb_geometry_validator.py`.
 - Preview PNG inspection through `core/qa/preview_inspector.py`.
 - Centralized pre-Blender quality gate for requirements, rules, asset compatibility, SceneSpec
   validity, repair attempts, and critical upstream errors.
@@ -24,7 +25,7 @@ Next checks:
 
 - Cleanup TTL tests.
 - Visual semantic inspection of generated scenes.
-- GLB metadata inspection beyond artifact presence.
+- Exact GLB transform/material inspection beyond object metadata.
 
 ## Quality Gates
 
@@ -33,7 +34,8 @@ Implemented:
 - `pre_blender_gate` blocks `generate_blender` when critical preconditions fail.
 - `post_blender_gate` blocks completion when generated artifacts or QA score fail.
 - `post_blender_gate` includes `glb_structure_valid`, `expected_objects_present`,
-  `minimum_node_count_valid`, and `preview_resolution_valid`.
+  `minimum_node_count_valid`, `real_blender_glb_parse_required`,
+  `geometry_validation_valid`, and `preview_resolution_valid`.
 - Reports are written to `quality_gates.json`, `status.json`, and `workflow_trace.json`.
 - Pytest covers direct gate behavior and the route that prevents Blender execution.
 
@@ -66,6 +68,32 @@ Implemented:
 - `PreviewInspector` parses PNG headers and verifies width/height against SceneSpec preview
   resolution.
 - `glb_inspection.json` and `preview_inspection.json` are written for completed generation runs.
+- `geometry_validation.json` is written for completed generation runs.
+
+## Geometry 3D QA
+
+Implemented:
+
+- `GLBGeometryValidator` verifies:
+  - tower presence
+  - antenna count
+  - beam count
+  - RRU count
+  - cable count
+  - azimuth-arrow count
+  - sector object presence
+  - object names/metadata match the SceneSpec assets
+  - tower height within `0.5m`
+  - antenna heights within `0.5m`
+  - azimuth metadata within `5deg`
+  - bounding box reasonableness
+- Geometry QA is included in `validation_report.json`, `quality_gates.json`,
+  `workflow_trace.json`, API status, and `geometry_validation.json`.
+
+Fallback:
+
+- If parsed GLB bounding-box data is unavailable, the validator uses file/object counts and
+  metadata as a conservative proxy and emits `BOUNDING_BOX_GEOMETRY_NOT_PARSED`.
 
 Fallback:
 

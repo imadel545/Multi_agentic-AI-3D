@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
+from core.contracts.requirements import RequirementSpec
 
 
 def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
@@ -18,7 +19,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
                     "Créer un site 5G sur pylône treillis 30m. Installer 3 secteurs à 24m. "
                     "Azimuts : 0°, 120°, 240°. Ajouter câbles, faisceaux et labels."
                 ),
-                "options": {"detail_level": "high", "generate_variants": False, "use_llm": False},
+                "options": {"detail_level": "high", "use_llm": False},
             },
         )
         assert response.status_code == 200
@@ -40,6 +41,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["structural_qa_passed"] is True
         assert status["expected_objects_present"] is True
         assert status["glb_inspection_summary"]["structural_qa_passed"] is True
+        assert status["geometry_validation_summary"]["status"] == "passed"
         assert status["preview_inspection_summary"]["minimum_resolution_valid"] is True
         assert status["total_duration_ms"] >= 0
         assert status["total_workflow_duration_ms"] >= 0
@@ -59,6 +61,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
             "scene_spec_hash",
             "asset_manifest_hash",
             "knowledge_index_hash",
+            "geometry_validation_passed",
             "cache_hits",
             "cache_misses",
         ]:
@@ -72,6 +75,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert Path(status["artifacts"]["qa_report"]).exists()
         assert Path(status["artifacts"]["generation_report"]).exists()
         assert Path(status["artifacts"]["glb_inspection"]).exists()
+        assert Path(status["artifacts"]["geometry_validation"]).exists()
         assert Path(status["artifacts"]["preview_inspection"]).exists()
         assert Path(status["artifacts"]["memory_recall"]).exists()
         assert Path(status["artifacts"]["metadata"]).exists()
@@ -83,11 +87,11 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert trace["metrics"]["memory_hits"] == status["memory_hits"]
         assert trace["metrics"]["memory_context_count"] == status["memory_context_count"]
         assert (
-            trace["metrics"]["total_workflow_duration_ms"]
-            == status["total_workflow_duration_ms"]
+            trace["metrics"]["total_workflow_duration_ms"] == status["total_workflow_duration_ms"]
         )
         assert len(trace["quality_gates"]) == 2
         assert trace["glb_inspection"]["structural_qa_passed"] is True
+        assert trace["geometry_validation"]["status"] == "passed"
         assert trace["preview_inspection"]["preview_qa_passed"] is True
         assert any(step["node"] == "memory_writeback" for step in trace["steps"])
     finally:
@@ -106,7 +110,7 @@ def test_api_status_exposes_structural_qa(tmp_path: Path) -> None:
                     "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
                     "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
                 ),
-                "options": {"detail_level": "high", "generate_variants": False, "use_llm": False},
+                "options": {"detail_level": "high", "use_llm": False},
             },
         )
         workflow_id = response.json()["workflow_id"]
@@ -121,3 +125,133 @@ def test_api_status_exposes_structural_qa(tmp_path: Path) -> None:
         assert status["preview_inspection_summary"]["format"] == "png"
     finally:
         workflow_service.outputs_dir = original_outputs
+
+
+def test_geometry_validation_report_written(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/designs",
+            json={
+                "requirements_text": (
+                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                    "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
+                ),
+                "options": {"detail_level": "high", "use_llm": False},
+            },
+        )
+        workflow_id = response.json()["workflow_id"]
+        status = client.get(f"/designs/{workflow_id}").json()
+        geometry_path = Path(status["artifacts"]["geometry_validation"])
+
+        assert geometry_path.exists()
+        payload = json.loads(geometry_path.read_text(encoding="utf-8"))
+        assert payload["status"] == "passed"
+        assert payload["checks"]["antenna_count_valid"] is True
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    extractor = workflow_service.orchestrator.extractor
+    original_provider = extractor.provider
+    original_provider_name = extractor.provider_name
+    original_enabled = extractor.enabled
+    provider = RecordingRequirementProvider()
+    workflow_service.outputs_dir = tmp_path
+    extractor.provider = provider
+    extractor.provider_name = "groq:test-provider"
+    extractor.enabled = True
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/designs",
+            json={
+                "requirements_text": (
+                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                    "Azimuts : 0°, 120°, 240°."
+                ),
+                "options": {"detail_level": "high", "use_llm": True},
+            },
+        )
+        workflow_id = response.json()["workflow_id"]
+        status = client.get(f"/designs/{workflow_id}").json()
+
+        assert response.status_code == 200
+        assert provider.calls == 1
+        assert status["llm_provider"] == "groq:test-provider"
+        assert status["llm_fallback_used"] is False
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        extractor.provider = original_provider
+        extractor.provider_name = original_provider_name
+        extractor.enabled = original_enabled
+
+
+def test_api_design_with_use_llm_false_does_not_call_configured_provider(
+    tmp_path: Path,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    extractor = workflow_service.orchestrator.extractor
+    original_provider = extractor.provider
+    original_provider_name = extractor.provider_name
+    original_enabled = extractor.enabled
+    provider = RecordingRequirementProvider()
+    workflow_service.outputs_dir = tmp_path
+    extractor.provider = provider
+    extractor.provider_name = "groq:test-provider"
+    extractor.enabled = True
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/designs",
+            json={
+                "requirements_text": (
+                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                    "Azimuts : 0°, 120°, 240°."
+                ),
+                "options": {"detail_level": "high", "use_llm": False},
+            },
+        )
+        workflow_id = response.json()["workflow_id"]
+        status = client.get(f"/designs/{workflow_id}").json()
+
+        assert response.status_code == 200
+        assert provider.calls == 0
+        assert status["llm_provider"] == "deterministic"
+        assert status["llm_fallback_used"] is True
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        extractor.provider = original_provider
+        extractor.provider_name = original_provider_name
+        extractor.enabled = original_enabled
+
+
+class RecordingRequirementProvider:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
+        self.calls += 1
+        return RequirementSpec(
+            network_type="5G",
+            site_type="telecom_site",
+            tower_type="lattice_tower",
+            tower_height_m=30,
+            sector_count=3,
+            antenna_type="panel_5g",
+            antenna_install_height_m=24,
+            azimuths_deg=[0, 120, 240],
+            mechanical_tilt_deg=3,
+            electrical_tilt_deg=0,
+            beamwidth_deg=65,
+            include_rru=True,
+            include_cables=True,
+            include_beams=True,
+            include_labels=True,
+            detail_level=detail_level,
+            warnings=[],
+        )

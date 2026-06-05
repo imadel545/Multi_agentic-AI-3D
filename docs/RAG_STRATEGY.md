@@ -29,6 +29,10 @@ Completed:
 - Search across all collections.
 - Filtered search by `network_type`, `tower_type`, and `doc_type`.
 - Deterministic hashing embedding as the local fallback.
+- Eval tests under `tests/rag_eval` for:
+  - `5G lattice tower 3 sectors`
+  - `microwave dish on lattice tower`
+  - `small cell pole`
 
 Available with fallback:
 
@@ -43,6 +47,14 @@ TELECOM_STUDIO_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
 ```
 
 The deterministic provider is an MVP fallback, not semantic production embedding quality.
+
+## Known Limitations
+
+- RAG context is advisory and cannot bypass the rule engine, asset registry, SceneSpec validator, or
+  quality gates.
+- Current seeds are small. Retrieval quality depends heavily on explicit seed text until a stronger
+  embedding provider and larger domain corpus are used.
+- Runtime memory collections are separate from static `/rag/reindex` collections.
 
 ## API
 

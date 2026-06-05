@@ -8,6 +8,7 @@ from langgraph.graph import END, StateGraph
 from core.agents import ScenePlanner
 from core.agents.requirement_extractor import RequirementExtractor
 from core.contracts.assets import AssetManifest
+from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
 from core.contracts.quality import QualityGateReport
@@ -17,7 +18,7 @@ from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
 from core.memory import MemoryService
 from core.performance import knowledge_index_hash, requirements_hash, scene_spec_hash
-from core.qa import GenerationQA, GLBInspector, PreviewInspector
+from core.qa import GenerationQA, GLBGeometryValidator, GLBInspector, PreviewInspector
 from core.rag import RagService
 from core.rules import RuleEngine
 from core.services.asset_registry import AssetRegistry
@@ -55,6 +56,7 @@ class WorkflowState(TypedDict, total=False):
     pre_blender_gate: QualityGateReport
     generation: GenerationResult
     glb_inspection: GlbInspectionReport
+    geometry_validation: GeometryValidationReport
     preview_inspection: PreviewInspectionReport
     qa_report: ValidationReport
     post_blender_gate: QualityGateReport
@@ -87,6 +89,7 @@ class OrchestratorResult:
     scene_report: ValidationReport | None
     qa_report: ValidationReport | None
     glb_inspection: GlbInspectionReport | None
+    geometry_validation: GeometryValidationReport | None
     preview_inspection: PreviewInspectionReport | None
     quality_gate_reports: list[QualityGateReport]
     generation: GenerationResult | None
@@ -118,6 +121,7 @@ class DesignOrchestrator:
         self.scene_planner = ScenePlanner()
         self.qa = GenerationQA()
         self.glb_inspector = GLBInspector()
+        self.geometry_validator = GLBGeometryValidator()
         self.preview_inspector = PreviewInspector()
         self.graph = self._build_graph()
 
@@ -295,9 +299,7 @@ class DesignOrchestrator:
         started = time.perf_counter()
         if self.rag_service is None:
             return {
-                "trace": _trace(
-                    state, "retrieve_rag_context", "skipped", started, status="skipped"
-                )
+                "trace": _trace(state, "retrieve_rag_context", "skipped", started, status="skipped")
             }
         try:
             results = self.rag_service.search(state["requirements_text"], limit=5)
@@ -305,9 +307,7 @@ class DesignOrchestrator:
             return {
                 "rag_context": context,
                 "cache_metrics": self._cache_metrics(),
-                "trace": _trace(
-                    state, "retrieve_rag_context", f"{len(context)} results", started
-                ),
+                "trace": _trace(state, "retrieve_rag_context", f"{len(context)} results", started),
             }
         except Exception as exc:
             return {
@@ -326,9 +326,7 @@ class DesignOrchestrator:
     def _memory_recall(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         if self.memory_service is None:
-            return {
-                "trace": _trace(state, "memory_recall", "skipped", started, status="skipped")
-            }
+            return {"trace": _trace(state, "memory_recall", "skipped", started, status="skipped")}
         recall = self.memory_service.recall(state["requirements"])
         return {
             "memory_recall": recall.model_dump(),
@@ -568,10 +566,14 @@ class DesignOrchestrator:
             repair_attempts=state.get("repair_attempts", 0),
             max_repair_attempts=state.get("max_repair_attempts", 2),
         )
-        report = state["report"] if gate.passed else _merge_quality_gate_report(
-            state["workflow_id"],
-            state["report"],
-            gate,
+        report = (
+            state["report"]
+            if gate.passed
+            else _merge_quality_gate_report(
+                state["workflow_id"],
+                state["report"],
+                gate,
+            )
         )
         return {
             "pre_blender_gate": gate,
@@ -594,9 +596,7 @@ class DesignOrchestrator:
         attempt = state.get("repair_attempts", 0) + 1
         report = state["scene_report"]
         repair_events = [
-            event.model_dump()
-            for event in state["requirements"].repair_events
-            if event.success
+            event.model_dump() for event in state["requirements"].repair_events if event.success
         ]
         if repair_events and report.status == "passed" and not state.get("scene_repair_recorded"):
             route = _route_event(
@@ -683,11 +683,17 @@ class DesignOrchestrator:
             Path(generation.artifacts["preview"]),
             state["scene"],
         )
+        geometry_validation = self.geometry_validator.validate(
+            state["scene"],
+            glb_inspection,
+            Path(generation.artifacts["metadata"]),
+        )
         qa_report = self.qa.validate(
             state["scene"],
             generation,
             glb_inspection,
             preview_inspection,
+            geometry_validation,
         )
         merged = _merge_reports(
             state["scene"].scene_id,
@@ -695,6 +701,7 @@ class DesignOrchestrator:
         )
         return {
             "glb_inspection": glb_inspection,
+            "geometry_validation": geometry_validation,
             "preview_inspection": preview_inspection,
             "qa_report": qa_report,
             "report": merged,
@@ -715,11 +722,16 @@ class DesignOrchestrator:
             qa_report=state.get("qa_report"),
             glb_inspection=state.get("glb_inspection"),
             preview_inspection=state.get("preview_inspection"),
+            geometry_validation=state.get("geometry_validation"),
         )
-        report = state["report"] if gate.passed else _merge_quality_gate_report(
-            state["workflow_id"],
-            state["report"],
-            gate,
+        report = (
+            state["report"]
+            if gate.passed
+            else _merge_quality_gate_report(
+                state["workflow_id"],
+                state["report"],
+                gate,
+            )
         )
         return {
             "post_blender_gate": gate,
@@ -932,12 +944,14 @@ def _merge_reports(design_id: str, reports: list[ValidationReport]) -> Validatio
     warnings = []
     errors = []
     glb_inspection = None
+    geometry_validation = None
     preview_inspection = None
     for report in reports:
         checks.update(report.checks)
         warnings.extend(report.warnings)
         errors.extend(report.errors)
         glb_inspection = report.glb_inspection or glb_inspection
+        geometry_validation = report.geometry_validation or geometry_validation
         preview_inspection = report.preview_inspection or preview_inspection
     score = sum(1 for passed in checks.values() if passed) / len(checks)
     return ValidationReport(
@@ -948,6 +962,7 @@ def _merge_reports(design_id: str, reports: list[ValidationReport]) -> Validatio
         warnings=warnings,
         errors=errors,
         glb_inspection=glb_inspection,
+        geometry_validation=geometry_validation,
         preview_inspection=preview_inspection,
     )
 
@@ -990,6 +1005,7 @@ def _merge_quality_gate_report(
         warnings=warnings,
         errors=errors,
         glb_inspection=report.glb_inspection,
+        geometry_validation=report.geometry_validation,
         preview_inspection=report.preview_inspection,
     )
 
@@ -1007,6 +1023,9 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         quality_gates=state.get("quality_gate_reports", []),
         glb_inspection=state["glb_inspection"].model_dump()
         if state.get("glb_inspection")
+        else None,
+        geometry_validation=state["geometry_validation"].model_dump()
+        if state.get("geometry_validation")
         else None,
         preview_inspection=state["preview_inspection"].model_dump()
         if state.get("preview_inspection")
@@ -1026,6 +1045,7 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         scene_report=state.get("scene_report"),
         qa_report=state.get("qa_report"),
         glb_inspection=state.get("glb_inspection"),
+        geometry_validation=state.get("geometry_validation"),
         preview_inspection=state.get("preview_inspection"),
         generation=state.get("generation"),
         rag_context=state.get("rag_context", []),
@@ -1087,17 +1107,24 @@ def _workflow_metrics(
         "knowledge_index_hash": state.get("knowledge_index_hash"),
     }
     glb_inspection: GlbInspectionReport | None = state.get("glb_inspection")
+    geometry_validation: GeometryValidationReport | None = state.get("geometry_validation")
     preview_inspection: PreviewInspectionReport | None = state.get("preview_inspection")
     if glb_inspection is not None:
         metrics.update(
             {
                 "structural_qa_passed": glb_inspection.structural_qa_passed,
-                "expected_objects_present": glb_inspection.checks.get(
-                    "expected_objects_present"
-                ),
+                "expected_objects_present": glb_inspection.checks.get("expected_objects_present"),
                 "glb_node_count": glb_inspection.node_count,
                 "glb_mesh_count": glb_inspection.mesh_count,
                 "glb_material_count": glb_inspection.material_count,
+            }
+        )
+    if geometry_validation is not None:
+        metrics.update(
+            {
+                "geometry_validation_passed": geometry_validation.status == "passed",
+                "geometry_missing_objects": len(geometry_validation.missing_objects),
+                "geometry_critical_errors": len(geometry_validation.critical_errors),
             }
         )
     if preview_inspection is not None:

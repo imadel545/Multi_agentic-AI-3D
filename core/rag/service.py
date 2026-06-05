@@ -142,6 +142,11 @@ class RagService:
         stats = self.query_cache.snapshot()
         return {"rag_cache_hits": stats["hits"], "rag_cache_misses": stats["misses"]}
 
+    def close(self) -> None:
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
     def upsert_runtime_document(
         self,
         collection: str,

@@ -13,6 +13,10 @@
 - SQLite workflow memory with recall, writeback, stats, typed trace, and node timings.
 - Centralized quality gates and process-local safe cache.
 - GLB structural inspection, preview dimension inspection, and golden GLB structure expectations.
+- GLB geometry validation with object count, sector object, height, azimuth, and bounding-box proxy
+  checks.
+- RAG and memory eval tests for core local-first scenarios.
+- Safe output cleanup service for old managed workflow folders.
 
 ## Available With Fallback
 
@@ -29,10 +33,10 @@
 
 ## Future
 
-- Replace procedural placeholder geometry with validated GLB asset imports.
-- Add cleanup TTL for old outputs and SQLite rows.
+- Replace procedural geometry with validated GLB asset imports.
+- Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
 - Add frontend React/Three.js viewer.
 - Add richer Qdrant payload filters and semantic embeddings as default.
 - Add comparative design variants.
-- Add GLB transform, bounding-box, and material validation.
+- Add exact GLB transform, bounding-box, and material validation.
 - Add rendered preview visual semantic checks.

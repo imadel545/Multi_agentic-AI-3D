@@ -5,4 +5,5 @@
 - Azimuth values are normalized in degrees and must be in `[0, 360)`.
 - Assets must be validated and compatible with the network type.
 - RRU assets are required when RRU generation is requested.
+- Microwave dish designs do not require RRU assets unless explicitly requested.
 - Cables and beams are procedural visual elements controlled by SceneSpec flags.

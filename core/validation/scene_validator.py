@@ -21,7 +21,8 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
             sector.radio_asset_id is None or sector.radio_asset_id in assets_by_id
             for sector in scene.sectors
         ),
-        "cables_present": all(sector.include_cable for sector in scene.sectors),
+        "cable_option_consistent": all(sector.include_cable for sector in scene.sectors)
+        or not any(sector.include_cable for sector in scene.sectors),
         "units_meters": scene.units == "meters",
     }
     errors = [

@@ -13,6 +13,9 @@ Workflow trace metrics include:
 - `memory_hits`
 - `memory_context_count`
 - `artifact_size_bytes`
+- `geometry_validation_passed`
+- `geometry_missing_objects`
+- `geometry_critical_errors`
 - `requirements_hash`
 - `scene_spec_hash`
 - `asset_manifest_hash`
@@ -39,6 +42,7 @@ Compatibility fields are still present:
 - QA duration includes generation QA and QA failure handling.
 - Memory duration includes recall and writeback.
 - Artifact size is the sum of generated artifact paths that exist on disk.
+- Geometry validation metrics are emitted when `qa_generation` runs.
 - Repair and asset fallback handler durations are included in `planning_duration_ms`.
 - Requirement and SceneSpec hashes are canonical JSON SHA-256 hashes.
 - Asset manifest hash is based on all JSON manifests under `assets/manifests`.
@@ -53,6 +57,9 @@ Implemented cache surfaces:
 - RAG query TTL cache with default 30 second TTL.
 - Runtime memory collections (`design_memory`, `error_memory`) are not query-cached, and runtime
   memory upserts clear the RAG query cache.
+- `core/services/cleanup_service.py` can remove old managed workflow folders named
+  `wf_<12 hex>` under the configured outputs directory.
+- FastAPI shutdown closes the Qdrant client explicitly through `RagService.close()`.
 
 The cache does not bypass validation. Requirement rules, SceneSpec validation, quality gates,
 Blender execution, QA, and memory writeback still run on each workflow.
@@ -63,6 +70,8 @@ Blender execution, QA, and memory writeback still run on each workflow.
 - Missing RAG service reports zero RAG results and a skipped or failed RAG trace step.
 - Failed Qdrant memory indexing is reported in memory writeback but does not fail the workflow.
 - Expired or invalidated cache entries are treated as misses.
+- Cleanup skips symlinks, non-workflow folders, and paths outside the configured output root.
+- Qdrant client shutdown is explicit to avoid local-client destructor noise.
 
 ## Future
 
@@ -78,3 +87,4 @@ Blender execution, QA, and memory writeback still run on each workflow.
 - File size metrics only include artifacts known to `GenerationResult`.
 - The RAG cache is process-local.
 - The asset cache re-hashes manifest files before reuse.
+- Cleanup is implemented as a service and tests, but is not scheduled automatically.

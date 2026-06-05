@@ -28,6 +28,7 @@ Completed:
 Implemented QA outputs:
 
 - `glb_inspection.json`
+- `geometry_validation.json`
 - `preview_inspection.json`
 
 Requires Local Blender Install:
@@ -52,6 +53,7 @@ Required artifacts:
 - `preview.png`
 - `scene_metadata.json`
 - `glb_inspection.json`
+- `geometry_validation.json`
 - `preview_inspection.json`
 
 Metadata fields:
@@ -63,6 +65,7 @@ Metadata fields:
 - `procedural_objects_created`
 - `sector_count`
 - `network_type`
+- `tower_height_m`
 - `azimuths_deg`
 - `antenna_heights_m`
 - `warnings`
@@ -70,4 +73,5 @@ Metadata fields:
 Known limitations:
 
 - The worker currently generates procedural primitives, not imported vendor GLB assets.
-- GLB structural QA checks node/object presence and counts, not visual aesthetics.
+- GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and
+  bounding-box reasonableness, not visual aesthetics or material quality.

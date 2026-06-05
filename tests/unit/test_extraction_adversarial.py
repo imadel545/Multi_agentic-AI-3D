@@ -36,8 +36,7 @@ def test_deterministic_extraction_adversarial_inputs(text: str, expected: dict) 
 
 def test_incoherent_antenna_height_is_repaired() -> None:
     spec = parse_requirements_text(
-        "Créer un site 5G sur pylône treillis 20m avec 3 secteurs à 24m. "
-        "Azimuts : 0°, 120°, 240°.",
+        "Créer un site 5G sur pylône treillis 20m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°.",
         detail_level="high",
     )
 

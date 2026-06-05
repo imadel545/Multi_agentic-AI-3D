@@ -161,10 +161,7 @@ def _extract_azimuths(text: str) -> list[float]:
     azimuth_block = re.search(r"(?:azimuts?|azimuths?)\s*:?\s*([0-9°,\s;/]+)", text)
     if not azimuth_block:
         return []
-    return [
-        float(value)
-        for value in re.findall(r"\d+(?:\.\d+)?", azimuth_block.group(1))
-    ]
+    return [float(value) for value in re.findall(r"\d+(?:\.\d+)?", azimuth_block.group(1))]
 
 
 def _contains_negation_for(text: str, terms: list[str]) -> bool:

@@ -59,6 +59,9 @@ The API writes `workflow_trace.json` for every workflow. It contains:
 - `steps`
 - `route_history`
 - `quality_gates`
+- `glb_inspection`
+- `geometry_validation`
+- `preview_inspection`
 - `metrics`
 
 Each step contains:
@@ -87,6 +90,8 @@ Each step contains:
 - If Blender is missing, fallback artifacts are generated and QA still runs.
 - If Qdrant is unavailable, RAG failure is traced and deterministic planning continues.
 - If a quality gate fails, the workflow is failed explicitly and the gate report is written.
+- A real Blender output must parse as GLB at the post-Blender gate.
+- Fallback generation remains explicit and visible in trace, QA, and status.
 
 ## Future
 
@@ -101,5 +106,5 @@ Each step contains:
   then are recorded in the graph as repair events.
 - Asset fallback is conservative and only uses validated network-compatible assets.
 - RAG and memory provide context only; they do not override deterministic rules.
-- Current quality gates validate structure, rules, artifacts, and QA metadata; they do not inspect
-  visual aesthetics.
+- Current quality gates validate structure, rules, artifacts, geometry metadata, and QA metadata;
+  they do not inspect visual aesthetics.

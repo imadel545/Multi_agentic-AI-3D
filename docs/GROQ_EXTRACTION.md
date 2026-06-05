@@ -26,11 +26,13 @@ Runtime behavior:
 If the API key is absent, the request fails, or Pydantic validation rejects the response,
 the workflow falls back to the deterministic parser and adds `LLM_EXTRACTION_FALLBACK`.
 
-Tests use mock providers and never call the real Groq API.
+Automated unit tests use local provider doubles and do not call the real Groq API by default.
 
 Completed:
 
 - Real Groq provider integration.
+- API workflow tests proving `use_llm=true` calls the configured provider and `use_llm=false`
+  bypasses it.
 - Deterministic fallback when key/API/validation fails.
 - Controlled field repair with `LLM_FIELD_REPAIRED`.
 - `extraction_report.json` per workflow.
@@ -41,3 +43,10 @@ Available with fallback:
 
 - Groq may still generate invalid numeric arrays for azimuths on some prompts. Invalid
   non-critical fields are repaired from deterministic baseline and surfaced as warnings.
+
+Known runtime result:
+
+- A local smoke run with `use_llm=true` verified `llm_provider = groq:openai/gpt-oss-120b`,
+  `llm_fallback_used = false`, real Blender generation, and passing geometry QA. The LLM response
+  still required an explicit `LLM_FIELD_REPAIRED` warning for azimuth formatting, which is visible
+  in the extraction and validation reports.

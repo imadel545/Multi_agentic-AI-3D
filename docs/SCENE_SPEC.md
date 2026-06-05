@@ -22,5 +22,9 @@ Core validation rules:
 - Azimuths are in `[0, 360)`.
 - Units are meters.
 - Radio assets are present when RRU generation is requested by the current MVP flow.
+- Cables are optional and valid when all sectors consistently disable them.
+
+Geometry QA derives expected antennas, RRUs, cables, beams, azimuth arrows, heights, and azimuth
+metadata from the SceneSpec.
 
 See `core/contracts/scene.py` for the executable schema.

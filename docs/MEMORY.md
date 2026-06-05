@@ -27,6 +27,8 @@
   - `design_memory`
   - `error_memory`
 - Runtime memory collections are not included in `/rag/reindex`.
+- Memory recall runs before planning when memory is configured.
+- Memory writeback runs after successful or failed terminal reports when memory is configured.
 
 ## Stored Data
 
@@ -64,7 +66,8 @@ Large outputs remain in `outputs/temp`.
 
 ## Future
 
-- Add TTL cleanup for old SQLite rows and old output folders.
+- Add TTL cleanup for old SQLite rows.
+- Wire output folder cleanup into an explicit CLI/admin action.
 - Add Qdrant server mode for concurrent API processes.
 - Add deeper ranking of reusable patterns by design similarity.
 

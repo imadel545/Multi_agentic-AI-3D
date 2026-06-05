@@ -17,3 +17,10 @@ Manifest fields:
 - `version`
 
 Only `status = validated` assets are eligible for automatic selection.
+
+Current limitation:
+
+- The repository currently stores manifests only. The GLB files referenced by `file` are not
+  present yet, so the Blender worker uses controlled procedural geometry.
+
+See `docs/ASSET_STRATEGY.md` for the replacement plan and quality requirements.

@@ -73,6 +73,7 @@ class WorkflowService:
             "qa_report": str(output_dir / "qa_report.json"),
             "generation_report": str(output_dir / "generation_report.json"),
             "glb_inspection": str(output_dir / "glb_inspection.json"),
+            "geometry_validation": str(output_dir / "geometry_validation.json"),
             "preview_inspection": str(output_dir / "preview_inspection.json"),
             "memory_recall": str(output_dir / "memory_recall.json"),
             "technical_report": str(output_dir / "technical_report.md"),
@@ -97,13 +98,12 @@ class WorkflowService:
             "blender_available": result.generation.blender_available if result.generation else None,
             "qa_score": result.qa_report.score if result.qa_report else None,
             "glb_inspection_summary": _glb_inspection_summary(result),
+            "geometry_validation_summary": _geometry_validation_summary(result),
             "preview_inspection_summary": _preview_inspection_summary(result),
             "structural_qa_passed": result.glb_inspection.structural_qa_passed
             if result.glb_inspection
             else None,
-            "expected_objects_present": result.glb_inspection.checks.get(
-                "expected_objects_present"
-            )
+            "expected_objects_present": result.glb_inspection.checks.get("expected_objects_present")
             if result.glb_inspection
             else None,
             "total_duration_ms": result.total_duration_ms,
@@ -150,6 +150,11 @@ class WorkflowService:
             self._write_json(output_dir / "generation_report.json", result.generation.model_dump())
         if result.glb_inspection:
             self._write_json(output_dir / "glb_inspection.json", result.glb_inspection.model_dump())
+        if result.geometry_validation:
+            self._write_json(
+                output_dir / "geometry_validation.json",
+                result.geometry_validation.model_dump(),
+            )
         if result.preview_inspection:
             self._write_json(
                 output_dir / "preview_inspection.json",
@@ -195,6 +200,7 @@ class WorkflowService:
                     f"- Total duration: {result.total_duration_ms} ms",
                     f"- Quality gates: {len(result.quality_gate_reports)}",
                     f"- Structural QA: {_structural_qa_status(result)}",
+                    f"- Geometry QA: {_geometry_qa_status(result)}",
                     "",
                     "## Validation",
                     f"- Status: {result.report.status}",
@@ -251,10 +257,20 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
         "mesh_count": result.glb_inspection.mesh_count,
         "material_count": result.glb_inspection.material_count,
         "structural_qa_passed": result.glb_inspection.structural_qa_passed,
-        "expected_objects_present": result.glb_inspection.checks.get(
-            "expected_objects_present"
-        ),
+        "expected_objects_present": result.glb_inspection.checks.get("expected_objects_present"),
         "critical_errors": result.glb_inspection.critical_errors,
+    }
+
+
+def _geometry_validation_summary(result: OrchestratorResult) -> dict | None:
+    if result.geometry_validation is None:
+        return None
+    return {
+        "status": result.geometry_validation.status,
+        "checks": result.geometry_validation.checks,
+        "object_counts": result.geometry_validation.object_counts,
+        "missing_objects": result.geometry_validation.missing_objects,
+        "critical_errors": result.geometry_validation.critical_errors,
     }
 
 
@@ -279,3 +295,9 @@ def _structural_qa_status(result: OrchestratorResult) -> str:
         return "not_run"
     status = "passed" if result.glb_inspection.structural_qa_passed else "failed"
     return f"{status} ({result.glb_inspection.inspection_mode})"
+
+
+def _geometry_qa_status(result: OrchestratorResult) -> str:
+    if result.geometry_validation is None:
+        return "not_run"
+    return result.geometry_validation.status

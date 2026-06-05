@@ -19,4 +19,5 @@ class ValidationReport(StrictModel):
     warnings: list[ValidationIssue] = Field(default_factory=list)
     errors: list[ValidationIssue] = Field(default_factory=list)
     glb_inspection: dict | None = None
+    geometry_validation: dict | None = None
     preview_inspection: dict | None = None

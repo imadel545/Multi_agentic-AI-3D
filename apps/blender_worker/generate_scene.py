@@ -312,6 +312,7 @@ def _write_metadata(
                 "procedural_objects_created": procedural_objects,
                 "sector_count": len(scene["sectors"]),
                 "network_type": scene["network_type"],
+                "tower_height_m": scene["tower"]["height_m"],
                 "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
                 "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
                 "warnings": warnings,
@@ -355,15 +356,11 @@ def _minimal_png(width: int, height: int) -> bytes:
         checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
         return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
 
-    header = (
-        width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + b"\x08\x02\x00\x00\x00"
-    )
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
     row = b"\x00" + (b"\xff\xff\xff" * width)
     image = zlib.compress(row * height, level=9)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(
-        b"IEND", b""
+    return (
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
     )
 
 

@@ -24,7 +24,7 @@ class RuleEngine:
                 if requirements.include_rru
                 else True
             ),
-            "cables_requested": requirements.include_cables,
+            "cable_option_valid": isinstance(requirements.include_cables, bool),
             "scene_units_meters": True,
         }
         warnings = [

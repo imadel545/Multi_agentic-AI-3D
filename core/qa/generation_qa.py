@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
@@ -14,6 +15,7 @@ class GenerationQA:
         generation: GenerationResult,
         glb_inspection: GlbInspectionReport,
         preview_inspection: PreviewInspectionReport,
+        geometry_validation: GeometryValidationReport,
     ) -> ValidationReport:
         glb_path = Path(generation.artifacts["glb"])
         preview_path = Path(generation.artifacts["preview"])
@@ -43,6 +45,7 @@ class GenerationQA:
             ),
             "preview_inspection_available": preview_inspection.inspection_mode == "png_parse",
             "preview_resolution_valid": preview_inspection.minimum_resolution_valid,
+            "geometry_validation_valid": geometry_validation.status == "passed",
         }
         warnings = []
         if generation.status == "fallback":
@@ -77,11 +80,27 @@ class GenerationQA:
             )
             for warning in preview_inspection.warnings
         )
+        warnings.extend(
+            ValidationIssue(
+                code=f"GEOMETRY_VALIDATION_{warning}",
+                message=f"Geometry validation warning: {warning}",
+                severity="warning",
+            )
+            for warning in geometry_validation.warnings
+        )
         errors = [
             ValidationIssue(code=code.upper(), message=f"QA check failed: {code}", severity="error")
             for code, passed in checks.items()
             if not passed
         ]
+        errors.extend(
+            ValidationIssue(
+                code=f"GEOMETRY_VALIDATION_{error}",
+                message=f"Geometry validation failed: {error}",
+                severity="error",
+            )
+            for error in geometry_validation.critical_errors
+        )
         score = sum(1 for passed in checks.values() if passed) / len(checks)
         return ValidationReport(
             design_id=scene.scene_id,
@@ -91,6 +110,7 @@ class GenerationQA:
             warnings=warnings,
             errors=errors,
             glb_inspection=glb_inspection.model_dump(),
+            geometry_validation=geometry_validation.model_dump(),
             preview_inspection=preview_inspection.model_dump(),
         )
 

@@ -33,6 +33,8 @@ Centralized quality gates are implemented in `core/validation/quality_gates.py`.
 - GLB structural inspection passed
 - expected 3D objects are present
 - minimum GLB node count is valid
+- real Blender outputs parse as GLB
+- geometry validation passed
 - preview PNG resolution is valid
 - QA score is at least `0.95`
 - no error-severity QA warning remains
@@ -54,6 +56,7 @@ Workflow state includes:
 - `route_history`
 - `quality_gate_reports`
 - `glb_inspection`
+- `geometry_validation`
 - `preview_inspection`
 - `requirements_hash`
 - `scene_spec_hash`
@@ -84,7 +87,7 @@ Trace steps include:
 - QA failure routes to `qa_failure_handler`, then memory writeback records the failed report.
 - Passed QA routes to `post_blender_gate`.
 - Failed post-Blender quality gates route to `quality_gate_failure_handler`.
-- Structural GLB/preview reports are attached during `qa_generation`.
+- Structural GLB, geometry, and preview reports are attached during `qa_generation`.
 
 ## Fallback
 
@@ -93,6 +96,7 @@ Trace steps include:
 - Scene repair is bounded by `max_repair_attempts`.
 - Quality gates fail closed. A failed pre-Blender gate blocks generation.
 - Non-GLB fallback artifacts use explicit `metadata_fallback` inspection mode.
+- Geometry validation warnings remain visible in QA reports and quality gate details.
 
 ## Future
 
@@ -108,4 +112,5 @@ Trace steps include:
 - Corrective routes are deterministic and conservative.
 - No handler can bypass rule validation.
 - Quality gate checks are local contract/artifact checks, not visual semantic inspection.
-- GLB inspection currently validates object presence and counts, not transforms or dimensions.
+- Geometry validation checks object counts, sector object presence, tower/antenna heights, azimuth
+  metadata, and bounding-box reasonableness. Exact transform/material parsing remains future work.

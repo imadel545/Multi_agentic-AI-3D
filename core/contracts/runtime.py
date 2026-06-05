@@ -24,6 +24,7 @@ class WorkflowTrace(StrictModel):
     route_history: list[dict] = Field(default_factory=list)
     quality_gates: list[dict] = Field(default_factory=list)
     glb_inspection: dict | None = None
+    geometry_validation: dict | None = None
     preview_inspection: dict | None = None
     metrics: dict[str, int | float | str | bool | None] = Field(default_factory=dict)
 

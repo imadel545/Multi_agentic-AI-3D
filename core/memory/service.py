@@ -305,19 +305,13 @@ def _ensure_column(
     column: str,
     definition: str,
 ) -> None:
-    columns = {
-        str(row["name"])
-        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-    }
+    columns = {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    return {
-        str(row["name"])
-        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-    }
+    return {str(row["name"]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def _insert_issue_memory(

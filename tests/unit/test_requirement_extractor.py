@@ -2,8 +2,12 @@ from core.agents.requirement_extractor import RequirementExtractor
 from core.contracts.requirements import RequirementSpec
 
 
-class FakeGroqProvider:
+class RecordingRequirementProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
     def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
+        self.calls.append((requirements_text, detail_level))
         return RequirementSpec(
             network_type="5G",
             site_type="telecom_site",
@@ -30,24 +34,45 @@ class FailingProvider:
         raise RuntimeError("provider down")
 
 
-def test_requirement_extractor_accepts_mock_structured_provider() -> None:
+def test_requirement_extractor_accepts_structured_provider() -> None:
+    provider = RecordingRequirementProvider()
     extractor = RequirementExtractor(
-        provider=FakeGroqProvider(),
-        provider_name="groq:mock",
+        provider=provider,
+        provider_name="groq:test-provider",
         enabled=True,
     )
 
     result = extractor.extract("Créer un site 5G treillis 30m avec 3 secteurs.", "high")
 
-    assert result.provider == "groq:mock"
+    assert provider.calls == [("Créer un site 5G treillis 30m avec 3 secteurs.", "high")]
+    assert result.provider == "groq:test-provider"
     assert result.fallback_used is False
     assert result.requirements.tower_type == "lattice_tower"
+
+
+def test_requirement_extractor_disabled_does_not_call_structured_provider() -> None:
+    provider = RecordingRequirementProvider()
+    extractor = RequirementExtractor(
+        provider=provider,
+        provider_name="groq:test-provider",
+        enabled=True,
+    )
+
+    result = extractor.extract(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°.",
+        "high",
+        enabled=False,
+    )
+
+    assert provider.calls == []
+    assert result.provider == "deterministic"
+    assert result.fallback_used is True
 
 
 def test_requirement_extractor_falls_back_on_provider_error() -> None:
     extractor = RequirementExtractor(
         provider=FailingProvider(),
-        provider_name="groq:mock",
+        provider_name="groq:test-provider",
         enabled=True,
     )
 

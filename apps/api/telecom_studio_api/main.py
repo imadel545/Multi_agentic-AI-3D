@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
@@ -19,7 +21,18 @@ from core.rag import RagService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 
-app = FastAPI(title="Agentic AI 3D Telecom Design Studio", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    rag_service.close()
+
+
+app = FastAPI(
+    title="Agentic AI 3D Telecom Design Studio",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 registry = AssetRegistry(settings.manifests_dir)
 rag_service = RagService(

@@ -106,8 +106,7 @@ def test_preview_inspector_missing_png(tmp_path: Path) -> None:
 
 def _scene():
     requirements = parse_requirements_text(
-        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-        "Azimuts : 0°, 120°, 240°."
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°."
     )
     registry = AssetRegistry(Path("assets/manifests"))
     tower = registry.select_tower(
@@ -158,13 +157,9 @@ def _png_bytes(width: int, height: int) -> bytes:
         checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
         return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
 
-    header = (
-        width.to_bytes(4, "big")
-        + height.to_bytes(4, "big")
-        + b"\x08\x02\x00\x00\x00"
-    )
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
     row = b"\x00" + (b"\xff\xff\xff" * width)
     image = zlib.compress(row * height, level=9)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(
-        b"IEND", b""
+    return (
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
     )

@@ -1,0 +1,235 @@
+import json
+from pathlib import Path
+
+from core.contracts.geometry_validation import GeometryValidationReport
+from core.contracts.glb_inspection import GlbInspectionReport
+from core.contracts.scene import SceneSpec
+
+HEIGHT_TOLERANCE_M = 0.5
+AZIMUTH_TOLERANCE_DEG = 5.0
+
+
+class GLBGeometryValidator:
+    def validate(
+        self,
+        scene: SceneSpec,
+        glb_inspection: GlbInspectionReport,
+        metadata_path: Path,
+    ) -> GeometryValidationReport:
+        metadata = _load_metadata(metadata_path)
+        object_names = glb_inspection.object_names
+        counts = _object_counts(object_names)
+        expected_antennas = len(scene.sectors)
+        expected_rru = sum(1 for sector in scene.sectors if sector.radio_asset_id)
+        expected_cables = sum(1 for sector in scene.sectors if sector.include_cable)
+        expected_beams = len(scene.sectors) if scene.visual_elements.include_sector_beams else 0
+        expected_arrows = len(scene.sectors) if scene.visual_elements.include_azimuth_arrows else 0
+        missing_objects = _missing_sector_objects(scene, object_names)
+
+        checks = {
+            "tower_present": counts["tower"] >= 1,
+            "antenna_count_valid": counts["antenna"] >= expected_antennas,
+            "beam_count_valid": _count_matches_option(counts["beam"], expected_beams),
+            "rru_count_valid": _count_matches_option(counts["rru"], expected_rru),
+            "cable_count_valid": _count_matches_option(counts["cable"], expected_cables),
+            "azimuth_arrow_count_valid": _count_matches_option(
+                counts["azimuth_arrow"], expected_arrows
+            ),
+            "sector_objects_present": not missing_objects,
+            "object_names_match_scene_spec": _object_names_match_scene(
+                scene,
+                object_names,
+                metadata,
+                missing_objects,
+            ),
+            "approx_tower_height_valid": _approx_tower_height_valid(scene, metadata),
+            "approx_antenna_height_valid": _approx_antenna_heights_valid(scene, metadata),
+            "azimuth_metadata_valid": _azimuths_valid(scene, metadata),
+            "bounding_box_reasonable": _bounding_box_reasonable(
+                scene,
+                metadata,
+                glb_inspection,
+            ),
+        }
+        warnings = []
+        if "bounding_box_m" not in metadata:
+            warnings.append("BOUNDING_BOX_GEOMETRY_NOT_PARSED")
+        critical_errors = [name for name, passed in checks.items() if not passed]
+        return GeometryValidationReport(
+            status="passed" if not critical_errors else "failed",
+            checks=checks,
+            object_counts=counts,
+            missing_objects=missing_objects,
+            warnings=warnings,
+            critical_errors=critical_errors,
+            height_tolerance_m=HEIGHT_TOLERANCE_M,
+            azimuth_tolerance_deg=AZIMUTH_TOLERANCE_DEG,
+        )
+
+
+def _object_counts(object_names: list[str]) -> dict[str, int]:
+    normalized = [_normalize(name) for name in object_names]
+    return {
+        "tower": _count(normalized, ("tower",)),
+        "antenna": _count(normalized, ("antenna", "dish")),
+        "rru": _count(normalized, ("radio", "rru")),
+        "cable": _count(normalized, ("cable",)),
+        "beam": _count(normalized, ("sector_beam", "beam")),
+        "azimuth_arrow": _count(normalized, ("azimuth_arrow",)),
+    }
+
+
+def _count(normalized_names: list[str], prefixes: tuple[str, ...]) -> int:
+    return sum(
+        1
+        for name in normalized_names
+        if any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
+    )
+
+
+def _count_matches_option(actual: int, expected: int) -> bool:
+    if expected == 0:
+        return actual == 0
+    return actual >= expected
+
+
+def _missing_sector_objects(scene: SceneSpec, object_names: list[str]) -> list[str]:
+    normalized = [_normalize(name) for name in object_names]
+    missing = []
+    for sector in scene.sectors:
+        sector_token = _normalize(sector.sector_id)
+        if not _has_sector_object(normalized, ("antenna", "dish"), sector_token):
+            missing.append(f"antenna:{sector.sector_id}")
+        if sector.radio_asset_id and not _has_sector_object(
+            normalized,
+            ("radio", "rru"),
+            sector_token,
+        ):
+            missing.append(f"radio:{sector.sector_id}")
+        if sector.include_cable and not _has_sector_object(normalized, ("cable",), sector_token):
+            missing.append(f"cable:{sector.sector_id}")
+        if scene.visual_elements.include_sector_beams and not _has_sector_object(
+            normalized,
+            ("sector_beam", "beam"),
+            sector_token,
+        ):
+            missing.append(f"beam:{sector.sector_id}")
+    return missing
+
+
+def _has_sector_object(
+    normalized_names: list[str],
+    prefixes: tuple[str, ...],
+    sector_token: str,
+) -> bool:
+    return any(
+        sector_token in name
+        and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
+        for name in normalized_names
+    )
+
+
+def _object_names_match_scene(
+    scene: SceneSpec,
+    object_names: list[str],
+    metadata: dict,
+    missing_objects: list[str],
+) -> bool:
+    if missing_objects:
+        return False
+    normalized = [_normalize(name) for name in object_names]
+    expected_asset_ids = {scene.tower.asset_id}
+    for sector in scene.sectors:
+        expected_asset_ids.add(sector.antenna_asset_id)
+        if sector.radio_asset_id:
+            expected_asset_ids.add(sector.radio_asset_id)
+    metadata_assets = {_normalize(asset_id) for asset_id in metadata.get("assets_used", [])}
+    return all(
+        _normalize(asset_id) in metadata_assets
+        or any(_normalize(asset_id) in name for name in normalized)
+        for asset_id in expected_asset_ids
+    )
+
+
+def _approx_tower_height_valid(scene: SceneSpec, metadata: dict) -> bool:
+    value = _number(metadata.get("tower_height_m"))
+    return value is not None and abs(value - scene.tower.height_m) <= HEIGHT_TOLERANCE_M
+
+
+def _approx_antenna_heights_valid(scene: SceneSpec, metadata: dict) -> bool:
+    values = metadata.get("antenna_heights_m")
+    if not isinstance(values, list) or len(values) != len(scene.sectors):
+        return False
+    expected = [sector.install_height_m for sector in scene.sectors]
+    parsed = [_number(value) for value in values]
+    if any(value is None for value in parsed):
+        return False
+    return all(
+        abs(float(actual) - target) <= HEIGHT_TOLERANCE_M
+        for actual, target in zip(parsed, expected, strict=True)
+    )
+
+
+def _azimuths_valid(scene: SceneSpec, metadata: dict) -> bool:
+    values = metadata.get("azimuths_deg")
+    if not isinstance(values, list) or len(values) != len(scene.sectors):
+        return False
+    expected = [sector.azimuth_deg for sector in scene.sectors]
+    parsed = [_number(value) for value in values]
+    if any(value is None for value in parsed):
+        return False
+    return all(
+        _angular_delta(float(actual), target) <= AZIMUTH_TOLERANCE_DEG
+        for actual, target in zip(parsed, expected, strict=True)
+    )
+
+
+def _bounding_box_reasonable(
+    scene: SceneSpec,
+    metadata: dict,
+    glb_inspection: GlbInspectionReport,
+) -> bool:
+    bbox = metadata.get("bounding_box_m")
+    if isinstance(bbox, dict):
+        height = _number(bbox.get("height"))
+        width = _number(bbox.get("width"))
+        depth = _number(bbox.get("depth"))
+        if height is None or width is None or depth is None:
+            return False
+        return (
+            scene.tower.height_m - HEIGHT_TOLERANCE_M <= height <= scene.tower.height_m + 10
+            and 0 < width <= 50
+            and 0 < depth <= 50
+        )
+    return (
+        glb_inspection.file_exists
+        and glb_inspection.file_size_bytes > 32
+        and glb_inspection.node_count >= len(scene.sectors) + 1
+        and _approx_tower_height_valid(scene, metadata)
+    )
+
+
+def _load_metadata(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _normalize(value: str) -> str:
+    return str(value).lower().replace(":", "_").replace("-", "_")
+
+
+def _number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _angular_delta(actual: float, expected: float) -> float:
+    delta = abs((actual - expected) % 360)
+    return min(delta, 360 - delta)
