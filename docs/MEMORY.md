@@ -29,6 +29,10 @@
 - Runtime memory collections are not included in `/rag/reindex`.
 - Memory recall runs before planning when memory is configured.
 - Memory writeback runs after successful or failed terminal reports when memory is configured.
+- Scene planning reads memory issue history through the typed `error_patterns` key. The old
+  `error_memory` key is not used by the planner.
+- Successful edit revisions can write back compact version SceneSpec/report paths when memory is
+  configured.
 
 ## Stored Data
 
@@ -63,6 +67,8 @@ Large outputs remain in `outputs/temp`.
 - SQLite writeback continues if Qdrant indexing fails.
 - Qdrant indexing errors are captured in `memory_writeback.index`.
 - RAG memory context does not override deterministic rules or validation.
+- Memory can expose warnings such as previous RF azimuth spacing issues, but it only influences
+  controlled planner flags and remains visible in trace/metrics.
 
 ## Future
 
@@ -77,3 +83,4 @@ Large outputs remain in `outputs/temp`.
 - Qdrant local mode can be locked by another running process.
 - Some geometry repairs happen before strict SceneSpec construction, then are recorded as
   `RepairEvent` route history entries.
+- Memory paths point to local filesystem artifacts; they are not a portable artifact store.

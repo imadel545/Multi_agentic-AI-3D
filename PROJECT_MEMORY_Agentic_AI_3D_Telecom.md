@@ -6,6 +6,33 @@
 
 ---
 
+## Current Backend Truth — 2026-06-08
+
+Implemented now:
+
+- Initial generation pipeline with Groq/deterministic extraction, RAG recall, SQLite memory,
+  domain validation agents, SceneSpec planning, Blender generation, GLB/geometry/preview QA,
+  quality gates, reports, and artifacts.
+- Prompt edit pipeline with typed `ScenePatch`, patch validation, diff, version creation,
+  full revision QA, per-version artifact directory, active version pointer, events, and rollback.
+- API endpoints for status, events/SSE, versions, rollback, asset inventory, RAG, memory stats,
+  downloads, and validation.
+
+Available with fallback:
+
+- Groq `openai/gpt-oss-120b` falls back visibly to deterministic extraction/patching.
+- Blender absence/failure creates explicit fallback artifacts that still go through QA.
+- Qdrant local deterministic embedding is available but is not production-grade semantic search.
+
+Known limitations:
+
+- Real vendor GLB files are not present; current asset library is manifest-only.
+- Blender output is controlled procedural geometry until imported GLB assets are added.
+- Frontend is not implemented in this repository state.
+- Visual semantic QA and exact GLB transform/material validation remain future work.
+
+---
+
 ## 0. Résumé exécutif
 
 Le projet vise à créer un **Agentic AI 3D Telecom Design Studio** : une application locale capable de transformer un cahier des charges télécom/réseau en **modèle 3D technique vérifiable**, basé sur une bibliothèque d’assets 3D contrôlés et un moteur Blender automatisé.

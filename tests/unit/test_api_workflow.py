@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -12,23 +13,18 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
     workflow_service.outputs_dir = tmp_path
     client = TestClient(app)
     try:
-        response = client.post(
-            "/designs",
-            json={
-                "requirements_text": (
-                    "Créer un site 5G sur pylône treillis 30m. Installer 3 secteurs à 24m. "
-                    "Azimuts : 0°, 120°, 240°. Ajouter câbles, faisceaux et labels."
-                ),
-                "options": {"detail_level": "high", "use_llm": False},
-            },
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m. Installer 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°. Ajouter câbles, faisceaux et labels."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
         )
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == "completed"
+        assert response["status"] == "completed"
 
-        status_response = client.get(f"/designs/{payload['workflow_id']}")
-        assert status_response.status_code == 200
-        status = status_response.json()
+        status = client.get(f"/designs/{response['workflow_id']}").json()
         assert status["status"] == "completed"
         assert status["llm_provider"] == "deterministic"
         assert status["llm_fallback_used"] is True
@@ -68,7 +64,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
             "cache_misses",
         ]:
             assert key in status["metrics"]
-        assert status["download_url"] == f"/designs/{payload['workflow_id']}/download"
+        assert status["download_url"] == f"/designs/{response['workflow_id']}/download"
         assert Path(status["trace_path"]).exists()
         assert Path(status["artifacts"]["scene_spec"]).exists()
         assert Path(status["artifacts"]["extraction_report"]).exists()
@@ -84,8 +80,13 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert Path(status["artifacts"]["glb"]).exists()
         assert Path(status["artifacts"]["preview"]).exists()
         assert Path(status["artifacts"]["download"]).exists()
+        scene_status = json.loads(
+            Path(status["artifacts"]["scene_spec"]).read_text(encoding="utf-8")
+        )
+        assert scene_status["visual_elements"]["include_power_cabinet"] is False
+        assert scene_status["visual_elements"]["include_gps_antenna"] is False
         trace = json.loads(Path(status["trace_path"]).read_text(encoding="utf-8"))
-        assert trace["workflow_id"] == payload["workflow_id"]
+        assert trace["workflow_id"] == response["workflow_id"]
         assert trace["metrics"]["memory_hits"] == status["memory_hits"]
         assert trace["metrics"]["memory_context_count"] == status["memory_context_count"]
         assert (
@@ -105,17 +106,16 @@ def test_api_status_exposes_structural_qa(tmp_path: Path) -> None:
     workflow_service.outputs_dir = tmp_path
     client = TestClient(app)
     try:
-        response = client.post(
-            "/designs",
-            json={
-                "requirements_text": (
-                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                    "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
-                ),
-                "options": {"detail_level": "high", "use_llm": False},
-            },
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
         )
-        workflow_id = response.json()["workflow_id"]
+        workflow_id = response["workflow_id"]
         status = client.get(f"/designs/{workflow_id}").json()
 
         assert status["structural_qa_passed"] is True
@@ -129,7 +129,7 @@ def test_api_status_exposes_structural_qa(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
-def test_geometry_validation_report_written(tmp_path: Path) -> None:
+def test_create_design_async_status_is_available_immediately(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
     client = TestClient(app)
@@ -139,12 +139,42 @@ def test_geometry_validation_report_written(tmp_path: Path) -> None:
             json={
                 "requirements_text": (
                     "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                    "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
+                    "Azimuts : 0°, 120°, 240°."
                 ),
                 "options": {"detail_level": "high", "use_llm": False},
             },
         )
+        assert response.status_code == 200
         workflow_id = response.json()["workflow_id"]
+
+        status_response = client.get(f"/designs/{workflow_id}")
+
+        assert status_response.status_code == 200
+        assert status_response.json()["status"] in {"pending", "completed"}
+        for _ in range(60):
+            status = client.get(f"/designs/{workflow_id}").json()["status"]
+            if status in {"completed", "failed"}:
+                break
+            time.sleep(0.1)
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_geometry_validation_report_written(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
         status = client.get(f"/designs/{workflow_id}").json()
         geometry_path = Path(status["artifacts"]["geometry_validation"])
 
@@ -169,20 +199,18 @@ def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) ->
     extractor.enabled = True
     client = TestClient(app)
     try:
-        response = client.post(
-            "/designs",
-            json={
-                "requirements_text": (
-                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                    "Azimuts : 0°, 120°, 240°."
-                ),
-                "options": {"detail_level": "high", "use_llm": True},
-            },
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°."
+            ),
+            detail_level="high",
+            use_llm=True,
+            _synchronous=True,
         )
-        workflow_id = response.json()["workflow_id"]
+        workflow_id = response["workflow_id"]
         status = client.get(f"/designs/{workflow_id}").json()
 
-        assert response.status_code == 200
         assert provider.calls == 1
         assert status["llm_provider"] == "groq:test-provider"
         assert status["llm_fallback_used"] is False
@@ -208,20 +236,18 @@ def test_api_design_with_use_llm_false_does_not_call_configured_provider(
     extractor.enabled = True
     client = TestClient(app)
     try:
-        response = client.post(
-            "/designs",
-            json={
-                "requirements_text": (
-                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                    "Azimuts : 0°, 120°, 240°."
-                ),
-                "options": {"detail_level": "high", "use_llm": False},
-            },
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
         )
-        workflow_id = response.json()["workflow_id"]
+        workflow_id = response["workflow_id"]
         status = client.get(f"/designs/{workflow_id}").json()
 
-        assert response.status_code == 200
         assert provider.calls == 0
         assert status["llm_provider"] == "deterministic"
         assert status["llm_fallback_used"] is True
@@ -230,6 +256,52 @@ def test_api_design_with_use_llm_false_does_not_call_configured_provider(
         extractor.provider = original_provider
         extractor.provider_name = original_provider_name
         extractor.enabled = original_enabled
+
+
+def test_assets_inventory_route_is_not_shadowed() -> None:
+    client = TestClient(app)
+
+    response = client.get("/assets/inventory")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "asset_count" in payload
+    assert "procedural_generation_required" in payload
+
+
+def test_global_exception_handler_returns_json_500(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    original_get_status = workflow_service.get_status
+    workflow_service.outputs_dir = tmp_path
+
+    def explode(_workflow_id: str) -> dict:
+        raise RuntimeError("forced test failure")
+
+    workflow_service.get_status = explode  # type: ignore[method-assign]
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        response = client.get("/designs/wf_000000000000")
+    finally:
+        workflow_service.get_status = original_get_status  # type: ignore[method-assign]
+        workflow_service.outputs_dir = original_outputs
+
+    assert response.status_code == 500
+    payload = response.json()
+    assert payload["error"] == "Internal server error"
+    assert payload["type"] == "RuntimeError"
+    assert response.headers["x-request-id"]
+
+
+def test_event_stream_unknown_workflow_returns_404(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = client.get("/designs/wf_000000000000/events/stream")
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+    assert response.status_code == 404
 
 
 class RecordingRequirementProvider:

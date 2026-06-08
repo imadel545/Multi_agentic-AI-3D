@@ -21,6 +21,15 @@ Initial result:
 - Runtime artifacts exist under ignored paths: `outputs/temp`, `data/qdrant`, and `data/sqlite`.
 - Fallback paths are visible in code/docs, not hidden, but needed stronger 3D geometry checks.
 
+Updated audit on 2026-06-08:
+
+- Tests before this hardening pass: `114 passed`.
+- `ruff check .` passed.
+- `ruff format --check .` initially failed on four files.
+- Confirmed issues: `/assets/inventory` route shadowing, exception handler re-raising,
+  semi-integrated edit regeneration, RAG text heuristics in planner, dead `error_memory` lookup,
+  and GPS/power cabinet enabled by default.
+
 | finding | risk_level | module | why_it_matters | action_taken | remaining_risk |
 |---|---|---|---|---|---|
 | Geometry QA stopped at structural object presence and metadata fallback. | high | `core/qa`, `core/validation`, `apps/api` | A generated GLB could contain expected names but still miss technical geometry expectations. | Added `GeometryValidationReport`, `GLBGeometryValidator`, API artifact/status integration, quality gate check, trace/metrics integration, and tests. | Bounding box remains metadata/proxy based until GLB transform parsing is added. |
@@ -37,3 +46,10 @@ Initial result:
 | API layer stayed mostly thin but writes artifact/status packaging. | low | `apps/api` | API should not absorb orchestration/QA logic. | Kept geometry summary and artifact writing in API; QA remains in core. | Archive/status writer may deserve extraction if it grows. |
 | Contracts are centralized and reusable. | low | `core/contracts` | Typed state keeps agents/services decoupled. | Added geometry contract instead of ad hoc dicts. | More report schemas may be needed for asset quality and cleanup results. |
 | Blender worker is controlled and does not execute LLM Python. | low | `apps/blender_worker` | Prevents unsafe arbitrary code execution. | Preserved SceneSpec-only worker contract and added tower height metadata. | Procedural primitives still stand in for real imported assets. |
+| Prompt edits created versions but only relaunched Blender in the root workflow folder. | high | `apps/api`, `core/orchestration`, `core/services` | A frontend could display a v2 GLB with stale v1 QA/status/report artifacts. | Added controlled `run_scene_revision`, per-version artifact directories, patch/diff/status files, QA rerun, quality gates, active version switching only after success, and tests. | Edit is synchronous for now; a future preview/apply flow may need async job state. |
+| `/assets/inventory` was shadowed by `/assets/{asset_id}`. | high | `apps/api` | Frontend asset readiness checks returned asset lookup behavior instead of inventory. | Moved the static inventory route before the dynamic asset route and added API test coverage. | None known. |
+| Global exception handler raised `HTTPException` inside the exception handler. | medium | `apps/api` | Internal failures could bubble through TestClient/server handling instead of returning clean JSON. | Replaced with `JSONResponse` including `request_id` and added test coverage. | App-specific error envelopes can still be refined. |
+| SSE event stream could loop forever for unknown workflows. | medium | `apps/api`, `core/services` | Frontend timeline could hang silently. | Unknown workflows now return `404`; event stream has an idle timeout. | Long-running workflows over five minutes need a heartbeat/timeout policy adjustment. |
+| RAG and memory planner logic used untyped text heuristics and a dead memory key. | high | `core/agents/scene_planner.py` | Retrieved noisy text could silently mutate dimensions/accessories; memory error patterns were ignored. | Planner now accepts only structured `payload.planning_hints`, uses `error_patterns`, and tests reject unstructured decorative hints. | Need richer typed planning-hint contracts before expanding RAG influence. |
+| GPS antenna and power cabinet were enabled by default. | high | `core/contracts`, `apps/blender_worker` | The generator added objects the user did not request, creating decorative/fake output. | Defaults are now false; Blender worker uses false defaults; tests prove normal generation does not add them. | Dedicated real assets and accessory geometry QA remain future work. |
+| Workflow deletion used direct `shutil.rmtree`. | medium | `apps/api`, `core/services` | Unsafe deletion logic can grow risky as local outputs expand. | API deletion now uses `CleanupService.delete_workflow()` with managed `wf_<12 hex>` confinement. | Cleanup TTL is still not scheduled automatically. |

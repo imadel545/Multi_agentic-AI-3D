@@ -17,13 +17,17 @@ Current checks:
 - Repair QA for antenna-height repair, azimuth normalization, sector-count repair, and
   non-repairable scene failure before Blender.
 - Asset fallback QA for compatible tower/antenna selection and explicit fallback failure.
+- Edit/revision QA: prompt edits create a patch, diff, version artifact directory, and full QA rerun
+  before the version becomes active.
+- Non-fake visual asset checks: GPS antenna and power cabinet are disabled by default and appear
+  only when requested or patched explicitly.
 - Golden scene fixture for `golden_5g_lattice_30m_3sector`.
 - Pytest coverage for parsing, registry selection, validation, API flow, RAG, Groq fallback,
-  LangGraph orchestration, Blender fallback, and golden scene consistency.
+  LangGraph orchestration, Blender fallback, edit/version artifacts, API errors, and golden scene
+  consistency.
 
 Next checks:
 
-- Cleanup TTL tests.
 - Visual semantic inspection of generated scenes.
 - Exact GLB transform/material inspection beyond object metadata.
 
@@ -37,6 +41,8 @@ Implemented:
   `minimum_node_count_valid`, `real_blender_glb_parse_required`,
   `geometry_validation_valid`, and `preview_resolution_valid`.
 - Reports are written to `quality_gates.json`, `status.json`, and `workflow_trace.json`.
+- For edit versions, quality gates and all QA reports are written under the version artifact
+  directory and the root workflow status points to the active version.
 - Pytest covers direct gate behavior and the route that prevents Blender execution.
 
 Fallback:
@@ -55,6 +61,8 @@ Known limitations:
 - Gates validate contracts and artifacts, not visual aesthetics.
 - Real Blender model size threshold is a local minimum byte-size guard.
 - `metadata_fallback` validates expected procedural object metadata, not GLB binary structure.
+- GPS/power-cabinet presence is generated and reported through metadata/procedural objects, but
+  dedicated geometry count gates for those accessories remain future work.
 
 ## Structural 3D QA
 
@@ -90,6 +98,8 @@ Implemented:
   - bounding box reasonableness
 - Geometry QA is included in `validation_report.json`, `quality_gates.json`,
   `workflow_trace.json`, API status, and `geometry_validation.json`.
+- Edit-generated versions include their own `geometry_validation.json` and do not reuse the
+  previous version's QA reports.
 
 Fallback:
 

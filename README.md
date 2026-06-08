@@ -15,6 +15,8 @@ This repository currently implements the local-first controlled generation pipel
 - Rule engine and SceneSpec validator.
 - Local asset manifest registry.
 - FastAPI endpoints for design creation, status, validation, assets, and artifact download.
+- Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
+  rollback, and event logging.
 - Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
 - Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
 - Geometry validation for expected antennas, beams, RRUs, cables, azimuths, and tower/antenna
@@ -65,6 +67,37 @@ Focused eval suites:
 pytest tests/rag_eval tests/memory_eval
 ```
 
+## API surface
+
+Implemented:
+
+- `POST /designs`: start a design workflow.
+- `GET /designs/{workflow_id}`: active workflow/version status, reports, artifacts, QA summaries,
+  LLM provider/fallback state, RAG/memory counts, and download URL.
+  A pending status file is available immediately after creation, so polling does not need to
+  tolerate a transient `404`.
+- `GET /designs/{workflow_id}/events`: agentic event log.
+- `GET /designs/{workflow_id}/events/stream`: SSE event stream; unknown workflows return `404`.
+- `POST /designs/{workflow_id}/edit`: create a structured patch from a prompt, validate it,
+  generate a new version, rerun QA, and activate it only if the revision passes.
+- `GET /designs/{workflow_id}/versions`: version history with active flag, artifacts, QA score,
+  generation mode, and diff summary.
+- `POST /designs/{workflow_id}/versions/{version_id}/rollback`: set an existing version active
+  without deleting history.
+- `GET /assets/inventory`: manifest-only/import-readiness inventory.
+
+Available with fallback:
+
+- Groq `openai/gpt-oss-120b` extraction and edit patching fall back to deterministic logic when
+  provider access fails or `options.use_llm=false` is set for creation.
+- Blender fallback artifacts are explicit and still pass through QA/gates.
+
+Known limitations:
+
+- The current asset library is manifest-only; referenced vendor GLB files are not in the repo.
+- The Blender worker generates controlled procedural geometry until real GLB assets are added.
+- Preview QA is structural/image-stat based, not semantic visual judging.
+
 ## Core flow
 
 ```text
@@ -82,6 +115,22 @@ requirements_text
 → generation QA
 → SQLite memory writeback
 → compliance report
+```
+
+Edit flow:
+
+```text
+edit prompt
+→ SceneEditAgent structured patch
+→ PatchApplier
+→ SceneSpec validation
+→ revision orchestration from patched SceneSpec
+→ Tower/RF/rule validation
+→ Blender generation
+→ GLB/geometry/preview QA
+→ quality gates
+→ version artifacts + status
+→ active version switch only on success
 ```
 
 FastEmbed/BGE-M3 and richer Blender asset imports remain extension points. Qdrant,

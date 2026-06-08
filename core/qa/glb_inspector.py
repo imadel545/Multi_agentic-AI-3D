@@ -135,8 +135,11 @@ def _parse_glb_json(path: Path) -> dict[str, Any]:
     if len(data) < 20:
         raise ValueError("GLB file is too small")
     magic, version, declared_length = struct.unpack_from("<4sII", data, 0)
-    if magic != GLB_MAGIC or version != 2 or declared_length != len(data):
+    if magic != GLB_MAGIC or version != 2:
         raise ValueError("Invalid GLB header")
+    # Allow trailing padding or extra chunks beyond declared length
+    if declared_length > len(data):
+        raise ValueError("Invalid GLB header: declared length exceeds file size")
     chunk_length, chunk_type = struct.unpack_from("<II", data, 12)
     if chunk_type != GLB_JSON_CHUNK_TYPE:
         raise ValueError("First GLB chunk is not JSON")

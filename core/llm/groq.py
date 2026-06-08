@@ -193,6 +193,13 @@ class GroqStructuredClient:
     def _post_and_validate(
         self, payload: dict[str, Any], baseline: RequirementSpec
     ) -> RequirementSpec:
+        raw = self._post_raw(payload)
+        try:
+            return RequirementSpec.model_validate(raw)
+        except ValidationError:
+            return _repair_and_validate(raw, baseline)
+
+    def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={
@@ -207,11 +214,7 @@ class GroqStructuredClient:
         content = body["choices"][0]["message"]["content"]
         if isinstance(content, list):
             content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        raw = json.loads(content)
-        try:
-            return RequirementSpec.model_validate(raw)
-        except ValidationError:
-            return _repair_and_validate(raw, baseline)
+        return json.loads(content)
 
 
 def _repair_and_validate(raw: dict[str, Any], baseline: RequirementSpec) -> RequirementSpec:

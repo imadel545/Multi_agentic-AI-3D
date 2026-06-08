@@ -1,4 +1,5 @@
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
@@ -7,14 +8,18 @@ from langgraph.graph import END, StateGraph
 
 from core.agents import ScenePlanner
 from core.agents.requirement_extractor import RequirementExtractor
+from core.agents.rf_engineer import RfEngineerAgent
+from core.agents.tower_engineer import TowerEngineerAgent
 from core.contracts.assets import AssetManifest
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
+from core.contracts.rf_validation import RfValidationReport
 from core.contracts.runtime import AgentStepTrace, WorkflowTrace
 from core.contracts.scene import SceneSpec
+from core.contracts.tower_validation import TowerValidationReport
 from core.contracts.validation import ValidationIssue, ValidationReport
 from core.memory import MemoryService
 from core.performance import knowledge_index_hash, requirements_hash, scene_spec_hash
@@ -73,6 +78,8 @@ class WorkflowState(TypedDict, total=False):
     repair_attempts: int
     scene_repair_recorded: bool
     route_history: list[dict]
+    tower_validation: TowerValidationReport
+    rf_validation: RfValidationReport
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,8 @@ class OrchestratorResult:
     trace: list[dict]
     workflow_trace: WorkflowTrace
     total_duration_ms: int
+    tower_validation: TowerValidationReport | None
+    rf_validation: RfValidationReport | None
     metrics: dict[str, int | float | str | bool | None]
     route_history: list[dict]
 
@@ -111,13 +120,17 @@ class DesignOrchestrator:
         rag_service: RagService | None,
         blender_runner: BlenderRunner,
         memory_service: MemoryService | None = None,
+        checkpoint_saver: Any | None = None,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
         self.rag_service = rag_service
         self.memory_service = memory_service
         self.blender_runner = blender_runner
+        self.checkpoint_saver = checkpoint_saver
         self.rule_engine = RuleEngine()
+        self.tower_engineer = TowerEngineerAgent()
+        self.rf_engineer = RfEngineerAgent()
         self.scene_planner = ScenePlanner()
         self.qa = GenerationQA()
         self.glb_inspector = GLBInspector()
@@ -134,22 +147,137 @@ class DesignOrchestrator:
         use_llm: bool | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
-        state = self.graph.invoke(
+        config = {"configurable": {"thread_id": workflow_id}}
+        initial_state = {
+            "workflow_id": workflow_id,
+            "requirements_text": requirements_text,
+            "detail_level": detail_level,
+            "use_llm": use_llm,
+            "output_dir": output_dir,
+            "trace": [],
+            "errors": [],
+            "rag_context": [],
+            "max_repair_attempts": 2,
+            "repair_attempts": 0,
+            "scene_repair_recorded": False,
+            "route_history": [],
+        }
+        state = self.graph.invoke(initial_state, config=config)
+        state["total_duration_ms"] = _duration_ms(started)
+        return _result_from_state(state)
+
+    def run_scene_revision(
+        self,
+        workflow_id: str,
+        scene: SceneSpec,
+        output_dir: Path,
+        detail_level: str = "high",
+        revision_id: str | None = None,
+    ) -> OrchestratorResult:
+        started = time.perf_counter()
+        state: WorkflowState = {
+            "workflow_id": workflow_id,
+            "requirements_text": f"validated scene revision {revision_id or 'unknown'}",
+            "detail_level": detail_level,
+            "use_llm": False,
+            "output_dir": output_dir,
+            "scene": scene,
+            "trace": [],
+            "errors": [],
+            "rag_context": [],
+            "max_repair_attempts": 0,
+            "repair_attempts": 0,
+            "scene_repair_recorded": False,
+            "route_history": [],
+            "quality_gate_reports": [],
+            "asset_manifest_hash": self.registry.manifest_hash,
+            "knowledge_index_hash": knowledge_index_hash(self.rag_service.project_root)
+            if self.rag_service is not None
+            else "",
+            "scene_spec_hash": scene_spec_hash(scene),
+            "cache_metrics": self._cache_metrics(),
+            "extraction_provider": "scene_revision",
+            "extraction_fallback_used": False,
+            "extraction_error": None,
+        }
+        try:
+            selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
+            requirements = _requirements_from_scene(scene, tower, antenna, radio, detail_level)
+        except (KeyError, ValueError) as exc:
+            report = _failed_report(
+                design_id=workflow_id,
+                code="SCENE_REVISION_ASSET_ERROR",
+                message=str(exc),
+            )
+            state.update(
+                {
+                    "report": report,
+                    "trace": _trace(
+                        state,
+                        "edit_prepare_revision",
+                        "asset_lookup_failed",
+                        started,
+                        status="failed",
+                        errors=["SCENE_REVISION_ASSET_ERROR"],
+                    ),
+                }
+            )
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        state.update(
             {
-                "workflow_id": workflow_id,
-                "requirements_text": requirements_text,
-                "detail_level": detail_level,
-                "use_llm": use_llm,
-                "output_dir": output_dir,
-                "trace": [],
-                "errors": [],
-                "rag_context": [],
-                "max_repair_attempts": 2,
-                "repair_attempts": 0,
-                "scene_repair_recorded": False,
-                "route_history": [],
+                "requirements": requirements,
+                "requirements_hash": requirements_hash(requirements),
+                "tower": tower,
+                "antenna": antenna,
+                "radio": radio,
+                "selected_assets": selected_assets,
+                "trace": _trace(
+                    state,
+                    "edit_prepare_revision",
+                    revision_id or "scene_revision",
+                    started,
+                ),
             }
         )
+
+        self._apply_update(state, self._validate_requirements(state))
+        if _requirements_route(state) != "continue":
+            self._apply_update(state, self._rule_violation_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._validate_scene(state))
+        if _scene_route(state) != "continue":
+            self._apply_update(state, self._scene_repair_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._pre_blender_gate(state))
+        if _pre_blender_gate_route(state) != "continue":
+            self._apply_update(state, self._quality_gate_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._generate_blender(state))
+        if _generation_route(state) == "blender_failure":
+            self._apply_update(state, self._blender_failure_handler(state))
+
+        self._apply_update(state, self._qa_generation(state))
+        if _qa_route(state) != "continue":
+            self._apply_update(state, self._qa_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._post_blender_gate(state))
+        if _post_blender_gate_route(state) != "continue":
+            self._apply_update(state, self._quality_gate_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        if self.memory_service is not None:
+            self._apply_update(state, self._memory_writeback(state))
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -246,11 +374,30 @@ class DesignOrchestrator:
         graph.add_edge("quality_gate_failure_handler", terminal_node)
         if self.memory_service is not None:
             graph.add_edge("memory_writeback", END)
-        return graph.compile()
+        return graph.compile(checkpointer=self.checkpoint_saver)
 
     def _cache_metrics(self) -> dict[str, int]:
         rag_stats = self.rag_service.cache_stats() if self.rag_service is not None else {}
         return self.registry.cache_stats() | rag_stats
+
+    def _assets_for_scene_revision(
+        self, scene: SceneSpec
+    ) -> tuple[list[AssetManifest], AssetManifest, AssetManifest, AssetManifest | None]:
+        tower = self.registry.get(scene.tower.asset_id)
+        antennas = []
+        radios = []
+        for sector in scene.sectors:
+            antennas.append(self.registry.get(sector.antenna_asset_id))
+            if sector.radio_asset_id:
+                radios.append(self.registry.get(sector.radio_asset_id))
+        selected_assets = _unique_assets([tower, *antennas, *radios])
+        if not antennas:
+            raise ValueError("scene revision requires at least one antenna asset")
+        return selected_assets, tower, antennas[0], radios[0] if radios else None
+
+    @staticmethod
+    def _apply_update(state: WorkflowState, update: dict) -> None:
+        state.update(update)
 
     def _extract_requirements(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
@@ -404,7 +551,11 @@ class DesignOrchestrator:
                     severity="warning",
                 )
             )
-            tower_type = tower.compatible_tower_types[0] if tower.compatible_tower_types else None
+            tower_type = (
+                tower.compatible_tower_types[0]
+                if tower.compatible_tower_types
+                else requirements.tower_type
+            )
             antenna = self.registry.select_asset_fallback(
                 "antenna",
                 requirements.network_type,
@@ -489,15 +640,44 @@ class DesignOrchestrator:
             report = report.model_copy(
                 update={"warnings": [*report.warnings, *state["asset_fallback_warnings"]]}
             )
+        # Multi-agent domain validation in parallel
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            tower_future = executor.submit(
+                self.tower_engineer.validate, state["requirements"], state["tower"]
+            )
+            rf_future = executor.submit(self.rf_engineer.validate, state["requirements"])
+            tower_report = tower_future.result()
+            rf_report = rf_future.result()
+        merged_warnings = [
+            *report.warnings,
+            *tower_report.warnings,
+            *rf_report.warnings,
+        ]
+        merged_errors = [
+            *report.errors,
+            *tower_report.errors,
+            *rf_report.errors,
+        ]
+        status = "failed" if merged_errors else "passed"
+        report = report.model_copy(
+            update={
+                "status": status,
+                "warnings": merged_warnings,
+                "errors": merged_errors,
+            }
+        )
+        trace_status = status
         return {
             "requirement_report": report,
             "report": report,
+            "tower_validation": tower_report,
+            "rf_validation": rf_report,
             "trace": _trace(
                 state,
                 "validate_requirements",
                 report.status,
                 started,
-                status=report.status,
+                status=trace_status,
                 warnings=[warning.code for warning in report.warnings],
                 errors=[error.code for error in report.errors],
             ),
@@ -530,6 +710,8 @@ class DesignOrchestrator:
             tower=state["tower"],
             antenna=state["antenna"],
             radio=state["radio"],
+            rag_context=state.get("rag_context"),
+            memory_recall=state.get("memory_recall"),
         )
         return {
             "scene": scene,
@@ -556,6 +738,7 @@ class DesignOrchestrator:
         }
 
     def _pre_blender_gate(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
         gate = evaluate_pre_blender_gate(
             requirements=state.get("requirements"),
             requirement_report=state.get("requirement_report"),
@@ -583,7 +766,7 @@ class DesignOrchestrator:
                 state,
                 "pre_blender_gate",
                 "passed" if gate.passed else "failed",
-                time.perf_counter() - (gate.duration_ms / 1000),
+                started,
                 status="passed" if gate.passed else "failed",
                 warnings=gate.warnings,
                 errors=gate.critical_errors,
@@ -835,6 +1018,46 @@ def _extraction_route(state: WorkflowState) -> str:
     return "continue" if state.get("requirements") is not None else "missing_data"
 
 
+def _requirements_from_scene(
+    scene: SceneSpec,
+    tower: AssetManifest,
+    antenna: AssetManifest,
+    radio: AssetManifest | None,
+    detail_level: str,
+) -> RequirementSpec:
+    first_sector = scene.sectors[0]
+    return RequirementSpec(
+        network_type=scene.network_type,
+        site_type="telecom_site",
+        tower_type=tower.compatible_tower_types[0]
+        if tower.compatible_tower_types
+        else scene.tower.asset_id,
+        tower_height_m=scene.tower.height_m,
+        tower_characteristics=scene.tower.characteristics,
+        sector_count=len(scene.sectors),
+        antenna_type=antenna.asset_id,
+        antenna_install_height_m=first_sector.install_height_m,
+        azimuths_deg=[sector.azimuth_deg for sector in scene.sectors],
+        mechanical_tilt_deg=first_sector.mechanical_tilt_deg,
+        electrical_tilt_deg=first_sector.electrical_tilt_deg,
+        beamwidth_deg=first_sector.beamwidth_deg,
+        include_rru=radio is not None,
+        include_cables=any(sector.include_cable for sector in scene.sectors),
+        include_beams=scene.visual_elements.include_sector_beams,
+        include_labels=scene.visual_elements.include_labels,
+        detail_level=detail_level,  # type: ignore[arg-type]
+        warnings=[],
+        repair_events=[],
+    )
+
+
+def _unique_assets(assets: list[AssetManifest]) -> list[AssetManifest]:
+    unique: dict[str, AssetManifest] = {}
+    for asset in assets:
+        unique[asset.asset_id] = asset
+    return list(unique.values())
+
+
 def _asset_route(state: WorkflowState) -> str:
     return "asset_fallback" if state.get("asset_error") else "continue"
 
@@ -844,7 +1067,11 @@ def _asset_fallback_route(state: WorkflowState) -> str:
 
 
 def _requirements_route(state: WorkflowState) -> str:
-    return "continue" if state["requirement_report"].status == "passed" else "rule_violation"
+    return (
+        "continue"
+        if state["requirement_report"].status in ("passed", "warning")
+        else "rule_violation"
+    )
 
 
 def _scene_route(state: WorkflowState) -> str:
@@ -1012,7 +1239,7 @@ def _merge_quality_gate_report(
 
 def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
     report = state.get("report")
-    status = "completed" if report and report.status == "passed" else "failed"
+    status = "completed" if report and report.status in ("passed", "warning") else "failed"
     metrics = _workflow_metrics(state, status)
     memory_recall = state.get("memory_recall")
     workflow_trace = WorkflowTrace(
@@ -1059,6 +1286,8 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         quality_gate_reports=[
             QualityGateReport(**report) for report in state.get("quality_gate_reports", [])
         ],
+        tower_validation=state.get("tower_validation"),
+        rf_validation=state.get("rf_validation"),
     )
 
 

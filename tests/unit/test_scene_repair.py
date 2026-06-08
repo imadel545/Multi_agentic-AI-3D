@@ -112,7 +112,7 @@ def _repair_codes(result) -> list[str]:
 
 
 class BrokenScenePlanner:
-    def build_scene_spec(self, workflow_id, requirements, tower, antenna, radio):
+    def build_scene_spec(self, workflow_id, requirements, tower, antenna, radio, **kwargs):
         return SceneSpec(
             scene_id=workflow_id,
             network_type=requirements.network_type,

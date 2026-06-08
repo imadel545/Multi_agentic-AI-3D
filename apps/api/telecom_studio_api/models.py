@@ -9,7 +9,7 @@ class DesignOptions(BaseModel):
 
 
 class CreateDesignRequest(BaseModel):
-    requirements_text: str = Field(min_length=1)
+    requirements_text: str = Field(min_length=1, max_length=5000)
     options: DesignOptions = Field(default_factory=DesignOptions)
 
 
@@ -21,6 +21,8 @@ class CreateDesignResponse(BaseModel):
 class WorkflowStatus(BaseModel):
     workflow_id: str
     status: str
+    version_id: str | None = None
+    active_version_id: str | None = None
     artifacts: dict[str, str]
     warnings: list[dict]
     errors: list[dict]
@@ -44,8 +46,67 @@ class WorkflowStatus(BaseModel):
     quality_gates: list[dict] | None = None
     download_url: str | None = None
     trace_path: str | None = None
+    tower_validation: dict | None = None
+    rf_validation: dict | None = None
+
+
+class ParseRequirementsRequest(BaseModel):
+    requirements_text: str = Field(min_length=1, max_length=5000)
+    detail_level: Literal["low", "medium", "high"] = "high"
+    use_llm: bool | None = None
+
+
+class ParseRequirementsResponse(BaseModel):
+    requirements: dict | None
+    warnings: list[dict]
+    errors: list[dict]
+    provider: str | None
+    fallback_used: bool | None
 
 
 class RagSearchResponse(BaseModel):
     query: str
     results: list[dict]
+
+
+class EditDesignRequest(BaseModel):
+    edit_prompt: str = Field(min_length=1, max_length=1000)
+
+
+class EditDesignResponse(BaseModel):
+    workflow_id: str
+    edit_id: str
+    status: str
+    version_id: str | None = None
+    diff_summary: dict | None = None
+    patch: dict | None = None
+    validation_report: dict | None = None
+    artifacts: dict[str, str] | None = None
+    generation_mode: str | None = None
+    qa_score: float | None = None
+    llm_provider: str | None = None
+    llm_fallback_used: bool | None = None
+    errors: list[dict] = Field(default_factory=list)
+    warnings: list[dict] = Field(default_factory=list)
+
+
+class ListDesignsResponse(BaseModel):
+    workflow_id: str
+    status: str
+    created_at: str | None = None
+    qa_score: float | None = None
+    generation_mode: str | None = None
+
+
+class VersionInfo(BaseModel):
+    version_id: str
+    parent_version_id: str | None = None
+    created_at: str
+    edit_description: str | None = None
+    diff_summary: dict | None = None
+    status: str | None = None
+    active: bool = False
+    artifact_dir: str | None = None
+    artifacts: dict[str, str] = Field(default_factory=dict)
+    qa_score: float | None = None
+    generation_mode: str | None = None

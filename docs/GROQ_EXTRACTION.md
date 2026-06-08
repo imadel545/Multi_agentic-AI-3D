@@ -3,6 +3,9 @@
 Groq extraction is isolated in `core/llm/groq.py` and routed through
 `core/agents/requirement_extractor.py`.
 
+Scene edits also use Groq through `core/agents/scene_edit_agent.py` when a key is configured.
+The edit agent can only return a typed `ScenePatch`; it never generates Blender Python code.
+
 Supported key sources:
 
 - `TELECOM_STUDIO_GROQ_API_KEY`
@@ -38,6 +41,8 @@ Completed:
 - Deterministic fallback when key/API/validation fails.
 - Controlled field repair with `LLM_FIELD_REPAIRED`.
 - `extraction_report.json` per workflow.
+- Groq-backed prompt editing with deterministic fallback and visible `edit_llm_provider` /
+  `edit_llm_fallback_used` fields in `scene_patch.json` and the edit API response.
 - Adversarial deterministic extraction tests for French, English, slash azimuths, words for
   sector counts, missing values, and invalid heights.
 
@@ -45,6 +50,8 @@ Available with fallback:
 
 - Groq may still generate invalid numeric arrays for azimuths on some prompts. Invalid
   non-critical fields are repaired from deterministic baseline and surfaced as warnings.
+- Groq edit patching may return invalid/empty operations. The system falls back to deterministic
+  patch parsing, then validates all paths and values through Pydantic and SceneSpec validation.
 
 Known runtime result:
 

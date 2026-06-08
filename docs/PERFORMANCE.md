@@ -42,6 +42,7 @@ Compatibility fields are still present:
 - QA duration includes generation QA and QA failure handling.
 - Memory duration includes recall and writeback.
 - Artifact size is the sum of generated artifact paths that exist on disk.
+- Edit revisions emit the same metrics for their version artifact directory.
 - Geometry validation metrics are emitted when `qa_generation` runs.
 - Repair and asset fallback handler durations are included in `planning_duration_ms`.
 - Requirement and SceneSpec hashes are canonical JSON SHA-256 hashes.
@@ -59,6 +60,8 @@ Implemented cache surfaces:
   memory upserts clear the RAG query cache.
 - `core/services/cleanup_service.py` can remove old managed workflow folders named
   `wf_<12 hex>` under the configured outputs directory.
+- API workflow deletion uses `CleanupService.delete_workflow()` so only managed workflow folders
+  under the output root are removed.
 - FastAPI shutdown closes the Qdrant client explicitly through `RagService.close()`.
 
 The cache does not bypass validation. Requirement rules, SceneSpec validation, quality gates,
@@ -88,3 +91,4 @@ Blender execution, QA, and memory writeback still run on each workflow.
 - The RAG cache is process-local.
 - The asset cache re-hashes manifest files before reuse.
 - Cleanup is implemented as a service and tests, but is not scheduled automatically.
+- Version artifacts increase local disk use per edit. Retention policy remains manual/local for now.

@@ -1,13 +1,21 @@
 import json
 import shutil
 import tempfile
+import threading
 import uuid
 from pathlib import Path
 
+from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.scene import SceneSpec
+from core.contracts.scene_edit import SceneEditResult
 from core.contracts.validation import ValidationReport
 from core.orchestration import DesignOrchestrator, OrchestratorResult
 from core.services.asset_registry import AssetRegistry
+from core.services.cleanup_service import CleanupService
+from core.services.diff_engine import DiffEngine
+from core.services.event_log import EventLogService
+from core.services.patch_applier import PatchApplier
+from core.services.scene_versioning import SceneVersioningService
 from core.validation import validate_scene_spec
 
 
@@ -17,51 +25,499 @@ class WorkflowService:
         registry: AssetRegistry,
         outputs_dir: Path,
         orchestrator: DesignOrchestrator,
+        scene_edit_agent: SceneEditAgent,
     ) -> None:
         self.registry = registry
         self.outputs_dir = outputs_dir
         self.orchestrator = orchestrator
+        self.scene_edit_agent = scene_edit_agent
+        self.patch_applier = PatchApplier()
+        self.versioning = SceneVersioningService(outputs_dir)
+        self.event_log = EventLogService(outputs_dir)
+        self.cleanup_service = CleanupService(outputs_dir)
+        self.diff_engine = DiffEngine()
+        self._lock = threading.Lock()
+
+    def _sync_output_services(self) -> None:
+        if self.versioning.outputs_dir == self.outputs_dir:
+            return
+        self.versioning = SceneVersioningService(self.outputs_dir)
+        self.event_log = EventLogService(self.outputs_dir)
+        self.cleanup_service = CleanupService(self.outputs_dir)
 
     def create_design(
         self,
         requirements_text: str,
         detail_level: str,
         use_llm: bool | None = None,
+        _synchronous: bool = False,
     ) -> dict:
+        self._sync_output_services()
         workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
 
-        result = self.orchestrator.run(
-            workflow_id=workflow_id,
-            requirements_text=requirements_text,
-            detail_level=detail_level,
-            output_dir=output_dir,
-            use_llm=use_llm,
+        # Emit design created event
+        self.event_log.emit(
+            workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
         )
+        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm)
 
-        self._write_result_files(output_dir, requirements_text, result)
-        self._make_archive(output_dir)
-        self._write_status(workflow_id, result.status, output_dir, result)
-        return {"workflow_id": workflow_id, "status": result.status}
+        def _run() -> None:
+            try:
+                self.event_log.emit(workflow_id, "blender_started", {"node": "generate_blender"})
+                result = self.orchestrator.run(
+                    workflow_id=workflow_id,
+                    requirements_text=requirements_text,
+                    detail_level=detail_level,
+                    output_dir=output_dir,
+                    use_llm=use_llm,
+                )
+                self._write_result_files(output_dir, requirements_text, result)
+                self._write_status(workflow_id, result.status, output_dir, result)
+                self._make_archive(output_dir)
+                self._write_status(workflow_id, result.status, output_dir, result)
+                if result.scene:
+                    version = self.versioning.save_version(
+                        workflow_id,
+                        result.scene,
+                        edit_description="initial",
+                        status=result.status,
+                        qa_score=result.qa_report.score if result.qa_report else None,
+                        generation_mode=result.generation.mode if result.generation else None,
+                        activate=True,
+                    )
+                    version_dir = self.versioning.version_artifacts_dir(
+                        workflow_id, version.version_id
+                    )
+                    self._copy_artifact_files(output_dir, version_dir)
+                    self._write_status(
+                        workflow_id,
+                        result.status,
+                        version_dir,
+                        result,
+                        version_id=version.version_id,
+                        active_version_id=version.version_id,
+                    )
+                    self._make_archive(version_dir)
+                    self._write_status(
+                        workflow_id,
+                        result.status,
+                        version_dir,
+                        result,
+                        version_id=version.version_id,
+                        active_version_id=version.version_id,
+                    )
+                    version_status = self._read_json(version_dir / "status.json")
+                    self.versioning.update_version(
+                        workflow_id,
+                        version.version_id,
+                        status=result.status,
+                        artifact_dir=str(version_dir),
+                        artifacts=version_status.get("artifacts", {}),
+                        qa_score=result.qa_report.score if result.qa_report else None,
+                        generation_mode=result.generation.mode if result.generation else None,
+                        active=True,
+                    )
+                    self._copy_active_status_to_root(workflow_id, version_dir)
+                self.event_log.emit(
+                    workflow_id,
+                    "workflow_completed" if result.status != "failed" else "workflow_failed",
+                    {
+                        "status": result.status,
+                        "duration_ms": result.total_duration_ms,
+                        "version_id": self.versioning.active_version_id(workflow_id),
+                        "node": "workflow",
+                    },
+                )
+            except Exception as exc:
+                self.event_log.emit(
+                    workflow_id,
+                    "workflow_failed",
+                    {"error": str(exc), "error_type": type(exc).__name__},
+                )
+                # Write a minimal failed status
+                self._write_failed_status(workflow_id, output_dir, str(exc))
+
+        if _synchronous:
+            _run()
+            try:
+                status = self.get_status(workflow_id)
+                return {"workflow_id": workflow_id, "status": status["status"]}
+            except KeyError:
+                return {"workflow_id": workflow_id, "status": "failed"}
+
+        thread = threading.Thread(target=_run, name=f"workflow-{workflow_id}")
+        thread.start()
+        return {"workflow_id": workflow_id, "status": "pending"}
 
     def get_status(self, workflow_id: str) -> dict:
+        self._sync_output_services()
         status_path = self.outputs_dir / workflow_id / "status.json"
         if not status_path.exists():
             raise KeyError(workflow_id)
         return json.loads(status_path.read_text(encoding="utf-8"))
 
     def archive_path(self, workflow_id: str) -> Path:
-        path = self.outputs_dir / workflow_id / "artifacts.zip"
+        self._sync_output_services()
+        status = self.get_status(workflow_id)
+        artifact_path = status.get("artifacts", {}).get("download")
+        path = (
+            Path(artifact_path)
+            if artifact_path
+            else self.outputs_dir / workflow_id / "artifacts.zip"
+        )
         if not path.exists():
             raise KeyError(workflow_id)
         return path
 
+    def list_designs(self, limit: int = 50, offset: int = 0) -> list[dict]:
+        self._sync_output_services()
+        designs = []
+        if not self.outputs_dir.exists():
+            return designs
+        dirs = sorted(
+            [d for d in self.outputs_dir.iterdir() if d.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for workflow_dir in dirs[offset : offset + limit]:
+            status_path = workflow_dir / "status.json"
+            if status_path.exists():
+                try:
+                    payload = json.loads(status_path.read_text(encoding="utf-8"))
+                    designs.append(
+                        {
+                            "workflow_id": payload.get("workflow_id"),
+                            "status": payload.get("status"),
+                            "created_at": payload.get("metrics", {}).get("started_at"),
+                            "qa_score": payload.get("qa_score"),
+                            "generation_mode": payload.get("generation_mode"),
+                        }
+                    )
+                except (OSError, json.JSONDecodeError):
+                    continue
+        return designs
+
+    def delete_design(self, workflow_id: str) -> None:
+        self._sync_output_services()
+        output_dir = self.outputs_dir / workflow_id
+        if not output_dir.exists():
+            raise KeyError(workflow_id)
+        try:
+            deleted = self.cleanup_service.delete_workflow(workflow_id)
+        except ValueError as exc:
+            raise KeyError(workflow_id) from exc
+        if not deleted:
+            raise KeyError(workflow_id)
+
+    def parse_requirements(
+        self,
+        requirements_text: str,
+        detail_level: str,
+        use_llm: bool | None = None,
+    ) -> dict:
+        extraction = self.orchestrator.extractor.extract(
+            requirements_text, detail_level, enabled=use_llm
+        )
+        return {
+            "requirements": (
+                extraction.requirements.model_dump() if extraction.requirements else None
+            ),
+            "warnings": (
+                [w.model_dump() for w in extraction.requirements.warnings]
+                if extraction.requirements
+                else []
+            ),
+            "errors": [e.model_dump() for e in extraction.errors] if extraction.errors else [],
+            "provider": extraction.provider_name,
+            "fallback_used": extraction.fallback_used,
+        }
+
     def validate_scene(self, scene: SceneSpec) -> ValidationReport:
         return validate_scene_spec(scene, self.registry.list_assets())
 
+    def edit_design(self, workflow_id: str, edit_prompt: str) -> SceneEditResult:
+        self._sync_output_services()
+        active_version = self.versioning.get_active_version(workflow_id)
+        if active_version is None:
+            return SceneEditResult(
+                workflow_id=workflow_id,
+                edit_id=f"edit_{uuid.uuid4().hex[:8]}",
+                status="failed",
+                errors=[
+                    {
+                        "code": "NO_ACTIVE_VERSION",
+                        "message": "No active scene version found for workflow.",
+                        "severity": "error",
+                    }
+                ],
+            )
+        original_scene = active_version.scene
+        edit_id = f"edit_{uuid.uuid4().hex[:8]}"
+
+        self.event_log.emit(
+            workflow_id,
+            "edit_patch_created",
+            {
+                "edit_id": edit_id,
+                "prompt": edit_prompt,
+                "version_id": active_version.version_id,
+                "agent": "SceneEditAgent",
+            },
+        )
+
+        try:
+            patch = self.scene_edit_agent.create_patch(workflow_id, original_scene, edit_prompt)
+        except Exception as exc:
+            self.event_log.emit(
+                workflow_id,
+                "edit_patch_rejected",
+                {"edit_id": edit_id, "reason": str(exc)},
+            )
+            return SceneEditResult(
+                workflow_id=workflow_id,
+                edit_id=edit_id,
+                status="failed",
+                original_scene=original_scene,
+                errors=[
+                    {
+                        "code": "EDIT_CREATION_FAILED",
+                        "message": str(exc),
+                        "severity": "error",
+                    }
+                ],
+            )
+
+        patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
+
+        if validation_report.status == "failed":
+            self.event_log.emit(
+                workflow_id,
+                "edit_patch_rejected",
+                {
+                    "edit_id": edit_id,
+                    "reason": "validation_failed",
+                    "errors": [e.model_dump() for e in validation_report.errors],
+                },
+            )
+            return SceneEditResult(
+                workflow_id=workflow_id,
+                edit_id=edit_id,
+                status="rejected",
+                original_scene=original_scene,
+                patch=patch,
+                validation_report=validation_report,
+                errors=validation_report.errors,
+            )
+
+        diff_summary = self.diff_engine.diff_scenes(original_scene, patched_scene)
+        version = self.versioning.save_version(
+            workflow_id,
+            patched_scene,
+            parent_version_id=active_version.version_id,
+            edit_description=patch.edit_description,
+            diff_summary=diff_summary,
+            status="generating",
+            activate=False,
+        )
+        version_output_dir = self.versioning.version_artifacts_dir(workflow_id, version.version_id)
+        self.event_log.emit(
+            workflow_id,
+            "version_created",
+            {
+                "edit_id": edit_id,
+                "version_id": version.version_id,
+                "parent_version_id": active_version.version_id,
+            },
+        )
+        self.event_log.emit(
+            workflow_id,
+            "blender_started",
+            {"trigger": "edit", "version_id": version.version_id, "node": "generate_blender"},
+        )
+        result = self.orchestrator.run_scene_revision(
+            workflow_id=workflow_id,
+            scene=patched_scene,
+            output_dir=version_output_dir,
+            detail_level="high",
+            revision_id=version.version_id,
+        )
+        self._write_result_files(version_output_dir, edit_prompt, result)
+        self._write_json(version_output_dir / "scene_patch.json", patch.model_dump())
+        self._write_json(version_output_dir / "scene_diff.json", diff_summary)
+        self._write_status(
+            workflow_id,
+            result.status,
+            version_output_dir,
+            result,
+            version_id=version.version_id,
+            active_version_id=self.versioning.active_version_id(workflow_id),
+        )
+        self._make_archive(version_output_dir)
+        self._write_status(
+            workflow_id,
+            result.status,
+            version_output_dir,
+            result,
+            version_id=version.version_id,
+            active_version_id=self.versioning.active_version_id(workflow_id),
+        )
+        version_status = self._read_json(version_output_dir / "status.json")
+        self.versioning.update_version(
+            workflow_id,
+            version.version_id,
+            status=result.status,
+            artifact_dir=str(version_output_dir),
+            artifacts=version_status.get("artifacts", {}),
+            qa_score=result.qa_report.score if result.qa_report else None,
+            generation_mode=result.generation.mode if result.generation else None,
+            active=False,
+        )
+
+        self.event_log.emit(
+            workflow_id,
+            "blender_completed"
+            if result.generation and result.generation.status in {"generated", "fallback"}
+            else "blender_failed",
+            {
+                "mode": result.generation.mode if result.generation else None,
+                "error": result.generation.error if result.generation else None,
+                "version_id": version.version_id,
+                "node": "generate_blender",
+            },
+        )
+        self.event_log.emit(
+            workflow_id,
+            "qa_completed" if result.status == "completed" else "qa_failed",
+            {
+                "version_id": version.version_id,
+                "qa_score": result.qa_report.score if result.qa_report else None,
+                "node": "qa_generation",
+            },
+        )
+
+        if result.status != "completed":
+            self.versioning.update_version(workflow_id, version.version_id, status="failed")
+            self.event_log.emit(
+                workflow_id,
+                "edit_patch_rejected",
+                {
+                    "edit_id": edit_id,
+                    "version_id": version.version_id,
+                    "reason": "revision_quality_failed",
+                    "errors": [e.model_dump() for e in result.report.errors],
+                },
+            )
+            return SceneEditResult(
+                workflow_id=workflow_id,
+                edit_id=edit_id,
+                status="failed",
+                original_scene=original_scene,
+                patched_scene=patched_scene,
+                patch=patch,
+                validation_report=result.report,
+                diff_summary=diff_summary,
+                version_id=version.version_id,
+                artifacts=version_status.get("artifacts", {}),
+                generation_mode=result.generation.mode if result.generation else None,
+                qa_score=result.qa_report.score if result.qa_report else None,
+                llm_provider=patch.edit_llm_provider,
+                llm_fallback_used=patch.edit_llm_fallback_used,
+                errors=result.report.errors,
+                warnings=[*validation_report.warnings, *result.report.warnings],
+            )
+
+        self.versioning.update_version(workflow_id, version.version_id, active=True)
+        self.versioning.rollback(workflow_id, version.version_id)
+        self._write_status(
+            workflow_id,
+            result.status,
+            version_output_dir,
+            result,
+            version_id=version.version_id,
+            active_version_id=version.version_id,
+        )
+        self._copy_active_status_to_root(workflow_id, version_output_dir)
+        self.event_log.emit(
+            workflow_id,
+            "edit_patch_applied",
+            {"edit_id": edit_id, "version_id": version.version_id, "status": result.status},
+        )
+
+        return SceneEditResult(
+            workflow_id=workflow_id,
+            edit_id=edit_id,
+            status="applied",
+            original_scene=original_scene,
+            patched_scene=patched_scene,
+            patch=patch,
+            validation_report=validation_report,
+            diff_summary=diff_summary,
+            version_id=version.version_id,
+            artifacts=version_status.get("artifacts", {}),
+            generation_mode=result.generation.mode if result.generation else None,
+            qa_score=result.qa_report.score if result.qa_report else None,
+            llm_provider=patch.edit_llm_provider,
+            llm_fallback_used=patch.edit_llm_fallback_used,
+            warnings=[*validation_report.warnings, *result.report.warnings],
+        )
+
+    def list_versions(self, workflow_id: str) -> list[dict]:
+        self._sync_output_services()
+        versions = self.versioning.list_versions(workflow_id)
+        return [
+            {
+                "version_id": v.version_id,
+                "parent_version_id": v.parent_version_id,
+                "created_at": v.created_at,
+                "edit_description": v.edit_description,
+                "diff_summary": v.diff_summary,
+                "status": v.status,
+                "active": v.active,
+                "artifact_dir": v.artifact_dir,
+                "artifacts": v.artifacts,
+                "qa_score": v.qa_score,
+                "generation_mode": v.generation_mode,
+            }
+            for v in versions
+        ]
+
+    def rollback_version(self, workflow_id: str, version_id: str) -> dict:
+        self._sync_output_services()
+        version = self.versioning.rollback(workflow_id, version_id)
+        if version is None:
+            raise KeyError(version_id)
+        if not version.artifact_dir:
+            raise KeyError(version_id)
+        self._copy_active_status_to_root(workflow_id, Path(version.artifact_dir))
+        self.event_log.emit(
+            workflow_id,
+            "version_rolled_back",
+            {"version_id": version_id},
+        )
+        return {
+            "workflow_id": workflow_id,
+            "version_id": version_id,
+            "rolled_back": True,
+        }
+
+    def get_events(self, workflow_id: str) -> list[dict]:
+        self._sync_output_services()
+        return [e.model_dump() for e in self.event_log.list_events(workflow_id)]
+
+    def workflow_exists(self, workflow_id: str) -> bool:
+        self._sync_output_services()
+        return (self.outputs_dir / workflow_id).exists()
+
     def _write_status(
-        self, workflow_id: str, status: str, output_dir: Path, result: OrchestratorResult
+        self,
+        workflow_id: str,
+        status: str,
+        output_dir: Path,
+        result: OrchestratorResult,
+        version_id: str | None = None,
+        active_version_id: str | None = None,
     ) -> None:
         report = result.report
         artifacts = {
@@ -86,6 +542,8 @@ class WorkflowService:
         payload = {
             "workflow_id": workflow_id,
             "status": status,
+            "version_id": version_id,
+            "active_version_id": active_version_id,
             "artifacts": artifacts,
             "llm_provider": result.llm_provider,
             "llm_fallback_used": result.llm_fallback_used,
@@ -115,6 +573,54 @@ class WorkflowService:
             "trace_path": str(output_dir / "workflow_trace.json"),
             "warnings": [warning.model_dump() for warning in report.warnings],
             "errors": [error.model_dump() for error in report.errors],
+            "tower_validation": result.tower_validation.model_dump()
+            if result.tower_validation
+            else None,
+            "rf_validation": result.rf_validation.model_dump() if result.rf_validation else None,
+        }
+        self._write_json(output_dir / "status.json", payload)
+
+    def _write_failed_status(self, workflow_id: str, output_dir: Path, error: str) -> None:
+        payload = {
+            "workflow_id": workflow_id,
+            "status": "failed",
+            "artifacts": {},
+            "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
+            "warnings": [],
+        }
+        self._write_json(output_dir / "status.json", payload)
+
+    def _write_pending_status(
+        self,
+        workflow_id: str,
+        output_dir: Path,
+        detail_level: str,
+        use_llm: bool | None,
+    ) -> None:
+        payload = {
+            "workflow_id": workflow_id,
+            "status": "pending",
+            "version_id": None,
+            "active_version_id": None,
+            "artifacts": {},
+            "warnings": [],
+            "errors": [],
+            "llm_provider": None,
+            "llm_fallback_used": None,
+            "rag_context_count": 0,
+            "memory_hits": 0,
+            "memory_context_count": 0,
+            "generation_mode": None,
+            "blender_available": None,
+            "qa_score": None,
+            "quality_gates": [],
+            "download_url": None,
+            "trace_path": None,
+            "metrics": {
+                "status": "pending",
+                "detail_level": detail_level,
+                "use_llm": use_llm,
+            },
         }
         self._write_json(output_dir / "status.json", payload)
 
@@ -169,7 +675,27 @@ class WorkflowService:
 
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    @staticmethod
+    def _read_json(path: Path) -> dict:
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _copy_artifact_files(source_dir: Path, target_dir: Path) -> None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for path in source_dir.iterdir():
+            if not path.is_file():
+                continue
+            shutil.copy2(path, target_dir / path.name)
+
+    def _copy_active_status_to_root(self, workflow_id: str, version_dir: Path) -> None:
+        root_status = self.outputs_dir / workflow_id / "status.json"
+        version_status = version_dir / "status.json"
+        if not version_status.exists():
+            raise KeyError(workflow_id)
+        root_status.write_text(version_status.read_text(encoding="utf-8"), encoding="utf-8")
 
     @staticmethod
     def _write_technical_report(

@@ -17,9 +17,9 @@ class GenerationQA:
         preview_inspection: PreviewInspectionReport,
         geometry_validation: GeometryValidationReport,
     ) -> ValidationReport:
-        glb_path = Path(generation.artifacts["glb"])
-        preview_path = Path(generation.artifacts["preview"])
-        metadata_path = Path(generation.artifacts["metadata"])
+        glb_path = Path(generation.artifacts.get("glb", ""))
+        preview_path = Path(generation.artifacts.get("preview", ""))
+        metadata_path = Path(generation.artifacts.get("metadata", ""))
         metadata = _load_metadata(metadata_path)
 
         checks = {

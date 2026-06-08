@@ -17,6 +17,10 @@
   checks.
 - RAG and memory eval tests for core local-first scenarios.
 - Safe output cleanup service for old managed workflow folders.
+- Prompt edit flow with typed patch, diff, transaction-style version generation, QA rerun,
+  per-version artifacts, event log, active version pointer, and rollback.
+- API fixes for `/assets/inventory`, JSON exception handling, and unknown SSE workflow handling.
+- RAG/memory planning hardening through structured hints and `error_patterns`.
 
 ## Available With Fallback
 
@@ -36,7 +40,9 @@
 - Replace procedural geometry with validated GLB asset imports.
 - Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
 - Add frontend React/Three.js viewer.
+- Add non-committed edit preview/apply workflow if the frontend needs preview before activation.
 - Add richer Qdrant payload filters and semantic embeddings as default.
 - Add comparative design variants.
 - Add exact GLB transform, bounding-box, and material validation.
 - Add rendered preview visual semantic checks.
+- Add dedicated manifest-backed GPS/power-cabinet assets and QA checks.

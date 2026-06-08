@@ -180,11 +180,21 @@ def _png_stats(data: bytes, width: int, height: int) -> PreviewStats:
 
 
 def _png_color_info(data: bytes) -> tuple[int, int, int, int]:
-    bit_depth = data[24]
-    color_type = data[25]
-    channels_by_color_type = {0: 1, 2: 3, 6: 4}
-    channels = channels_by_color_type[color_type]
-    return bit_depth, color_type, channels, channels
+    # IHDR is at offset 8 right after the PNG signature in standard PNGs.
+    # Robustly locate the IHDR chunk in case ancillary chunks precede it.
+    offset = len(PNG_SIGNATURE)
+    while offset + 25 <= len(data):
+        chunk_length = struct.unpack(">I", data[offset : offset + 4])[0]
+        chunk_type = data[offset + 4 : offset + 8]
+        if chunk_type == b"IHDR" and chunk_length == 13:
+            # IHDR payload: width(4) + height(4) + bit_depth(1) + color_type(1) + ...
+            bit_depth = data[offset + 16]
+            color_type = data[offset + 17]
+            channels_by_color_type = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+            channels = channels_by_color_type.get(color_type, 3)
+            return bit_depth, color_type, channels, channels
+        offset += 12 + chunk_length
+    raise ValueError("IHDR chunk not found in PNG data")
 
 
 def _png_idat_payload(data: bytes) -> bytes:

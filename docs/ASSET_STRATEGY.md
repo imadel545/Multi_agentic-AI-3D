@@ -6,6 +6,8 @@ Implemented:
 
 - Manifest-first registry under `assets/manifests`.
 - Asset inventory endpoint through `GET /assets/inventory`.
+- `/assets/inventory` is exposed before `/assets/{asset_id}`, so the frontend can query import
+  readiness without route shadowing.
 - Validated manifest IDs for:
   - `TOWER_LATTICE_30M`
   - `TOWER_MONOPOLE_30M`
@@ -24,6 +26,8 @@ Known limitation:
   `assets/towers`, `assets/antennas`, and `assets/radios` are not present.
 - `GET /assets/inventory` currently reports `status = manifest_only`,
   `real_glb_asset_count = 0`, and `procedural_generation_required = true`.
+- GPS antenna and power cabinet are procedural visual objects controlled by SceneSpec flags. They
+  are not represented as vendor GLB assets yet.
 
 ## Procedural Generation
 
@@ -38,12 +42,14 @@ Implemented:
   - sector beams
   - azimuth arrows
   - height markers
+  - GPS antenna and power cabinet only when explicitly enabled
   - labels/metadata
 
 Rule:
 
 - Procedural objects must be visible in `scene_metadata.json` through
   `procedural_objects_created`.
+- Prompt-edited versions get their own procedural metadata and QA reports.
 - Procedural generation is acceptable for current local validation, but it is not a substitute for
   vendor-grade GLB asset import.
 

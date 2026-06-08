@@ -2,6 +2,10 @@
 
 The workflow is implemented in `core/orchestration/langgraph_orchestrator.py`.
 
+Initial generation uses the compiled LangGraph. Prompt edits use `run_scene_revision`, a controlled
+revision path in the same orchestrator that reuses the validation, generation, QA, gate, metrics,
+trace, and memory components from a patched `SceneSpec`.
+
 ## Implemented Nodes
 
 Main path:
@@ -18,6 +22,18 @@ Main path:
 10. `qa_generation`
 11. `post_blender_gate`
 12. `memory_writeback`
+
+Revision path for edits:
+
+1. `edit_prepare_revision`
+2. `validate_requirements`
+3. `validate_scene`
+4. `pre_blender_gate`
+5. `generate_blender`
+6. `blender_failure_handler` when fallback/failure is explicit
+7. `qa_generation`
+8. `post_blender_gate`
+9. `memory_writeback` when memory is configured and the revision passes
 
 Corrective foundation:
 
@@ -84,6 +100,10 @@ Each step contains:
 - `warnings`
 - `duration_ms`
 
+For edit versions, `workflow_trace.json`, reports, GLB, preview, metadata, patch, diff, status, and
+archive are written under that version's artifact directory. The root `status.json` points to the
+active version.
+
 ## Fallback
 
 - If memory is not configured, memory nodes are omitted.
@@ -92,6 +112,7 @@ Each step contains:
 - If a quality gate fails, the workflow is failed explicitly and the gate report is written.
 - A real Blender output must parse as GLB at the post-Blender gate.
 - Fallback generation remains explicit and visible in trace, QA, and status.
+- Edit fallback patching remains explicit in `scene_patch.json` and the API edit response.
 
 ## Future
 
@@ -106,5 +127,7 @@ Each step contains:
   then are recorded in the graph as repair events.
 - Asset fallback is conservative and only uses validated network-compatible assets.
 - RAG and memory provide context only; they do not override deterministic rules.
+- ScenePlanner only accepts structured `planning_hints` from RAG payloads for controlled planning
+  changes. It no longer parses arbitrary retrieved text into scene dimensions/accessories.
 - Current quality gates validate structure, rules, artifacts, geometry metadata, and QA metadata;
   they do not inspect visual aesthetics.

@@ -250,6 +250,10 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
         objects.extend(f"azimuth_arrow:{sector.sector_id}" for sector in scene.sectors)
     if scene.visual_elements.include_height_markers:
         objects.append("height_marker")
+    if scene.visual_elements.include_power_cabinet:
+        objects.append("power_cabinet")
+    if scene.visual_elements.include_gps_antenna:
+        objects.append("gps_antenna")
     if scene.visual_elements.include_labels:
         objects.append("labels_metadata")
     return objects

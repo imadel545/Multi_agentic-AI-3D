@@ -34,6 +34,10 @@ def main() -> int:
     _create_tower(bpy, scene, procedural_objects)
     _create_height_marker(bpy, scene, procedural_objects)
     _create_sectors(bpy, scene, procedural_objects)
+    if scene["visual_elements"].get("include_power_cabinet", False):
+        _create_power_cabinet(bpy, scene, procedural_objects)
+    if scene["visual_elements"].get("include_gps_antenna", False):
+        _create_gps_antenna(bpy, scene, procedural_objects)
     camera_metadata = _create_camera_and_light(bpy, scene)
 
     glb_path = output_dir / "design.glb"
@@ -112,25 +116,29 @@ def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
     height = float(scene["tower"]["height_m"])
     characteristics = scene["tower"].get("characteristics", {})
     tower_type = scene["tower"]["asset_id"].lower()
+    base_width = float(characteristics.get("base_width_m") or 4.0)
     if "lattice" in tower_type:
         _create_lattice_tower(bpy, height, characteristics)
         procedural_objects.append("tower:lattice_procedural")
     elif "monopole" in tower_type:
+        radius = base_width / 2
         bpy.ops.mesh.primitive_cylinder_add(
-            vertices=32, radius=0.35, depth=height, location=(0, 0, height / 2)
+            vertices=32, radius=radius, depth=height, location=(0, 0, height / 2)
         )
         obj = bpy.context.object
         obj.name = f"tower_{scene['tower']['asset_id']}"
         obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
         procedural_objects.append("tower:monopole_procedural")
     else:
+        radius = base_width / 2
         bpy.ops.mesh.primitive_cylinder_add(
-            vertices=12, radius=0.5, depth=height, location=(0, 0, height / 2)
+            vertices=12, radius=radius, depth=height, location=(0, 0, height / 2)
         )
         obj = bpy.context.object
         obj.name = f"tower_{scene['tower']['asset_id']}"
         obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
         procedural_objects.append("tower:generic_procedural")
+    _create_foundation(bpy, characteristics, procedural_objects)
     _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
 
@@ -190,6 +198,7 @@ def _create_tower_accessories(
     procedural_objects: list[str],
 ) -> None:
     steel = _material(bpy, "accessory_steel", (0.42, 0.44, 0.46, 1))
+    base_width = float(characteristics.get("base_width_m") or 4.0)
     if characteristics.get("has_platform"):
         count = max(1, int(characteristics.get("platform_count") or 1))
         for index in range(count):
@@ -201,18 +210,19 @@ def _create_tower_accessories(
             platform.data.materials.append(steel)
             procedural_objects.append(f"tower_platform:{index + 1}")
     if characteristics.get("has_ladder"):
+        ladder_offset = base_width / 2 + 0.15
         _create_cylinder_between(
             bpy,
-            (-1.9, 0, 0.5),
-            (-1.9, 0, height - 0.5),
+            (-ladder_offset, 0, 0.5),
+            (-ladder_offset, 0, height - 0.5),
             0.018,
             "tower_ladder",
             steel,
         )
         _create_cylinder_between(
             bpy,
-            (-1.75, 0, 0.5),
-            (-1.75, 0, height - 0.5),
+            (-ladder_offset + 0.15, 0, 0.5),
+            (-ladder_offset + 0.15, 0, height - 0.5),
             0.018,
             "tower_ladder",
             steel,
@@ -237,22 +247,29 @@ def _create_tower_accessories(
 
 
 def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
+    characteristics = scene["tower"].get("characteristics", {})
+    base_width = float(characteristics.get("base_width_m") or 4.0)
+    mount_radius = base_width / 2 + 0.35
     for sector in scene["sectors"]:
         azimuth = math.radians(float(sector["azimuth_deg"]))
-        radius = 1.35
-        x = math.sin(azimuth) * radius
-        y = math.cos(azimuth) * radius
+        x = math.sin(azimuth) * mount_radius
+        y = math.cos(azimuth) * mount_radius
         z = float(sector["install_height_m"])
+        tilt_deg = float(sector.get("mechanical_tilt_deg") or 0.0)
+
+        # Mounting bracket arm
+        _create_mounting_bracket(bpy, mount_radius, azimuth, z)
+        procedural_objects.append(f"mount_bracket:{sector['sector_id']}")
 
         if "dish" in sector["antenna_asset_id"].lower():
-            _create_dish(bpy, sector, x, y, z, azimuth)
+            _create_dish(bpy, sector, x, y, z, azimuth, tilt_deg)
             procedural_objects.append(f"antenna_dish:{sector['sector_id']}")
         else:
-            _create_panel_antenna(bpy, sector, x, y, z, azimuth)
+            _create_panel_antenna(bpy, sector, x, y, z, azimuth, tilt_deg)
             procedural_objects.append(f"antenna_panel:{sector['sector_id']}")
 
         if sector.get("radio_asset_id"):
-            _create_radio(bpy, sector, x * 0.9, y * 0.9, z - 1.0)
+            _create_radio(bpy, sector, x * 0.92, y * 0.92, z - 1.0)
             procedural_objects.append(f"radio:{sector['sector_id']}")
 
         if sector.get("include_cable"):
@@ -260,7 +277,10 @@ def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
             procedural_objects.append(f"cable:{sector['sector_id']}")
 
         if scene["visual_elements"].get("include_sector_beams"):
-            _create_beam(bpy, sector["sector_id"], azimuth, z, float(sector["beam_radius_m"]))
+            beamwidth = float(sector.get("beamwidth_deg") or 65.0)
+            _create_beam(
+                bpy, sector["sector_id"], azimuth, z, float(sector["beam_radius_m"]), beamwidth
+            )
             procedural_objects.append(f"sector_beam:{sector['sector_id']}")
 
         if scene["visual_elements"].get("include_azimuth_arrows"):
@@ -268,31 +288,65 @@ def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
             procedural_objects.append(f"azimuth_arrow:{sector['sector_id']}")
 
 
-def _create_panel_antenna(bpy, sector: dict, x: float, y: float, z: float, azimuth: float) -> None:
+def _create_panel_antenna(
+    bpy, sector: dict, x: float, y: float, z: float, azimuth: float, tilt_deg: float
+) -> None:
+    dims = sector.get("antenna_dimensions_m") or {}
+    width = float(dims.get("width") or 0.35)
+    depth = float(dims.get("depth") or 0.12)
+    height = float(dims.get("height") or 1.55)
+    total_tilt = tilt_deg + float(sector.get("electrical_tilt_deg") or 0.0)
     bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
     antenna = bpy.context.object
     antenna.name = f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}"
-    antenna.dimensions = (0.35, 0.12, 1.55)
-    antenna.rotation_euler[2] = -azimuth
+    antenna.dimensions = (width, depth, height)
+    antenna.rotation_mode = "ZXY"
+    antenna.rotation_euler = (-azimuth, math.radians(total_tilt), 0)
     antenna.data.materials.append(_material(bpy, "antenna_white", (0.9, 0.9, 0.86, 1)))
 
 
-def _create_dish(bpy, sector: dict, x: float, y: float, z: float, azimuth: float) -> None:
+def _create_dish(
+    bpy, sector: dict, x: float, y: float, z: float, azimuth: float, tilt_deg: float
+) -> None:
+    dims = sector.get("antenna_dimensions_m") or {}
+    width = float(dims.get("width") or 0.9)
+    depth = float(dims.get("depth") or 0.35)
+    radius = width / 2
+    total_tilt = tilt_deg + float(sector.get("electrical_tilt_deg") or 0.0)
     bpy.ops.mesh.primitive_uv_sphere_add(
-        segments=32, ring_count=16, radius=0.45, location=(x, y, z)
+        segments=32, ring_count=16, radius=radius, location=(x, y, z)
     )
     dish = bpy.context.object
     dish.name = f"dish_{sector['sector_id']}_{sector['antenna_asset_id']}"
-    dish.scale = (1.0, 0.22, 1.0)
-    dish.rotation_euler[2] = -azimuth
+    dish.scale = (1.0, depth / width, 1.0)
+    dish.rotation_mode = "ZXY"
+    dish.rotation_euler = (-azimuth, math.radians(total_tilt), 0)
     dish.data.materials.append(_material(bpy, "dish_light_gray", (0.78, 0.8, 0.82, 1)))
+    # Feed horn
+    horn_dir = (
+        math.sin(azimuth) * (radius * 0.35),
+        math.cos(azimuth) * (radius * 0.35),
+        z + math.sin(math.radians(total_tilt)) * (radius * 0.35),
+    )
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=16, radius=radius * 0.06, depth=radius * 0.25, location=horn_dir
+    )
+    horn = bpy.context.object
+    horn.name = f"dish_horn_{sector['sector_id']}"
+    horn.rotation_mode = "ZXY"
+    horn.rotation_euler = (-azimuth, math.radians(total_tilt), 0)
+    horn.data.materials.append(_material(bpy, "dish_feed", (0.2, 0.22, 0.24, 1)))
 
 
 def _create_radio(bpy, sector: dict, x: float, y: float, z: float) -> None:
+    dims = sector.get("radio_dimensions_m") or {}
+    width = float(dims.get("width") or 0.35)
+    depth = float(dims.get("depth") or 0.18)
+    height = float(dims.get("height") or 0.55)
     bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
     radio = bpy.context.object
     radio.name = f"radio_{sector['sector_id']}_{sector['radio_asset_id']}"
-    radio.dimensions = (0.35, 0.18, 0.55)
+    radio.dimensions = (width, depth, height)
     radio.data.materials.append(_material(bpy, "rru_gray", (0.25, 0.27, 0.29, 1)))
 
 
@@ -313,7 +367,9 @@ def _create_cable(
     bpy.context.collection.objects.link(obj)
 
 
-def _create_beam(bpy, sector_id: str, azimuth: float, z: float, radius: float) -> None:
+def _create_beam(
+    bpy, sector_id: str, azimuth: float, z: float, radius: float, beamwidth_deg: float = 65.0
+) -> None:
     visual_length = min(radius, 4.5)
     start_radius = 1.55
     start = (
@@ -328,7 +384,9 @@ def _create_beam(bpy, sector_id: str, azimuth: float, z: float, radius: float) -
     )
     material = _material(bpy, "beam_direction_blue", (0.05, 0.45, 1.0, 0.62))
     _create_cylinder_between(bpy, start, end, 0.035, f"sector_beam_{sector_id}", material)
-    bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=0.14, depth=0.3, location=end)
+    # Cone head scaled by beamwidth (narrower beam = sharper cone)
+    cone_radius = max(0.08, 0.14 * (65.0 / max(beamwidth_deg, 10.0)))
+    bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=cone_radius, depth=0.3, location=end)
     head = bpy.context.object
     head.name = f"sector_beam_head_{sector_id}"
     head.rotation_euler = _direction_to_euler(
@@ -350,6 +408,71 @@ def _create_azimuth_arrow(bpy, sector_id: str, azimuth: float, z: float) -> None
     head.rotation_euler[0] = math.radians(90)
     head.rotation_euler[2] = -azimuth
     head.data.materials.append(material)
+
+
+def _create_power_cabinet(bpy, scene: dict, procedural_objects: list[str]) -> None:
+    base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
+    # Place cabinet a few meters away from tower base
+    offset = max(3.0, base_width * 1.2)
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(offset, 0, 0.9))
+    cabinet = bpy.context.object
+    cabinet.name = "power_cabinet_dc"
+    cabinet.dimensions = (1.5, 0.8, 1.8)
+    cabinet.data.materials.append(_material(bpy, "cabinet_gray", (0.35, 0.37, 0.39, 1)))
+    # Small detail: door outline hint
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(offset + 0.76, 0, 0.9))
+    door = bpy.context.object
+    door.name = "power_cabinet_door"
+    door.dimensions = (0.04, 0.72, 1.6)
+    door.data.materials.append(_material(bpy, "cabinet_door", (0.28, 0.30, 0.32, 1)))
+    procedural_objects.append("power_cabinet")
+
+
+def _create_gps_antenna(bpy, scene: dict, procedural_objects: list[str]) -> None:
+    height = float(scene["tower"]["height_m"])
+    # GPS typically mounted near tower top
+    z = height - 0.5
+    base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
+    mount_radius = base_width / 2 + 0.1
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=16, radius=0.04, depth=0.6, location=(0, mount_radius, z + 0.3)
+    )
+    pole = bpy.context.object
+    pole.name = "gps_mount_pole"
+    pole.data.materials.append(_material(bpy, "gps_pole", (0.5, 0.5, 0.52, 1)))
+    # Radome: flattened sphere instead of flat disc
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        segments=16, ring_count=8, radius=0.12, location=(0, mount_radius, z + 0.64)
+    )
+    radome = bpy.context.object
+    radome.name = "gps_antenna_radome"
+    radome.scale = (1.0, 1.0, 0.55)
+    radome.data.materials.append(_material(bpy, "gps_white", (0.92, 0.92, 0.9, 1)))
+    procedural_objects.append("gps_antenna")
+
+
+def _create_foundation(bpy, characteristics: dict, procedural_objects: list[str]) -> None:
+    foundation_type = characteristics.get("foundation_type", "concrete_pad")
+    if foundation_type == "concrete_pad":
+        base_width = float(characteristics.get("base_width_m") or 4.0)
+        size = max(base_width * 1.6, 3.0)
+        bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, -0.15))
+        pad = bpy.context.object
+        pad.name = "foundation_concrete_pad"
+        pad.dimensions = (size, size, 0.3)
+        pad.data.materials.append(_material(bpy, "concrete_gray", (0.62, 0.64, 0.66, 1)))
+        procedural_objects.append("foundation_concrete_pad")
+
+
+def _create_mounting_bracket(bpy, mount_radius: float, azimuth: float, z: float) -> None:
+    steel = _material(bpy, "mount_steel", (0.42, 0.44, 0.46, 1))
+    start = (
+        math.sin(azimuth) * (mount_radius - 0.25),
+        math.cos(azimuth) * (mount_radius - 0.25),
+        z,
+    )
+    end = (math.sin(azimuth) * (mount_radius + 0.05), math.cos(azimuth) * (mount_radius + 0.05), z)
+    _create_cylinder_between(bpy, start, end, 0.035, "mount_bracket", steel)
 
 
 def _create_height_marker(bpy, scene: dict, procedural_objects: list[str]) -> None:

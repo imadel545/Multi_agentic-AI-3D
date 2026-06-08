@@ -19,6 +19,11 @@ RAG will supply context to agents, but final decisions remain controlled by:
 Rule Engine -> Asset Registry -> SceneSpec Validator -> QA Agent
 ```
 
+Scene planning only accepts RAG-driven modifications through structured
+`payload.planning_hints`. The planner no longer parses arbitrary retrieved text for dimensions,
+GPS, cabinet, cables, or beamwidth. This keeps RAG useful as a controlled signal instead of a
+silent scene mutator.
+
 ## Embedding Provider
 
 Completed:
@@ -33,6 +38,7 @@ Completed:
   - `5G lattice tower 3 sectors`
   - `microwave dish on lattice tower`
   - `small cell pole`
+- Unit coverage for structured planning hints and rejection of unstructured decorative hints.
 
 Available with fallback:
 
@@ -52,6 +58,8 @@ The deterministic provider is an MVP fallback, not semantic production embedding
 
 - RAG context is advisory and cannot bypass the rule engine, asset registry, SceneSpec validator, or
   quality gates.
+- RAG does not add GPS/power cabinet by text match. Those objects require explicit SceneSpec flags
+  from the user prompt/edit or a future typed rule.
 - Current seeds are small. Retrieval quality depends heavily on explicit seed text until a stronger
   embedding provider and larger domain corpus are used.
 - Runtime memory collections are separate from static `/rag/reindex` collections.

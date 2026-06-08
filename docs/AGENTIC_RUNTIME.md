@@ -16,6 +16,12 @@ The LangGraph runtime has explicit routing foundations:
 
 Centralized quality gates are implemented in `core/validation/quality_gates.py`.
 
+Prompt edits use the same deterministic validation/QA stack through
+`DesignOrchestrator.run_scene_revision`. The revision path does not re-extract requirements from
+free text and does not ask the LLM to write Blender code. It starts from the patched `SceneSpec`,
+derives controlled requirements, reruns Rule/Tower/RF validation, pre/post quality gates, Blender,
+GLB inspection, geometry validation, preview inspection, and memory writeback when configured.
+
 `pre_blender_gate` checks:
 
 - extracted requirements are valid
@@ -64,6 +70,8 @@ Workflow state includes:
 - `knowledge_index_hash`
 - cache hit/miss metrics
 
+Edit/version events include `version_id` in their payload when a version is involved.
+
 Trace steps include:
 
 - `node`
@@ -93,6 +101,8 @@ Trace steps include:
 
 - Blender fallback is explicit and still goes through QA.
 - Asset fallback only selects assets with `status=validated` and compatible network type.
+- Groq edit patching fallback is explicit through `edit_llm_provider` and
+  `edit_llm_fallback_used` in the patch/result.
 - Scene repair is bounded by `max_repair_attempts`.
 - Quality gates fail closed. A failed pre-Blender gate blocks generation.
 - Non-GLB fallback artifacts use explicit `metadata_fallback` inspection mode.
@@ -104,6 +114,7 @@ Trace steps include:
 - Add richer LOD/ranking policy for asset fallback.
 - Add policy controls for max repair attempts per route type.
 - Add per-gate policy overrides for lower-risk development scenarios.
+- Add a separate preview-only edit endpoint if the frontend needs non-committed patch previews.
 
 ## Known Limitations
 
@@ -111,6 +122,7 @@ Trace steps include:
   reject invalid geometry.
 - Corrective routes are deterministic and conservative.
 - No handler can bypass rule validation.
+- Revision orchestration is a controlled service path, not a second LangGraph graph yet.
 - Quality gate checks are local contract/artifact checks, not visual semantic inspection.
 - Geometry validation checks object counts, sector object presence, tower/antenna heights, azimuth
   metadata, and bounding-box reasonableness. Exact transform/material parsing remains future work.

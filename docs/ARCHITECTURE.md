@@ -24,6 +24,23 @@ FastAPI Local Gateway
   -> Artifact Writer
 ```
 
+Prompt edit/revision path:
+
+```text
+FastAPI /designs/{workflow_id}/edit
+  -> SceneEditAgent
+  -> PatchApplier
+  -> DiffEngine
+  -> SceneVersioningService
+  -> DesignOrchestrator.run_scene_revision
+  -> Rule/Tower/RF validation
+  -> Pre-Blender Gate
+  -> Blender Runner
+  -> GLB/Geometry/Preview QA
+  -> Post-Blender Gate
+  -> Version artifacts/status
+```
+
 ## Implemented
 
 - `core/contracts`: strict Pydantic contracts.
@@ -31,6 +48,9 @@ FastAPI Local Gateway
 - `core/services/requirement_parser.py`: deterministic baseline extraction.
 - `core/llm/groq.py`: Groq strict JSON Schema extraction client.
 - `core/agents/requirement_extractor.py`: Groq/deterministic extraction router.
+- `core/agents/scene_edit_agent.py`: prompt-to-typed ScenePatch editor.
+- `core/agents/tower_engineer.py` and `core/agents/rf_engineer.py`: deterministic domain
+  validation agents.
 - `core/orchestration`: LangGraph workflow nodes and state.
 - `core/memory`: SQLite workflow memory, recall, and writeback.
 - `core/performance`: local cache helpers and canonical runtime hashes.
@@ -39,6 +59,8 @@ FastAPI Local Gateway
 - `core/validation/quality_gates.py`: centralized pre/post Blender gate checks.
 - `core/qa/glb_geometry_validator.py`: sector/object/metadata geometry QA.
 - `apps/api`: local FastAPI gateway.
+- `core/services/scene_versioning.py`: active version pointer and per-version metadata/artifacts.
+- `core/services/event_log.py`: append-only workflow event log for timeline/SSE consumers.
 - `core/rag`: Qdrant indexing/search over rules, docs, templates, and manifests.
 - `core/services/blender_runner.py`: Blender availability detection, execution, timeout, fallback.
 - `apps/blender_worker`: controlled SceneSpec-driven Blender entrypoint.
@@ -50,6 +72,15 @@ FastAPI Local Gateway
 Implemented:
 
 - Quality gate reports are included in workflow trace and API status.
+- Edits are transaction-style revisions: a patched SceneSpec becomes active only after validation,
+  generation, QA, and quality gates complete successfully.
+- Each successful edit version gets independent artifacts under its version artifact directory.
+- Rollback switches the active version pointer and root status back to stored version artifacts
+  without deleting later versions.
+- `/assets/inventory` reports manifest-only versus real GLB readiness without being shadowed by
+  `/assets/{asset_id}`.
+- Global API exceptions return JSON `500` with `request_id`.
+- `POST /designs` writes a pending status immediately so frontend polling has no transient 404 gap.
 - GLB and preview inspection reports are included in workflow trace, validation report, API status,
   and output artifacts.
 - Geometry validation reports are included in workflow trace, validation report, API status, quality
@@ -63,12 +94,15 @@ Fallback:
 - Cache misses fall back to normal manifest loading or Qdrant query.
 - Quality gates fail closed and route to `quality_gate_failure_handler`.
 - GLB parsing failure uses explicit metadata fallback only when metadata exists.
+- Groq edit patching falls back to deterministic patch parsing and exposes fallback state in the
+  patch/result.
 
 Known limitations:
 
 - Caches are process-local.
 - Qdrant local mode can still lock when multiple API processes use the same local path.
 - Quality gates do not perform semantic visual inspection.
+- Version artifacts are filesystem-local and intended for local-first mono-user workflows.
 - Geometry QA validates counts, sector object presence, heights, azimuth metadata, and a
   bounding-box proxy. It does not yet parse exact GLB node transforms or materials.
 

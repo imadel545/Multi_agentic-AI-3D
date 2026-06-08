@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from core.contracts.assets import DimensionsM
 from core.contracts.common import NetworkType, StrictModel
 from core.contracts.tower import TowerCharacteristics
 
@@ -11,6 +12,15 @@ class SceneAssetPlacement(StrictModel):
     position: list[float] = Field(min_length=3, max_length=3)
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
+
+    @field_validator("scale")
+    @classmethod
+    def validate_scale_positive(cls, value: list[float]) -> list[float]:
+        for i, v in enumerate(value):
+            if v <= 0:
+                raise ValueError(f"scale[{i}] must be positive, got {v}")
+        return value
+
     height_m: float = Field(gt=0)
     characteristics: TowerCharacteristics = Field(
         default_factory=lambda: TowerCharacteristics(
@@ -34,6 +44,8 @@ class SectorSpec(StrictModel):
     electrical_tilt_deg: float = Field(default=0.0, ge=-15, le=30)
     beamwidth_deg: float = Field(gt=0, le=360)
     beam_radius_m: float = Field(default=8.0, gt=0)
+    antenna_dimensions_m: DimensionsM | None = None
+    radio_dimensions_m: DimensionsM | None = None
     include_cable: bool = True
     include_label: bool = True
 
@@ -43,6 +55,8 @@ class VisualElements(StrictModel):
     include_azimuth_arrows: bool = True
     include_height_markers: bool = True
     include_labels: bool = True
+    include_power_cabinet: bool = False
+    include_gps_antenna: bool = False
 
 
 class PreviewSpec(StrictModel):
