@@ -64,6 +64,7 @@ Workflow state includes:
 - `glb_inspection`
 - `geometry_validation`
 - `preview_inspection`
+- asset import metadata through generated `scene_metadata.json` and API status
 - `requirements_hash`
 - `scene_spec_hash`
 - `asset_manifest_hash`
@@ -101,6 +102,8 @@ Trace steps include:
 
 - Blender fallback is explicit and still goes through QA.
 - Asset fallback only selects assets with `status=validated` and compatible network type.
+- Asset import fallback is separate from asset selection fallback: a selected manifest can still use
+  `procedural_fallback` when its GLB file is missing and the manifest allows fallback.
 - Groq edit patching fallback is explicit through `edit_llm_provider` and
   `edit_llm_fallback_used` in the patch/result.
 - Scene repair is bounded by `max_repair_attempts`.
@@ -126,3 +129,4 @@ Trace steps include:
 - Quality gate checks are local contract/artifact checks, not visual semantic inspection.
 - Geometry validation checks object counts, sector object presence, tower/antenna heights, azimuth
   metadata, and bounding-box reasonableness. Exact transform/material parsing remains future work.
+- Asset import QA validates metadata modes and visibility, not vendor-grade mesh quality yet.

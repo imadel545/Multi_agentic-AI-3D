@@ -113,6 +113,8 @@ active version.
 - A real Blender output must parse as GLB at the post-Blender gate.
 - Fallback generation remains explicit and visible in trace, QA, and status.
 - Edit fallback patching remains explicit in `scene_patch.json` and the API edit response.
+- Asset import fallback is visible in `scene_metadata.json`, QA warnings, and API status through
+  `asset_imports` and `asset_import_summary`.
 
 ## Future
 
@@ -131,3 +133,6 @@ active version.
   changes. It no longer parses arbitrary retrieved text into scene dimensions/accessories.
 - Current quality gates validate structure, rules, artifacts, geometry metadata, and QA metadata;
   they do not inspect visual aesthetics.
+- Asset import routing is deterministic inside the Blender worker; the graph selects compatible
+  manifests, and the worker records whether each placement became `imported_glb` or
+  `procedural_fallback`.

@@ -520,6 +520,7 @@ class WorkflowService:
         active_version_id: str | None = None,
     ) -> None:
         report = result.report
+        asset_import_metadata = _asset_import_metadata(output_dir)
         artifacts = {
             "requirements_spec": str(output_dir / "requirements_spec.json"),
             "extraction_report": str(output_dir / "extraction_report.json"),
@@ -559,6 +560,8 @@ class WorkflowService:
             "glb_inspection_summary": _glb_inspection_summary(result),
             "geometry_validation_summary": _geometry_validation_summary(result),
             "preview_inspection_summary": _preview_inspection_summary(result),
+            "asset_import_summary": asset_import_metadata.get("asset_import_summary"),
+            "asset_imports": asset_import_metadata.get("asset_imports"),
             "structural_qa_passed": result.glb_inspection.structural_qa_passed
             if result.glb_inspection
             else None,
@@ -836,6 +839,20 @@ def _preview_inspection_summary(result: OrchestratorResult) -> dict | None:
         "non_dark_pixel_ratio": result.preview_inspection.non_dark_pixel_ratio,
         "preview_qa_passed": result.preview_inspection.preview_qa_passed,
         "critical_errors": result.preview_inspection.critical_errors,
+    }
+
+
+def _asset_import_metadata(output_dir: Path) -> dict:
+    metadata_path = output_dir / "scene_metadata.json"
+    if not metadata_path.exists():
+        return {"asset_import_summary": None, "asset_imports": None}
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"asset_import_summary": None, "asset_imports": None}
+    return {
+        "asset_import_summary": metadata.get("asset_import_summary"),
+        "asset_imports": metadata.get("asset_imports"),
     }
 
 

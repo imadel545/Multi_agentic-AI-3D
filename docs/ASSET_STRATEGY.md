@@ -1,96 +1,71 @@
 # Asset Strategy
 
-## Current Assets
-
-Implemented:
+## Implemented
 
 - Manifest-first registry under `assets/manifests`.
-- Asset inventory endpoint through `GET /assets/inventory`.
-- `/assets/inventory` is exposed before `/assets/{asset_id}`, so the frontend can query import
-  readiness without route shadowing.
-- Validated manifest IDs for:
-  - `TOWER_LATTICE_30M`
-  - `TOWER_MONOPOLE_30M`
-  - `TOWER_ROOFTOP_12M`
-  - `TOWER_SMALL_CELL_10M`
-  - `ANT_PANEL_5G_001`
-  - `ANT_PANEL_4G_001`
-  - `ANT_MICROWAVE_DISH_001`
-  - `RRU_SMALL_001`
-- Asset selection is compatibility-based and only selects `status = validated`.
-- RAG indexes manifests as `asset_manifests`.
+- Compatibility-based selection for assets with `status = validated`.
+- Asset metadata fields:
+  - `source`
+  - `import_fallback_allowed`
+  - `dimensions_m`
+  - `mount_zones`
+- `/assets/inventory` reports import readiness before `/assets/{asset_id}` can shadow the route.
+- Scene planning copies manifest file/source/fallback metadata into `SceneSpec`, so Blender knows
+  whether to import a real GLB or use fallback.
+- Blender writes per-placement import records to `scene_metadata.json`.
+- API status exposes `asset_import_summary` and `asset_imports`.
 
-Known limitation:
+## Current Assets
 
-- The repository currently contains manifests only. The referenced GLB files under
-  `assets/towers`, `assets/antennas`, and `assets/radios` are not present.
-- `GET /assets/inventory` currently reports `status = manifest_only`,
-  `real_glb_asset_count = 0`, and `procedural_generation_required = true`.
+Validated manifests:
+
+- `TOWER_LATTICE_30M`
+- `TOWER_MONOPOLE_30M`
+- `TOWER_ROOFTOP_12M`
+- `TOWER_SMALL_CELL_10M`
+- `ANT_PANEL_5G_001`
+- `ANT_PANEL_4G_001`
+- `ANT_MICROWAVE_DISH_001`
+- `RRU_SMALL_001`
+
+GLB files currently present:
+
+- `assets/antennas/ant_panel_5g_001.glb`
+- `assets/radios/rru_small_001.glb`
+
+These files are internal minimal test assets. They are useful to verify import behavior, but they
+are not vendor-grade. Inventory and generation metadata expose this through
+`source = internal_test_minimal`.
+
+## Available With Fallback
+
+- Tower, 4G panel, microwave dish, and other missing vendor files currently use controlled
+  procedural fallback when their manifest allows it.
 - GPS antenna and power cabinet are procedural visual objects controlled by SceneSpec flags. They
-  are not represented as vendor GLB assets yet.
+  are not manifest-backed GLB assets yet.
+- Non-Blender generation writes explicit fallback metadata instead of pretending assets were
+  imported.
 
-## Procedural Generation
+## Import Modes
 
-Implemented:
-
-- The Blender worker creates controlled procedural geometry from `SceneSpec` for:
-  - lattice/monopole/generic tower primitives
-  - panel antennas
-  - microwave dish
-  - RRU boxes
-  - cables
-  - sector beams
-  - azimuth arrows
-  - height markers
-  - GPS antenna and power cabinet only when explicitly enabled
-  - labels/metadata
-
-Rule:
-
-- Procedural objects must be visible in `scene_metadata.json` through
-  `procedural_objects_created`.
-- Prompt-edited versions get their own procedural metadata and QA reports.
-- Procedural generation is acceptable for current local validation, but it is not a substitute for
-  vendor-grade GLB asset import.
-
-## Missing Real Assets
-
-Missing:
-
-- Real lattice tower GLB.
-- Real monopole GLB.
-- Real rooftop mast GLB.
-- Real small-cell pole GLB.
-- Real 4G/5G panel antenna GLBs.
-- Real microwave dish GLB.
-- Real RRU GLB.
-- Material/LOD metadata for imported models.
+- `imported_glb`: a manifest file exists and the Blender worker imported it successfully.
+- `procedural_fallback`: no usable GLB was imported, and controlled procedural geometry was used.
+- `missing_file`: no GLB was imported and fallback was not allowed. This should fail QA.
+- `manifest_only`: inventory-level state for manifests whose referenced file is absent.
 
 ## Asset Manifest Rules
 
 Required:
 
 - `asset_id` must be stable and unique.
-- `type` must match the selectable family: `tower`, `antenna`, or `radio`.
-- `file` must point to the expected GLB asset path.
+- `type` must match the selectable family.
+- `file` must point to the expected GLB path.
 - `dimensions_m` must be credible and in meters.
 - `compatible_networks` and `compatible_tower_types` must be explicit.
 - `status = validated` is required for automatic selection.
-- `mount_zones` should define safe install ranges for towers.
-
-Recommended next rule:
-
-- A manifest whose `file` is missing should be marked `status = manifest_only` or be reported by
-  an asset inventory validator before selection claims real imported assets.
-
-## Replacement Plan
-
-1. Add real GLB files for the existing manifest IDs without changing IDs.
-2. Add an asset inventory validator that verifies every `file` path exists.
-3. Extend Blender worker to import existing GLBs and fall back to procedural geometry only when
-   explicitly allowed.
-4. Record asset import mode per object: `imported_glb` or `procedural`.
-5. Extend geometry QA to compare bounding boxes and transforms from parsed GLB nodes.
+- `source` must distinguish expected vendor assets from internal minimal assets.
+- `import_fallback_allowed` must be intentional.
+- Tower `mount_zones` should define safe install ranges.
 
 ## Quality Requirements
 
@@ -98,10 +73,28 @@ Implemented:
 
 - Object presence/count validation through GLB inspection and geometry validation.
 - Sector-level checks for antennas, RRUs, cables, beams, azimuth arrows, and metadata azimuths.
+- Import metadata checks for file existence, import success, dimensions check flag, modes, and
+  visible fallback warnings.
 - Height tolerance: `0.5m`.
 - Azimuth tolerance: `5deg`.
 
-Known limitations:
+Future:
 
-- Current bounding-box QA is metadata/proxy based when GLB transform parsing is unavailable.
-- Materials, LOD, normals, mesh quality, and collision-free mounting are not validated yet.
+- Exact GLB bounding-box checks against manifest dimensions.
+- Material, LOD, pivot, mount-point, and texture budget validation.
+- Manifest-backed GPS/power cabinet assets.
+
+## Replacement Plan
+
+1. Replace internal minimal GLBs with vendor-grade assets without changing stable IDs.
+2. Add real tower, 4G panel, and microwave dish GLBs.
+3. Add pivot/mount metadata to manifests.
+4. Tighten GLB dimension/material QA once vendor assets are present.
+5. Expose vendor provenance to the frontend.
+
+## Known Limitations
+
+- Inventory is `partial_import_ready`, not fully vendor-ready.
+- Current internal GLBs are simple boxes for pipeline validation.
+- Procedural fallback still carries most visual quality for towers.
+- GLB parser QA does not yet verify exact transforms or material quality.

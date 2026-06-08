@@ -45,6 +45,13 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     assert metadata["preview_camera"]["camera"] == "fallback_preview"
     assert metadata["preview_camera"]["ortho_scale"] >= 18
     assert "TOWER_LATTICE_30M" in metadata["assets_used"]
+    assert metadata["asset_import_summary"]["asset_count"] == 7
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 0
+    assert metadata["asset_import_summary"]["procedural_fallback_count"] == 7
+    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 6
+    assert {record["import_mode"] for record in metadata["asset_imports"]} == {
+        "procedural_fallback"
+    }
 
 
 @pytest.mark.skipif(
@@ -81,3 +88,13 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["framing"] == "full_tower_front"
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
     assert metadata["procedural_objects_created"]
+    assert metadata["asset_import_summary"]["asset_count"] == 7
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 6
+    assert metadata["asset_import_summary"]["procedural_fallback_count"] == 1
+    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 6
+    imported_records = [
+        record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
+    ]
+    assert len(imported_records) == 6
+    assert all(record["asset_import_success"] is True for record in imported_records)
+    assert all(record["asset_dimensions_checked"] is True for record in imported_records)

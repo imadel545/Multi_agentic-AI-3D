@@ -88,6 +88,8 @@ Blender execution, QA, and memory writeback still run on each workflow.
 - Metrics are local process timings, not distributed tracing.
 - Qdrant local lock contention appears as RAG or memory indexing errors.
 - File size metrics only include artifacts known to `GenerationResult`.
+- Asset import counts are exposed in status/metadata, but they are not aggregated into long-term
+  performance metrics yet.
 - The RAG cache is process-local.
 - The asset cache re-hashes manifest files before reuse.
 - Cleanup is implemented as a service and tests, but is not scheduled automatically.

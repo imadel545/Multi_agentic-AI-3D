@@ -21,6 +21,10 @@ class GenerationQA:
         preview_path = Path(generation.artifacts.get("preview", ""))
         metadata_path = Path(generation.artifacts.get("metadata", ""))
         metadata = _load_metadata(metadata_path)
+        asset_imports = metadata.get("asset_imports", [])
+        expected_asset_placements = (
+            1 + len(scene.sectors) + sum(1 for sector in scene.sectors if sector.radio_asset_id)
+        )
 
         checks = {
             "glb_exists": glb_path.exists(),
@@ -38,6 +42,17 @@ class GenerationQA:
             == [sector.install_height_m for sector in scene.sectors],
             "metadata_preview_camera_valid": isinstance(metadata.get("preview_camera"), dict)
             and bool(metadata["preview_camera"].get("camera")),
+            "metadata_asset_imports_present": isinstance(asset_imports, list)
+            and len(asset_imports) >= expected_asset_placements,
+            "metadata_asset_import_modes_valid": _asset_import_modes_valid(asset_imports),
+            "metadata_asset_import_summary_valid": _asset_import_summary_valid(
+                metadata.get("asset_import_summary"), asset_imports
+            ),
+            "metadata_imported_glb_records_valid": _imported_glb_records_valid(asset_imports),
+            "metadata_asset_fallbacks_visible": _asset_fallbacks_visible(asset_imports),
+            "metadata_no_missing_asset_without_fallback": not any(
+                record.get("import_mode") == "missing_file" for record in asset_imports
+            ),
             "generation_completed_or_fallback": generation.status in {"generated", "fallback"},
             "glb_inspection_available": glb_inspection.inspection_mode
             in {"glb_parse", "metadata_fallback"},
@@ -92,6 +107,7 @@ class GenerationQA:
             )
             for warning in geometry_validation.warnings
         )
+        warnings.extend(_asset_import_warnings(asset_imports))
         errors = [
             ValidationIssue(code=code.upper(), message=f"QA check failed: {code}", severity="error")
             for code, passed in checks.items()
@@ -123,3 +139,91 @@ def _load_metadata(path: Path) -> dict:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _asset_import_modes_valid(asset_imports: list) -> bool:
+    valid_modes = {"imported_glb", "procedural_fallback", "missing_file"}
+    if not isinstance(asset_imports, list):
+        return False
+    for record in asset_imports:
+        if not isinstance(record, dict):
+            return False
+        if record.get("import_mode") not in valid_modes:
+            return False
+        if record.get("effective_generation_mode") not in valid_modes:
+            return False
+    return True
+
+
+def _asset_import_summary_valid(summary: object, asset_imports: list) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    if summary.get("asset_count") != len(asset_imports):
+        return False
+    modes = summary.get("modes")
+    if not isinstance(modes, dict):
+        return False
+    for mode in {"imported_glb", "procedural_fallback", "missing_file"}:
+        expected = sum(1 for record in asset_imports if record.get("import_mode") == mode)
+        if summary.get(f"{mode}_count") is not None and summary.get(f"{mode}_count") != expected:
+            return False
+        if modes.get(mode, 0) != expected:
+            return False
+    return True
+
+
+def _imported_glb_records_valid(asset_imports: list) -> bool:
+    for record in asset_imports:
+        if not isinstance(record, dict):
+            return False
+        if record.get("import_mode") != "imported_glb":
+            continue
+        if record.get("asset_file_exists") is not True:
+            return False
+        if record.get("asset_import_success") is not True:
+            return False
+        if not record.get("imported_object_names"):
+            return False
+    return True
+
+
+def _asset_fallbacks_visible(asset_imports: list) -> bool:
+    visible_codes = {
+        "PROCEDURAL_FALLBACK_USED",
+        "BLENDER_FALLBACK_ASSET_IMPORT_SKIPPED",
+    }
+    for record in asset_imports:
+        if not isinstance(record, dict):
+            return False
+        if record.get("import_mode") != "procedural_fallback":
+            continue
+        warnings = set(record.get("warnings", []))
+        if not warnings.intersection(visible_codes):
+            return False
+    return True
+
+
+def _asset_import_warnings(asset_imports: list) -> list[ValidationIssue]:
+    warnings: list[ValidationIssue] = []
+    for record in asset_imports:
+        if not isinstance(record, dict):
+            continue
+        asset_id = record.get("asset_id", "unknown_asset")
+        mode = record.get("import_mode")
+        if mode == "procedural_fallback":
+            warnings.append(
+                ValidationIssue(
+                    code="ASSET_IMPORT_PROCEDURAL_FALLBACK",
+                    message=f"{asset_id} used procedural fallback instead of a real GLB import.",
+                    severity="warning",
+                )
+            )
+        for warning in record.get("warnings", []):
+            warnings.append(
+                ValidationIssue(
+                    code=f"ASSET_IMPORT_{warning}",
+                    message=f"{asset_id}: {warning}",
+                    severity="warning",
+                )
+            )
+    return warnings

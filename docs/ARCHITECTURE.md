@@ -15,6 +15,7 @@ FastAPI Local Gateway
   -> SceneSpec Validator
   -> Pre-Blender Quality Gate
   -> Blender Runner
+  -> Asset GLB Import or Explicit Procedural Fallback
   -> GLB Structural Inspector
   -> GLB Geometry Validator
   -> Preview Inspector
@@ -45,6 +46,7 @@ FastAPI /designs/{workflow_id}/edit
 
 - `core/contracts`: strict Pydantic contracts.
 - `core/services/asset_registry.py`: manifest loading and compatibility selection.
+- `core/services/asset_inventory.py`: asset file/import readiness reporting for frontend and QA.
 - `core/services/requirement_parser.py`: deterministic baseline extraction.
 - `core/llm/groq.py`: Groq strict JSON Schema extraction client.
 - `core/agents/requirement_extractor.py`: Groq/deterministic extraction router.
@@ -63,7 +65,8 @@ FastAPI /designs/{workflow_id}/edit
 - `core/services/event_log.py`: append-only workflow event log for timeline/SSE consumers.
 - `core/rag`: Qdrant indexing/search over rules, docs, templates, and manifests.
 - `core/services/blender_runner.py`: Blender availability detection, execution, timeout, fallback.
-- `apps/blender_worker`: controlled SceneSpec-driven Blender entrypoint.
+- `apps/blender_worker`: controlled SceneSpec-driven Blender entrypoint with manifest GLB import
+  when files exist and explicit procedural fallback when allowed.
 - `core/qa`: generation artifact QA, GLB structural inspection, GLB geometry validation, and
   preview inspection.
 
@@ -79,6 +82,8 @@ Implemented:
   without deleting later versions.
 - `/assets/inventory` reports manifest-only versus real GLB readiness without being shadowed by
   `/assets/{asset_id}`.
+- Workflow status exposes asset import metadata from `scene_metadata.json` so the frontend can
+  distinguish `imported_glb`, `procedural_fallback`, and `missing_file`.
 - Global API exceptions return JSON `500` with `request_id`.
 - `POST /designs` writes a pending status immediately so frontend polling has no transient 404 gap.
 - GLB and preview inspection reports are included in workflow trace, validation report, API status,
@@ -111,4 +116,6 @@ Known limitations:
 - Qdrant retrieval provides context but does not bypass rules.
 - SQLite memory stores compact workflow summaries and validation patterns, not large GLB/PNG files.
 - FastEmbed/BGE-M3 can replace the hashing embedder behind the RAG provider interface.
-- Real GLB asset imports can replace procedural primitives inside the controlled Blender worker.
+- The current MVP imports available GLBs and falls back procedurally when manifests allow it.
+- Vendor-grade GLB assets can replace the current internal minimal assets and missing files without
+  changing stable manifest IDs.

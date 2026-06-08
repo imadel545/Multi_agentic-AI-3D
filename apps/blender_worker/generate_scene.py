@@ -28,12 +28,14 @@ def main() -> int:
         return 0
 
     procedural_objects: list[str] = []
+    asset_imports: list[dict] = []
+    asset_warnings: list[str] = []
     _reset_scene(bpy)
     _configure_scene(bpy, scene)
     _create_ground_plane(bpy, scene)
-    _create_tower(bpy, scene, procedural_objects)
+    _create_tower(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     _create_height_marker(bpy, scene, procedural_objects)
-    _create_sectors(bpy, scene, procedural_objects)
+    _create_sectors(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_power_cabinet", False):
         _create_power_cabinet(bpy, scene, procedural_objects)
     if scene["visual_elements"].get("include_gps_antenna", False):
@@ -47,7 +49,15 @@ def main() -> int:
     camera_metadata["render_backdrop"] = "preview_only_light_plane"
     bpy.context.scene.render.filepath = str(preview_path)
     bpy.ops.render.render(write_still=True)
-    _write_metadata(scene, output_dir, "real_blender", procedural_objects, [], camera_metadata)
+    _write_metadata(
+        scene,
+        output_dir,
+        "real_blender",
+        procedural_objects,
+        asset_warnings,
+        camera_metadata,
+        asset_imports,
+    )
     return 0
 
 
@@ -112,32 +122,58 @@ def _create_ground_plane(bpy, scene: dict) -> None:
     ground.data.materials.append(_material(bpy, "matte_ground", (0.72, 0.74, 0.74, 1)))
 
 
-def _create_tower(bpy, scene: dict, procedural_objects: list[str]) -> None:
+def _create_tower(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
     height = float(scene["tower"]["height_m"])
     characteristics = scene["tower"].get("characteristics", {})
     tower_type = scene["tower"]["asset_id"].lower()
     base_width = float(characteristics.get("base_width_m") or 4.0)
-    if "lattice" in tower_type:
-        _create_lattice_tower(bpy, height, characteristics)
-        procedural_objects.append("tower:lattice_procedural")
-    elif "monopole" in tower_type:
-        radius = base_width / 2
-        bpy.ops.mesh.primitive_cylinder_add(
-            vertices=32, radius=radius, depth=height, location=(0, 0, height / 2)
-        )
-        obj = bpy.context.object
-        obj.name = f"tower_{scene['tower']['asset_id']}"
-        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
-        procedural_objects.append("tower:monopole_procedural")
-    else:
-        radius = base_width / 2
-        bpy.ops.mesh.primitive_cylinder_add(
-            vertices=12, radius=radius, depth=height, location=(0, 0, height / 2)
-        )
-        obj = bpy.context.object
-        obj.name = f"tower_{scene['tower']['asset_id']}"
-        obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
-        procedural_objects.append("tower:generic_procedural")
+    tower_mode = _try_import_glb_asset(
+        bpy=bpy,
+        asset_id=scene["tower"]["asset_id"],
+        asset_file=scene["tower"].get("asset_file"),
+        asset_source=scene["tower"].get("asset_source"),
+        fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
+        object_role="tower",
+        object_name=f"tower_{scene['tower']['asset_id']}",
+        location=(0.0, 0.0, height / 2),
+        rotation=(0.0, 0.0, 0.0),
+        dimensions=scene["tower"].get("dimensions_m")
+        or {
+            "width": base_width,
+            "depth": base_width,
+            "height": height,
+        },
+        asset_imports=asset_imports,
+        warnings=asset_warnings,
+    )
+    if tower_mode != "imported_glb" and scene["tower"].get("import_fallback_allowed", True):
+        if "lattice" in tower_type:
+            _create_lattice_tower(bpy, height, characteristics)
+            procedural_objects.append("tower:lattice_procedural")
+        elif "monopole" in tower_type:
+            radius = base_width / 2
+            bpy.ops.mesh.primitive_cylinder_add(
+                vertices=32, radius=radius, depth=height, location=(0, 0, height / 2)
+            )
+            obj = bpy.context.object
+            obj.name = f"tower_{scene['tower']['asset_id']}"
+            obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
+            procedural_objects.append("tower:monopole_procedural")
+        else:
+            radius = base_width / 2
+            bpy.ops.mesh.primitive_cylinder_add(
+                vertices=12, radius=radius, depth=height, location=(0, 0, height / 2)
+            )
+            obj = bpy.context.object
+            obj.name = f"tower_{scene['tower']['asset_id']}"
+            obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
+            procedural_objects.append("tower:generic_procedural")
     _create_foundation(bpy, characteristics, procedural_objects)
     _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
@@ -246,7 +282,13 @@ def _create_tower_accessories(
         procedural_objects.append("tower_aviation_light")
 
 
-def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
+def _create_sectors(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
     characteristics = scene["tower"].get("characteristics", {})
     base_width = float(characteristics.get("base_width_m") or 4.0)
     mount_radius = base_width / 2 + 0.35
@@ -261,16 +303,49 @@ def _create_sectors(bpy, scene: dict, procedural_objects: list[str]) -> None:
         _create_mounting_bracket(bpy, mount_radius, azimuth, z)
         procedural_objects.append(f"mount_bracket:{sector['sector_id']}")
 
-        if "dish" in sector["antenna_asset_id"].lower():
-            _create_dish(bpy, sector, x, y, z, azimuth, tilt_deg)
-            procedural_objects.append(f"antenna_dish:{sector['sector_id']}")
-        else:
-            _create_panel_antenna(bpy, sector, x, y, z, azimuth, tilt_deg)
-            procedural_objects.append(f"antenna_panel:{sector['sector_id']}")
+        total_tilt = tilt_deg + float(sector.get("electrical_tilt_deg") or 0.0)
+        antenna_mode = _try_import_glb_asset(
+            bpy=bpy,
+            asset_id=sector["antenna_asset_id"],
+            asset_file=sector.get("antenna_asset_file"),
+            asset_source=sector.get("antenna_asset_source"),
+            fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
+            object_role="antenna",
+            object_name=f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}",
+            location=(x, y, z),
+            rotation=(-azimuth, math.radians(total_tilt), 0.0),
+            rotation_mode="ZXY",
+            dimensions=sector.get("antenna_dimensions_m"),
+            asset_imports=asset_imports,
+            warnings=asset_warnings,
+        )
+        if antenna_mode != "imported_glb" and sector.get("antenna_import_fallback_allowed", True):
+            if "dish" in sector["antenna_asset_id"].lower():
+                _create_dish(bpy, sector, x, y, z, azimuth, tilt_deg)
+                procedural_objects.append(f"antenna_dish:{sector['sector_id']}")
+            else:
+                _create_panel_antenna(bpy, sector, x, y, z, azimuth, tilt_deg)
+                procedural_objects.append(f"antenna_panel:{sector['sector_id']}")
 
         if sector.get("radio_asset_id"):
-            _create_radio(bpy, sector, x * 0.92, y * 0.92, z - 1.0)
-            procedural_objects.append(f"radio:{sector['sector_id']}")
+            radio_mode = _try_import_glb_asset(
+                bpy=bpy,
+                asset_id=sector["radio_asset_id"],
+                asset_file=sector.get("radio_asset_file"),
+                asset_source=sector.get("radio_asset_source"),
+                fallback_allowed=sector.get("radio_import_fallback_allowed", True),
+                object_role="radio",
+                object_name=f"radio_{sector['sector_id']}_{sector['radio_asset_id']}",
+                location=(x * 0.92, y * 0.92, z - 1.0),
+                rotation=(0.0, 0.0, 0.0),
+                rotation_mode="XYZ",
+                dimensions=sector.get("radio_dimensions_m"),
+                asset_imports=asset_imports,
+                warnings=asset_warnings,
+            )
+            if radio_mode != "imported_glb" and sector.get("radio_import_fallback_allowed", True):
+                _create_radio(bpy, sector, x * 0.92, y * 0.92, z - 1.0)
+                procedural_objects.append(f"radio:{sector['sector_id']}")
 
         if sector.get("include_cable"):
             _create_cable(bpy, sector["sector_id"], (x, y, z - 0.8), (0, 0, 0.5))
@@ -464,6 +539,171 @@ def _create_foundation(bpy, characteristics: dict, procedural_objects: list[str]
         procedural_objects.append("foundation_concrete_pad")
 
 
+def _try_import_glb_asset(
+    *,
+    bpy,
+    asset_id: str,
+    asset_file: str | None,
+    asset_source: str | None,
+    fallback_allowed: bool,
+    object_role: str,
+    object_name: str,
+    location: tuple[float, float, float],
+    rotation: tuple[float, float, float],
+    rotation_mode: str = "XYZ",
+    dimensions: dict | None = None,
+    asset_imports: list[dict],
+    warnings: list[str],
+) -> str:
+    path = _resolve_asset_path(asset_file)
+    record = _base_asset_import_record(
+        asset_id=asset_id,
+        asset_file=asset_file,
+        asset_source=asset_source,
+        object_role=object_role,
+        object_name=object_name,
+        path=path,
+        fallback_allowed=fallback_allowed,
+        dimensions=dimensions,
+    )
+    if path is None or not path.exists():
+        return _record_asset_import_fallback(
+            record,
+            asset_imports,
+            warnings,
+            "ASSET_FILE_MISSING",
+            fallback_allowed=fallback_allowed,
+        )
+
+    before_names = {obj.name for obj in bpy.data.objects}
+    try:
+        bpy.ops.import_scene.gltf(filepath=str(path))
+    except Exception as exc:
+        return _record_asset_import_fallback(
+            record,
+            asset_imports,
+            warnings,
+            f"ASSET_IMPORT_FAILED:{type(exc).__name__}",
+            fallback_allowed=fallback_allowed,
+        )
+
+    imported = [obj for obj in bpy.data.objects if obj.name not in before_names]
+    if not imported:
+        return _record_asset_import_fallback(
+            record,
+            asset_imports,
+            warnings,
+            "ASSET_IMPORT_EMPTY",
+            fallback_allowed=fallback_allowed,
+        )
+
+    for index, obj in enumerate(imported):
+        obj.name = object_name if len(imported) == 1 else f"{object_name}_{index + 1}"
+        obj.location = location
+        obj.rotation_mode = rotation_mode
+        obj.rotation_euler = rotation
+
+    dimensions_checked = False
+    if dimensions and len(imported) == 1:
+        imported_obj = imported[0]
+        imported_obj.dimensions = (
+            float(dimensions.get("width") or imported_obj.dimensions.x),
+            float(dimensions.get("depth") or imported_obj.dimensions.y),
+            float(dimensions.get("height") or imported_obj.dimensions.z),
+        )
+        bpy.ops.object.select_all(action="DESELECT")
+        imported_obj.select_set(True)
+        bpy.context.view_layer.objects.active = imported_obj
+        bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+        imported_obj.select_set(False)
+        dimensions_checked = True
+
+    record.update(
+        {
+            "asset_file_exists": True,
+            "asset_import_success": True,
+            "asset_dimensions_checked": dimensions_checked,
+            "import_mode": "imported_glb",
+            "effective_generation_mode": "imported_glb",
+            "imported_object_count": len(imported),
+            "imported_object_names": [obj.name for obj in imported],
+        }
+    )
+    if asset_source == "internal_test_minimal":
+        _append_warning(record["warnings"], "INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+        _append_warning(warnings, f"INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE:{asset_id}")
+    asset_imports.append(record)
+    return "imported_glb"
+
+
+def _resolve_asset_path(asset_file: str | None) -> Path | None:
+    if not asset_file:
+        return None
+    path = Path(asset_file)
+    if path.is_absolute():
+        return path
+    return Path.cwd() / path
+
+
+def _base_asset_import_record(
+    *,
+    asset_id: str,
+    asset_file: str | None,
+    asset_source: str | None,
+    object_role: str,
+    object_name: str,
+    path: Path | None,
+    fallback_allowed: bool,
+    dimensions: dict | None,
+) -> dict:
+    return {
+        "asset_id": asset_id,
+        "asset_file": asset_file,
+        "asset_source": asset_source or "vendor_expected",
+        "object_role": object_role,
+        "object_name": object_name,
+        "resolved_path": str(path) if path else None,
+        "asset_file_exists": bool(path and path.exists()),
+        "asset_import_success": False,
+        "asset_dimensions_checked": False,
+        "manifest_dimensions_m": dimensions,
+        "import_fallback_allowed": fallback_allowed,
+        "import_mode": "not_attempted",
+        "effective_generation_mode": "not_attempted",
+        "imported_object_count": 0,
+        "imported_object_names": [],
+        "warnings": [],
+    }
+
+
+def _record_asset_import_fallback(
+    record: dict,
+    asset_imports: list[dict],
+    warnings: list[str],
+    warning_code: str,
+    *,
+    fallback_allowed: bool,
+) -> str:
+    mode = "procedural_fallback" if fallback_allowed else "missing_file"
+    record.update(
+        {
+            "import_mode": mode,
+            "effective_generation_mode": mode,
+            "asset_import_success": False,
+        }
+    )
+    _append_warning(record["warnings"], warning_code)
+    _append_warning(warnings, f"{warning_code}:{record['asset_id']}")
+    if fallback_allowed:
+        _append_warning(record["warnings"], "PROCEDURAL_FALLBACK_USED")
+        _append_warning(warnings, f"PROCEDURAL_FALLBACK_USED:{record['asset_id']}")
+    else:
+        _append_warning(record["warnings"], "PROCEDURAL_FALLBACK_NOT_ALLOWED")
+        _append_warning(warnings, f"PROCEDURAL_FALLBACK_NOT_ALLOWED:{record['asset_id']}")
+    asset_imports.append(record)
+    return mode
+
+
 def _create_mounting_bracket(bpy, mount_radius: float, azimuth: float, z: float) -> None:
     steel = _material(bpy, "mount_steel", (0.42, 0.44, 0.46, 1))
     start = (
@@ -622,6 +862,7 @@ def _write_non_blender_fallback(scene: dict, output_dir: Path) -> None:
         _procedural_objects_from_scene(scene),
         ["Blender Python API not available; worker fallback artifact created."],
         _fallback_camera_metadata(scene),
+        _fallback_asset_import_records(scene),
     )
 
 
@@ -632,7 +873,19 @@ def _write_metadata(
     procedural_objects: list[str],
     warnings: list[str],
     camera_metadata: dict,
+    asset_imports: list[dict] | None = None,
 ) -> None:
+    asset_imports = asset_imports or _fallback_asset_import_records(scene)
+    all_warnings = _unique_strings(
+        [
+            *warnings,
+            *[
+                f"{warning}:{record['asset_id']}"
+                for record in asset_imports
+                for warning in record.get("warnings", [])
+            ],
+        ]
+    )
     (output_dir / "scene_metadata.json").write_text(
         json.dumps(
             {
@@ -641,6 +894,8 @@ def _write_metadata(
                 "generation_mode": generation_mode,
                 "assets_used": _assets_used(scene),
                 "procedural_objects_created": procedural_objects,
+                "asset_imports": asset_imports,
+                "asset_import_summary": _asset_import_summary(asset_imports),
                 "sector_count": len(scene["sectors"]),
                 "network_type": scene["network_type"],
                 "tower_height_m": scene["tower"]["height_m"],
@@ -648,7 +903,7 @@ def _write_metadata(
                 "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
                 "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
                 "preview_camera": camera_metadata,
-                "warnings": warnings,
+                "warnings": all_warnings,
             },
             indent=2,
         ),
@@ -691,9 +946,130 @@ def _procedural_objects_from_scene(scene: dict) -> list[str]:
             objects.append(f"azimuth_arrow:{sector['sector_id']}")
     if scene["visual_elements"].get("include_height_markers"):
         objects.append("height_marker")
+    if scene["visual_elements"].get("include_power_cabinet"):
+        objects.append("power_cabinet")
+    if scene["visual_elements"].get("include_gps_antenna"):
+        objects.append("gps_antenna")
     if scene["visual_elements"].get("include_labels"):
         objects.append("labels_metadata")
     return objects
+
+
+def _fallback_asset_import_records(scene: dict) -> list[dict]:
+    records = [
+        _fallback_asset_import_record(
+            asset_id=scene["tower"]["asset_id"],
+            asset_file=scene["tower"].get("asset_file"),
+            asset_source=scene["tower"].get("asset_source"),
+            object_role="tower",
+            object_name=f"tower_{scene['tower']['asset_id']}",
+            fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
+            dimensions=scene["tower"].get("dimensions_m")
+            or {
+                "height": scene["tower"].get("height_m"),
+                "width": scene["tower"].get("characteristics", {}).get("base_width_m"),
+                "depth": scene["tower"].get("characteristics", {}).get("base_width_m"),
+            },
+        )
+    ]
+    for sector in scene["sectors"]:
+        records.append(
+            _fallback_asset_import_record(
+                asset_id=sector["antenna_asset_id"],
+                asset_file=sector.get("antenna_asset_file"),
+                asset_source=sector.get("antenna_asset_source"),
+                object_role="antenna",
+                object_name=f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}",
+                fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
+                dimensions=sector.get("antenna_dimensions_m"),
+            )
+        )
+        if sector.get("radio_asset_id"):
+            records.append(
+                _fallback_asset_import_record(
+                    asset_id=sector["radio_asset_id"],
+                    asset_file=sector.get("radio_asset_file"),
+                    asset_source=sector.get("radio_asset_source"),
+                    object_role="radio",
+                    object_name=f"radio_{sector['sector_id']}_{sector['radio_asset_id']}",
+                    fallback_allowed=sector.get("radio_import_fallback_allowed", True),
+                    dimensions=sector.get("radio_dimensions_m"),
+                )
+            )
+    return records
+
+
+def _fallback_asset_import_record(
+    *,
+    asset_id: str,
+    asset_file: str | None,
+    asset_source: str | None,
+    object_role: str,
+    object_name: str,
+    fallback_allowed: bool,
+    dimensions: dict | None,
+) -> dict:
+    path = _resolve_asset_path(asset_file)
+    file_exists = bool(path and path.exists())
+    mode = "procedural_fallback" if fallback_allowed else "missing_file"
+    warnings = ["BLENDER_FALLBACK_ASSET_IMPORT_SKIPPED"]
+    if not file_exists:
+        warnings.append("ASSET_FILE_MISSING")
+    if asset_source == "internal_test_minimal":
+        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    if not fallback_allowed:
+        warnings.append("PROCEDURAL_FALLBACK_NOT_ALLOWED")
+    return {
+        "asset_id": asset_id,
+        "asset_file": asset_file,
+        "asset_source": asset_source or "vendor_expected",
+        "object_role": object_role,
+        "object_name": object_name,
+        "resolved_path": str(path) if path else None,
+        "asset_file_exists": file_exists,
+        "asset_import_success": False,
+        "asset_dimensions_checked": False,
+        "manifest_dimensions_m": dimensions,
+        "import_fallback_allowed": fallback_allowed,
+        "import_mode": mode,
+        "effective_generation_mode": mode,
+        "imported_object_count": 0,
+        "imported_object_names": [],
+        "warnings": warnings,
+    }
+
+
+def _asset_import_summary(asset_imports: list[dict]) -> dict:
+    modes: dict[str, int] = {}
+    for record in asset_imports:
+        mode = str(record.get("import_mode") or "unknown")
+        modes[mode] = modes.get(mode, 0) + 1
+    return {
+        "asset_count": len(asset_imports),
+        "imported_glb_count": modes.get("imported_glb", 0),
+        "procedural_fallback_count": modes.get("procedural_fallback", 0),
+        "missing_file_count": modes.get("missing_file", 0),
+        "import_success_count": sum(
+            1 for record in asset_imports if record.get("asset_import_success") is True
+        ),
+        "asset_file_exists_count": sum(
+            1 for record in asset_imports if record.get("asset_file_exists") is True
+        ),
+        "modes": modes,
+    }
+
+
+def _append_warning(warnings: list[str], warning: str) -> None:
+    if warning not in warnings:
+        warnings.append(warning)
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    unique = []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    return unique
 
 
 def _fallback_camera_metadata(scene: dict) -> dict:

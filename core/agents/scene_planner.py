@@ -51,7 +51,13 @@ class ScenePlanner:
             SectorSpec(
                 sector_id=f"S{index + 1}",
                 antenna_asset_id=antenna.asset_id,
+                antenna_asset_file=antenna.file,
+                antenna_asset_source=antenna.source,
+                antenna_import_fallback_allowed=antenna.import_fallback_allowed,
                 radio_asset_id=radio.asset_id if radio else None,
+                radio_asset_file=radio.file if radio else None,
+                radio_asset_source=radio.source if radio else None,
+                radio_import_fallback_allowed=radio.import_fallback_allowed if radio else True,
                 install_height_m=install_height,
                 azimuth_deg=azimuth,
                 mechanical_tilt_deg=requirements.mechanical_tilt_deg,
@@ -69,6 +75,9 @@ class ScenePlanner:
             network_type=requirements.network_type,
             tower=SceneAssetPlacement(
                 asset_id=tower.asset_id,
+                asset_file=tower.file,
+                asset_source=tower.source,
+                import_fallback_allowed=tower.import_fallback_allowed,
                 position=[0.0, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],

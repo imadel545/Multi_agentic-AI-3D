@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from core.contracts.common import AssetType, NetworkType, StrictModel
@@ -32,6 +34,10 @@ class AssetManifest(StrictModel):
     mount_zones: list[MountZone] = Field(default_factory=list)
     status: str = "validated"
     version: str = "1.0.0"
+    source: Literal["vendor_expected", "vendor_supplied", "internal_test_minimal"] = (
+        "vendor_expected"
+    )
+    import_fallback_allowed: bool = True
 
     @property
     def is_validated(self) -> bool:

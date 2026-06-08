@@ -41,6 +41,17 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["glb_inspection_summary"]["structural_qa_passed"] is True
         assert status["geometry_validation_summary"]["status"] == "passed"
         assert status["preview_inspection_summary"]["minimum_resolution_valid"] is True
+        assert status["asset_import_summary"]["asset_count"] >= 4
+        assert status["asset_import_summary"]["asset_file_exists_count"] >= 1
+        assert status["asset_imports"]
+        assert any(
+            record["asset_id"] == "ANT_PANEL_5G_001" and record["asset_file_exists"] is True
+            for record in status["asset_imports"]
+        )
+        assert all(
+            record["import_mode"] in {"imported_glb", "procedural_fallback", "missing_file"}
+            for record in status["asset_imports"]
+        )
         assert status["total_duration_ms"] >= 0
         assert status["total_workflow_duration_ms"] >= 0
         assert status["metrics"]["trace_steps"] >= 8
@@ -267,6 +278,10 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     payload = response.json()
     assert "asset_count" in payload
     assert "procedural_generation_required" in payload
+    assert payload["status"] == "partial_import_ready"
+    assert payload["real_glb_asset_count"] == 2
+    assert any(entry["asset_import_mode"] == "missing_file" for entry in payload["entries"])
+    assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
 
 
 def test_global_exception_handler_returns_json_500(tmp_path: Path) -> None:

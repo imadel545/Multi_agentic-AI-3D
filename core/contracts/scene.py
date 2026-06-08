@@ -9,6 +9,9 @@ from core.contracts.tower import TowerCharacteristics
 
 class SceneAssetPlacement(StrictModel):
     asset_id: str = Field(min_length=1)
+    asset_file: str | None = None
+    asset_source: str | None = None
+    import_fallback_allowed: bool = True
     position: list[float] = Field(min_length=3, max_length=3)
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
@@ -37,7 +40,13 @@ class SceneAssetPlacement(StrictModel):
 class SectorSpec(StrictModel):
     sector_id: str = Field(min_length=1)
     antenna_asset_id: str = Field(min_length=1)
+    antenna_asset_file: str | None = None
+    antenna_asset_source: str | None = None
+    antenna_import_fallback_allowed: bool = True
     radio_asset_id: str | None = None
+    radio_asset_file: str | None = None
+    radio_asset_source: str | None = None
+    radio_import_fallback_allowed: bool = True
     install_height_m: float = Field(gt=0)
     azimuth_deg: float = Field(ge=0, lt=360)
     mechanical_tilt_deg: float = Field(default=3.0, ge=-15, le=30)

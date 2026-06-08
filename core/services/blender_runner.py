@@ -170,13 +170,23 @@ class BlenderRunner:
             install_hint=install_hint,
         )
 
-    @staticmethod
-    def _write_fallback_artifacts(output_dir: Path, scene: SceneSpec, mode: str) -> None:
+    def _write_fallback_artifacts(self, output_dir: Path, scene: SceneSpec, mode: str) -> None:
         (output_dir / "design.glb").write_bytes(
             b"glTF fallback artifact generated from validated SceneSpec: " + scene.scene_id.encode()
         )
         width, height = scene.preview.resolution
         (output_dir / "preview.png").write_bytes(_minimal_png(width, height))
+        asset_imports = _fallback_asset_imports(scene, self.project_root)
+        warnings = _unique_strings(
+            [
+                _blender_install_hint(),
+                *[
+                    f"{warning}:{record['asset_id']}"
+                    for record in asset_imports
+                    for warning in record.get("warnings", [])
+                ],
+            ]
+        )
         (output_dir / "scene_metadata.json").write_text(
             json.dumps(
                 {
@@ -185,6 +195,8 @@ class BlenderRunner:
                     "generation_mode": mode,
                     "assets_used": _assets_used(scene),
                     "procedural_objects_created": _procedural_objects(scene),
+                    "asset_imports": asset_imports,
+                    "asset_import_summary": _asset_import_summary(asset_imports),
                     "sector_count": len(scene.sectors),
                     "network_type": scene.network_type,
                     "tower_height_m": scene.tower.height_m,
@@ -192,7 +204,7 @@ class BlenderRunner:
                     "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                     "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
                     "preview_camera": _preview_camera_metadata(scene),
-                    "warnings": [_blender_install_hint()],
+                    "warnings": warnings,
                 },
                 indent=2,
             ),
@@ -257,6 +269,134 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
     if scene.visual_elements.include_labels:
         objects.append("labels_metadata")
     return objects
+
+
+def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
+    records = [
+        _fallback_asset_import_record(
+            project_root=project_root,
+            asset_id=scene.tower.asset_id,
+            asset_file=scene.tower.asset_file,
+            asset_source=scene.tower.asset_source,
+            object_role="tower",
+            object_name=f"tower_{scene.tower.asset_id}",
+            fallback_allowed=scene.tower.import_fallback_allowed,
+            dimensions={
+                "height": scene.tower.height_m,
+                "width": scene.tower.characteristics.base_width_m,
+                "depth": scene.tower.characteristics.base_width_m,
+            },
+        )
+    ]
+    for sector in scene.sectors:
+        records.append(
+            _fallback_asset_import_record(
+                project_root=project_root,
+                asset_id=sector.antenna_asset_id,
+                asset_file=sector.antenna_asset_file,
+                asset_source=sector.antenna_asset_source,
+                object_role="antenna",
+                object_name=f"antenna_{sector.sector_id}_{sector.antenna_asset_id}",
+                fallback_allowed=sector.antenna_import_fallback_allowed,
+                dimensions=sector.antenna_dimensions_m.model_dump()
+                if sector.antenna_dimensions_m
+                else None,
+            )
+        )
+        if sector.radio_asset_id:
+            records.append(
+                _fallback_asset_import_record(
+                    project_root=project_root,
+                    asset_id=sector.radio_asset_id,
+                    asset_file=sector.radio_asset_file,
+                    asset_source=sector.radio_asset_source,
+                    object_role="radio",
+                    object_name=f"radio_{sector.sector_id}_{sector.radio_asset_id}",
+                    fallback_allowed=sector.radio_import_fallback_allowed,
+                    dimensions=sector.radio_dimensions_m.model_dump()
+                    if sector.radio_dimensions_m
+                    else None,
+                )
+            )
+    return records
+
+
+def _fallback_asset_import_record(
+    *,
+    project_root: Path,
+    asset_id: str,
+    asset_file: str | None,
+    asset_source: str | None,
+    object_role: str,
+    object_name: str,
+    fallback_allowed: bool,
+    dimensions: dict | None,
+) -> dict:
+    path = _resolve_asset_path(project_root, asset_file)
+    file_exists = bool(path and path.exists())
+    mode = "procedural_fallback" if fallback_allowed else "missing_file"
+    warnings = ["BLENDER_FALLBACK_ASSET_IMPORT_SKIPPED"]
+    if not file_exists:
+        warnings.append("ASSET_FILE_MISSING")
+    if asset_source == "internal_test_minimal":
+        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    if not fallback_allowed:
+        warnings.append("PROCEDURAL_FALLBACK_NOT_ALLOWED")
+    return {
+        "asset_id": asset_id,
+        "asset_file": asset_file,
+        "asset_source": asset_source or "vendor_expected",
+        "object_role": object_role,
+        "object_name": object_name,
+        "resolved_path": str(path) if path else None,
+        "asset_file_exists": file_exists,
+        "asset_import_success": False,
+        "asset_dimensions_checked": False,
+        "manifest_dimensions_m": dimensions,
+        "import_fallback_allowed": fallback_allowed,
+        "import_mode": mode,
+        "effective_generation_mode": mode,
+        "imported_object_count": 0,
+        "imported_object_names": [],
+        "warnings": warnings,
+    }
+
+
+def _resolve_asset_path(project_root: Path, asset_file: str | None) -> Path | None:
+    if not asset_file:
+        return None
+    path = Path(asset_file)
+    if path.is_absolute():
+        return path
+    return project_root / path
+
+
+def _asset_import_summary(asset_imports: list[dict]) -> dict:
+    modes: dict[str, int] = {}
+    for record in asset_imports:
+        mode = str(record.get("import_mode") or "unknown")
+        modes[mode] = modes.get(mode, 0) + 1
+    return {
+        "asset_count": len(asset_imports),
+        "imported_glb_count": modes.get("imported_glb", 0),
+        "procedural_fallback_count": modes.get("procedural_fallback", 0),
+        "missing_file_count": modes.get("missing_file", 0),
+        "import_success_count": sum(
+            1 for record in asset_imports if record.get("asset_import_success") is True
+        ),
+        "asset_file_exists_count": sum(
+            1 for record in asset_imports if record.get("asset_file_exists") is True
+        ),
+        "modes": modes,
+    }
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    unique = []
+    for value in values:
+        if value not in unique:
+            unique.append(value)
+    return unique
 
 
 def _preview_camera_metadata(scene: SceneSpec) -> dict:

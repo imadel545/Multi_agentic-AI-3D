@@ -21,6 +21,12 @@ Completed:
   - height marker;
   - GPS antenna and power cabinet only when `SceneSpec.visual_elements` explicitly enables them;
   - metadata labels.
+- The worker imports manifest-backed GLB assets when the referenced file exists and import succeeds.
+  Current imported internal test assets are:
+  - `ANT_PANEL_5G_001`
+  - `RRU_SMALL_001`
+- Missing or failed imports use controlled procedural fallback only when
+  `import_fallback_allowed = true`.
 - Real Blender output is `generation_mode = real_blender`.
 - Missing Blender output is `generation_mode = fallback_no_blender`.
 - Runner verifies required artifacts after Blender exits.
@@ -67,6 +73,8 @@ Metadata fields:
 - `generation_mode`
 - `assets_used`
 - `procedural_objects_created`
+- `asset_imports`
+- `asset_import_summary`
 - `sector_count`
 - `network_type`
 - `tower_height_m`
@@ -75,10 +83,18 @@ Metadata fields:
 - `antenna_heights_m`
 - `warnings`
 
+Each `asset_imports` entry includes `asset_id`, `asset_file`, `asset_source`,
+`asset_file_exists`, `asset_import_success`, `asset_dimensions_checked`, `import_mode`,
+`effective_generation_mode`, imported object names, and warnings.
+
 Known limitations:
 
-- The worker currently generates procedural primitives, not imported vendor GLB assets.
-- `GET /assets/inventory` exposes whether manifests have real GLB files available for import.
+- The worker imports available GLBs, but the current GLB files are internal minimal test assets,
+  not vendor-grade assets.
+- Tower, 4G panel, and microwave dish GLB files are still missing and therefore use visible
+  procedural fallback when allowed.
+- `GET /assets/inventory` exposes whether manifests have real GLB files available for import and
+  whether fallback will be needed.
 - GPS antenna and power cabinet are procedural helper objects until real assets/manifests are added
   for them.
 - GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and

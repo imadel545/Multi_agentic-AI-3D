@@ -21,12 +21,17 @@
   per-version artifacts, event log, active version pointer, and rollback.
 - API fixes for `/assets/inventory`, JSON exception handling, and unknown SSE workflow handling.
 - RAG/memory planning hardening through structured hints and `error_patterns`.
+- Asset pipeline MVP: inventory detects present/missing GLBs, two internal minimal GLBs are present,
+  Blender imports available GLBs, procedural fallback is explicit, and API status exposes asset
+  import metadata.
 
 ## Available With Fallback
 
 - Groq extraction falls back to deterministic parser.
 - FastEmbed setting falls back to deterministic hashing if FastEmbed is not installed.
 - Blender generation falls back explicitly if Blender is absent or fails.
+- Missing asset files fall back to procedural geometry only when the manifest allows it, and the
+  fallback is visible in `scene_metadata.json`, QA, and API status.
 - GLB inspection falls back to `metadata_fallback` only for explicit non-GLB fallback artifacts
   with `scene_metadata.json`.
 
@@ -37,12 +42,13 @@
 
 ## Future
 
-- Replace procedural geometry with validated GLB asset imports.
+- Replace internal minimal GLBs and missing manifests with vendor-grade GLB assets.
+- Add exact imported-asset bounding-box, pivot, mount-point, material, and LOD validation.
 - Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
 - Add frontend React/Three.js viewer.
 - Add non-committed edit preview/apply workflow if the frontend needs preview before activation.
 - Add richer Qdrant payload filters and semantic embeddings as default.
 - Add comparative design variants.
-- Add exact GLB transform, bounding-box, and material validation.
+- Add exact GLB transform, bounding-box, and material validation for imported vendor assets.
 - Add rendered preview visual semantic checks.
 - Add dedicated manifest-backed GPS/power-cabinet assets and QA checks.

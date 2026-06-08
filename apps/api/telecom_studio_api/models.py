@@ -38,6 +38,8 @@ class WorkflowStatus(BaseModel):
     glb_inspection_summary: dict | None = None
     geometry_validation_summary: dict | None = None
     preview_inspection_summary: dict | None = None
+    asset_import_summary: dict | None = None
+    asset_imports: list[dict] | None = None
     structural_qa_passed: bool | None = None
     expected_objects_present: bool | None = None
     total_duration_ms: int | None = None

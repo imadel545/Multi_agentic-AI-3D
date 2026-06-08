@@ -202,6 +202,7 @@ class DesignOrchestrator:
         }
         try:
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
+            scene = _scene_with_asset_metadata(scene, selected_assets)
             requirements = _requirements_from_scene(scene, tower, antenna, radio, detail_level)
         except (KeyError, ValueError) as exc:
             report = _failed_report(
@@ -229,6 +230,8 @@ class DesignOrchestrator:
             {
                 "requirements": requirements,
                 "requirements_hash": requirements_hash(requirements),
+                "scene": scene,
+                "scene_spec_hash": scene_spec_hash(scene),
                 "tower": tower,
                 "antenna": antenna,
                 "radio": radio,
@@ -1056,6 +1059,37 @@ def _unique_assets(assets: list[AssetManifest]) -> list[AssetManifest]:
     for asset in assets:
         unique[asset.asset_id] = asset
     return list(unique.values())
+
+
+def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) -> SceneSpec:
+    assets_by_id = {asset.asset_id: asset for asset in assets}
+    tower_asset = assets_by_id[scene.tower.asset_id]
+    tower = scene.tower.model_copy(
+        update={
+            "asset_file": tower_asset.file,
+            "asset_source": tower_asset.source,
+            "import_fallback_allowed": tower_asset.import_fallback_allowed,
+        }
+    )
+    sectors = []
+    for sector in scene.sectors:
+        antenna_asset = assets_by_id[sector.antenna_asset_id]
+        radio_asset = assets_by_id.get(sector.radio_asset_id) if sector.radio_asset_id else None
+        sectors.append(
+            sector.model_copy(
+                update={
+                    "antenna_asset_file": antenna_asset.file,
+                    "antenna_asset_source": antenna_asset.source,
+                    "antenna_import_fallback_allowed": antenna_asset.import_fallback_allowed,
+                    "radio_asset_file": radio_asset.file if radio_asset else None,
+                    "radio_asset_source": radio_asset.source if radio_asset else None,
+                    "radio_import_fallback_allowed": radio_asset.import_fallback_allowed
+                    if radio_asset
+                    else True,
+                }
+            )
+        )
+    return scene.model_copy(update={"tower": tower, "sectors": sectors})
 
 
 def _asset_route(state: WorkflowState) -> str:

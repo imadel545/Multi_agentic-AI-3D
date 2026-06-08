@@ -14,6 +14,8 @@ This repository currently implements the local-first controlled generation pipel
 - Durable SQLite memory for workflow recall and writeback.
 - Rule engine and SceneSpec validator.
 - Local asset manifest registry.
+- Asset inventory/import metadata with explicit `imported_glb`, `procedural_fallback`, and
+  `missing_file` modes.
 - FastAPI endpoints for design creation, status, validation, assets, and artifact download.
 - Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
   rollback, and event logging.
@@ -73,7 +75,7 @@ Implemented:
 
 - `POST /designs`: start a design workflow.
 - `GET /designs/{workflow_id}`: active workflow/version status, reports, artifacts, QA summaries,
-  LLM provider/fallback state, RAG/memory counts, and download URL.
+  LLM provider/fallback state, RAG/memory counts, asset import summary, and download URL.
   A pending status file is available immediately after creation, so polling does not need to
   tolerate a transient `404`.
 - `GET /designs/{workflow_id}/events`: agentic event log.
@@ -84,7 +86,8 @@ Implemented:
   generation mode, and diff summary.
 - `POST /designs/{workflow_id}/versions/{version_id}/rollback`: set an existing version active
   without deleting history.
-- `GET /assets/inventory`: manifest-only/import-readiness inventory.
+- `GET /assets/inventory`: GLB readiness inventory with missing/present files, source, fallback
+  policy, and warnings.
 
 Available with fallback:
 
@@ -94,8 +97,11 @@ Available with fallback:
 
 Known limitations:
 
-- The current asset library is manifest-only; referenced vendor GLB files are not in the repo.
-- The Blender worker generates controlled procedural geometry until real GLB assets are added.
+- The current asset library is only `partial_import_ready`: internal minimal GLBs exist for the
+  5G panel antenna and RRU, while vendor tower, 4G panel, and microwave dish GLBs are still missing.
+- Internal minimal GLBs prove the import pipeline but are not vendor-grade.
+- The Blender worker imports available GLBs and uses controlled procedural fallback for missing
+  assets only when fallback is allowed and visible in metadata.
 - Preview QA is structural/image-stat based, not semantic visual judging.
 
 ## Core flow
@@ -133,8 +139,7 @@ edit prompt
 → active version switch only on success
 ```
 
-FastEmbed/BGE-M3 and richer Blender asset imports remain extension points. Qdrant,
-Groq structured extraction, LangGraph orchestration, controlled Blender execution, and
-generation QA are implemented. SQLite memory is stored under `data/sqlite` by default.
-Current asset files are manifest-only; the Blender worker uses controlled procedural geometry until
-real GLB assets are added.
+FastEmbed/BGE-M3 and vendor-grade Blender assets remain extension points. Qdrant,
+Groq structured extraction, LangGraph orchestration, controlled Blender execution, GLB import
+metadata, and generation QA are implemented. SQLite memory is stored under `data/sqlite` by
+default.

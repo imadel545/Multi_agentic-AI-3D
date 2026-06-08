@@ -21,6 +21,9 @@ Current checks:
   before the version becomes active.
 - Non-fake visual asset checks: GPS antenna and power cabinet are disabled by default and appear
   only when requested or patched explicitly.
+- Asset import QA: generation metadata must include import records, valid import modes, import
+  success evidence for `imported_glb`, visible warnings for procedural fallback, and no
+  `missing_file` record without allowed fallback.
 - Golden scene fixture for `golden_5g_lattice_30m_3sector`.
 - Pytest coverage for parsing, registry selection, validation, API flow, RAG, Groq fallback,
   LangGraph orchestration, Blender fallback, edit/version artifacts, API errors, and golden scene
@@ -55,6 +58,7 @@ Future:
 
 - Add visual semantic inspection of rendered previews.
 - Add GLB parser checks for transforms, bounding boxes, and material assignment.
+- Tighten vendor GLB dimension/material validation once real vendor assets are available.
 
 Known limitations:
 
@@ -77,6 +81,8 @@ Implemented:
   resolution, luminance, contrast, and non-dark pixel ratio.
 - `glb_inspection.json` and `preview_inspection.json` are written for completed generation runs.
 - `geometry_validation.json` is written for completed generation runs.
+- `qa_report.json` includes asset import metadata checks, so a missing non-fallback asset fails
+  generation QA instead of silently passing.
 
 ## Geometry 3D QA
 
@@ -116,12 +122,14 @@ Future:
 
 - Validate GLB node transforms and rough object placement.
 - Validate object dimensions against asset manifests.
+- Validate imported GLB bounding boxes directly against `dimensions_m`.
 
 Known limitations:
 
 - GLB parsing currently inspects JSON structure only.
 - Preview inspection validates PNG dimensions and basic visibility metrics, not full aesthetic or
   semantic visual correctness.
+- Current imported GLBs are internal minimal assets, not vendor-grade assets.
 
 ## Golden Scenes
 
