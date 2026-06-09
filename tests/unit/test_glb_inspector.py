@@ -79,6 +79,18 @@ def test_glb_inspection_detects_missing_expected_objects(tmp_path: Path) -> None
     assert "EXPECTED_GLB_OBJECTS_MISSING" in report.critical_errors
 
 
+def test_glb_inspector_requires_requested_accessories(tmp_path: Path) -> None:
+    scene = _accessory_scene()
+    glb_path = tmp_path / "design.glb"
+    _write_test_glb(glb_path, _expected_object_names(scene))
+
+    report = GLBInspector().inspect(glb_path, scene, None)
+
+    assert report.structural_qa_passed is True
+    assert report.checks["has_gps_antenna"] is True
+    assert report.checks["has_power_cabinet"] is True
+
+
 def test_preview_inspector_valid_png(tmp_path: Path) -> None:
     scene = _scene()
     preview_path = tmp_path / "preview.png"
@@ -134,6 +146,31 @@ def _scene():
     return ScenePlanner().build_scene_spec("wf_glb_inspection", requirements, tower, antenna, radio)
 
 
+def _accessory_scene():
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter GPS et armoire énergie."
+    ).model_copy(update={"include_gps_antenna": True, "include_power_cabinet": True})
+    registry = AssetRegistry(Path("assets/manifests"))
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    gps = registry.select_asset("gps", requirements.network_type, requirements.tower_type)
+    cabinet = registry.select_asset("cabinet", requirements.network_type, requirements.tower_type)
+    return ScenePlanner().build_scene_spec(
+        "wf_glb_inspection_accessories",
+        requirements,
+        tower,
+        antenna,
+        radio,
+        accessory_assets=[gps, cabinet],
+    )
+
+
 def _expected_object_names(scene) -> list[str]:
     names = ["tower_lattice"]
     for sector in scene.sectors:
@@ -146,6 +183,11 @@ def _expected_object_names(scene) -> list[str]:
                 f"azimuth_arrow_{sector.sector_id}",
             ]
         )
+    for accessory in scene.accessory_assets:
+        if accessory.asset_type == "gps":
+            names.append(f"gps_antenna_{accessory.asset_id}")
+        if accessory.asset_type == "cabinet":
+            names.append(f"power_cabinet_{accessory.asset_id}")
     return names
 
 

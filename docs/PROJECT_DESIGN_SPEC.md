@@ -41,11 +41,13 @@ matches or by decorative defaults.
 - `ProjectDesignSpec` is still mapped to `RequirementSpec` before SceneSpec planning; direct
   SceneSpec synthesis from `ProjectDesignSpec` is future work.
 - Antenna/cabinet inventories are still minimal and do not yet preserve vendor-grade equipment rows.
-- GPS antenna and power cabinet can be enabled from confirmed document evidence, but the Blender
-  worker still generates those accessory objects procedurally rather than importing the accessory
-  GLBs as manifest-backed placements.
+- GPS antenna and power cabinet can be enabled from confirmed document evidence and are carried as
+  manifest-backed SceneSpec accessory placements. When their GLB files exist, the Blender worker
+  imports them and reports `imported_glb`.
 - Per-sector mechanical tilt is not represented by `RequirementSpec`; non-uniform sector tilt
   remains a future SceneSpec-direct mapping case.
+- `mapping_loss_report` is returned with pack-to-design mapping so the frontend can distinguish
+  `mapped`, `not_modeled`, `missing`, `conflict`, `fallback`, and `lost_field`.
 
 ## Future
 

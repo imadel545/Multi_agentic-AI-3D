@@ -24,6 +24,8 @@ class GLBGeometryValidator:
         expected_cables = sum(1 for sector in scene.sectors if sector.include_cable)
         expected_beams = len(scene.sectors) if scene.visual_elements.include_sector_beams else 0
         expected_arrows = len(scene.sectors) if scene.visual_elements.include_azimuth_arrows else 0
+        expected_cabinets = 1 if scene.visual_elements.include_power_cabinet else 0
+        expected_gps = 1 if scene.visual_elements.include_gps_antenna else 0
         missing_objects = _missing_sector_objects(scene, object_names)
 
         checks = {
@@ -35,6 +37,10 @@ class GLBGeometryValidator:
             "azimuth_arrow_count_valid": _count_matches_option(
                 counts["azimuth_arrow"], expected_arrows
             ),
+            "power_cabinet_count_valid": _count_matches_option(
+                counts["power_cabinet"], expected_cabinets
+            ),
+            "gps_antenna_count_valid": _count_matches_option(counts["gps"], expected_gps),
             "sector_objects_present": not missing_objects,
             "object_names_match_scene_spec": _object_names_match_scene(
                 scene,
@@ -49,6 +55,7 @@ class GLBGeometryValidator:
             ),
             "approx_antenna_height_valid": _approx_antenna_heights_valid(scene, metadata),
             "azimuth_metadata_valid": _azimuths_valid(scene, metadata),
+            "mechanical_tilt_metadata_valid": _mechanical_tilts_valid(scene, metadata),
             "bounding_box_reasonable": _bounding_box_reasonable(
                 scene,
                 metadata,
@@ -80,6 +87,8 @@ def _object_counts(object_names: list[str]) -> dict[str, int]:
         "cable": _count(normalized, ("cable",)),
         "beam": _count(normalized, ("sector_beam", "beam")),
         "azimuth_arrow": _count(normalized, ("azimuth_arrow",)),
+        "power_cabinet": _count(normalized, ("power_cabinet", "cabinet")),
+        "gps": _count(normalized, ("gps_antenna", "gps")),
     }
 
 
@@ -119,6 +128,14 @@ def _missing_sector_objects(scene: SceneSpec, object_names: list[str]) -> list[s
             sector_token,
         ):
             missing.append(f"beam:{sector.sector_id}")
+    if scene.visual_elements.include_power_cabinet and not _has_object(
+        normalized, ("power_cabinet", "cabinet")
+    ):
+        missing.append("power_cabinet")
+    if scene.visual_elements.include_gps_antenna and not _has_object(
+        normalized, ("gps_antenna", "gps")
+    ):
+        missing.append("gps_antenna")
     return missing
 
 
@@ -130,6 +147,14 @@ def _has_sector_object(
     return any(
         sector_token in name
         and not _is_auxiliary_object(name)
+        and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
+        for name in normalized_names
+    )
+
+
+def _has_object(normalized_names: list[str], prefixes: tuple[str, ...]) -> bool:
+    return any(
+        not _is_auxiliary_object(name)
         and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
         for name in normalized_names
     )
@@ -153,6 +178,8 @@ def _object_names_match_scene(
         expected_asset_ids.add(sector.antenna_asset_id)
         if sector.radio_asset_id:
             expected_asset_ids.add(sector.radio_asset_id)
+    for accessory in scene.accessory_assets:
+        expected_asset_ids.add(accessory.asset_id)
     metadata_assets = {_normalize(asset_id) for asset_id in metadata.get("assets_used", [])}
     return all(
         _normalize(asset_id) in metadata_assets
@@ -199,6 +226,19 @@ def _azimuths_valid(scene: SceneSpec, metadata: dict) -> bool:
     return all(
         _angular_delta(float(actual), target) <= AZIMUTH_TOLERANCE_DEG
         for actual, target in zip(parsed, expected, strict=True)
+    )
+
+
+def _mechanical_tilts_valid(scene: SceneSpec, metadata: dict) -> bool:
+    values = metadata.get("mechanical_tilts_deg")
+    if not isinstance(values, list) or len(values) != len(scene.sectors):
+        return False
+    expected = [sector.mechanical_tilt_deg for sector in scene.sectors]
+    parsed = [_number(value) for value in values]
+    if any(value is None for value in parsed):
+        return False
+    return all(
+        abs(float(actual) - target) <= 0.05 for actual, target in zip(parsed, expected, strict=True)
     )
 
 

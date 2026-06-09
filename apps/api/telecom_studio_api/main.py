@@ -443,6 +443,7 @@ def generate_design_from_document_pack(pack_id: str) -> dict:
             "prompt_text_reparse": False,
             "provider": "project_design_spec",
             "fallback_used": False,
+            "mapping_loss_report": mapping.mapping_loss_report,
         },
         **design,
     }

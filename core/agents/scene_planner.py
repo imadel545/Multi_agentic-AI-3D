@@ -2,6 +2,7 @@ from core.contracts.assets import AssetManifest
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import (
     RuntimeAssetMetadata,
+    SceneAccessoryPlacement,
     SceneAssetPlacement,
     SceneSpec,
     SectorSpec,
@@ -17,6 +18,7 @@ class ScenePlanner:
         tower: AssetManifest,
         antenna: AssetManifest,
         radio: AssetManifest | None,
+        accessory_assets: list[AssetManifest] | None = None,
         rag_context: list[dict] | None = None,
         memory_recall: dict | None = None,
     ) -> SceneSpec:
@@ -100,6 +102,11 @@ class ScenePlanner:
             ),
             sectors=sectors,
             visual_elements=visual_elements,
+            accessory_assets=_accessory_placements(
+                requirements=requirements,
+                tower=tower,
+                assets=accessory_assets or [],
+            ),
         )
 
 
@@ -113,6 +120,62 @@ def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
         normalized_by=asset.normalized_by,
         pivot_policy=asset.pivot_policy,
         front_axis=asset.front_axis,
+    )
+
+
+def _accessory_placements(
+    *,
+    requirements: RequirementSpec,
+    tower: AssetManifest,
+    assets: list[AssetManifest],
+) -> list[SceneAccessoryPlacement]:
+    placements: list[SceneAccessoryPlacement] = []
+    assets_by_type = {asset.type: asset for asset in assets}
+    base_width = (
+        requirements.tower_characteristics.base_width_m
+        or (tower.dimensions_m.width if tower.dimensions_m else 4.0)
+        or 4.0
+    )
+    if requirements.include_power_cabinet and (cabinet := assets_by_type.get("cabinet")):
+        offset = max(3.0, float(base_width) * 1.2)
+        placements.append(
+            _accessory_placement(
+                cabinet,
+                asset_type="cabinet",
+                position=[offset, 0.0, 0.8],
+                rotation_deg=[0.0, 0.0, 0.0],
+            )
+        )
+    if requirements.include_gps_antenna and (gps := assets_by_type.get("gps")):
+        mount_radius = float(base_width) / 2 + 0.1
+        placements.append(
+            _accessory_placement(
+                gps,
+                asset_type="gps",
+                position=[0.0, mount_radius, max(0.5, requirements.tower_height_m - 0.5)],
+                rotation_deg=[0.0, 0.0, 0.0],
+            )
+        )
+    return placements
+
+
+def _accessory_placement(
+    asset: AssetManifest,
+    *,
+    asset_type: str,
+    position: list[float],
+    rotation_deg: list[float],
+) -> SceneAccessoryPlacement:
+    return SceneAccessoryPlacement(
+        asset_id=asset.asset_id,
+        asset_file=asset.file,
+        asset_source=asset.source,
+        asset_metadata=_runtime_asset_metadata(asset),
+        import_fallback_allowed=asset.import_fallback_allowed,
+        asset_type=asset_type,  # type: ignore[arg-type]
+        dimensions_m=asset.dimensions_m,
+        position=position,
+        rotation_deg=rotation_deg,
     )
 
 

@@ -19,8 +19,9 @@ Current checks:
 - Asset fallback QA for compatible tower/antenna selection and explicit fallback failure.
 - Edit/revision QA: prompt edits create a patch, diff, version artifact directory, and full QA rerun
   before the version becomes active.
-- Non-fake visual asset checks: GPS antenna and power cabinet are disabled by default and appear
-  only when requested or patched explicitly.
+- Non-fake visual asset checks: GPS antenna and power cabinet are disabled by default, appear only
+  when requested/patched/confirmed by document evidence, and require manifest-backed accessory
+  placements for SceneSpec validation.
 - Asset import QA: generation metadata must include import records, valid import modes, import
   success evidence for `imported_glb`, visible warnings for procedural fallback, and no
   `missing_file` record without allowed fallback.
@@ -70,8 +71,7 @@ Known limitations:
 - Gates validate contracts and artifacts, not visual aesthetics.
 - Real Blender model size threshold is a local minimum byte-size guard.
 - `metadata_fallback` validates expected procedural object metadata, not GLB binary structure.
-- GPS/power-cabinet presence is generated and reported through metadata/procedural objects, but
-  dedicated geometry count gates for those accessories remain future work.
+- GPS/power-cabinet presence is checked by GLB inspection and geometry validation when requested.
 - Document-pack QA validates selected OCR and DXF extraction when the local adapters are available,
   but it does not yet validate OCR layout bounding boxes or CAD geometry dimensions.
 
@@ -80,8 +80,8 @@ Known limitations:
 Implemented:
 
 - `GLBInspector` parses GLB/GLTF JSON and extracts node, mesh, material, and object names.
-- The inspector verifies expected tower, antenna, radio/RRU, cable, beam, and azimuth-arrow
-  objects from the SceneSpec.
+- The inspector verifies expected tower, antenna, radio/RRU, cable, beam, azimuth-arrow, GPS, and
+  power-cabinet objects from the SceneSpec.
 - Empty, missing, or malformed GLB files fail structural QA unless explicit metadata fallback is
   available.
 - `PreviewInspector` parses PNG headers and verifies width/height against SceneSpec preview
@@ -101,6 +101,8 @@ Implemented:
   - beam count
   - RRU count
   - cable count
+  - GPS antenna count
+  - power cabinet count
   - azimuth-arrow count
   - sector object presence
   - object names/metadata match the SceneSpec assets
@@ -108,6 +110,7 @@ Implemented:
   - tower characteristics metadata matches the SceneSpec
   - antenna heights within `0.5m`
   - azimuth metadata within `5deg`
+  - mechanical tilt metadata
   - bounding box reasonableness
 - Geometry QA is included in `validation_report.json`, `quality_gates.json`,
   `workflow_trace.json`, API status, and `geometry_validation.json`.

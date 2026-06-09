@@ -37,9 +37,9 @@ def main() -> int:
     _create_height_marker(bpy, scene, procedural_objects)
     _create_sectors(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_power_cabinet", False):
-        _create_power_cabinet(bpy, scene, procedural_objects)
+        _create_power_cabinet(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_gps_antenna", False):
-        _create_gps_antenna(bpy, scene, procedural_objects)
+        _create_gps_antenna(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     camera_metadata = _create_camera_and_light(bpy, scene)
 
     glb_path = output_dir / "design.glb"
@@ -488,10 +488,35 @@ def _create_azimuth_arrow(bpy, sector_id: str, azimuth: float, z: float) -> None
     head.data.materials.append(material)
 
 
-def _create_power_cabinet(bpy, scene: dict, procedural_objects: list[str]) -> None:
+def _create_power_cabinet(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
     base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
     # Place cabinet a few meters away from tower base
     offset = max(3.0, base_width * 1.2)
+    accessory = _accessory_asset(scene, "cabinet")
+    if accessory:
+        mode = _try_import_glb_asset(
+            bpy=bpy,
+            asset_id=accessory["asset_id"],
+            asset_file=accessory.get("asset_file"),
+            asset_source=accessory.get("asset_source"),
+            asset_metadata=accessory.get("asset_metadata"),
+            fallback_allowed=accessory.get("import_fallback_allowed", True),
+            object_role="cabinet",
+            object_name=f"power_cabinet_{accessory['asset_id']}",
+            location=tuple(accessory.get("position") or [offset, 0.0, 0.8]),
+            rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
+            dimensions=accessory.get("dimensions_m"),
+            asset_imports=asset_imports,
+            warnings=asset_warnings,
+        )
+        if mode == "imported_glb" or not accessory.get("import_fallback_allowed", True):
+            return
     bpy.ops.mesh.primitive_cube_add(size=1, location=(offset, 0, 0.9))
     cabinet = bpy.context.object
     cabinet.name = "power_cabinet_dc"
@@ -506,12 +531,37 @@ def _create_power_cabinet(bpy, scene: dict, procedural_objects: list[str]) -> No
     procedural_objects.append("power_cabinet")
 
 
-def _create_gps_antenna(bpy, scene: dict, procedural_objects: list[str]) -> None:
+def _create_gps_antenna(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
     height = float(scene["tower"]["height_m"])
     # GPS typically mounted near tower top
     z = height - 0.5
     base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
     mount_radius = base_width / 2 + 0.1
+    accessory = _accessory_asset(scene, "gps")
+    if accessory:
+        mode = _try_import_glb_asset(
+            bpy=bpy,
+            asset_id=accessory["asset_id"],
+            asset_file=accessory.get("asset_file"),
+            asset_source=accessory.get("asset_source"),
+            asset_metadata=accessory.get("asset_metadata"),
+            fallback_allowed=accessory.get("import_fallback_allowed", True),
+            object_role="gps",
+            object_name=f"gps_antenna_{accessory['asset_id']}",
+            location=tuple(accessory.get("position") or [0.0, mount_radius, z + 0.64]),
+            rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
+            dimensions=accessory.get("dimensions_m"),
+            asset_imports=asset_imports,
+            warnings=asset_warnings,
+        )
+        if mode == "imported_glb" or not accessory.get("import_fallback_allowed", True):
+            return
     bpy.ops.mesh.primitive_cylinder_add(
         vertices=16, radius=0.04, depth=0.6, location=(0, mount_radius, z + 0.3)
     )
@@ -527,6 +577,17 @@ def _create_gps_antenna(bpy, scene: dict, procedural_objects: list[str]) -> None
     radome.scale = (1.0, 1.0, 0.55)
     radome.data.materials.append(_material(bpy, "gps_white", (0.92, 0.92, 0.9, 1)))
     procedural_objects.append("gps_antenna")
+
+
+def _accessory_asset(scene: dict, asset_type: str) -> dict | None:
+    for accessory in scene.get("accessory_assets", []):
+        if accessory.get("asset_type") == asset_type:
+            return accessory
+    return None
+
+
+def _rotation_deg_to_rad(values: list[float]) -> tuple[float, float, float]:
+    return tuple(math.radians(float(value)) for value in values[:3])
 
 
 def _create_foundation(bpy, characteristics: dict, procedural_objects: list[str]) -> None:
@@ -570,6 +631,8 @@ def _try_import_glb_asset(
         path=path,
         fallback_allowed=fallback_allowed,
         dimensions=dimensions,
+        location=location,
+        rotation=rotation,
     )
     if path is None or not path.exists():
         return _record_asset_import_fallback(
@@ -661,6 +724,8 @@ def _base_asset_import_record(
     path: Path | None,
     fallback_allowed: bool,
     dimensions: dict | None,
+    location: tuple[float, float, float],
+    rotation: tuple[float, float, float],
 ) -> dict:
     return {
         "asset_id": asset_id,
@@ -674,6 +739,9 @@ def _base_asset_import_record(
         "asset_import_success": False,
         "asset_dimensions_checked": False,
         "manifest_dimensions_m": dimensions,
+        "placement_location": [round(float(value), 5) for value in location],
+        "placement_rotation_rad": [round(float(value), 5) for value in rotation],
+        "placement_rotation_deg": [round(math.degrees(float(value)), 5) for value in rotation],
         "import_fallback_allowed": fallback_allowed,
         "import_mode": "not_attempted",
         "effective_generation_mode": "not_attempted",
@@ -909,6 +977,11 @@ def _write_metadata(
                 "tower_characteristics": scene["tower"].get("characteristics", {}),
                 "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
                 "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
+                "mechanical_tilts_deg": [
+                    sector.get("mechanical_tilt_deg", 0.0) for sector in scene["sectors"]
+                ],
+                "visual_elements": scene.get("visual_elements", {}),
+                "accessory_assets": scene.get("accessory_assets", []),
                 "preview_camera": camera_metadata,
                 "warnings": all_warnings,
             },
@@ -924,6 +997,8 @@ def _assets_used(scene: dict) -> list[str]:
         assets.append(sector["antenna_asset_id"])
         if sector.get("radio_asset_id"):
             assets.append(sector["radio_asset_id"])
+    for accessory in scene.get("accessory_assets", []):
+        assets.append(accessory["asset_id"])
     return sorted(set(assets))
 
 
@@ -1006,6 +1081,19 @@ def _fallback_asset_import_records(scene: dict) -> list[dict]:
                     dimensions=sector.get("radio_dimensions_m"),
                 )
             )
+    for accessory in scene.get("accessory_assets", []):
+        records.append(
+            _fallback_asset_import_record(
+                asset_id=accessory["asset_id"],
+                asset_file=accessory.get("asset_file"),
+                asset_source=accessory.get("asset_source"),
+                asset_metadata=accessory.get("asset_metadata"),
+                object_role=accessory.get("asset_type", "accessory"),
+                object_name=f"{accessory.get('asset_type', 'accessory')}_{accessory['asset_id']}",
+                fallback_allowed=accessory.get("import_fallback_allowed", True),
+                dimensions=accessory.get("dimensions_m"),
+            )
+        )
     return records
 
 

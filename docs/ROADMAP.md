@@ -31,9 +31,12 @@
   `ProjectDesignSpec`, manual corrections, document-pack QA, direct `RequirementSpec` generation,
   trace/events, and frontend-ready endpoints.
 - Document-pack accessory mapping: confirmed GPS antenna and power-cabinet evidence is carried into
-  `RequirementSpec` and `SceneSpec.visual_elements` without RAG-driven decorative activation.
+  `RequirementSpec`, `SceneSpec.visual_elements`, and manifest-backed `SceneSpec.accessory_assets`
+  without RAG-driven decorative activation.
 - Document-pack tilt mapping: confirmed uniform mechanical tilt is carried into `RequirementSpec`
   instead of silently using the default.
+- Final real 3D acceptance path: document-pack GPS/power-cabinet/tilt/RRU/cables smoke-tested
+  through FastAPI, real Blender, GLB inspection, geometry QA, preview QA, and API status.
 - Document-pack memory writeback: compact `memory_summary.json`, SQLite
   `document_pack_memory`/`document_pack_issue_memory`, optional Qdrant runtime
   `document_pack_memory`, and `/memory/stats` counts.
@@ -68,7 +71,7 @@
 
 - Replace internal cleaned/minimal GLBs and missing tower manifests with vendor-grade or
   project-owned production GLB assets.
-- Wire manifest-backed accessory placement for GPS, power cabinet, mounting bracket, and cable tray.
+- Wire standalone prompt/document controls for mounting bracket and cable-tray accessory placement.
 - Add exact imported-asset bounding-box, pivot, mount-point, material, and LOD validation.
 - Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
 - Add frontend React/Three.js viewer.
@@ -80,4 +83,4 @@
 - Add comparative design variants.
 - Add exact GLB transform, bounding-box, and material validation for imported vendor assets.
 - Add rendered preview visual semantic checks.
-- Add accessory-specific QA checks once accessory manifests are placed by the worker.
+- Add richer accessory-specific dimensional QA beyond current presence/count/import-mode checks.

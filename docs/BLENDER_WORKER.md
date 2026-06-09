@@ -19,13 +19,16 @@ Completed:
   - sector beams;
   - azimuth arrows;
   - height marker;
-  - GPS antenna and power cabinet only when `SceneSpec.visual_elements` explicitly enables them;
+  - GPS antenna and power cabinet procedural fallback only when explicitly requested and GLB import
+    cannot be used;
   - metadata labels.
 - The worker imports manifest-backed GLB assets when the referenced file exists and import succeeds.
   Current imported MVP assets include:
   - `TOWER_LATTICE_30M` as a normalized CC Attribution GLB;
   - `ANT_PANEL_4G_001` as an internal cleaned GLB;
   - `ANT_MICROWAVE_DISH_001` as an internal cleaned GLB;
+  - `GPS_ANTENNA_001` as an internal cleaned GLB when explicitly requested;
+  - `POWER_CABINET_001` as an internal cleaned GLB when explicitly requested;
   - `ANT_PANEL_5G_001` as an internal minimal test GLB;
   - `RRU_SMALL_001` as an internal minimal test GLB.
 - Missing or failed imports use controlled procedural fallback only when
@@ -84,6 +87,9 @@ Metadata fields:
 - `tower_characteristics`
 - `azimuths_deg`
 - `antenna_heights_m`
+- `mechanical_tilts_deg`
+- `visual_elements`
+- `accessory_assets`
 - `warnings`
 
 Each `asset_imports` entry includes `asset_id`, `asset_file`, `asset_source`,
@@ -98,8 +104,8 @@ Known limitations:
   procedural fallback when selected and allowed.
 - `GET /assets/inventory` exposes whether manifests have real GLB files available for import and
   whether fallback will be needed.
-- GPS antenna, power cabinet, mounting bracket, and cable tray have inventory GLBs, but the worker
-  does not yet place those accessory manifest files. GPS/cabinet objects are still procedural and
-  only appear when the SceneSpec explicitly enables them.
+- GPS antenna and power cabinet have manifest-backed GLB placement when requested. Mounting
+  bracket and cable tray have inventory GLBs but are not yet exposed as standalone requested
+  accessory placements.
 - GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and
   bounding-box reasonableness, not visual aesthetics or material quality.

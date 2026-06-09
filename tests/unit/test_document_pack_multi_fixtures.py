@@ -159,6 +159,12 @@ def test_document_pack_mapping_preserves_confirmed_accessories(tmp_path: Path) -
     warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
     assert "DOC_ACCESSORY_GPS_ENABLED_FROM_EVIDENCE" in warning_codes
     assert "DOC_ACCESSORY_POWER_CABINET_ENABLED_FROM_EVIDENCE" in warning_codes
+    fields = {
+        field["project_field"]: field["status"] for field in mapping.mapping_loss_report["fields"]
+    }
+    assert fields["compound.gps"] == "mapped"
+    assert fields["compound.power_cabinet"] == "mapped"
+    assert "lost_field" not in mapping.mapping_loss_report["counts"]
 
 
 def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Path) -> None:
@@ -184,6 +190,10 @@ def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Pat
     assert mapping.requirements["mechanical_tilt_deg"] == 5.0
     warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
     assert "DOC_DEFAULT_MECHANICAL_TILT_USED" not in warning_codes
+    fields = {
+        field["project_field"]: field["status"] for field in mapping.mapping_loss_report["fields"]
+    }
+    assert fields["radio.mechanical_tilt_deg"] == "mapped"
 
 
 def test_document_pack_mapping_respects_explicit_rru_false_correction(tmp_path: Path) -> None:

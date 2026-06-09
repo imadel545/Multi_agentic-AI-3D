@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from core.contracts.assets import DimensionsM
-from core.contracts.common import NetworkType, StrictModel
+from core.contracts.common import AssetType, NetworkType, StrictModel
 from core.contracts.tower import TowerCharacteristics
 
 
@@ -74,6 +74,19 @@ class SectorSpec(StrictModel):
     include_label: bool = True
 
 
+class SceneAccessoryPlacement(StrictModel):
+    asset_id: str = Field(min_length=1)
+    asset_file: str | None = None
+    asset_source: str | None = None
+    asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
+    import_fallback_allowed: bool = True
+    asset_type: AssetType
+    dimensions_m: DimensionsM | None = None
+    position: list[float] = Field(min_length=3, max_length=3)
+    rotation_deg: list[float] = Field(min_length=3, max_length=3)
+    scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
+
+
 class VisualElements(StrictModel):
     include_sector_beams: bool = True
     include_azimuth_arrows: bool = True
@@ -110,6 +123,7 @@ class SceneSpec(StrictModel):
     tower: SceneAssetPlacement
     sectors: list[SectorSpec] = Field(min_length=1)
     visual_elements: VisualElements = Field(default_factory=VisualElements)
+    accessory_assets: list[SceneAccessoryPlacement] = Field(default_factory=list)
     preview: PreviewSpec = Field(default_factory=PreviewSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
 

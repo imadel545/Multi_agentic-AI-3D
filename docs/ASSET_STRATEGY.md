@@ -62,9 +62,8 @@ under `assets/source_downloads/getglb/cell_tower_replica/`, and attribution is r
 
 - Monopole, rooftop mast, and small-cell pole tower manifests still use controlled procedural
   fallback when their GLB files are absent and fallback is allowed.
-- GPS antenna and power cabinet now have manifest-backed internal cleaned GLBs for inventory,
-  but the worker still creates those objects procedurally from `SceneSpec.visual_elements`.
-  They are not injected into a scene unless explicitly requested.
+- GPS antenna and power cabinet now have manifest-backed internal cleaned GLBs and worker
+  placements. They are imported as `imported_glb` when explicitly requested and the files exist.
 - Non-Blender generation writes explicit fallback metadata instead of pretending assets were
   imported.
 
@@ -97,6 +96,7 @@ Implemented:
 
 - Object presence/count validation through GLB inspection and geometry validation.
 - Sector-level checks for antennas, RRUs, cables, beams, azimuth arrows, and metadata azimuths.
+- Accessory presence/count checks for requested GPS antenna and power cabinet.
 - Import metadata checks for file existence, import success, dimensions check flag, modes, and
   visible fallback warnings.
 - Height tolerance: `0.5m`.
@@ -106,15 +106,16 @@ Future:
 
 - Exact GLB bounding-box checks against manifest dimensions.
 - Material, LOD, pivot, mount-point, and texture budget validation.
-- Worker-level import placement for GPS/power cabinet/bracket/cable-tray accessory manifests.
+- Worker-level import placement for bracket/cable-tray accessory manifests when they become
+  user-requestable standalone accessories.
 
 ## Replacement Plan
 
 1. Replace internal minimal/cleaned GLBs with vendor-grade or project-owned production assets
    without changing stable IDs.
 2. Add real monopole, rooftop mast, and small-cell pole GLBs.
-3. Wire manifest-backed accessory import placement for GPS, power cabinet, brackets, and cable
-   trays when the SceneSpec requests them.
+3. Wire manifest-backed accessory import placement for brackets and cable trays when the SceneSpec
+   requests them.
 4. Tighten GLB dimension/material QA once production assets are present.
 5. Keep provenance and attribution visible to the frontend.
 

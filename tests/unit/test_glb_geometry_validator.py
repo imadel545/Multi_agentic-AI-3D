@@ -22,6 +22,7 @@ def test_geometry_validation_valid_5g_scene(tmp_path: Path) -> None:
     assert report.checks["cable_count_valid"] is True
     assert report.checks["tower_characteristics_metadata_valid"] is True
     assert report.checks["azimuth_metadata_valid"] is True
+    assert report.checks["mechanical_tilt_metadata_valid"] is True
 
 
 def test_geometry_validation_missing_antenna_fails(tmp_path: Path) -> None:
@@ -107,6 +108,34 @@ def test_geometry_validation_respects_no_cables_option(tmp_path: Path) -> None:
     assert report.checks["cable_count_valid"] is True
 
 
+def test_geometry_validation_requires_requested_accessories(tmp_path: Path) -> None:
+    scene = _accessory_scene()
+
+    passed = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(_object_names(scene)),
+        _metadata_path(tmp_path, scene),
+    )
+    missing = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(
+            [
+                name
+                for name in _object_names(scene)
+                if not name.startswith(("gps_antenna", "power_cabinet"))
+            ]
+        ),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert passed.status == "passed"
+    assert passed.checks["gps_antenna_count_valid"] is True
+    assert passed.checks["power_cabinet_count_valid"] is True
+    assert missing.status == "failed"
+    assert "gps_antenna" in missing.missing_objects
+    assert "power_cabinet" in missing.missing_objects
+
+
 def _scene(prompt: str | None = None):
     requirements = parse_requirements_text(
         prompt
@@ -130,6 +159,37 @@ def _scene(prompt: str | None = None):
     return ScenePlanner().build_scene_spec("wf_geometry", requirements, tower, antenna, radio)
 
 
+def _accessory_scene():
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, GPS et armoire énergie."
+    ).model_copy(
+        update={
+            "mechanical_tilt_deg": 5,
+            "include_gps_antenna": True,
+            "include_power_cabinet": True,
+        }
+    )
+    registry = AssetRegistry(Path("assets/manifests"))
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    gps = registry.select_asset("gps", requirements.network_type, requirements.tower_type)
+    cabinet = registry.select_asset("cabinet", requirements.network_type, requirements.tower_type)
+    return ScenePlanner().build_scene_spec(
+        "wf_geometry_accessories",
+        requirements,
+        tower,
+        antenna,
+        radio,
+        accessory_assets=[gps, cabinet],
+    )
+
+
 def _object_names(scene) -> list[str]:
     names = ["tower_leg", f"tower_{scene.tower.asset_id}"]
     for sector in scene.sectors:
@@ -142,6 +202,11 @@ def _object_names(scene) -> list[str]:
             names.append(f"sector_beam_{sector.sector_id}")
         if scene.visual_elements.include_azimuth_arrows:
             names.append(f"azimuth_arrow_{sector.sector_id}")
+    for accessory in scene.accessory_assets:
+        if accessory.asset_type == "gps":
+            names.append(f"gps_antenna_{accessory.asset_id}")
+        if accessory.asset_type == "cabinet":
+            names.append(f"power_cabinet_{accessory.asset_id}")
     return names
 
 
@@ -152,6 +217,8 @@ def _metadata_path(tmp_path: Path, scene) -> Path:
         assets.append(sector.antenna_asset_id)
         if sector.radio_asset_id:
             assets.append(sector.radio_asset_id)
+    for accessory in scene.accessory_assets:
+        assets.append(accessory.asset_id)
     path.write_text(
         json.dumps(
             {
@@ -161,6 +228,7 @@ def _metadata_path(tmp_path: Path, scene) -> Path:
                 "tower_characteristics": scene.tower.characteristics.model_dump(),
                 "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                 "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
+                "mechanical_tilts_deg": [sector.mechanical_tilt_deg for sector in scene.sectors],
             }
         ),
         encoding="utf-8",

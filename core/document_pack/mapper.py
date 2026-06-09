@@ -15,6 +15,7 @@ class ProjectDesignSpecMapper:
                 status="blocked",
                 blocking_fields=blocking,
                 conflicts=conflicts,
+                mapping_loss_report=_mapping_loss_report(spec, None),
             )
 
         tower_type = _required_str(spec, "tower_spec", "tower_type")
@@ -23,7 +24,9 @@ class ProjectDesignSpecMapper:
         hba_values = _required_float_list(spec, "radio_sectors", "hba_m")
         install_height = min(hba_values) if hba_values else tower_height
         network_type = _network_type(spec)
-        include_rru = _confirmed_bool(spec.cabling_spec.get("include_rru"))
+        include_rru = _confirmed_bool(_first_sector_field(spec, "rru")) or _confirmed_bool(
+            spec.cabling_spec.get("include_rru")
+        )
         include_cables = _confirmed_bool(spec.cabling_spec.get("include_cables"))
         include_gps_antenna = _confirmed_bool(spec.compound_spec.get("gps"))
         include_power_cabinet = _confirmed_bool(spec.compound_spec.get("power_cabinet"))
@@ -60,6 +63,7 @@ class ProjectDesignSpecMapper:
             requirements=requirements.model_dump(),
             generated_requirements_text=_requirements_text(requirements, spec.pack_id),
             network_type=network_type,
+            mapping_loss_report=_mapping_loss_report(spec, requirements),
         )
 
 
@@ -92,6 +96,12 @@ def _confirmed_bool(field) -> bool:
 def _confirmed_field(spec: ProjectDesignSpec, section: str, field: str):
     candidate = getattr(spec, section).get(field)
     return candidate if candidate and candidate.status == "confirmed" else None
+
+
+def _first_sector_field(spec: ProjectDesignSpec, field: str):
+    if not spec.radio_sectors:
+        return None
+    return getattr(spec.radio_sectors[0], field)
 
 
 def _mapping_warnings(
@@ -180,6 +190,207 @@ def _uniform_confirmed_sector_float(spec: ProjectDesignSpec, field: str) -> floa
     if all(abs(value - first) < 0.05 for value in values):
         return first
     return None
+
+
+def _mapping_loss_report(
+    spec: ProjectDesignSpec,
+    requirements: RequirementSpec | None,
+) -> dict:
+    entries = [
+        _mapping_entry(
+            spec,
+            "tower.tower_type",
+            requirement_field="tower_type",
+            scene_field="tower.asset_id",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "tower.tower_height_m",
+            requirement_field="tower_height_m",
+            scene_field="tower.height_m",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "radio.azimuths_deg",
+            requirement_field="azimuths_deg",
+            scene_field="sectors[].azimuth_deg",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "radio.hba_m",
+            requirement_field="antenna_install_height_m",
+            scene_field="sectors[].install_height_m",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "radio.mechanical_tilt_deg",
+            requirement_field="mechanical_tilt_deg",
+            scene_field="sectors[].mechanical_tilt_deg",
+            mapped=requirements is not None
+            and requirements.mechanical_tilt_deg != 3.0
+            and _confirmed_any(spec, "radio_sectors", "mechanical_tilt_deg"),
+            fallback=requirements is not None and requirements.mechanical_tilt_deg == 3.0,
+        ),
+        _mapping_entry(
+            spec,
+            "radio.include_rru",
+            requirement_field="include_rru",
+            scene_field="sectors[].radio_asset_id",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "cabling.include_cables",
+            requirement_field="include_cables",
+            scene_field="sectors[].include_cable",
+            mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "compound.gps",
+            requirement_field="include_gps_antenna",
+            scene_field="visual_elements.include_gps_antenna/accessory_assets[gps]",
+            mapped=requirements is not None and requirements.include_gps_antenna,
+        ),
+        _mapping_entry(
+            spec,
+            "compound.power_cabinet",
+            requirement_field="include_power_cabinet",
+            scene_field="visual_elements.include_power_cabinet/accessory_assets[cabinet]",
+            mapped=requirements is not None and requirements.include_power_cabinet,
+        ),
+        _mapping_entry(
+            spec,
+            "site.site_name",
+            requirement_field=None,
+            scene_field=None,
+            not_modeled=True,
+        ),
+        _mapping_entry(
+            spec,
+            "coordinates.latitude",
+            requirement_field=None,
+            scene_field=None,
+            not_modeled=True,
+        ),
+        _mapping_entry(
+            spec,
+            "coordinates.longitude",
+            requirement_field=None,
+            scene_field=None,
+            not_modeled=True,
+        ),
+        _mapping_entry(
+            spec,
+            "grounding.grounding",
+            requirement_field=None,
+            scene_field=None,
+            not_modeled=True,
+        ),
+        _mapping_entry(
+            spec,
+            "tower.color_ral",
+            requirement_field=None,
+            scene_field=None,
+            not_modeled=True,
+        ),
+    ]
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry["status"]] = counts.get(entry["status"], 0) + 1
+    return {"pack_id": spec.pack_id, "counts": counts, "fields": entries}
+
+
+def _mapping_entry(
+    spec: ProjectDesignSpec,
+    project_field: str,
+    *,
+    requirement_field: str | None,
+    scene_field: str | None,
+    mapped: bool = False,
+    not_modeled: bool = False,
+    fallback: bool = False,
+) -> dict:
+    field = _find_project_field(spec, project_field)
+    if _is_conflict(spec, project_field):
+        status = "conflict"
+    elif field is None or field.status == "missing":
+        status = "missing"
+    elif not_modeled and field.status == "confirmed":
+        status = "not_modeled"
+    elif mapped and field.status == "confirmed":
+        status = "mapped"
+    elif fallback:
+        status = "fallback"
+    elif field.status == "confirmed":
+        status = "lost_field"
+    else:
+        status = field.status
+    return {
+        "project_field": project_field,
+        "project_status": field.status if field else "missing",
+        "requirement_field": requirement_field,
+        "scene_field": scene_field,
+        "status": status,
+        "evidence_count": len(field.sources) if field else 0,
+        "reason": _mapping_reason(status),
+    }
+
+
+def _mapping_reason(status: str) -> str:
+    return {
+        "mapped": "Field is preserved into RequirementSpec and expected SceneSpec fields.",
+        "not_modeled": (
+            "Field is extracted with evidence but no SceneSpec contract field exists yet."
+        ),
+        "missing": "No confirmed project field is available.",
+        "conflict": "Conflicting document values require user correction before mapping.",
+        "fallback": "No confirmed field is available; controlled deterministic default is used.",
+        "lost_field": "Confirmed field exists but is not preserved by the current mapper.",
+    }.get(status, "Field is visible for frontend review.")
+
+
+def _find_project_field(spec: ProjectDesignSpec, project_field: str):
+    if project_field == "radio.azimuths_deg" and spec.radio_sectors:
+        return spec.radio_sectors[0].azimuth_deg
+    if project_field == "radio.hba_m" and spec.radio_sectors:
+        return spec.radio_sectors[0].hba_m
+    if project_field == "radio.mechanical_tilt_deg" and spec.radio_sectors:
+        return spec.radio_sectors[0].mechanical_tilt_deg
+    if project_field == "radio.include_rru" and spec.radio_sectors:
+        return spec.radio_sectors[0].rru
+    sections = {
+        "tower": spec.tower_spec,
+        "cabling": spec.cabling_spec,
+        "compound": spec.compound_spec,
+        "site": spec.site_info,
+        "coordinates": spec.coordinate_info,
+        "grounding": spec.grounding_spec,
+    }
+    prefix, _, key = project_field.partition(".")
+    return sections.get(prefix, {}).get(key)
+
+
+def _is_conflict(spec: ProjectDesignSpec, project_field: str) -> bool:
+    aliases = {
+        "radio.azimuths_deg": {"radio.azimuths_deg"},
+        "radio.hba_m": {"radio.hba_m"},
+    }
+    candidates = aliases.get(project_field, {project_field})
+    return any(conflict.field in candidates for conflict in spec.conflicts)
+
+
+def _confirmed_any(spec: ProjectDesignSpec, section: str, field: str) -> bool:
+    if section == "radio_sectors":
+        return any(
+            (candidate := getattr(sector, field)) is not None and candidate.status == "confirmed"
+            for sector in spec.radio_sectors
+        )
+    return False
 
 
 def _network_type(spec: ProjectDesignSpec) -> str:

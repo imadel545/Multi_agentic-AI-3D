@@ -33,6 +33,7 @@ def test_scene_planner_uses_structured_rag_hints_without_decorative_assets() -> 
     assert scene.visual_elements.include_sector_beams is False
     assert scene.visual_elements.include_gps_antenna is False
     assert scene.visual_elements.include_power_cabinet is False
+    assert scene.accessory_assets == []
 
 
 def test_scene_planner_reads_memory_error_patterns_key() -> None:
@@ -71,10 +72,16 @@ def test_scene_planner_carries_explicit_requirement_accessories() -> None:
         tower=_tower(),
         antenna=_antenna(),
         radio=_radio(),
+        accessory_assets=[_gps(), _cabinet()],
     )
 
     assert scene.visual_elements.include_gps_antenna is True
     assert scene.visual_elements.include_power_cabinet is True
+    assert {accessory.asset_id for accessory in scene.accessory_assets} == {
+        "GPS_ANTENNA_001",
+        "POWER_CABINET_001",
+    }
+    assert all(accessory.asset_file for accessory in scene.accessory_assets)
 
 
 def test_scene_planner_carries_asset_license_metadata() -> None:
@@ -161,6 +168,30 @@ def _radio() -> AssetManifest:
         type="radio",
         file="assets/radios/rru_small_001.glb",
         dimensions_m=DimensionsM(width=0.35, depth=0.18, height=0.45),
+        compatible_networks=["5G"],
+        compatible_tower_types=["lattice_tower"],
+        status="validated",
+    )
+
+
+def _gps() -> AssetManifest:
+    return AssetManifest(
+        asset_id="GPS_ANTENNA_001",
+        type="gps",
+        file="assets/antennas/gps_antenna_001.glb",
+        dimensions_m=DimensionsM(width=0.32, depth=0.32, height=0.22),
+        compatible_networks=["5G"],
+        compatible_tower_types=["lattice_tower"],
+        status="validated",
+    )
+
+
+def _cabinet() -> AssetManifest:
+    return AssetManifest(
+        asset_id="POWER_CABINET_001",
+        type="cabinet",
+        file="assets/cabinets/power_cabinet_001.glb",
+        dimensions_m=DimensionsM(width=1.0, depth=0.45, height=1.6),
         compatible_networks=["5G"],
         compatible_tower_types=["lattice_tower"],
         status="validated",

@@ -18,6 +18,8 @@
   - `mount_zones`
   - warnings
 - The Blender worker attempts controlled GLB import when `asset_file` exists.
+- Requested GPS antenna and power cabinet are SceneSpec accessory placements and are imported from
+  their GLB files when available.
 - If import fails or the file is missing, procedural fallback is used only when the manifest allows
   it, and the fallback is written to `scene_metadata.json`.
 - `scene_metadata.json` includes `asset_imports` and `asset_import_summary`.
@@ -74,6 +76,7 @@ Implemented:
 - Procedural fallback records must include visible fallback warnings.
 - `missing_file` without allowed fallback fails generation QA.
 - CC-BY and internal cleaned/minimal assets emit non-vendor-grade or attribution warnings.
+- Requested GPS/power-cabinet accessories are included in GLB inspection and geometry QA counts.
 
 Future:
 

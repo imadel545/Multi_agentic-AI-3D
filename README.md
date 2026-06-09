@@ -21,8 +21,8 @@ This repository currently implements the local-first controlled generation pipel
   rollback, and event logging.
 - Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
 - Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
-- Geometry validation for expected antennas, beams, RRUs, cables, azimuths, and tower/antenna
-  heights.
+- Geometry validation for expected antennas, beams, RRUs, cables, GPS, power cabinet, azimuths,
+  tilt metadata, and tower/antenna heights.
 - Local Qdrant RAG indexing and search over rules, docs, templates, and asset manifests.
 - Document-pack intelligence for ZIP ingestion, classification, deterministic extraction,
   provenance, missing/conflict detection, manual corrections, QA, processing capabilities, and
@@ -125,7 +125,8 @@ Known limitations:
 - The current asset library is `partial_import_ready`: a CC-BY lattice tower and internal
   cleaned/minimal telecom assets exist, but they are not a complete vendor-grade library.
 - The Blender worker imports available GLBs and uses controlled procedural fallback for missing
-  assets only when fallback is allowed and visible in metadata.
+  assets only when fallback is allowed and visible in metadata. GPS and power-cabinet accessories
+  are manifest-backed placements when explicitly requested.
 - Preview QA is structural/image-stat based, not semantic visual judging.
 - Document-pack PDF text/table, selected OCR, DXF parsing, coordinate conversion, and Groq bounded
   extraction are capability-gated and report unavailable tools explicitly. Docling is currently

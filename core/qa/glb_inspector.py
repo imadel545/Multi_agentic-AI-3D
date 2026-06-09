@@ -180,6 +180,8 @@ def _report(
         "has_cables": found["cables"],
         "has_sector_beams": found["sector_beams"],
         "has_azimuth_arrows": found["azimuth_arrows"],
+        "has_power_cabinet": found["power_cabinet"],
+        "has_gps_antenna": found["gps_antenna"],
         "has_metadata": metadata_exists,
         "expected_objects_present": expected_objects_present,
         "minimum_node_count_valid": minimum_node_count_valid,
@@ -215,6 +217,8 @@ def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int
     cable_count = sum(1 for sector in scene.sectors if sector.include_cable)
     beam_count = sector_count if scene.visual_elements.include_sector_beams else 0
     arrow_count = sector_count if scene.visual_elements.include_azimuth_arrows else 0
+    cabinet_count = 1 if scene.visual_elements.include_power_cabinet else 0
+    gps_count = 1 if scene.visual_elements.include_gps_antenna else 0
     return [
         ("tower", ("tower", "tower_"), 1),
         (
@@ -226,6 +230,8 @@ def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int
         ("cables", ("cable", "cable_"), cable_count),
         ("sector_beams", ("beam", "beam_", "sector_beam", "sector_beam_"), beam_count),
         ("azimuth_arrows", ("azimuth_arrow", "azimuth_arrow_"), arrow_count),
+        ("power_cabinet", ("power_cabinet", "cabinet"), cabinet_count),
+        ("gps_antenna", ("gps_antenna", "gps"), gps_count),
     ]
 
 
@@ -237,6 +243,10 @@ def _minimum_node_count(scene: SceneSpec) -> int:
         minimum += len(scene.sectors)
     if scene.visual_elements.include_azimuth_arrows:
         minimum += len(scene.sectors)
+    if scene.visual_elements.include_power_cabinet:
+        minimum += 1
+    if scene.visual_elements.include_gps_antenna:
+        minimum += 1
     return minimum
 
 

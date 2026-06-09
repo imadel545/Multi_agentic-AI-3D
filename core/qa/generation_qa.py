@@ -23,7 +23,10 @@ class GenerationQA:
         metadata = _load_metadata(metadata_path)
         asset_imports = metadata.get("asset_imports", [])
         expected_asset_placements = (
-            1 + len(scene.sectors) + sum(1 for sector in scene.sectors if sector.radio_asset_id)
+            1
+            + len(scene.sectors)
+            + sum(1 for sector in scene.sectors if sector.radio_asset_id)
+            + len(scene.accessory_assets)
         )
 
         checks = {
@@ -40,6 +43,11 @@ class GenerationQA:
             == [sector.azimuth_deg for sector in scene.sectors],
             "metadata_antenna_heights_valid": metadata.get("antenna_heights_m")
             == [sector.install_height_m for sector in scene.sectors],
+            "metadata_mechanical_tilts_valid": metadata.get("mechanical_tilts_deg")
+            == [sector.mechanical_tilt_deg for sector in scene.sectors],
+            "metadata_visual_elements_valid": metadata.get("visual_elements")
+            == scene.visual_elements.model_dump(),
+            "metadata_accessory_assets_valid": _metadata_accessory_assets_valid(metadata, scene),
             "metadata_preview_camera_valid": isinstance(metadata.get("preview_camera"), dict)
             and bool(metadata["preview_camera"].get("camera")),
             "metadata_asset_imports_present": isinstance(asset_imports, list)
@@ -153,6 +161,17 @@ def _asset_import_modes_valid(asset_imports: list) -> bool:
         if record.get("effective_generation_mode") not in valid_modes:
             return False
     return True
+
+
+def _metadata_accessory_assets_valid(metadata: dict, scene: SceneSpec) -> bool:
+    expected_ids = {accessory.asset_id for accessory in scene.accessory_assets}
+    raw = metadata.get("accessory_assets")
+    if not expected_ids:
+        return raw in ([], None) or raw == []
+    if not isinstance(raw, list):
+        return False
+    actual_ids = {entry.get("asset_id") for entry in raw if isinstance(entry, dict)}
+    return expected_ids.issubset(actual_ids)
 
 
 def _asset_import_summary_valid(summary: object, asset_imports: list) -> bool:

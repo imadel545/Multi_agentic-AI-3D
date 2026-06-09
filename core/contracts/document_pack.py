@@ -214,6 +214,7 @@ class RequirementMappingResult(StrictModel):
     blocking_fields: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
     network_type: NetworkType | None = None
+    mapping_loss_report: dict = Field(default_factory=dict)
 
 
 class DocumentToolCapability(StrictModel):

@@ -55,6 +55,36 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     }
 
 
+def test_blender_runner_reports_accessory_fallback_when_file_missing(tmp_path: Path) -> None:
+    base_scene = _accessory_scene()
+    scene = base_scene.model_copy(
+        update={
+            "accessory_assets": [
+                accessory.model_copy(update={"asset_file": "assets/missing/gps_missing.glb"})
+                if accessory.asset_type == "gps"
+                else accessory
+                for accessory in base_scene.accessory_assets
+            ]
+        }
+    )
+    runner = BlenderRunner(
+        project_root=Path.cwd(),
+        blender_binary="definitely-missing-blender-binary",
+    )
+
+    result = runner.generate(scene, tmp_path)
+
+    assert result.status == "fallback"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    gps_record = next(
+        record for record in metadata["asset_imports"] if record["asset_id"] == "GPS_ANTENNA_001"
+    )
+    assert gps_record["import_mode"] == "procedural_fallback"
+    assert gps_record["asset_file_exists"] is False
+    assert "ASSET_FILE_MISSING" in gps_record["warnings"]
+    assert metadata["asset_import_summary"]["asset_count"] == 9
+
+
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -107,6 +137,31 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert "ATTRIBUTION_REQUIRED" in tower_record["warnings"]
 
 
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is not available",
+)
+def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path: Path) -> None:
+    scene = _accessory_scene()
+
+    result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
+
+    assert result.status == "generated"
+    assert result.mode == "real_blender"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    assert metadata["visual_elements"]["include_gps_antenna"] is True
+    assert metadata["visual_elements"]["include_power_cabinet"] is True
+    assert metadata["mechanical_tilts_deg"] == [5, 5, 5]
+    assert metadata["asset_import_summary"]["asset_count"] == 9
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 9
+    records = {record["asset_id"]: record for record in metadata["asset_imports"]}
+    assert records["GPS_ANTENNA_001"]["import_mode"] == "imported_glb"
+    assert records["POWER_CABINET_001"]["import_mode"] == "imported_glb"
+    assert records["GPS_ANTENNA_001"]["asset_import_success"] is True
+    assert records["POWER_CABINET_001"]["asset_import_success"] is True
+
+
 def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypatch) -> None:
     registry = AssetRegistry(Path("assets/manifests"))
     requirements = parse_requirements_text(
@@ -142,3 +197,34 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
     assert attempts == 2
     assert result.status == "generated"
     assert result.mode == "real_blender"
+
+
+def _accessory_scene():
+    registry = AssetRegistry(Path("assets/manifests"))
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, GPS, armoire énergie."
+    ).model_copy(
+        update={
+            "mechanical_tilt_deg": 5,
+            "include_gps_antenna": True,
+            "include_power_cabinet": True,
+        }
+    )
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    gps = registry.select_asset("gps", requirements.network_type, requirements.tower_type)
+    cabinet = registry.select_asset("cabinet", requirements.network_type, requirements.tower_type)
+    return ScenePlanner().build_scene_spec(
+        "wf_real_blender_accessories",
+        requirements,
+        tower,
+        antenna,
+        radio,
+        accessory_assets=[gps, cabinet],
+    )

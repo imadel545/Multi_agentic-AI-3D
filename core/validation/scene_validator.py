@@ -23,6 +23,10 @@ def _mount_zones_valid(scene: SceneSpec, assets_by_id: dict[str, AssetManifest])
     return True
 
 
+def _has_accessory(scene: SceneSpec, asset_type: str) -> bool:
+    return any(accessory.asset_type == asset_type for accessory in scene.accessory_assets)
+
+
 def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> ValidationReport:
     assets_by_id = {asset.asset_id: asset for asset in assets}
     checks = {
@@ -41,6 +45,18 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
         "radio_asset_valid": all(
             sector.radio_asset_id is None or sector.radio_asset_id in assets_by_id
             for sector in scene.sectors
+        ),
+        "accessory_assets_valid": all(
+            accessory.asset_id in assets_by_id
+            and assets_by_id[accessory.asset_id].is_validated
+            and assets_by_id[accessory.asset_id].type == accessory.asset_type
+            for accessory in scene.accessory_assets
+        ),
+        "gps_asset_present_when_requested": (
+            not scene.visual_elements.include_gps_antenna or _has_accessory(scene, "gps")
+        ),
+        "power_cabinet_asset_present_when_requested": (
+            not scene.visual_elements.include_power_cabinet or _has_accessory(scene, "cabinet")
         ),
         "cable_option_consistent": all(sector.include_cable for sector in scene.sectors)
         or not any(sector.include_cable for sector in scene.sectors),

@@ -217,6 +217,13 @@ class BlenderRunner:
                     "tower_characteristics": scene.tower.characteristics.model_dump(),
                     "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                     "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
+                    "mechanical_tilts_deg": [
+                        sector.mechanical_tilt_deg for sector in scene.sectors
+                    ],
+                    "visual_elements": scene.visual_elements.model_dump(),
+                    "accessory_assets": [
+                        accessory.model_dump() for accessory in scene.accessory_assets
+                    ],
                     "preview_camera": _preview_camera_metadata(scene),
                     "warnings": warnings,
                 },
@@ -251,6 +258,8 @@ def _assets_used(scene: SceneSpec) -> list[str]:
         assets.append(sector.antenna_asset_id)
         if sector.radio_asset_id:
             assets.append(sector.radio_asset_id)
+    for accessory in scene.accessory_assets:
+        assets.append(accessory.asset_id)
     return sorted(set(assets))
 
 
@@ -337,6 +346,20 @@ def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
                     else None,
                 )
             )
+    for accessory in scene.accessory_assets:
+        records.append(
+            _fallback_asset_import_record(
+                project_root=project_root,
+                asset_id=accessory.asset_id,
+                asset_file=accessory.asset_file,
+                asset_source=accessory.asset_source,
+                asset_metadata=accessory.asset_metadata.model_dump(),
+                object_role=accessory.asset_type,
+                object_name=f"{accessory.asset_type}_{accessory.asset_id}",
+                fallback_allowed=accessory.import_fallback_allowed,
+                dimensions=accessory.dimensions_m.model_dump() if accessory.dimensions_m else None,
+            )
+        )
     return records
 
 

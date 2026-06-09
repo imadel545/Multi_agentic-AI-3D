@@ -88,6 +88,8 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         assert generation["workflow_id"] == "wf_from_pack"
         assert generation["mapping"]["status"] == "mapped"
         assert generation["extraction_report"]["prompt_text_reparse"] is False
+        assert "mapping_loss_report" in generation["mapping"]
+        assert generation["extraction_report"]["mapping_loss_report"]["counts"]["mapped"] >= 4
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled

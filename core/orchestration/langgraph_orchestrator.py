@@ -54,6 +54,7 @@ class WorkflowState(TypedDict, total=False):
     tower: AssetManifest
     antenna: AssetManifest
     radio: AssetManifest | None
+    accessory_assets: list[AssetManifest]
     selected_assets: list[AssetManifest]
     requirement_report: ValidationReport
     scene: SceneSpec
@@ -291,6 +292,7 @@ class DesignOrchestrator:
             "extraction_error": None,
         }
         try:
+            scene = _scene_with_required_accessories(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
             scene = _scene_with_asset_metadata(scene, selected_assets)
             requirements = _requirements_from_scene(scene, tower, antenna, radio, detail_level)
@@ -325,6 +327,11 @@ class DesignOrchestrator:
                 "tower": tower,
                 "antenna": antenna,
                 "radio": radio,
+                "accessory_assets": [
+                    asset
+                    for asset in selected_assets
+                    if asset.asset_id in _scene_accessory_ids(scene)
+                ],
                 "selected_assets": selected_assets,
                 "trace": _trace(
                     state,
@@ -479,11 +486,14 @@ class DesignOrchestrator:
         tower = self.registry.get(scene.tower.asset_id)
         antennas = []
         radios = []
+        accessories = []
         for sector in scene.sectors:
             antennas.append(self.registry.get(sector.antenna_asset_id))
             if sector.radio_asset_id:
                 radios.append(self.registry.get(sector.radio_asset_id))
-        selected_assets = _unique_assets([tower, *antennas, *radios])
+        for accessory in scene.accessory_assets:
+            accessories.append(self.registry.get(accessory.asset_id))
+        selected_assets = _unique_assets([tower, *antennas, *radios, *accessories])
         if not antennas:
             raise ValueError("scene revision requires at least one antenna asset")
         return selected_assets, tower, antennas[0], radios[0] if radios else None
@@ -592,6 +602,7 @@ class DesignOrchestrator:
                 if requirements.include_rru
                 else None
             )
+            accessory_assets = _select_accessory_assets(self.registry, requirements)
         except LookupError as exc:
             report = _failed_report(
                 design_id=state["workflow_id"],
@@ -612,11 +623,14 @@ class DesignOrchestrator:
                     errors=["ASSET_SELECTION_FAILED"],
                 ),
             }
-        selected_assets = [asset for asset in [tower, antenna, radio] if asset is not None]
+        selected_assets = [
+            asset for asset in [tower, antenna, radio, *accessory_assets] if asset is not None
+        ]
         return {
             "tower": tower,
             "antenna": antenna,
             "radio": radio,
+            "accessory_assets": accessory_assets,
             "selected_assets": selected_assets,
             "cache_metrics": self._cache_metrics(),
             "trace": _trace(
@@ -675,6 +689,12 @@ class DesignOrchestrator:
                         severity="warning",
                     )
                 )
+            accessory_assets = _select_accessory_assets(
+                self.registry,
+                requirements,
+                fallback=True,
+                tower_type=tower_type,
+            )
         except LookupError as exc:
             route = _route_event(state, "asset_fallback_handler", "asset_fallback")
             report = _failed_report(
@@ -697,7 +717,9 @@ class DesignOrchestrator:
                     attempt=state.get("repair_attempts", 0),
                 ),
             }
-        selected_assets = [asset for asset in [tower, antenna, radio] if asset is not None]
+        selected_assets = [
+            asset for asset in [tower, antenna, radio, *accessory_assets] if asset is not None
+        ]
         route = _route_event(
             state,
             "asset_fallback_handler",
@@ -708,6 +730,7 @@ class DesignOrchestrator:
             "tower": tower,
             "antenna": antenna,
             "radio": radio,
+            "accessory_assets": accessory_assets,
             "selected_assets": selected_assets,
             "asset_fallback_failed": False,
             "asset_fallback_warnings": warnings,
@@ -803,6 +826,7 @@ class DesignOrchestrator:
             tower=state["tower"],
             antenna=state["antenna"],
             radio=state["radio"],
+            accessory_assets=state.get("accessory_assets", []),
             rag_context=state.get("rag_context"),
             memory_recall=state.get("memory_recall"),
         )
@@ -1154,6 +1178,8 @@ def _requirements_from_scene(
         include_cables=any(sector.include_cable for sector in scene.sectors),
         include_beams=scene.visual_elements.include_sector_beams,
         include_labels=scene.visual_elements.include_labels,
+        include_power_cabinet=scene.visual_elements.include_power_cabinet,
+        include_gps_antenna=scene.visual_elements.include_gps_antenna,
         detail_level=detail_level,  # type: ignore[arg-type]
         warnings=[],
         repair_events=[],
@@ -1201,7 +1227,99 @@ def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) ->
                 }
             )
         )
-    return scene.model_copy(update={"tower": tower, "sectors": sectors})
+    accessories = []
+    for accessory in scene.accessory_assets:
+        asset = assets_by_id[accessory.asset_id]
+        accessories.append(
+            accessory.model_copy(
+                update={
+                    "asset_file": asset.file,
+                    "asset_source": asset.source,
+                    "asset_metadata": _runtime_asset_metadata(asset),
+                    "import_fallback_allowed": asset.import_fallback_allowed,
+                    "dimensions_m": asset.dimensions_m,
+                }
+            )
+        )
+    return scene.model_copy(
+        update={"tower": tower, "sectors": sectors, "accessory_assets": accessories}
+    )
+
+
+def _select_accessory_assets(
+    registry: AssetRegistry,
+    requirements: RequirementSpec,
+    *,
+    fallback: bool = False,
+    tower_type: str | None = None,
+) -> list[AssetManifest]:
+    assets: list[AssetManifest] = []
+    selector = registry.select_asset_fallback if fallback else registry.select_asset
+    selected_tower_type = tower_type or requirements.tower_type
+    if requirements.include_power_cabinet:
+        assets.append(selector("cabinet", requirements.network_type, selected_tower_type))
+    if requirements.include_gps_antenna:
+        assets.append(selector("gps", requirements.network_type, selected_tower_type))
+    return assets
+
+
+def _scene_with_required_accessories(scene: SceneSpec, registry: AssetRegistry) -> SceneSpec:
+    existing_types = {accessory.asset_type for accessory in scene.accessory_assets}
+    additions = []
+    tower_type = (
+        scene.tower.characteristics.structure
+        if scene.tower.characteristics.structure != "lattice"
+        else "lattice_tower"
+    )
+    if scene.visual_elements.include_power_cabinet and "cabinet" not in existing_types:
+        asset = registry.select_asset("cabinet", scene.network_type, tower_type)
+        additions.append(
+            _accessory_from_asset(
+                asset,
+                asset_type="cabinet",
+                position=[
+                    max(3.0, (scene.tower.characteristics.base_width_m or 4.0) * 1.2),
+                    0,
+                    0.8,
+                ],
+            )
+        )
+    if scene.visual_elements.include_gps_antenna and "gps" not in existing_types:
+        asset = registry.select_asset("gps", scene.network_type, tower_type)
+        additions.append(
+            _accessory_from_asset(
+                asset,
+                asset_type="gps",
+                position=[
+                    0,
+                    (scene.tower.characteristics.base_width_m or 4.0) / 2 + 0.1,
+                    max(0.5, scene.tower.height_m - 0.5),
+                ],
+            )
+        )
+    if not additions:
+        return scene
+    return scene.model_copy(update={"accessory_assets": [*scene.accessory_assets, *additions]})
+
+
+def _accessory_from_asset(asset: AssetManifest, *, asset_type: str, position: list[float]):
+    from core.contracts.scene import SceneAccessoryPlacement
+
+    return SceneAccessoryPlacement(
+        asset_id=asset.asset_id,
+        asset_file=asset.file,
+        asset_source=asset.source,
+        asset_metadata=_runtime_asset_metadata(asset),
+        import_fallback_allowed=asset.import_fallback_allowed,
+        asset_type=asset_type,  # type: ignore[arg-type]
+        dimensions_m=asset.dimensions_m,
+        position=position,
+        rotation_deg=[0.0, 0.0, 0.0],
+    )
+
+
+def _scene_accessory_ids(scene: SceneSpec) -> set[str]:
+    return {accessory.asset_id for accessory in scene.accessory_assets}
 
 
 def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
