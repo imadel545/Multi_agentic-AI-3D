@@ -39,6 +39,8 @@ Completed:
   - `microwave dish on lattice tower`
   - `small cell pole`
 - Unit coverage for structured planning hints and rejection of unstructured decorative hints.
+- Compact document-pack memory summaries are written as JSON artifacts, SQLite metadata rows, and
+  optional Qdrant runtime `document_pack_memory` points.
 
 Available with fallback:
 
@@ -63,6 +65,10 @@ The deterministic provider is an MVP fallback, not semantic production embedding
 - Current seeds are small. Retrieval quality depends heavily on explicit seed text until a stronger
   embedding provider and larger domain corpus are used.
 - Runtime memory collections are separate from static `/rag/reindex` collections.
+- Document-pack memory can be indexed into Qdrant collection `document_pack_memory` when a RAG
+  service is configured. This runtime collection is compact and not part of static `/rag/reindex`.
+- Document-pack Groq extraction is active only when a Groq client/key is configured. It is bounded,
+  evidence-checked, and cannot override provenance, resolver decisions, conflicts, or QA.
 
 ## API
 

@@ -22,6 +22,25 @@ free text and does not ask the LLM to write Blender code. It starts from the pat
 derives controlled requirements, reruns Rule/Tower/RF validation, pre/post quality gates, Blender,
 GLB inspection, geometry validation, preview inspection, and memory writeback when configured.
 
+Document-pack intelligence now has a dedicated LangGraph orchestrator:
+
+```text
+index
+-> extract_pdf_ocr_cad
+-> groq_extract
+-> consolidate
+-> qa
+-> write_artifacts
+-> memory_writeback
+```
+
+`DocumentPackService` remains the API/storage facade. The graph produces `trace.json` and
+`events.json` for frontend timeline display.
+
+Pack-to-design generation now uses `ProjectDesignSpec -> RequirementSpec` directly through
+`WorkflowService.create_design_from_requirements()` and `DesignOrchestrator.run_requirements()`.
+It does not reparse a generated prompt.
+
 `pre_blender_gate` checks:
 
 - extracted requirements are valid
@@ -125,7 +144,9 @@ Trace steps include:
   reject invalid geometry.
 - Corrective routes are deterministic and conservative.
 - No handler can bypass rule validation.
-- Revision orchestration is a controlled service path, not a second LangGraph graph yet.
+- Revision orchestration is a controlled service path that reuses deterministic validators and QA.
+- Document-pack orchestration is graph-based but synchronous; async/SSE can be added if ingestion
+  becomes long-running.
 - Quality gate checks are local contract/artifact checks, not visual semantic inspection.
 - Geometry validation checks object counts, sector object presence, tower/antenna heights, azimuth
   metadata, and bounding-box reasonableness. Exact transform/material parsing remains future work.

@@ -1,4 +1,10 @@
 from core.contracts.assets import AssetManifest
+from core.contracts.document_pack import (
+    DocumentPackCorrection,
+    DocumentPackQAReport,
+    DocumentPackSummary,
+    ProjectDesignSpec,
+)
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
@@ -11,6 +17,9 @@ from core.contracts.validation import ValidationIssue, ValidationReport
 
 __all__ = [
     "AssetManifest",
+    "DocumentPackSummary",
+    "DocumentPackCorrection",
+    "DocumentPackQAReport",
     "GeometryValidationReport",
     "GlbInspectionReport",
     "MemoryIndexResult",
@@ -19,6 +28,7 @@ __all__ = [
     "QualityGateCheck",
     "QualityGateReport",
     "PreviewInspectionReport",
+    "ProjectDesignSpec",
     "RepairEvent",
     "RepairReport",
     "RequirementSpec",

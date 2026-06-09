@@ -8,6 +8,7 @@ from core.contracts.common import StrictModel
 class WorkflowEvent(StrictModel):
     event_type: Literal[
         "design_created",
+        "validated_requirements_received",
         "edit_patch_created",
         "edit_patch_applied",
         "edit_patch_rejected",

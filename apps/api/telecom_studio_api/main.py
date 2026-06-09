@@ -19,8 +19,11 @@ from apps.api.telecom_studio_api.models import (
 from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.document_pack import DocumentPackCorrection
+from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
+from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
 from core.llm import GroqStructuredClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
@@ -76,6 +79,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 registry = AssetRegistry(settings.manifests_dir)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
+project_spec_mapper = ProjectDesignSpecMapper()
 rag_service = RagService(
     project_root=settings.project_root,
     qdrant_path=settings.local_qdrant_path,
@@ -92,6 +96,13 @@ groq_client = (
     )
     if settings.resolved_groq_api_key
     else None
+)
+document_pack_service = DocumentPackService(
+    settings.temp_outputs_dir,
+    groq_client=groq_client,
+    groq_provider_name=f"groq:{settings.groq_model}" if groq_client else None,
+    groq_bounded_extraction_enabled=settings.enable_groq_extraction,
+    memory_service=memory_service,
 )
 requirement_extractor = RequirementExtractor(
     provider=groq_client,
@@ -274,6 +285,167 @@ def get_asset(asset_id: str) -> dict:
         return registry.get(asset_id).model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
+
+
+@app.post("/document-packs")
+async def create_document_pack(request: Request) -> dict:
+    content = await request.body()
+    if not content:
+        raise HTTPException(status_code=422, detail="empty document pack body")
+    filename = request.headers.get("x-filename")
+    try:
+        return document_pack_service.ingest_zip(content, filename=filename).model_dump()
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/document-packs")
+def list_document_packs() -> list[dict]:
+    return document_pack_service.list_packs()
+
+
+@app.get("/document-packs/capabilities")
+def get_document_pack_capabilities() -> dict:
+    return document_pack_service.capabilities().model_dump()
+
+
+@app.get("/document-packs/{pack_id}")
+def get_document_pack(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_summary(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/documents")
+def get_document_pack_documents(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_documents(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/extractions")
+def get_document_pack_extractions(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_extractions(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/consolidated-spec")
+def get_document_pack_consolidated_spec(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_spec(pack_id).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/conflicts")
+def get_document_pack_conflicts(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_conflicts(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/missing-fields")
+def get_document_pack_missing_fields(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_missing_fields(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/provenance")
+def get_document_pack_provenance(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_provenance(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/qa")
+def get_document_pack_qa(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_qa_report(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/processing")
+def get_document_pack_processing(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_processing_report(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/trace")
+def get_document_pack_trace(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_trace(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/events")
+def get_document_pack_events(pack_id: str) -> list[dict]:
+    try:
+        return document_pack_service.get_events(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.get("/document-packs/{pack_id}/memory-summary")
+def get_document_pack_memory_summary(pack_id: str) -> dict:
+    try:
+        return document_pack_service.get_memory_summary(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.post("/document-packs/{pack_id}/corrections")
+def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrection) -> dict:
+    try:
+        return document_pack_service.apply_correction(pack_id, correction).model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+
+
+@app.post("/document-packs/{pack_id}/generate-design")
+def generate_design_from_document_pack(pack_id: str) -> dict:
+    try:
+        spec = document_pack_service.get_spec(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+    mapping = project_spec_mapper.map_to_requirements(spec)
+    if mapping.status != "mapped":
+        return {
+            "pack_id": pack_id,
+            "status": "blocked",
+            "mapping": mapping.model_dump(),
+        }
+    requirements = RequirementSpec.model_validate(mapping.requirements)
+    design = workflow_service.create_design_from_requirements(
+        requirements=requirements,
+        detail_level="high",
+        source_label="project_design_spec",
+    )
+    if design.get("workflow_id"):
+        document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
+    return {
+        "pack_id": pack_id,
+        "status": "pending",
+        "mapping": mapping.model_dump(),
+        "extraction_report": {
+            "source": "project_design_spec",
+            "prompt_text_reparse": False,
+            "provider": "project_design_spec",
+            "fallback_used": False,
+        },
+        **design,
+    }
 
 
 @app.get("/memory/stats")

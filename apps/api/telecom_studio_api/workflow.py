@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
 from core.contracts.validation import ValidationReport
@@ -151,6 +152,118 @@ class WorkflowService:
         thread.start()
         return {"workflow_id": workflow_id, "status": "pending"}
 
+    def create_design_from_requirements(
+        self,
+        requirements: RequirementSpec,
+        *,
+        detail_level: str,
+        source_label: str = "project_design_spec",
+        _synchronous: bool = False,
+    ) -> dict:
+        self._sync_output_services()
+        workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
+        output_dir = self.outputs_dir / workflow_id
+        output_dir.mkdir(parents=True, exist_ok=False)
+        context_text = _requirements_context_text(requirements, source_label)
+        self.event_log.emit(
+            workflow_id,
+            "design_created",
+            {"detail_level": detail_level, "use_llm": False, "source": source_label},
+        )
+        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
+
+        def _run() -> None:
+            try:
+                self.event_log.emit(
+                    workflow_id,
+                    "validated_requirements_received",
+                    {"source": source_label, "node": "use_validated_requirements"},
+                )
+                self.event_log.emit(workflow_id, "blender_started", {"node": "generate_blender"})
+                result = self.orchestrator.run_requirements(
+                    workflow_id=workflow_id,
+                    requirements=requirements,
+                    detail_level=detail_level,
+                    output_dir=output_dir,
+                    source_label=source_label,
+                )
+                self._write_result_files(output_dir, context_text, result)
+                self._write_status(workflow_id, result.status, output_dir, result)
+                self._make_archive(output_dir)
+                self._write_status(workflow_id, result.status, output_dir, result)
+                if result.scene:
+                    version = self.versioning.save_version(
+                        workflow_id,
+                        result.scene,
+                        edit_description=f"initial from {source_label}",
+                        status=result.status,
+                        qa_score=result.qa_report.score if result.qa_report else None,
+                        generation_mode=result.generation.mode if result.generation else None,
+                        activate=True,
+                    )
+                    version_dir = self.versioning.version_artifacts_dir(
+                        workflow_id, version.version_id
+                    )
+                    self._copy_artifact_files(output_dir, version_dir)
+                    self._write_status(
+                        workflow_id,
+                        result.status,
+                        version_dir,
+                        result,
+                        version_id=version.version_id,
+                        active_version_id=version.version_id,
+                    )
+                    self._make_archive(version_dir)
+                    self._write_status(
+                        workflow_id,
+                        result.status,
+                        version_dir,
+                        result,
+                        version_id=version.version_id,
+                        active_version_id=version.version_id,
+                    )
+                    version_status = self._read_json(version_dir / "status.json")
+                    self.versioning.update_version(
+                        workflow_id,
+                        version.version_id,
+                        status=result.status,
+                        artifact_dir=str(version_dir),
+                        artifacts=version_status.get("artifacts", {}),
+                        qa_score=result.qa_report.score if result.qa_report else None,
+                        generation_mode=result.generation.mode if result.generation else None,
+                        active=True,
+                    )
+                    self._copy_active_status_to_root(workflow_id, version_dir)
+                self.event_log.emit(
+                    workflow_id,
+                    "workflow_completed" if result.status != "failed" else "workflow_failed",
+                    {
+                        "status": result.status,
+                        "duration_ms": result.total_duration_ms,
+                        "version_id": self.versioning.active_version_id(workflow_id),
+                        "node": "workflow",
+                    },
+                )
+            except Exception as exc:
+                self.event_log.emit(
+                    workflow_id,
+                    "workflow_failed",
+                    {"error": str(exc), "error_type": type(exc).__name__},
+                )
+                self._write_failed_status(workflow_id, output_dir, str(exc))
+
+        if _synchronous:
+            _run()
+            try:
+                status = self.get_status(workflow_id)
+                return {"workflow_id": workflow_id, "status": status["status"]}
+            except KeyError:
+                return {"workflow_id": workflow_id, "status": "failed"}
+
+        thread = threading.Thread(target=_run, name=f"workflow-{workflow_id}")
+        thread.start()
+        return {"workflow_id": workflow_id, "status": "pending"}
+
     def get_status(self, workflow_id: str) -> dict:
         self._sync_output_services()
         status_path = self.outputs_dir / workflow_id / "status.json"
@@ -229,8 +342,8 @@ class WorkflowService:
                 if extraction.requirements
                 else []
             ),
-            "errors": [e.model_dump() for e in extraction.errors] if extraction.errors else [],
-            "provider": extraction.provider_name,
+            "errors": _extraction_errors(extraction.error),
+            "provider": extraction.provider,
             "fallback_used": extraction.fallback_used,
         }
 
@@ -769,11 +882,28 @@ def _extraction_report(result: OrchestratorResult) -> dict:
         "provider": result.llm_provider,
         "fallback_used": result.llm_fallback_used,
         "error": result.llm_error,
+        "source": result.llm_provider,
         "repaired_fields": repaired_fields,
         "inferred_fields": inferred_fields,
         "confidence": round(confidence, 2),
         "warnings": [warning.model_dump() for warning in warnings],
     }
+
+
+def _requirements_context_text(requirements: RequirementSpec, source_label: str) -> str:
+    return "\n".join(
+        [
+            f"source: {source_label}",
+            f"network_type: {requirements.network_type}",
+            f"tower_type: {requirements.tower_type}",
+            f"tower_height_m: {requirements.tower_height_m}",
+            f"sector_count: {requirements.sector_count}",
+            "azimuths_deg: " + ", ".join(str(value) for value in requirements.azimuths_deg),
+            f"antenna_install_height_m: {requirements.antenna_install_height_m}",
+            f"include_rru: {requirements.include_rru}",
+            f"include_cables: {requirements.include_cables}",
+        ]
+    )
 
 
 def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
@@ -797,6 +927,18 @@ def _tower_characteristics_summary(result: OrchestratorResult) -> dict | None:
     if result.scene is None:
         return None
     return result.scene.tower.characteristics.model_dump()
+
+
+def _extraction_errors(error: str | None) -> list[dict]:
+    if not error:
+        return []
+    return [
+        {
+            "code": "LLM_EXTRACTION_ERROR",
+            "message": error,
+            "severity": "warning",
+        }
+    ]
 
 
 def _tower_characteristics_text(result: OrchestratorResult) -> str:

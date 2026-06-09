@@ -18,6 +18,24 @@ The backend exposes the data needed for an advanced local-first frontend:
 - `POST /designs/{workflow_id}/versions/{version_id}/rollback` changes the active version without
   deleting history.
 - `GET /assets/inventory` exposes GLB readiness and fallback state for every manifest.
+- `POST /document-packs` ingests a ZIP as raw `application/zip` bytes and stores index/extraction
+  JSON, not the original archive.
+- `GET /document-packs/{pack_id}/documents`, `/extractions`, `/consolidated-spec`, `/conflicts`,
+  and `/missing-fields` expose document intelligence panels for the future studio.
+- `GET /document-packs/{pack_id}/provenance` exposes evidence by field.
+- `GET /document-packs/{pack_id}/qa` exposes document-pack QA checks and score.
+- `GET /document-packs/capabilities` exposes local OCR/PDF/CAD/coordinate/Groq document-pack
+  capability status.
+- `GET /document-packs/{pack_id}/processing` exposes per-document extraction status, tools, and
+  warnings.
+- `GET /document-packs/{pack_id}/trace` and `/events` expose document-pack orchestration timeline
+  data for an agent-studio panel.
+- `GET /document-packs/{pack_id}/memory-summary` exposes a compact no-large-file summary for
+  future memory/RAG panels.
+- `POST /document-packs/{pack_id}/corrections` applies a manual correction, rebuilds the
+  consolidated spec, and stores `user_correction` provenance.
+- `POST /document-packs/{pack_id}/generate-design` maps a provenance-backed `ProjectDesignSpec`
+  to `RequirementSpec` and launches the design workflow without prompt text reparsing.
 
 ## Asset Data Exposed
 
@@ -32,6 +50,7 @@ Each asset import record reports:
 - `asset_id`
 - `asset_file`
 - `asset_source`
+- `asset_metadata`
 - `object_role`
 - `asset_file_exists`
 - `asset_import_success`
@@ -40,8 +59,9 @@ Each asset import record reports:
 - `effective_generation_mode`
 - `warnings`
 
-The frontend should render `internal_test_minimal` and `procedural_fallback` as visible
-limitations, not as vendor-grade imported assets.
+The frontend should render `cc_by`, `internal_cleaned`, `internal_test_minimal`, and
+`procedural_fallback` as visible limitations, not as vendor-grade imported assets. `cc_by`
+entries must expose attribution.
 
 ## Available With Fallback
 
@@ -53,8 +73,15 @@ limitations, not as vendor-grade imported assets.
 
 ## Known Limitations
 
-- Asset library is `partial_import_ready`: two internal minimal GLBs are present, but vendor tower,
-  4G panel, and microwave dish GLBs are still missing.
+- Document-pack intelligence is operational but still bounded: PDF text/table, selected OCR, DXF,
+  Groq bounded extraction when configured, corrections, provenance, QA, processing reports, trace,
+  events, direct generation, and memory writeback are implemented. Docling layout and DWG conversion
+  are not default runtime paths.
+- Asset library is `partial_import_ready`: nine GLBs are present, including one CC Attribution
+  tower and internal cleaned/minimal telecom assets. Monopole, rooftop mast, and small-cell tower
+  vendor GLBs are still missing.
+- Accessory assets for GPS, power cabinet, bracket, and cable tray are inventory-ready, but not
+  yet imported as worker placements.
 - Preview inspection is structural/image-stat based, not semantic design judging.
 - The API is synchronous for edit application. A separate preview-only edit workflow can be added
   later if the UI needs apply/reject before generation.
@@ -65,4 +92,6 @@ limitations, not as vendor-grade imported assets.
 
 - Add frontend viewer routes that serve artifacts by version without exposing raw filesystem paths.
 - Add patch preview/apply endpoints if the UX needs non-committed edit previews.
-- Add vendor asset provenance, pivot/mount-point metadata, and stricter imported-GLB dimension QA.
+- Add vendor-grade asset replacement, exact pivot/mount-point validation, and stricter
+  imported-GLB dimension QA.
+- Add asynchronous document-pack ingestion events if OCR/CAD processing becomes long-running.

@@ -18,7 +18,7 @@ from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
 from core.contracts.rf_validation import RfValidationReport
 from core.contracts.runtime import AgentStepTrace, WorkflowTrace
-from core.contracts.scene import SceneSpec
+from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.contracts.tower_validation import TowerValidationReport
 from core.contracts.validation import ValidationIssue, ValidationReport
 from core.memory import MemoryService
@@ -163,6 +163,96 @@ class DesignOrchestrator:
             "route_history": [],
         }
         state = self.graph.invoke(initial_state, config=config)
+        state["total_duration_ms"] = _duration_ms(started)
+        return _result_from_state(state)
+
+    def run_requirements(
+        self,
+        workflow_id: str,
+        requirements: RequirementSpec,
+        detail_level: str,
+        output_dir: Path,
+        source_label: str = "project_design_spec",
+    ) -> OrchestratorResult:
+        started = time.perf_counter()
+        state: WorkflowState = {
+            "workflow_id": workflow_id,
+            "requirements_text": _requirements_context_text(requirements, source_label),
+            "detail_level": detail_level,
+            "use_llm": False,
+            "output_dir": output_dir,
+            "requirements": requirements,
+            "requirements_hash": requirements_hash(requirements),
+            "asset_manifest_hash": self.registry.manifest_hash,
+            "knowledge_index_hash": knowledge_index_hash(self.rag_service.project_root)
+            if self.rag_service is not None
+            else "",
+            "extraction_provider": source_label,
+            "extraction_fallback_used": False,
+            "extraction_error": None,
+            "trace": [],
+            "errors": [],
+            "rag_context": [],
+            "max_repair_attempts": 2,
+            "repair_attempts": 0,
+            "scene_repair_recorded": False,
+            "route_history": [],
+            "quality_gate_reports": [],
+            "cache_metrics": self._cache_metrics(),
+        }
+        state["trace"] = _trace(state, "use_validated_requirements", source_label, started)
+
+        self._apply_update(state, self._retrieve_rag_context(state))
+        if self.memory_service is not None:
+            self._apply_update(state, self._memory_recall(state))
+
+        self._apply_update(state, self._select_assets(state))
+        if _asset_route(state) == "asset_fallback":
+            self._apply_update(state, self._asset_fallback_handler(state))
+            if _asset_fallback_route(state) != "continue":
+                state["total_duration_ms"] = _duration_ms(started)
+                return _result_from_state(state)
+
+        self._apply_update(state, self._validate_requirements(state))
+        if _requirements_route(state) != "continue":
+            self._apply_update(state, self._rule_violation_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._plan_scene(state))
+        self._apply_update(state, self._validate_scene(state))
+        if _scene_route(state) != "continue":
+            self._apply_update(state, self._scene_repair_handler(state))
+            if _scene_repair_route(state) == "retry":
+                self._apply_update(state, self._validate_scene(state))
+            if _scene_route(state) != "continue":
+                state["total_duration_ms"] = _duration_ms(started)
+                return _result_from_state(state)
+
+        self._apply_update(state, self._pre_blender_gate(state))
+        if _pre_blender_gate_route(state) != "continue":
+            self._apply_update(state, self._quality_gate_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._generate_blender(state))
+        if _generation_route(state) == "blender_failure":
+            self._apply_update(state, self._blender_failure_handler(state))
+
+        self._apply_update(state, self._qa_generation(state))
+        if _qa_route(state) != "continue":
+            self._apply_update(state, self._qa_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        self._apply_update(state, self._post_blender_gate(state))
+        if _post_blender_gate_route(state) != "continue":
+            self._apply_update(state, self._quality_gate_failure_handler(state))
+            state["total_duration_ms"] = _duration_ms(started)
+            return _result_from_state(state)
+
+        if self.memory_service is not None:
+            self._apply_update(state, self._memory_writeback(state))
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -1021,6 +1111,22 @@ def _extraction_route(state: WorkflowState) -> str:
     return "continue" if state.get("requirements") is not None else "missing_data"
 
 
+def _requirements_context_text(requirements: RequirementSpec, source_label: str) -> str:
+    return "\n".join(
+        [
+            f"source: {source_label}",
+            f"network_type: {requirements.network_type}",
+            f"tower_type: {requirements.tower_type}",
+            f"tower_height_m: {requirements.tower_height_m}",
+            f"sector_count: {requirements.sector_count}",
+            "azimuths_deg: " + ", ".join(str(value) for value in requirements.azimuths_deg),
+            f"antenna_install_height_m: {requirements.antenna_install_height_m}",
+            f"include_rru: {requirements.include_rru}",
+            f"include_cables: {requirements.include_cables}",
+        ]
+    )
+
+
 def _requirements_from_scene(
     scene: SceneSpec,
     tower: AssetManifest,
@@ -1068,7 +1174,9 @@ def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) ->
         update={
             "asset_file": tower_asset.file,
             "asset_source": tower_asset.source,
+            "asset_metadata": _runtime_asset_metadata(tower_asset),
             "import_fallback_allowed": tower_asset.import_fallback_allowed,
+            "dimensions_m": tower_asset.dimensions_m,
         }
     )
     sectors = []
@@ -1080,9 +1188,13 @@ def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) ->
                 update={
                     "antenna_asset_file": antenna_asset.file,
                     "antenna_asset_source": antenna_asset.source,
+                    "antenna_asset_metadata": _runtime_asset_metadata(antenna_asset),
                     "antenna_import_fallback_allowed": antenna_asset.import_fallback_allowed,
                     "radio_asset_file": radio_asset.file if radio_asset else None,
                     "radio_asset_source": radio_asset.source if radio_asset else None,
+                    "radio_asset_metadata": _runtime_asset_metadata(radio_asset)
+                    if radio_asset
+                    else RuntimeAssetMetadata(),
                     "radio_import_fallback_allowed": radio_asset.import_fallback_allowed
                     if radio_asset
                     else True,
@@ -1090,6 +1202,19 @@ def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) ->
             )
         )
     return scene.model_copy(update={"tower": tower, "sectors": sectors})
+
+
+def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
+    return RuntimeAssetMetadata(
+        license=asset.license,
+        attribution_required=asset.attribution_required,
+        attribution=asset.attribution,
+        original_url=asset.original_url,
+        original_author=asset.original_author,
+        normalized_by=asset.normalized_by,
+        pivot_policy=asset.pivot_policy,
+        front_axis=asset.front_axis,
+    )
 
 
 def _asset_route(state: WorkflowState) -> str:

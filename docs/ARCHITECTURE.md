@@ -5,6 +5,8 @@ the safety net, while agentic integrations are layered around it.
 
 ```text
 FastAPI Local Gateway
+  -> Document Pack Intelligence (optional entry, LangGraph)
+  -> ProjectDesignSpec / RequirementSpec mapping
   -> LangGraph Orchestrator
   -> RAG Retrieval
   -> Groq Structured Extraction or Deterministic Parser
@@ -45,6 +47,11 @@ FastAPI /designs/{workflow_id}/edit
 ## Implemented
 
 - `core/contracts`: strict Pydantic contracts.
+- `core/contracts/document_pack.py`: document-pack, evidence, QA, capability, and
+  `ProjectDesignSpec` contracts.
+- `core/document_pack`: safe ZIP indexing, classification, optional PDF/CAD/coordinate capability
+  adapters, selected OCR, DXF parsing, bounded Groq extraction, LangGraph orchestration,
+  consolidation, corrections, QA, trace/events, processing reports, and memory writeback.
 - `core/services/asset_registry.py`: manifest loading and compatibility selection.
 - `core/services/asset_inventory.py`: asset file/import readiness reporting for frontend and QA.
 - `core/services/requirement_parser.py`: deterministic baseline extraction.
@@ -110,6 +117,11 @@ Known limitations:
 - Version artifacts are filesystem-local and intended for local-first mono-user workflows.
 - Geometry QA validates counts, sector object presence, heights, azimuth metadata, and a
   bounding-box proxy. It does not yet parse exact GLB node transforms or materials.
+- Document-pack orchestration is graph-based but synchronous. Large OCR/CAD/Groq packs may require
+  async jobs/SSE later.
+- The `document-intel` extra is installed and validated in the current `.venv`; Docling is installed
+  separately and importable, but not used by default because it is heavy and model-cache dependent.
+  Missing local tools still remain visible through capability and processing endpoints.
 
 ## Reserved integrations
 
@@ -119,3 +131,5 @@ Known limitations:
 - The current MVP imports available GLBs and falls back procedurally when manifests allow it.
 - Vendor-grade GLB assets can replace the current internal minimal assets and missing files without
   changing stable manifest IDs.
+- Document-pack memory summaries are compact local artifacts and can write compact SQLite/Qdrant
+  runtime memory. They do not store source ZIP/PDF/image/GLB/PNG bytes.

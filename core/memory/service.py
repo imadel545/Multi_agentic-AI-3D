@@ -4,6 +4,11 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from core.contracts.document_pack import (
+    DocumentPackQAReport,
+    DocumentPackSummary,
+    ProjectDesignSpec,
+)
 from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
@@ -164,7 +169,93 @@ class MemoryService:
                 "workflow_memory_count": _count(conn, "workflow_memory"),
                 "design_memory_count": _count(conn, "design_memory"),
                 "error_memory_count": _count(conn, "error_memory"),
+                "document_pack_memory_count": _count(conn, "document_pack_memory"),
+                "document_pack_issue_memory_count": _count(conn, "document_pack_issue_memory"),
             }
+
+    def write_document_pack_summary(
+        self,
+        *,
+        spec: ProjectDesignSpec,
+        summary: DocumentPackSummary,
+        qa_report: DocumentPackQAReport,
+        corrections: list[dict],
+        generated_workflow_id: str | None,
+    ) -> dict:
+        created_at = int(time.time())
+        fields = _document_pack_fields(spec)
+        categories = _document_pack_categories(spec)
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM document_pack_issue_memory WHERE pack_id = ?",
+                (spec.pack_id,),
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO document_pack_memory (
+                    pack_id, site_code, tower_type, tower_height_m, sector_count, qa_score,
+                    ready_to_generate, source_mode, categories_json, fields_json,
+                    corrections_json, conflicts_json, missing_fields_json,
+                    generated_workflow_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    spec.pack_id,
+                    fields.get("site.site_code"),
+                    fields.get("tower.tower_type"),
+                    fields.get("tower.tower_height_m"),
+                    len(spec.radio_sectors),
+                    summary.qa_score or 0.0,
+                    int(qa_report.ready_to_generate),
+                    spec.source_mode,
+                    json.dumps(categories),
+                    json.dumps(fields),
+                    json.dumps(corrections),
+                    json.dumps([field.model_dump() for field in spec.conflicts]),
+                    json.dumps([field.model_dump() for field in spec.missing_fields]),
+                    generated_workflow_id,
+                    created_at,
+                ),
+            )
+            for check in qa_report.checks:
+                if check.passed:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO document_pack_issue_memory (
+                        pack_id, issue_code, message, severity, field, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        spec.pack_id,
+                        check.name,
+                        check.reason,
+                        "warning",
+                        check.name,
+                        created_at,
+                    ),
+                )
+        index_result = self._index_document_pack_memory(
+            spec=spec,
+            summary=summary,
+            qa_report=qa_report,
+            fields=fields,
+            categories=categories,
+            generated_workflow_id=generated_workflow_id,
+            created_at=created_at,
+        )
+        return {
+            "status": "written",
+            "pack_id": spec.pack_id,
+            "generated_workflow_id": generated_workflow_id,
+            "sqlite": {
+                "document_pack_memory_count": self.stats()["document_pack_memory_count"],
+                "document_pack_issue_memory_count": self.stats()[
+                    "document_pack_issue_memory_count"
+                ],
+            },
+            "qdrant": index_result,
+        }
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -241,6 +332,48 @@ class MemoryService:
                 "CREATE INDEX IF NOT EXISTS idx_error_memory_lookup "
                 "ON error_memory(network_type, tower_type, created_at)"
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_pack_memory (
+                    pack_id TEXT PRIMARY KEY,
+                    site_code TEXT,
+                    tower_type TEXT,
+                    tower_height_m REAL,
+                    sector_count INTEGER NOT NULL,
+                    qa_score REAL NOT NULL,
+                    ready_to_generate INTEGER NOT NULL,
+                    source_mode TEXT NOT NULL,
+                    categories_json TEXT NOT NULL,
+                    fields_json TEXT NOT NULL,
+                    corrections_json TEXT NOT NULL,
+                    conflicts_json TEXT NOT NULL,
+                    missing_fields_json TEXT NOT NULL,
+                    generated_workflow_id TEXT,
+                    created_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_pack_issue_memory (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pack_id TEXT NOT NULL,
+                    issue_code TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    severity TEXT NOT NULL,
+                    field TEXT,
+                    created_at INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_document_pack_memory_lookup "
+                "ON document_pack_memory(tower_type, sector_count, qa_score, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_document_pack_issue_lookup "
+                "ON document_pack_issue_memory(pack_id, issue_code, created_at)"
+            )
 
     def _index_summary(
         self,
@@ -288,6 +421,43 @@ class MemoryService:
             indexed_points=sum(indexed.values()),
             errors=errors,
         )
+
+    def _index_document_pack_memory(
+        self,
+        *,
+        spec: ProjectDesignSpec,
+        summary: DocumentPackSummary,
+        qa_report: DocumentPackQAReport,
+        fields: dict,
+        categories: dict,
+        generated_workflow_id: str | None,
+        created_at: int,
+    ) -> dict:
+        if self.rag_service is None:
+            return {"status": "skipped", "errors": ["rag_service_not_configured"]}
+        payload = {
+            "type": "document_pack_memory",
+            "doc_type": "document_pack_memory",
+            "pack_id": spec.pack_id,
+            "tower_type": fields.get("tower.tower_type"),
+            "sector_count": len(spec.radio_sectors),
+            "qa_score": summary.qa_score,
+            "ready_to_generate": qa_report.ready_to_generate,
+            "source_mode": spec.source_mode,
+            "categories": categories,
+            "generated_workflow_id": generated_workflow_id,
+            "created_at": created_at,
+        }
+        try:
+            self.rag_service.upsert_runtime_document(
+                collection="document_pack_memory",
+                doc_id=f"memory:document_pack:{spec.pack_id}",
+                text=_document_pack_memory_text(payload, fields),
+                payload=payload,
+            )
+        except Exception as exc:
+            return {"status": "failed", "errors": [f"{type(exc).__name__}: {exc}"]}
+        return {"status": "indexed", "indexed_points": 1, "errors": []}
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
@@ -412,5 +582,58 @@ def _issue_text(summary: MemorySummary, issue: ValidationIssue) -> str:
             f"issue_code: {issue.code}",
             f"severity: {issue.severity}",
             f"message: {issue.message}",
+        ]
+    )
+
+
+def _document_pack_fields(spec: ProjectDesignSpec) -> dict:
+    fields: dict[str, object] = {}
+    for section_name in [
+        "site_info",
+        "coordinate_info",
+        "tower_spec",
+        "foundation_spec",
+        "cabling_spec",
+        "grounding_spec",
+        "compound_spec",
+    ]:
+        section = getattr(spec, section_name)
+        prefix = {
+            "site_info": "site",
+            "coordinate_info": "coordinates",
+            "tower_spec": "tower",
+            "foundation_spec": "foundation",
+            "cabling_spec": "cabling",
+            "grounding_spec": "grounding",
+            "compound_spec": "compound",
+        }[section_name]
+        for key, field in section.items():
+            if field.status == "confirmed":
+                fields[f"{prefix}.{key}"] = field.value
+    if spec.radio_sectors:
+        fields["radio.sector_count"] = len(spec.radio_sectors)
+        fields["radio.azimuths_deg"] = [sector.azimuth_deg.value for sector in spec.radio_sectors]
+        fields["radio.hba_m"] = [sector.hba_m.value for sector in spec.radio_sectors]
+    return fields
+
+
+def _document_pack_categories(spec: ProjectDesignSpec) -> dict[str, int]:
+    categories: dict[str, int] = {}
+    for document in spec.document_references:
+        categories[document.category] = categories.get(document.category, 0) + 1
+    return categories
+
+
+def _document_pack_memory_text(payload: dict, fields: dict) -> str:
+    return "\n".join(
+        [
+            f"pack_id: {payload.get('pack_id')}",
+            f"tower_type: {payload.get('tower_type')}",
+            f"sector_count: {payload.get('sector_count')}",
+            f"qa_score: {payload.get('qa_score')}",
+            f"ready_to_generate: {payload.get('ready_to_generate')}",
+            f"source_mode: {payload.get('source_mode')}",
+            f"generated_workflow_id: {payload.get('generated_workflow_id')}",
+            "fields: " + json.dumps(fields, ensure_ascii=False, sort_keys=True),
         ]
     )

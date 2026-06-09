@@ -6,6 +6,11 @@ Groq extraction is isolated in `core/llm/groq.py` and routed through
 Scene edits also use Groq through `core/agents/scene_edit_agent.py` when a key is configured.
 The edit agent can only return a typed `ScenePatch`; it never generates Blender Python code.
 
+Document-pack ingestion can invoke a separate bounded Groq extractor in
+`core/document_pack/groq_extractor.py` when a Groq client/key is configured. This extractor is not
+the requirements extractor; it accepts only selected document chunks and must return source-backed
+field candidates.
+
 Supported key sources:
 
 - `TELECOM_STUDIO_GROQ_API_KEY`
@@ -43,6 +48,11 @@ Completed:
 - `extraction_report.json` per workflow.
 - Groq-backed prompt editing with deterministic fallback and visible `edit_llm_provider` /
   `edit_llm_fallback_used` fields in `scene_patch.json` and the edit API response.
+- Bounded document-pack extraction over selected high/medium text/table/OCR/CAD chunks.
+- Groq document-pack output requires strict JSON fields with `field`, `value`, `confidence`,
+  `document_id`, `page`, and `evidence`.
+- Groq document-pack fields are rejected when evidence is empty, not present in the selected chunk,
+  tied to an invalid document, or outside supported field prefixes.
 - Adversarial deterministic extraction tests for French, English, slash azimuths, words for
   sector counts, missing values, and invalid heights.
 
@@ -52,6 +62,9 @@ Available with fallback:
   non-critical fields are repaired from deterministic baseline and surfaced as warnings.
 - Groq edit patching may return invalid/empty operations. The system falls back to deterministic
   patch parsing, then validates all paths and values through Pydantic and SceneSpec validation.
+- Document-pack Groq extraction is visible in `source_mode`, `llm_provider`,
+  `llm_fallback_used`, `groq_rejected_fields`, QA, and processing reports. It cannot bypass
+  deterministic conflicts, user corrections, `ProjectDesignSpec` contracts, or QA.
 
 Known runtime result:
 

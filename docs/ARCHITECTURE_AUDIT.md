@@ -32,8 +32,40 @@ Updated audit on 2026-06-08:
 - Asset pipeline update: inventory is now `partial_import_ready`; two internal minimal GLB assets
   are present and importable, while vendor-grade tower/4G/microwave assets remain missing.
 
+Document intelligence audit on 2026-06-08:
+
+- Confirmed local `.venv` lacks `fitz`, `pdfplumber`, `docling`, `ezdxf`, `pyproj`,
+  `pytesseract`, and `PIL`; only the `tesseract` binary was detected.
+- Confirmed document-pack MVP already supports safe ZIP indexing, classification, deterministic
+  extraction, missing/conflict detection, user corrections, QA, mapping to `RequirementSpec`, and
+  frontend endpoints.
+- Confirmed remaining risks: scanned PDFs cannot be understood, DXF/DWG are not parsed without
+  local tooling, coordinate conversion cannot run without `pyproj`, and Groq bounded document-pack
+  extraction is not wired.
+- Action taken: added typed capability reporting, per-document processing status/warnings, optional
+  DXF adapter readiness, explicit coordinate conversion status, compact memory-summary artifacts,
+  stronger document-pack QA, API endpoints, docs, and tests.
+
+Document intelligence hardening update on 2026-06-08:
+
+- Installed and verified `.[document-intel]`: PyMuPDF/fitz, pdfplumber, ezdxf, pyproj,
+  pytesseract, and Pillow.
+- Installed Docling separately and verified imports. Model-based PDF conversion depends on cached
+  model files and free disk; the acceptance run keeps it outside default ingestion because it is
+  heavy and can fail when disk space is too low.
+- Added selected OCR, real DXF parsing, bounded Groq document-pack extraction, document-pack
+  LangGraph orchestration, SQLite/Qdrant document-pack memory writeback, trace/events endpoints,
+  and direct `RequirementSpec` generation from `ProjectDesignSpec`.
+- Remaining risk: DWG still requires a local converter; Docling layout is not enabled by default;
+  OCR is bounded and not a full layout understanding engine.
+
 | finding | risk_level | module | why_it_matters | action_taken | remaining_risk |
 |---|---|---|---|---|---|
+| Document packs did not expose local tool availability. | high | `core/document_pack`, `apps/api` | A frontend could assume PDF/OCR/CAD/coordinate extraction happened when the tool was missing. | Added `DocumentPackCapabilities`, `/document-packs/capabilities`, per-pack processing reports, and tool status in summary/spec. | Optional tools still need installation and smoke tests before claiming extraction capability. |
+| Coordinate fields were extracted but conversion status was a deterministic sentence, not an adapter result. | high | `core/document_pack/extractor.py`, `core/document_pack/coordinates.py` | Lambert coordinates could be misrepresented or silently left unconverted. | Added optional `pyproj` conversion adapter and explicit statuses such as `unavailable_pyproj`, `unsupported_crs`, and `not_required_wgs84`. Fixed X/Y/lat/lon numeric typing. | Real conversion smoke requires `pyproj` installed and representative CRS fixtures. |
+| DXF/DWG files were inventoried but no adapter status existed. | medium | `core/document_pack/cad.py` | CAD evidence could look useful without proof of parsing. | Added optional `ezdxf` parser path, explicit DXF `inventory_only` fallback, and DWG unsupported warnings. | DWG conversion and CAD geometry extraction remain future work. |
+| Document-pack QA did not validate processing visibility or cross-field plausibility. | medium | `core/document_pack/service.py` | Missing OCR/CAD or invalid HBA/tower relationships could pass too quietly. | Added QA checks for visible processing limits, coordinate status, HBA <= tower height, and sector/azimuth consistency. | QA still cannot semantically validate scanned pages or CAD geometry without adapters. |
+| Document-pack memory was not represented. | medium | `core/document_pack/service.py`, `docs/MEMORY.md` | Future frontend/RAG panels need compact pack-to-design history without large files. | Added `memory_summary.json` and `/document-packs/{pack_id}/memory-summary`. | Not automatically indexed into SQLite/Qdrant yet. |
 | Geometry QA stopped at structural object presence and metadata fallback. | high | `core/qa`, `core/validation`, `apps/api` | A generated GLB could contain expected names but still miss technical geometry expectations. | Added `GeometryValidationReport`, `GLBGeometryValidator`, API artifact/status integration, quality gate check, trace/metrics integration, and tests. | Bounding box remains metadata/proxy based until GLB transform parsing is added. |
 | Real Blender outputs were not explicitly required to parse as GLB at the post gate. | high | `core/validation/quality_gates.py` | A broken real Blender artifact could pass weaker artifact checks. | Added `real_blender_glb_parse_required` to post-Blender quality gate. | Fallback mode still uses explicit metadata fallback by design. |
 | `include_cables=false` scenes failed validator assumptions. | medium | `core/rules`, `core/validation` | A valid no-cable option was treated as invalid, blocking legitimate telecom requirements. | Replaced mandatory cable presence checks with option consistency checks. | Mixed per-sector cable policies are still not modeled. |

@@ -31,6 +31,7 @@ RAG_COLLECTIONS = [
 RUNTIME_MEMORY_COLLECTIONS = [
     "design_memory",
     "error_memory",
+    "document_pack_memory",
 ]
 
 
