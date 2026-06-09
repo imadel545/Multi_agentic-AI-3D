@@ -1,6 +1,12 @@
 from core.contracts.assets import AssetManifest
 from core.contracts.requirements import RequirementSpec
-from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
+from core.contracts.scene import (
+    RuntimeAssetMetadata,
+    SceneAssetPlacement,
+    SceneSpec,
+    SectorSpec,
+    VisualElements,
+)
 
 
 class ScenePlanner:
@@ -53,10 +59,14 @@ class ScenePlanner:
                 antenna_asset_id=antenna.asset_id,
                 antenna_asset_file=antenna.file,
                 antenna_asset_source=antenna.source,
+                antenna_asset_metadata=_runtime_asset_metadata(antenna),
                 antenna_import_fallback_allowed=antenna.import_fallback_allowed,
                 radio_asset_id=radio.asset_id if radio else None,
                 radio_asset_file=radio.file if radio else None,
                 radio_asset_source=radio.source if radio else None,
+                radio_asset_metadata=_runtime_asset_metadata(radio)
+                if radio
+                else RuntimeAssetMetadata(),
                 radio_import_fallback_allowed=radio.import_fallback_allowed if radio else True,
                 install_height_m=install_height,
                 azimuth_deg=azimuth,
@@ -77,7 +87,9 @@ class ScenePlanner:
                 asset_id=tower.asset_id,
                 asset_file=tower.file,
                 asset_source=tower.source,
+                asset_metadata=_runtime_asset_metadata(tower),
                 import_fallback_allowed=tower.import_fallback_allowed,
+                dimensions_m=tower.dimensions_m,
                 position=[0.0, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],
@@ -87,6 +99,19 @@ class ScenePlanner:
             sectors=sectors,
             visual_elements=visual_elements,
         )
+
+
+def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
+    return RuntimeAssetMetadata(
+        license=asset.license,
+        attribution_required=asset.attribution_required,
+        attribution=asset.attribution,
+        original_url=asset.original_url,
+        original_author=asset.original_author,
+        normalized_by=asset.normalized_by,
+        pivot_policy=asset.pivot_policy,
+        front_axis=asset.front_axis,
+    )
 
 
 def _planning_hints(context: dict) -> dict:

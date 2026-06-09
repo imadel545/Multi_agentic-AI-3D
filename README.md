@@ -24,6 +24,9 @@ This repository currently implements the local-first controlled generation pipel
 - Geometry validation for expected antennas, beams, RRUs, cables, azimuths, and tower/antenna
   heights.
 - Local Qdrant RAG indexing and search over rules, docs, templates, and asset manifests.
+- Document-pack intelligence for ZIP ingestion, classification, deterministic extraction,
+  provenance, missing/conflict detection, manual corrections, QA, processing capabilities, and
+  mapping into the existing design workflow.
 
 ## Run locally
 
@@ -57,6 +60,16 @@ TELECOM_STUDIO_GROQ_API_KEY=...
 The API uses `openai/gpt-oss-120b` by default. Per request, set
 `options.use_llm=false` to force deterministic extraction.
 
+Optional document-intelligence tooling:
+
+```bash
+pip install -e ".[document-intel]"
+```
+
+This enables optional local adapters when available (`fitz`, `pdfplumber`, `ezdxf`, `pyproj`,
+`pytesseract`, `PIL`). The backend still reports each capability explicitly and does not pretend
+OCR/CAD/conversion succeeded when a tool is missing.
+
 ## Test
 
 ```bash
@@ -88,21 +101,34 @@ Implemented:
   without deleting history.
 - `GET /assets/inventory`: GLB readiness inventory with missing/present files, source, fallback
   policy, and warnings.
+- `POST /document-packs`: ingest a ZIP as raw bytes and write JSON-only pack artifacts.
+- `GET /document-packs/capabilities`: local PDF/OCR/CAD/coordinate/Groq document-pack tool status.
+- `GET /document-packs/{pack_id}/documents`: classified document inventory.
+- `GET /document-packs/{pack_id}/consolidated-spec`: provenance-backed `ProjectDesignSpec`.
+- `GET /document-packs/{pack_id}/processing`: per-document extraction status/tools/warnings.
+- `GET /document-packs/{pack_id}/qa`: document-pack QA score, checks, and blocking issues.
+- `POST /document-packs/{pack_id}/corrections`: apply a manual correction with provenance.
+- `GET /document-packs/{pack_id}/memory-summary`: compact no-large-file memory summary artifact.
+- `POST /document-packs/{pack_id}/generate-design`: map an unblocked pack into the design flow.
 
 Available with fallback:
 
 - Groq `openai/gpt-oss-120b` extraction and edit patching fall back to deterministic logic when
   provider access fails or `options.use_llm=false` is set for creation.
 - Blender fallback artifacts are explicit and still pass through QA/gates.
+- PDF/OCR/CAD/coordinate tooling is optional and reported through `/document-packs/capabilities`.
 
 Known limitations:
 
-- The current asset library is only `partial_import_ready`: internal minimal GLBs exist for the
-  5G panel antenna and RRU, while vendor tower, 4G panel, and microwave dish GLBs are still missing.
-- Internal minimal GLBs prove the import pipeline but are not vendor-grade.
+- The current asset library is `partial_import_ready`: a CC-BY lattice tower and internal
+  cleaned/minimal telecom assets exist, but they are not a complete vendor-grade library.
 - The Blender worker imports available GLBs and uses controlled procedural fallback for missing
   assets only when fallback is allowed and visible in metadata.
 - Preview QA is structural/image-stat based, not semantic visual judging.
+- Document-pack PDF text/table, selected OCR, DXF parsing, coordinate conversion, and Groq bounded
+  extraction are capability-gated and report unavailable tools explicitly. Docling is currently
+  `installed_import_only`, not part of the default extraction path. DWG remains
+  `unsupported_without_converter` unless a local ODA/FreeCAD/dwgread converter is installed.
 
 ## Core flow
 
@@ -121,6 +147,22 @@ requirements_text
 → generation QA
 → SQLite memory writeback
 → compliance report
+```
+
+Document-pack flow:
+
+```text
+zip pack
+→ safe inventory
+→ document classification
+→ optional local text/table/CAD capability checks
+→ deterministic telecom extraction
+→ coordinate conversion status
+→ ProjectDesignSpec resolver
+→ document-pack QA
+→ user corrections when needed
+→ RequirementSpec mapping
+→ existing design workflow
 ```
 
 Edit flow:

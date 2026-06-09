@@ -18,5 +18,15 @@
     }
   ],
   "status": "validated",
-  "version": "1.0.0"
+  "version": "1.1.0",
+  "source": "cc_by",
+  "license": "CC Attribution",
+  "attribution_required": true,
+  "attribution": "Cell Tower Replica by poly by google via GetGLB. Normalized to 30m by Codex Agent for this project.",
+  "original_url": "https://www.getglb.com/architecture/cell-tower-replica/",
+  "original_author": "poly by google",
+  "normalized_by": "Codex Agent",
+  "pivot_policy": "base_center_ground",
+  "front_axis": "+Y",
+  "import_fallback_allowed": true
 }

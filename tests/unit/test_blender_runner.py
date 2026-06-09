@@ -1,5 +1,6 @@
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -48,7 +49,7 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     assert metadata["asset_import_summary"]["asset_count"] == 7
     assert metadata["asset_import_summary"]["imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["procedural_fallback_count"] == 7
-    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 6
+    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 7
     assert {record["import_mode"] for record in metadata["asset_imports"]} == {
         "procedural_fallback"
     }
@@ -89,12 +90,55 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
     assert metadata["procedural_objects_created"]
     assert metadata["asset_import_summary"]["asset_count"] == 7
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 6
-    assert metadata["asset_import_summary"]["procedural_fallback_count"] == 1
-    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 6
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 7
+    assert metadata["asset_import_summary"]["procedural_fallback_count"] == 0
+    assert metadata["asset_import_summary"]["asset_file_exists_count"] == 7
     imported_records = [
         record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
     ]
-    assert len(imported_records) == 6
+    assert len(imported_records) == 7
     assert all(record["asset_import_success"] is True for record in imported_records)
     assert all(record["asset_dimensions_checked"] is True for record in imported_records)
+    tower_record = next(
+        record for record in imported_records if record["asset_id"] == "TOWER_LATTICE_30M"
+    )
+    assert tower_record["asset_source"] == "cc_by"
+    assert tower_record["asset_metadata"]["attribution_required"] is True
+    assert "ATTRIBUTION_REQUIRED" in tower_record["warnings"]
+
+
+def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypatch) -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°."
+    )
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    scene = ScenePlanner().build_scene_spec("wf_blender_retry", requirements, tower, antenna, radio)
+    runner = BlenderRunner(project_root=Path.cwd())
+    attempts = 0
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return subprocess.CompletedProcess(command, 42, stdout="", stderr="")
+        output_dir = Path(command[-1])
+        (output_dir / "design.glb").write_bytes(b"x" * 64)
+        (output_dir / "preview.png").write_bytes(b"x" * 64)
+        (output_dir / "scene_metadata.json").write_text('{"generation_mode":"real_blender"}')
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(runner, "_run_blender_command", fake_run)
+
+    result = runner.generate(scene, tmp_path)
+
+    assert attempts == 2
+    assert result.status == "generated"
+    assert result.mode == "real_blender"

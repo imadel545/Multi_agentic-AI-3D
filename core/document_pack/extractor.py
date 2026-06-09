@@ -487,11 +487,25 @@ def _extract_number_list(text: str, pattern: str, maximum: float) -> list[float]
     if not match:
         return []
     values = []
-    for raw in re.findall(r"\d+(?:[.,]\d+)?", match.group(1)):
-        number = float(raw.replace(",", "."))
+    for raw in _list_numbers(match.group(1)):
+        number = float(raw)
         if 0 <= number <= maximum:
             values.append(number)
     return values
+
+
+def _list_numbers(raw: str) -> list[str]:
+    value = raw.replace("°", " ").replace("m", " ")
+    if ";" in value or "/" in value:
+        return [
+            token.replace(",", ".")
+            for token in re.split(r"[;\s/]+", value)
+            if re.fullmatch(r"\d+(?:[,.]\d+)?", token)
+        ]
+    if value.count(",") > 1 or re.search(r",\s+", value):
+        value = value.replace(",", " ")
+        return re.findall(r"\d+(?:\.\d+)?", value)
+    return [token.replace(",", ".") for token in re.findall(r"\d+(?:[,.]\d+)?", value)]
 
 
 def _sector_value_list(text: str, labels: list[str], maximum: float) -> list[float]:

@@ -269,6 +269,40 @@ def test_api_design_with_use_llm_false_does_not_call_configured_provider(
         extractor.enabled = original_enabled
 
 
+def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
+    extractor = workflow_service.orchestrator.extractor
+    original_provider = extractor.provider
+    original_provider_name = extractor.provider_name
+    original_enabled = extractor.enabled
+    extractor.provider = FailingRequirementProvider()
+    extractor.provider_name = "groq:test-provider"
+    extractor.enabled = True
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/requirements/parse",
+            json={
+                "requirements_text": (
+                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                    "Azimuts : 0, 120, 240."
+                ),
+                "detail_level": "high",
+                "use_llm": True,
+            },
+        )
+    finally:
+        extractor.provider = original_provider
+        extractor.provider_name = original_provider_name
+        extractor.enabled = original_enabled
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provider"] == "deterministic"
+    assert payload["fallback_used"] is True
+    assert payload["requirements"]["tower_type"] == "lattice_tower"
+    assert payload["errors"][0]["code"] == "LLM_EXTRACTION_ERROR"
+
+
 def test_assets_inventory_route_is_not_shadowed() -> None:
     client = TestClient(app)
 
@@ -279,7 +313,7 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert "asset_count" in payload
     assert "procedural_generation_required" in payload
     assert payload["status"] == "partial_import_ready"
-    assert payload["real_glb_asset_count"] == 2
+    assert payload["real_glb_asset_count"] == 9
     assert any(entry["asset_import_mode"] == "missing_file" for entry in payload["entries"])
     assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
 
@@ -344,3 +378,8 @@ class RecordingRequirementProvider:
             detail_level=detail_level,
             warnings=[],
         )
+
+
+class FailingRequirementProvider:
+    def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
+        raise RuntimeError("forced provider failure")

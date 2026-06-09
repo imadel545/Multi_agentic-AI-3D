@@ -12,6 +12,7 @@ AssetType = Literal[
     "cable",
     "bracket",
     "cabinet",
+    "gps",
     "beam",
     "marker",
     "label",

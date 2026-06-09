@@ -22,9 +22,12 @@ Completed:
   - GPS antenna and power cabinet only when `SceneSpec.visual_elements` explicitly enables them;
   - metadata labels.
 - The worker imports manifest-backed GLB assets when the referenced file exists and import succeeds.
-  Current imported internal test assets are:
-  - `ANT_PANEL_5G_001`
-  - `RRU_SMALL_001`
+  Current imported MVP assets include:
+  - `TOWER_LATTICE_30M` as a normalized CC Attribution GLB;
+  - `ANT_PANEL_4G_001` as an internal cleaned GLB;
+  - `ANT_MICROWAVE_DISH_001` as an internal cleaned GLB;
+  - `ANT_PANEL_5G_001` as an internal minimal test GLB;
+  - `RRU_SMALL_001` as an internal minimal test GLB.
 - Missing or failed imports use controlled procedural fallback only when
   `import_fallback_allowed = true`.
 - Real Blender output is `generation_mode = real_blender`.
@@ -84,18 +87,19 @@ Metadata fields:
 - `warnings`
 
 Each `asset_imports` entry includes `asset_id`, `asset_file`, `asset_source`,
-`asset_file_exists`, `asset_import_success`, `asset_dimensions_checked`, `import_mode`,
-`effective_generation_mode`, imported object names, and warnings.
+`asset_metadata`, `asset_file_exists`, `asset_import_success`, `asset_dimensions_checked`,
+`import_mode`, `effective_generation_mode`, imported object names, and warnings.
 
 Known limitations:
 
-- The worker imports available GLBs, but the current GLB files are internal minimal test assets,
-  not vendor-grade assets.
-- Tower, 4G panel, and microwave dish GLB files are still missing and therefore use visible
-  procedural fallback when allowed.
+- The worker imports available GLBs, but current project-owned/internal assets are not vendor-grade.
+- `TOWER_LATTICE_30M` is an accepted CC Attribution MVP asset, not a vendor-grade tower.
+- Monopole, rooftop mast, and small-cell pole GLB files are still missing and therefore use visible
+  procedural fallback when selected and allowed.
 - `GET /assets/inventory` exposes whether manifests have real GLB files available for import and
   whether fallback will be needed.
-- GPS antenna and power cabinet are procedural helper objects until real assets/manifests are added
-  for them.
+- GPS antenna, power cabinet, mounting bracket, and cable tray have inventory GLBs, but the worker
+  does not yet place those accessory manifest files. GPS/cabinet objects are still procedural and
+  only appear when the SceneSpec explicitly enables them.
 - GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and
   bounding-box reasonableness, not visual aesthetics or material quality.

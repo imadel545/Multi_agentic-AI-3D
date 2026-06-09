@@ -83,6 +83,36 @@ def test_document_pack_groq_bounded_extraction_requires_evidence(tmp_path: Path)
     assert processing["groq_rejected_fields"]
 
 
+def test_document_pack_groq_values_are_normalized_from_evidence(tmp_path: Path) -> None:
+    service = DocumentPackService(
+        tmp_path,
+        groq_client=FakeGroqTypedDocumentProvider(),
+        groq_provider_name="groq:test",
+        groq_bounded_extraction_enabled=True,
+    )
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "APD/current.txt": (
+                    "Type pylone: pylone treillis\n"
+                    "Hauteur pylone: 30m\n"
+                    "Azimuts: 0,120,240\n"
+                    "HBA: 24,24,24\n"
+                    "Bandes NR700 NR3500 5G\n"
+                )
+            }
+        )
+    )
+    spec = service.get_spec(summary.pack_id)
+
+    assert summary.can_generate_design is True
+    assert spec.conflicts == []
+    assert [sector.hba_m.value for sector in spec.radio_sectors] == [24.0, 24.0, 24.0]
+    assert spec.radio_sectors[0].bands is not None
+    assert spec.radio_sectors[0].bands.value == ["5G", "NR3500", "NR700"]
+
+
 def test_document_pack_memory_writeback_uses_compact_metadata(tmp_path: Path) -> None:
     memory = MemoryService(tmp_path / "memory.db")
     service = DocumentPackService(tmp_path, memory_service=memory)
@@ -131,6 +161,34 @@ class FakeGroqDocumentProvider:
                     "document_id": document_id,
                     "page": None,
                     "evidence": "",
+                },
+            ]
+        }
+
+
+class FakeGroqTypedDocumentProvider:
+    model = "openai/gpt-oss-120b"
+
+    def _post_raw(self, payload: dict) -> dict:
+        user_content = payload["messages"][1]["content"]
+        document_id = user_content.split("document_id=", 1)[1].split(" ", 1)[0]
+        return {
+            "fields": [
+                {
+                    "field": "radio.hba_m",
+                    "value": "242424",
+                    "confidence": 0.9,
+                    "document_id": document_id,
+                    "page": None,
+                    "evidence": "HBA: 24,24,24",
+                },
+                {
+                    "field": "radio.bands",
+                    "value": "NR700 NR3500 5G",
+                    "confidence": 0.88,
+                    "document_id": document_id,
+                    "page": None,
+                    "evidence": "Bandes NR700 NR3500 5G",
                 },
             ]
         }

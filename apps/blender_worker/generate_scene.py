@@ -138,6 +138,7 @@ def _create_tower(
         asset_id=scene["tower"]["asset_id"],
         asset_file=scene["tower"].get("asset_file"),
         asset_source=scene["tower"].get("asset_source"),
+        asset_metadata=scene["tower"].get("asset_metadata"),
         fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
         object_role="tower",
         object_name=f"tower_{scene['tower']['asset_id']}",
@@ -309,6 +310,7 @@ def _create_sectors(
             asset_id=sector["antenna_asset_id"],
             asset_file=sector.get("antenna_asset_file"),
             asset_source=sector.get("antenna_asset_source"),
+            asset_metadata=sector.get("antenna_asset_metadata"),
             fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
             object_role="antenna",
             object_name=f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}",
@@ -333,6 +335,7 @@ def _create_sectors(
                 asset_id=sector["radio_asset_id"],
                 asset_file=sector.get("radio_asset_file"),
                 asset_source=sector.get("radio_asset_source"),
+                asset_metadata=sector.get("radio_asset_metadata"),
                 fallback_allowed=sector.get("radio_import_fallback_allowed", True),
                 object_role="radio",
                 object_name=f"radio_{sector['sector_id']}_{sector['radio_asset_id']}",
@@ -545,6 +548,7 @@ def _try_import_glb_asset(
     asset_id: str,
     asset_file: str | None,
     asset_source: str | None,
+    asset_metadata: dict | None,
     fallback_allowed: bool,
     object_role: str,
     object_name: str,
@@ -560,6 +564,7 @@ def _try_import_glb_asset(
         asset_id=asset_id,
         asset_file=asset_file,
         asset_source=asset_source,
+        asset_metadata=asset_metadata,
         object_role=object_role,
         object_name=object_name,
         path=path,
@@ -629,9 +634,9 @@ def _try_import_glb_asset(
             "imported_object_names": [obj.name for obj in imported],
         }
     )
-    if asset_source == "internal_test_minimal":
-        _append_warning(record["warnings"], "INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
-        _append_warning(warnings, f"INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE:{asset_id}")
+    for source_warning in _asset_source_warnings(asset_source, asset_metadata):
+        _append_warning(record["warnings"], source_warning)
+        _append_warning(warnings, f"{source_warning}:{asset_id}")
     asset_imports.append(record)
     return "imported_glb"
 
@@ -650,6 +655,7 @@ def _base_asset_import_record(
     asset_id: str,
     asset_file: str | None,
     asset_source: str | None,
+    asset_metadata: dict | None,
     object_role: str,
     object_name: str,
     path: Path | None,
@@ -660,6 +666,7 @@ def _base_asset_import_record(
         "asset_id": asset_id,
         "asset_file": asset_file,
         "asset_source": asset_source or "vendor_expected",
+        "asset_metadata": asset_metadata or {},
         "object_role": object_role,
         "object_name": object_name,
         "resolved_path": str(path) if path else None,
@@ -961,6 +968,7 @@ def _fallback_asset_import_records(scene: dict) -> list[dict]:
             asset_id=scene["tower"]["asset_id"],
             asset_file=scene["tower"].get("asset_file"),
             asset_source=scene["tower"].get("asset_source"),
+            asset_metadata=scene["tower"].get("asset_metadata"),
             object_role="tower",
             object_name=f"tower_{scene['tower']['asset_id']}",
             fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
@@ -978,6 +986,7 @@ def _fallback_asset_import_records(scene: dict) -> list[dict]:
                 asset_id=sector["antenna_asset_id"],
                 asset_file=sector.get("antenna_asset_file"),
                 asset_source=sector.get("antenna_asset_source"),
+                asset_metadata=sector.get("antenna_asset_metadata"),
                 object_role="antenna",
                 object_name=f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}",
                 fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
@@ -990,6 +999,7 @@ def _fallback_asset_import_records(scene: dict) -> list[dict]:
                     asset_id=sector["radio_asset_id"],
                     asset_file=sector.get("radio_asset_file"),
                     asset_source=sector.get("radio_asset_source"),
+                    asset_metadata=sector.get("radio_asset_metadata"),
                     object_role="radio",
                     object_name=f"radio_{sector['sector_id']}_{sector['radio_asset_id']}",
                     fallback_allowed=sector.get("radio_import_fallback_allowed", True),
@@ -1004,6 +1014,7 @@ def _fallback_asset_import_record(
     asset_id: str,
     asset_file: str | None,
     asset_source: str | None,
+    asset_metadata: dict | None,
     object_role: str,
     object_name: str,
     fallback_allowed: bool,
@@ -1015,14 +1026,14 @@ def _fallback_asset_import_record(
     warnings = ["BLENDER_FALLBACK_ASSET_IMPORT_SKIPPED"]
     if not file_exists:
         warnings.append("ASSET_FILE_MISSING")
-    if asset_source == "internal_test_minimal":
-        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    warnings.extend(_asset_source_warnings(asset_source, asset_metadata))
     if not fallback_allowed:
         warnings.append("PROCEDURAL_FALLBACK_NOT_ALLOWED")
     return {
         "asset_id": asset_id,
         "asset_file": asset_file,
         "asset_source": asset_source or "vendor_expected",
+        "asset_metadata": asset_metadata or {},
         "object_role": object_role,
         "object_name": object_name,
         "resolved_path": str(path) if path else None,
@@ -1057,6 +1068,19 @@ def _asset_import_summary(asset_imports: list[dict]) -> dict:
         ),
         "modes": modes,
     }
+
+
+def _asset_source_warnings(asset_source: str | None, asset_metadata: dict | None) -> list[str]:
+    warnings = []
+    if asset_source == "internal_test_minimal":
+        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "internal_cleaned":
+        warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "cc_by":
+        warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
+    if isinstance(asset_metadata, dict) and asset_metadata.get("attribution_required"):
+        warnings.append("ATTRIBUTION_REQUIRED")
+    return warnings
 
 
 def _append_warning(warnings: list[str], warning: str) -> None:

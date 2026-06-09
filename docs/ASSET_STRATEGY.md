@@ -6,6 +6,14 @@
 - Compatibility-based selection for assets with `status = validated`.
 - Asset metadata fields:
   - `source`
+  - `license`
+  - `attribution_required`
+  - `attribution`
+  - `original_url`
+  - `original_author`
+  - `normalized_by`
+  - `pivot_policy`
+  - `front_axis`
   - `import_fallback_allowed`
   - `dimensions_m`
   - `mount_zones`
@@ -26,23 +34,37 @@ Validated manifests:
 - `ANT_PANEL_5G_001`
 - `ANT_PANEL_4G_001`
 - `ANT_MICROWAVE_DISH_001`
+- `POWER_CABINET_001`
+- `GPS_ANTENNA_001`
+- `MOUNTING_BRACKET_001`
+- `CABLE_TRAY_001`
 - `RRU_SMALL_001`
 
 GLB files currently present:
 
+- `assets/towers/tower_lattice_30m.glb`
+- `assets/antennas/ant_panel_4g_001.glb`
+- `assets/antennas/ant_microwave_dish_001.glb`
 - `assets/antennas/ant_panel_5g_001.glb`
+- `assets/antennas/gps_antenna_001.glb`
+- `assets/brackets/mounting_bracket_001.glb`
+- `assets/cabinets/power_cabinet_001.glb`
+- `assets/cables/cable_tray_001.glb`
 - `assets/radios/rru_small_001.glb`
 
-These files are internal minimal test assets. They are useful to verify import behavior, but they
-are not vendor-grade. Inventory and generation metadata expose this through
-`source = internal_test_minimal`.
+`TOWER_LATTICE_30M` is an integrated CC Attribution asset from GetGLB. The source file is kept
+under `assets/source_downloads/getglb/cell_tower_replica/`, and attribution is required.
+`ANT_PANEL_4G_001`, `ANT_MICROWAVE_DISH_001`, `POWER_CABINET_001`, `GPS_ANTENNA_001`,
+`MOUNTING_BRACKET_001`, and `CABLE_TRAY_001` are project-authored internal cleaned GLBs.
+`ANT_PANEL_5G_001` and `RRU_SMALL_001` are still internal minimal test assets.
 
 ## Available With Fallback
 
-- Tower, 4G panel, microwave dish, and other missing vendor files currently use controlled
-  procedural fallback when their manifest allows it.
-- GPS antenna and power cabinet are procedural visual objects controlled by SceneSpec flags. They
-  are not manifest-backed GLB assets yet.
+- Monopole, rooftop mast, and small-cell pole tower manifests still use controlled procedural
+  fallback when their GLB files are absent and fallback is allowed.
+- GPS antenna and power cabinet now have manifest-backed internal cleaned GLBs for inventory,
+  but the worker still creates those objects procedurally from `SceneSpec.visual_elements`.
+  They are not injected into a scene unless explicitly requested.
 - Non-Blender generation writes explicit fallback metadata instead of pretending assets were
   imported.
 
@@ -64,6 +86,8 @@ Required:
 - `compatible_networks` and `compatible_tower_types` must be explicit.
 - `status = validated` is required for automatic selection.
 - `source` must distinguish expected vendor assets from internal minimal assets.
+- `license` and attribution fields must be filled for any external asset.
+- `pivot_policy` and `front_axis` must be documented before an asset is used by the worker.
 - `import_fallback_allowed` must be intentional.
 - Tower `mount_zones` should define safe install ranges.
 
@@ -82,19 +106,22 @@ Future:
 
 - Exact GLB bounding-box checks against manifest dimensions.
 - Material, LOD, pivot, mount-point, and texture budget validation.
-- Manifest-backed GPS/power cabinet assets.
+- Worker-level import placement for GPS/power cabinet/bracket/cable-tray accessory manifests.
 
 ## Replacement Plan
 
-1. Replace internal minimal GLBs with vendor-grade assets without changing stable IDs.
-2. Add real tower, 4G panel, and microwave dish GLBs.
-3. Add pivot/mount metadata to manifests.
-4. Tighten GLB dimension/material QA once vendor assets are present.
-5. Expose vendor provenance to the frontend.
+1. Replace internal minimal/cleaned GLBs with vendor-grade or project-owned production assets
+   without changing stable IDs.
+2. Add real monopole, rooftop mast, and small-cell pole GLBs.
+3. Wire manifest-backed accessory import placement for GPS, power cabinet, brackets, and cable
+   trays when the SceneSpec requests them.
+4. Tighten GLB dimension/material QA once production assets are present.
+5. Keep provenance and attribution visible to the frontend.
 
 ## Known Limitations
 
 - Inventory is `partial_import_ready`, not fully vendor-ready.
-- Current internal GLBs are simple boxes for pipeline validation.
-- Procedural fallback still carries most visual quality for towers.
+- Current internal cleaned/minimal GLBs are useful for pipeline validation and MVP visuals, but
+  not vendor-grade.
+- Procedural fallback still carries monopole/rooftop/small-cell tower visual quality.
 - GLB parser QA does not yet verify exact transforms or material quality.

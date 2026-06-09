@@ -7,11 +7,24 @@ from core.contracts.common import NetworkType, StrictModel
 from core.contracts.tower import TowerCharacteristics
 
 
+class RuntimeAssetMetadata(StrictModel):
+    license: str | None = None
+    attribution_required: bool = False
+    attribution: str | None = None
+    original_url: str | None = None
+    original_author: str | None = None
+    normalized_by: str | None = None
+    pivot_policy: str | None = None
+    front_axis: str | None = None
+
+
 class SceneAssetPlacement(StrictModel):
     asset_id: str = Field(min_length=1)
     asset_file: str | None = None
     asset_source: str | None = None
+    asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
     import_fallback_allowed: bool = True
+    dimensions_m: DimensionsM | None = None
     position: list[float] = Field(min_length=3, max_length=3)
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
@@ -42,10 +55,12 @@ class SectorSpec(StrictModel):
     antenna_asset_id: str = Field(min_length=1)
     antenna_asset_file: str | None = None
     antenna_asset_source: str | None = None
+    antenna_asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
     antenna_import_fallback_allowed: bool = True
     radio_asset_id: str | None = None
     radio_asset_file: str | None = None
     radio_asset_source: str | None = None
+    radio_asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
     radio_import_fallback_allowed: bool = True
     install_height_m: float = Field(gt=0)
     azimuth_deg: float = Field(ge=0, lt=360)

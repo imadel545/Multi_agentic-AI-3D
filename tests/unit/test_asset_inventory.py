@@ -9,14 +9,27 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
 
     inventory = AssetInventoryService(Path.cwd(), registry).inspect()
 
-    assert inventory["asset_count"] == 8
+    assert inventory["asset_count"] == 12
     assert inventory["status"] == "partial_import_ready"
-    assert inventory["missing_file_count"] == 6
-    assert inventory["real_glb_asset_count"] == 2
-    assert inventory["import_ready_asset_count"] == 2
-    assert inventory["procedural_fallback_count"] == 6
+    assert inventory["missing_file_count"] == 3
+    assert inventory["real_glb_asset_count"] == 9
+    assert inventory["import_ready_asset_count"] == 9
+    assert inventory["procedural_fallback_count"] == 3
     assert inventory["procedural_generation_required"] is True
     entries_by_id = {entry["asset_id"]: entry for entry in inventory["entries"]}
+    assert entries_by_id["TOWER_LATTICE_30M"]["asset_file_exists"] is True
+    assert entries_by_id["TOWER_LATTICE_30M"]["asset_import_mode"] == "imported_glb"
+    assert entries_by_id["TOWER_LATTICE_30M"]["source"] == "cc_by"
+    assert entries_by_id["TOWER_LATTICE_30M"]["attribution_required"] is True
+    assert "ATTRIBUTION_REQUIRED" in entries_by_id["TOWER_LATTICE_30M"]["warnings"]
+    assert "CC_BY_ASSET_NOT_VENDOR_GRADE" in entries_by_id["TOWER_LATTICE_30M"]["warnings"]
+    assert entries_by_id["ANT_PANEL_4G_001"]["asset_file_exists"] is True
+    assert entries_by_id["ANT_PANEL_4G_001"]["source"] == "internal_cleaned"
+    assert (
+        "INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE" in entries_by_id["ANT_PANEL_4G_001"]["warnings"]
+    )
+    assert entries_by_id["POWER_CABINET_001"]["asset_file_exists"] is True
+    assert entries_by_id["GPS_ANTENNA_001"]["asset_file_exists"] is True
     assert entries_by_id["ANT_PANEL_5G_001"]["asset_file_exists"] is True
     assert entries_by_id["ANT_PANEL_5G_001"]["asset_import_mode"] == "imported_glb"
     assert entries_by_id["ANT_PANEL_5G_001"]["source"] == "internal_test_minimal"
@@ -25,7 +38,7 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
         in entries_by_id["ANT_PANEL_5G_001"]["warnings"]
     )
     assert entries_by_id["RRU_SMALL_001"]["asset_file_exists"] is True
-    assert entries_by_id["TOWER_LATTICE_30M"]["asset_file_exists"] is False
-    assert entries_by_id["TOWER_LATTICE_30M"]["effective_generation_mode"] == (
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["asset_file_exists"] is False
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["effective_generation_mode"] == (
         "procedural_fallback"
     )

@@ -62,6 +62,39 @@ def test_scene_planner_reads_memory_error_patterns_key() -> None:
     assert scene.visual_elements.include_gps_antenna is False
 
 
+def test_scene_planner_carries_asset_license_metadata() -> None:
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_asset_metadata",
+        requirements=_requirements(),
+        tower=_tower().model_copy(
+            update={
+                "source": "cc_by",
+                "license": "CC Attribution",
+                "attribution_required": True,
+                "attribution": "Cell Tower Replica by poly by google via GetGLB",
+                "original_url": "https://www.getglb.com/architecture/cell-tower-replica/",
+            }
+        ),
+        antenna=_antenna().model_copy(
+            update={
+                "source": "internal_cleaned",
+                "license": "internal_project_generated",
+                "attribution": "Project-authored minimal antenna",
+            }
+        ),
+        radio=_radio(),
+    )
+
+    assert scene.tower.asset_source == "cc_by"
+    assert scene.tower.asset_metadata.license == "CC Attribution"
+    assert scene.tower.asset_metadata.attribution_required is True
+    assert scene.tower.asset_metadata.original_url == (
+        "https://www.getglb.com/architecture/cell-tower-replica/"
+    )
+    assert scene.sectors[0].antenna_asset_source == "internal_cleaned"
+    assert scene.sectors[0].antenna_asset_metadata.license == "internal_project_generated"
+
+
 def _requirements() -> RequirementSpec:
     return RequirementSpec(
         network_type="5G",

@@ -50,6 +50,12 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         warnings.append("ASSET_FILE_MISSING")
     if asset.source == "internal_test_minimal":
         warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    if asset.source == "internal_cleaned":
+        warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset.attribution_required:
+        warnings.append("ATTRIBUTION_REQUIRED")
+    if asset.source == "cc_by":
+        warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
     asset_import_mode = "imported_glb" if file_exists else "missing_file"
     effective_generation_mode = (
         "imported_glb"
@@ -65,9 +71,18 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         "file_exists": file_exists,
         "asset_file_exists": file_exists,
         "asset_import_mode": asset_import_mode,
+        "asset_import_success": None,
         "effective_generation_mode": effective_generation_mode,
         "import_fallback_allowed": asset.import_fallback_allowed,
         "source": asset.source,
+        "license": asset.license,
+        "attribution_required": asset.attribution_required,
+        "attribution": asset.attribution,
+        "original_url": asset.original_url,
+        "original_author": asset.original_author,
+        "normalized_by": asset.normalized_by,
+        "pivot_policy": asset.pivot_policy,
+        "front_axis": asset.front_axis,
         "status": asset.status,
         "compatible_networks": asset.compatible_networks,
         "compatible_tower_types": asset.compatible_tower_types,

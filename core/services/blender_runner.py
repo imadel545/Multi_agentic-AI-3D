@@ -64,27 +64,31 @@ class BlenderRunner:
             str(scene_spec_path),
             str(output_dir),
         ]
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=self.project_root,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                check=False,
+        completed: subprocess.CompletedProcess[str] | None = None
+        attempt_errors: list[str] = []
+        for attempt in range(1, 4):
+            try:
+                completed = self._run_blender_command(command)
+            except subprocess.TimeoutExpired as exc:
+                self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_timeout")
+                return self._result(
+                    started,
+                    output_dir,
+                    "fallback",
+                    "fallback_blender_timeout",
+                    True,
+                    blender_path=str(blender_path),
+                    error=str(exc),
+                )
+            if completed.returncode == 0:
+                break
+            raw_error = (completed.stderr or completed.stdout).strip()
+            attempt_errors.append(
+                f"attempt_{attempt}: {raw_error or f'exit_code={completed.returncode}'}"
             )
-        except subprocess.TimeoutExpired as exc:
-            self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_timeout")
-            return self._result(
-                started,
-                output_dir,
-                "fallback",
-                "fallback_blender_timeout",
-                True,
-                blender_path=str(blender_path),
-                error=str(exc),
-            )
-        if completed.returncode != 0:
+            if attempt < 3:
+                time.sleep(attempt)
+        if completed is None or completed.returncode != 0:
             self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_error")
             return self._result(
                 started,
@@ -93,7 +97,7 @@ class BlenderRunner:
                 "fallback_blender_error",
                 True,
                 blender_path=str(blender_path),
-                error=(completed.stderr or completed.stdout).strip()[-2000:] or "Blender failed.",
+                error="\n".join(attempt_errors)[-2000:] or "Blender failed.",
             )
         if not _artifacts_valid(output_dir):
             error_output = (completed.stderr or completed.stdout).strip()[-2000:]
@@ -116,6 +120,16 @@ class BlenderRunner:
             "real_blender",
             True,
             blender_path=str(blender_path),
+        )
+
+    def _run_blender_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            command,
+            cwd=self.project_root,
+            capture_output=True,
+            text=True,
+            timeout=self.timeout_s,
+            check=False,
         )
 
     def _resolve_blender_binary(self) -> Path | None:
@@ -278,10 +292,13 @@ def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
             asset_id=scene.tower.asset_id,
             asset_file=scene.tower.asset_file,
             asset_source=scene.tower.asset_source,
+            asset_metadata=scene.tower.asset_metadata.model_dump(),
             object_role="tower",
             object_name=f"tower_{scene.tower.asset_id}",
             fallback_allowed=scene.tower.import_fallback_allowed,
-            dimensions={
+            dimensions=scene.tower.dimensions_m.model_dump()
+            if scene.tower.dimensions_m
+            else {
                 "height": scene.tower.height_m,
                 "width": scene.tower.characteristics.base_width_m,
                 "depth": scene.tower.characteristics.base_width_m,
@@ -295,6 +312,7 @@ def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
                 asset_id=sector.antenna_asset_id,
                 asset_file=sector.antenna_asset_file,
                 asset_source=sector.antenna_asset_source,
+                asset_metadata=sector.antenna_asset_metadata.model_dump(),
                 object_role="antenna",
                 object_name=f"antenna_{sector.sector_id}_{sector.antenna_asset_id}",
                 fallback_allowed=sector.antenna_import_fallback_allowed,
@@ -310,6 +328,7 @@ def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
                     asset_id=sector.radio_asset_id,
                     asset_file=sector.radio_asset_file,
                     asset_source=sector.radio_asset_source,
+                    asset_metadata=sector.radio_asset_metadata.model_dump(),
                     object_role="radio",
                     object_name=f"radio_{sector.sector_id}_{sector.radio_asset_id}",
                     fallback_allowed=sector.radio_import_fallback_allowed,
@@ -327,6 +346,7 @@ def _fallback_asset_import_record(
     asset_id: str,
     asset_file: str | None,
     asset_source: str | None,
+    asset_metadata: dict | None,
     object_role: str,
     object_name: str,
     fallback_allowed: bool,
@@ -338,14 +358,14 @@ def _fallback_asset_import_record(
     warnings = ["BLENDER_FALLBACK_ASSET_IMPORT_SKIPPED"]
     if not file_exists:
         warnings.append("ASSET_FILE_MISSING")
-    if asset_source == "internal_test_minimal":
-        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    warnings.extend(_asset_source_warnings(asset_source, asset_metadata))
     if not fallback_allowed:
         warnings.append("PROCEDURAL_FALLBACK_NOT_ALLOWED")
     return {
         "asset_id": asset_id,
         "asset_file": asset_file,
         "asset_source": asset_source or "vendor_expected",
+        "asset_metadata": asset_metadata or {},
         "object_role": object_role,
         "object_name": object_name,
         "resolved_path": str(path) if path else None,
@@ -389,6 +409,19 @@ def _asset_import_summary(asset_imports: list[dict]) -> dict:
         ),
         "modes": modes,
     }
+
+
+def _asset_source_warnings(asset_source: str | None, asset_metadata: dict | None) -> list[str]:
+    warnings = []
+    if asset_source == "internal_test_minimal":
+        warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "internal_cleaned":
+        warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "cc_by":
+        warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
+    if isinstance(asset_metadata, dict) and asset_metadata.get("attribution_required"):
+        warnings.append("ATTRIBUTION_REQUIRED")
+    return warnings
 
 
 def _unique_strings(values: list[str]) -> list[str]:

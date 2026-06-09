@@ -57,7 +57,17 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         assert not [field for field in missing if field["severity"] == "blocking"]
         capabilities = client.get("/document-packs/capabilities")
         assert capabilities.status_code == 200
-        assert "pdf_text_extraction" in capabilities.json()
+        capabilities_payload = capabilities.json()
+        assert "pdf_text_extraction" in capabilities_payload
+        assert capabilities_payload["pdf_layout_extraction"]["status"] in {
+            "installed_import_only",
+            "unavailable",
+        }
+        assert capabilities_payload["pdf_layout_extraction"]["status"] != "available"
+        assert capabilities_payload["dwg_conversion"]["status"] in {
+            "conversion_available",
+            "unsupported_without_converter",
+        }
         processing = client.get(f"/document-packs/{pack_id}/processing").json()
         assert processing["pack_id"] == pack_id
         assert processing["documents"][0]["extraction_status"] == "extracted"

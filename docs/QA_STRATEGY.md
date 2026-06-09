@@ -24,6 +24,9 @@ Current checks:
 - Asset import QA: generation metadata must include import records, valid import modes, import
   success evidence for `imported_glb`, visible warnings for procedural fallback, and no
   `missing_file` record without allowed fallback.
+- Document-pack QA: provenance on critical fields, no blocking missing values, resolved conflicts,
+  average confidence, useful documents, numeric plausibility, visible OCR/PDF/CAD limits, explicit
+  coordinate conversion status, HBA/tower consistency, and sector/azimuth consistency.
 - Golden scene fixture for `golden_5g_lattice_30m_3sector`.
 - Pytest coverage for parsing, registry selection, validation, API flow, RAG, Groq fallback,
   LangGraph orchestration, Blender fallback, edit/version artifacts, API errors, and golden scene
@@ -33,6 +36,7 @@ Next checks:
 
 - Visual semantic inspection of generated scenes.
 - Exact GLB transform/material inspection beyond object metadata.
+- OCR/CAD semantic QA once optional adapters are installed.
 
 ## Quality Gates
 
@@ -67,6 +71,8 @@ Known limitations:
 - `metadata_fallback` validates expected procedural object metadata, not GLB binary structure.
 - GPS/power-cabinet presence is generated and reported through metadata/procedural objects, but
   dedicated geometry count gates for those accessories remain future work.
+- Document-pack QA cannot validate scanned pages or CAD geometry until OCR/CAD adapters are
+  installed and smoke-tested.
 
 ## Structural 3D QA
 

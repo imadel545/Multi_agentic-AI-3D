@@ -18,6 +18,8 @@ def detect_document_pack_capabilities(
     tesseract_path = shutil.which("tesseract")
     oda_path = shutil.which("ODAFileConverter")
     freecad_path = shutil.which("FreeCAD")
+    dwgread_path = shutil.which("dwgread")
+    dwg_converter = oda_path or freecad_path or dwgread_path
 
     return DocumentPackCapabilities(
         pdf_text_extraction=DocumentToolCapability(
@@ -38,13 +40,22 @@ def detect_document_pack_capabilities(
         ),
         pdf_layout_extraction=DocumentToolCapability(
             name="Docling",
-            status="available" if docling_available else "unavailable",
-            purpose="Structured PDF layout/table/picture extraction when installed locally.",
+            status="installed_import_only" if docling_available else "unavailable",
+            purpose=(
+                "Structured PDF layout/table/picture extraction when installed locally; currently "
+                "detected only as an importable optional dependency."
+            ),
             module="docling",
             fallback=(
-                "Layout-level structure is not inferred; deterministic text extraction remains."
+                "Layout-level structure is not inferred; deterministic PyMuPDF/pdfplumber/OCR "
+                "extraction remains the default path."
             ),
-            warnings=[] if docling_available else ["python_module_missing:docling"],
+            warnings=[
+                "docling_importable_but_conversion_disabled",
+                "docling_model_downloads_disabled_in_tests",
+            ]
+            if docling_available
+            else ["python_module_missing:docling"],
         ),
         ocr=DocumentToolCapability(
             name="Tesseract OCR",
@@ -67,11 +78,11 @@ def detect_document_pack_capabilities(
         ),
         dwg_conversion=DocumentToolCapability(
             name="Local DWG converter",
-            status="available" if oda_path or freecad_path else "unavailable",
+            status="conversion_available" if dwg_converter else "unsupported_without_converter",
             purpose="Convert DWG to DXF using local tooling before parsing.",
-            command=oda_path or freecad_path,
+            command=dwg_converter,
             fallback="DWG files are recorded as unsupported; no cloud conversion is attempted.",
-            warnings=[] if oda_path or freecad_path else ["local_dwg_converter_missing"],
+            warnings=[] if dwg_converter else ["local_dwg_converter_missing"],
         ),
         coordinate_conversion=DocumentToolCapability(
             name="pyproj",

@@ -34,9 +34,23 @@ class AssetManifest(StrictModel):
     mount_zones: list[MountZone] = Field(default_factory=list)
     status: str = "validated"
     version: str = "1.0.0"
-    source: Literal["vendor_expected", "vendor_supplied", "internal_test_minimal"] = (
-        "vendor_expected"
-    )
+    source: Literal[
+        "vendor_expected",
+        "vendor_supplied",
+        "cc0",
+        "cc_by",
+        "royalty_free",
+        "internal_cleaned",
+        "internal_test_minimal",
+    ] = "vendor_expected"
+    license: str | None = None
+    attribution_required: bool = False
+    attribution: str | None = None
+    original_url: str | None = None
+    original_author: str | None = None
+    normalized_by: str | None = None
+    pivot_policy: str | None = None
+    front_axis: str | None = None
     import_fallback_allowed: bool = True
 
     @property

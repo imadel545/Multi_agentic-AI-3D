@@ -104,6 +104,31 @@ def test_irrelevant_admin_files_are_recorded_but_ignored(tmp_path: Path) -> None
     )
 
 
+def test_document_pack_parses_comma_separated_azimuths_without_spaces(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "APD/radio.txt": (
+                    "Type pylone: pylone treillis\n"
+                    "Hauteur pylone: 30m\n"
+                    "Azimuts: 0,120,240\n"
+                    "HBA: 24,24,24\n"
+                    "Bandes NR700 NR3500 5G\n"
+                )
+            }
+        )
+    )
+    mapping = ProjectDesignSpecMapper().map_to_requirements(service.get_spec(summary.pack_id))
+
+    assert summary.can_generate_design is True
+    assert mapping.status == "mapped"
+    assert mapping.requirements is not None
+    assert mapping.requirements["sector_count"] == 3
+    assert mapping.requirements["azimuths_deg"] == [0.0, 120.0, 240.0]
+
+
 def test_dwg_and_scanned_pdf_are_inventory_only_without_hallucination(tmp_path: Path) -> None:
     service = DocumentPackService(tmp_path)
 

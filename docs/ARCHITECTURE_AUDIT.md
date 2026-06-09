@@ -29,10 +29,12 @@ Updated audit on 2026-06-08:
 - Confirmed issues: `/assets/inventory` route shadowing, exception handler re-raising,
   semi-integrated edit regeneration, RAG text heuristics in planner, dead `error_memory` lookup,
   and GPS/power cabinet enabled by default.
-- Asset pipeline update: inventory is now `partial_import_ready`; two internal minimal GLB assets
-  are present and importable, while vendor-grade tower/4G/microwave assets remain missing.
+- Asset pipeline update: inventory is now `partial_import_ready`; nine GLB files are present,
+  including one CC Attribution lattice tower, internal cleaned antenna/accessory assets, and
+  internal minimal 5G/RRU assets. Monopole, rooftop mast, and small-cell vendor GLBs remain
+  missing.
 
-Document intelligence audit on 2026-06-08:
+Document intelligence initial audit on 2026-06-08:
 
 - Confirmed local `.venv` lacks `fitz`, `pdfplumber`, `docling`, `ezdxf`, `pyproj`,
   `pytesseract`, and `PIL`; only the `tesseract` binary was detected.
@@ -50,9 +52,9 @@ Document intelligence hardening update on 2026-06-08:
 
 - Installed and verified `.[document-intel]`: PyMuPDF/fitz, pdfplumber, ezdxf, pyproj,
   pytesseract, and Pillow.
-- Installed Docling separately and verified imports. Model-based PDF conversion depends on cached
-  model files and free disk; the acceptance run keeps it outside default ingestion because it is
-  heavy and can fail when disk space is too low.
+- Installed Docling separately and verified imports. `/document-packs/capabilities` reports it as
+  `installed_import_only`, not `available`, because model-based PDF conversion depends on cached
+  model files and free disk. Tests must not trigger Docling model downloads.
 - Added selected OCR, real DXF parsing, bounded Groq document-pack extraction, document-pack
   LangGraph orchestration, SQLite/Qdrant document-pack memory writeback, trace/events endpoints,
   and direct `RequirementSpec` generation from `ProjectDesignSpec`.

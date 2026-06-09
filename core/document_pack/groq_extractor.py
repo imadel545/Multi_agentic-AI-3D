@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -268,10 +269,11 @@ def _validate_raw_fields(
             continue
         chunk = chunks_by_document[str(field["document_id"])]
         evidence = str(field["evidence"]).strip()
+        normalized_value = _normalize_groq_value(str(field["field"]), field["value"], evidence)
         candidates.append(
             FieldCandidate(
                 field=str(field["field"]),
-                value=_normalize_groq_value(str(field["field"]), field["value"]),
+                value=normalized_value,
                 confidence=float(field["confidence"]),
                 source=SourceEvidence(
                     document_id=chunk.document_id,
@@ -305,14 +307,14 @@ def _field_rejection_reason(
     confidence = field.get("confidence")
     if not isinstance(confidence, int | float) or not 0 <= float(confidence) <= 1:
         return "invalid_confidence"
-    if field_name in {"radio.azimuths_deg", "radio.hba_m"} and not _valid_number_list_value(
-        field.get("value")
-    ):
-        return "invalid_value_shape"
+    normalized_value = _normalize_groq_value(field_name, field.get("value"), evidence)
+    if field_name in {"radio.azimuths_deg", "radio.hba_m"}:
+        if not _valid_number_list_value(field_name, normalized_value):
+            return "invalid_value_shape"
     return None
 
 
-def _normalize_groq_value(field: str, value: Any) -> Any:
+def _normalize_groq_value(field: str, value: Any, evidence: str = "") -> Any:
     if field == "tower.tower_type" and isinstance(value, str):
         normalized = value.lower().replace("ô", "o").replace("é", "e").replace("è", "e")
         if "treillis" in normalized or "lattice" in normalized:
@@ -324,7 +326,12 @@ def _normalize_groq_value(field: str, value: Any) -> Any:
         if "small cell" in normalized:
             return "small_cell_pole"
     if field in {"radio.azimuths_deg", "radio.hba_m"}:
-        return _number_list(value)
+        numbers = _number_list(value)
+        if not _valid_number_list_value(field, numbers) and evidence:
+            numbers = _number_list(evidence)
+        return numbers
+    if field == "radio.bands" and isinstance(value, str):
+        return _band_list(value) or _band_list(evidence) or value
     if field == "radio.sector_count" and isinstance(value, float | int | str):
         try:
             return int(float(str(value).replace(",", ".")))
@@ -348,19 +355,47 @@ def _number_list(value: Any) -> Any:
                 return value
         return numbers
     if isinstance(value, str):
-        import re
-
-        numbers = [float(raw.replace(",", ".")) for raw in re.findall(r"\d+(?:[.,]\d+)?", value)]
+        numbers = [float(raw) for raw in _list_numbers(value)]
         return numbers or value
     return value
 
 
-def _valid_number_list_value(value: Any) -> bool:
-    if isinstance(value, list):
-        return bool(value) and all(isinstance(item, int | float | str) for item in value)
-    if isinstance(value, str):
-        return len(_number_list(value)) >= 1 if isinstance(_number_list(value), list) else False
-    return False
+def _list_numbers(raw: str) -> list[str]:
+    value = raw.replace("°", " ").replace("m", " ")
+    if ";" in value or "/" in value:
+        return [
+            token.replace(",", ".")
+            for token in re.split(r"[;\s/]+", value)
+            if re.fullmatch(r"\d+(?:[,.]\d+)?", token)
+        ]
+    if value.count(",") > 1 or re.search(r",\s+", value):
+        value = value.replace(",", " ")
+        return re.findall(r"\d+(?:\.\d+)?", value)
+    return [token.replace(",", ".") for token in re.findall(r"\d+(?:[,.]\d+)?", value)]
+
+
+def _valid_number_list_value(field: str, value: Any) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    try:
+        numbers = [float(item) for item in value]
+    except (TypeError, ValueError):
+        return False
+    maximum = 360 if field == "radio.azimuths_deg" else 150
+    if any(number < 0 or number > maximum for number in numbers):
+        return False
+    if field == "radio.azimuths_deg" and len(numbers) > 6:
+        return False
+    if field == "radio.hba_m" and len(numbers) > 6:
+        return False
+    return True
+
+
+def _band_list(value: str) -> list[str]:
+    bands = set()
+    for raw in re.findall(r"\b(?:NR\d{3,4}|L\d{3,4}|[45]G)\b", value.upper()):
+        bands.add(raw)
+    return sorted(bands)
 
 
 def _groq_failed(

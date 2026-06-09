@@ -49,7 +49,14 @@ DocumentExtractionStatus = Literal[
     "failed",
     "inventory_only",
 ]
-ToolAvailability = Literal["available", "unavailable", "unsupported"]
+ToolAvailability = Literal[
+    "available",
+    "unavailable",
+    "unsupported",
+    "installed_import_only",
+    "conversion_available",
+    "unsupported_without_converter",
+]
 SourceEvidenceType = Literal[
     "text",
     "table",
