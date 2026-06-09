@@ -1,7 +1,7 @@
 import { Environment, Grid, Html, OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Box, Cable, Crosshair, RotateCcw } from "lucide-react";
-import { Suspense, useEffect, useMemo } from "react";
+import { Component, Suspense, useEffect, useMemo, type ReactNode } from "react";
 import { Box3, Group, Vector3 } from "three";
 import type { Material, Mesh, Object3D } from "three";
 
@@ -52,30 +52,40 @@ export function ThreeViewer({ workflow }: ThreeViewerProps) {
 
       <div className="viewer-canvas-frame">
         {glbUrl ? (
-          <Canvas camera={{ position: [14, -18, 12], fov: 46 }} shadows>
-            <color attach="background" args={["#111820"]} />
-            <ambientLight intensity={1.4} />
-            <hemisphereLight args={["#dff8ff", "#1c2a31", 1.6]} />
-            <directionalLight position={[8, -8, 14]} intensity={3.2} />
-            <directionalLight position={[-6, 8, 10]} intensity={1.6} />
-            <Suspense fallback={<Loading3D />}>
-              <CameraAim />
-              <SceneModel
-                url={glbUrl}
-                toggles={toggles}
-                onSelect={(name) => setSelectedObject(name)}
+          <ViewerErrorBoundary resetKey={glbUrl}>
+            <Canvas camera={{ position: [7.2, -10, 6.3], fov: 30, near: 0.1, far: 1000 }} shadows>
+              <color attach="background" args={["#111820"]} />
+              <ambientLight intensity={1.4} />
+              <hemisphereLight args={["#dff8ff", "#1c2a31", 1.6]} />
+              <directionalLight position={[8, -8, 14]} intensity={3.2} />
+              <directionalLight position={[-6, 8, 10]} intensity={1.6} />
+              <Suspense fallback={<Loading3D />}>
+                <CameraAim />
+                <SceneModel
+                  url={glbUrl}
+                  toggles={toggles}
+                  onSelect={(name) => setSelectedObject(name)}
+                />
+                <Grid
+                  args={[26, 26]}
+                  cellColor="#26313a"
+                  sectionColor="#376572"
+                  fadeDistance={26}
+                  fadeStrength={1.6}
+                  position={[0, -5.9, 0]}
+                />
+                <Environment preset="city" />
+              </Suspense>
+              <OrbitControls
+                makeDefault
+                target={[0, 0, 0]}
+                minDistance={3}
+                maxDistance={34}
+                enableDamping
+                dampingFactor={0.08}
               />
-              <Grid
-                args={[42, 42]}
-                cellColor="#26313a"
-                sectionColor="#376572"
-                fadeDistance={42}
-                position={[0, -4.6, 0]}
-              />
-              <Environment preset="city" />
-            </Suspense>
-            <OrbitControls makeDefault target={[0, 0, 0]} />
-          </Canvas>
+            </Canvas>
+          </ViewerErrorBoundary>
         ) : (
           <div className="viewer-empty">
             <Box size={34} />
@@ -93,6 +103,36 @@ export function ThreeViewer({ workflow }: ThreeViewerProps) {
       </div>
     </main>
   );
+}
+
+class ViewerErrorBoundary extends Component<
+  { children: ReactNode; resetKey: string },
+  { error: Error | null }
+> {
+  state = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidUpdate(previous: { resetKey: string }) {
+    if (previous.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="viewer-empty">
+          <Box size={34} />
+          <strong>GLB artifact unavailable</strong>
+          <p>The selected workflow does not expose a readable GLB artifact.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 type SceneModelProps = {
@@ -116,8 +156,9 @@ function SceneModel({ url, toggles, onSelect }: SceneModelProps) {
     const box = new Box3().setFromObject(scene);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
-    const maxAxis = Math.max(size.x, size.y, size.z, 1);
-    const scale = 5.8 / maxAxis;
+    const dominantVertical = Math.max(size.y, size.z, 1);
+    const broadAxis = Math.max(size.x, size.y, size.z, 1);
+    const scale = Math.min(18 / dominantVertical, 14 / broadAxis);
     scene.position.set(-center.x, -center.y, -center.z);
     frame.scale.setScalar(scale);
     return { group: frame, framedScene: scene };

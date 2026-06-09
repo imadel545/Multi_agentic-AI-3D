@@ -44,6 +44,16 @@ export function TopBar({ backendStatus, workflow }: TopBarProps) {
           <StatusBadge status={workflow?.generation_mode ?? "not_generated"} />
         </div>
         <div className="status-cell">
+          <span>Version</span>
+          <strong>{shortId(workflow?.active_version_id ?? workflow?.version_id)}</strong>
+        </div>
+        <div className="status-cell">
+          <span>LLM</span>
+          <StatusBadge
+            status={workflow?.llm_fallback_used ? "fallback" : workflow?.llm_provider ?? "not_used"}
+          />
+        </div>
+        <div className="status-cell">
           <TriangleAlert size={15} />
           <span>Issues</span>
           <Badge tone={errorCount ? "bad" : warningCount ? "warn" : "good"}>

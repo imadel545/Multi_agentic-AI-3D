@@ -1,0 +1,221 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Architecture Multi-Agent AI 3D Telecom Design Studio</title>
+  <desc id="desc">Architecture diagram from technical input and document intelligence to multi-agent orchestration, Blender execution, QA, and frontend output.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#07111f"/>
+      <stop offset="0.55" stop-color="#0d1726"/>
+      <stop offset="1" stop-color="#101820"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#132236"/>
+      <stop offset="1" stop-color="#0e1a2a"/>
+    </linearGradient>
+    <linearGradient id="agent" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#113a42"/>
+      <stop offset="1" stop-color="#102734"/>
+    </linearGradient>
+    <linearGradient id="qa" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#3d2f14"/>
+      <stop offset="1" stop-color="#251f18"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#67e8f9"/>
+    </marker>
+    <style>
+      .title { font: 700 42px Inter, Arial, sans-serif; fill: #f8fafc; }
+      .subtitle { font: 500 18px Inter, Arial, sans-serif; fill: #94a3b8; }
+      .layer-title { font: 700 21px Inter, Arial, sans-serif; fill: #f8fafc; letter-spacing: 0.2px; }
+      .label { font: 600 16px Inter, Arial, sans-serif; fill: #e2e8f0; }
+      .small { font: 500 13px Inter, Arial, sans-serif; fill: #b6c4d6; }
+      .tiny { font: 500 12px Inter, Arial, sans-serif; fill: #91a4bb; }
+      .box { fill: url(#panel); stroke: #28425e; stroke-width: 1.4; rx: 14; filter: url(#shadow); }
+      .agent-box { fill: url(#agent); stroke: #1f9ead; stroke-width: 1.4; rx: 12; }
+      .qa-box { fill: url(#qa); stroke: #f59e0b; stroke-width: 1.4; rx: 12; }
+      .input-box { fill: #172033; stroke: #64748b; stroke-width: 1.4; rx: 12; }
+      .output-box { fill: #10251f; stroke: #22c55e; stroke-width: 1.4; rx: 12; }
+      .api-box { fill: #1c2435; stroke: #818cf8; stroke-width: 1.4; rx: 12; }
+      .line { stroke: #67e8f9; stroke-width: 2.4; fill: none; marker-end: url(#arrow); opacity: 0.88; }
+      .loop { stroke: #f59e0b; stroke-width: 2.2; fill: none; marker-end: url(#arrow); opacity: 0.92; stroke-dasharray: 8 7; }
+      .muted-line { stroke: #475569; stroke-width: 1.4; fill: none; opacity: 0.7; }
+      .badge { fill: #0f172a; stroke: #334155; stroke-width: 1; rx: 10; }
+      .badge-text { font: 700 12px Inter, Arial, sans-serif; fill: #67e8f9; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect x="32" y="32" width="1856" height="1016" fill="none" stroke="#1e293b" stroke-width="2" rx="28"/>
+
+  <text x="72" y="88" class="title">Architecture Multi-Agent AI 3D Telecom Design Studio</text>
+  <text x="72" y="122" class="subtitle">Input technique et documents vers SceneSpec valide, generation Blender reelle, QA, versions et frontend agentique.</text>
+
+  <!-- Main layer panels -->
+  <rect x="58" y="165" width="250" height="590" class="box"/>
+  <text x="84" y="205" class="layer-title">1. Inputs</text>
+  <rect x="82" y="234" width="202" height="70" class="input-box"/>
+  <text x="102" y="262" class="label">Cahier des charges</text>
+  <text x="102" y="285" class="small">texte telecom</text>
+  <rect x="82" y="322" width="202" height="86" class="input-box"/>
+  <text x="102" y="350" class="label">Document pack</text>
+  <text x="102" y="373" class="small">PDF, ZIP, images</text>
+  <text x="102" y="394" class="small">DXF / plans</text>
+  <rect x="82" y="426" width="202" height="86" class="input-box"/>
+  <text x="102" y="454" class="label">Prompt utilisateur</text>
+  <text x="102" y="477" class="small">generation</text>
+  <text x="102" y="498" class="small">edition / correction</text>
+  <rect x="82" y="548" width="202" height="158" class="api-box"/>
+  <text x="102" y="578" class="label">FastAPI</text>
+  <text x="102" y="603" class="small">/designs</text>
+  <text x="102" y="624" class="small">/document-packs</text>
+  <text x="102" y="645" class="small">/assets/inventory</text>
+  <text x="102" y="666" class="small">/events / versions</text>
+
+  <rect x="344" y="165" width="282" height="590" class="box"/>
+  <text x="370" y="205" class="layer-title">2. Contracts</text>
+  <rect x="370" y="234" width="230" height="72" class="api-box"/>
+  <text x="392" y="262" class="label">Pydantic strict</text>
+  <text x="392" y="285" class="small">source de verite typee</text>
+  <rect x="370" y="324" width="230" height="58" class="api-box"/>
+  <text x="392" y="359" class="label">ProjectDesignSpec</text>
+  <rect x="370" y="400" width="230" height="58" class="api-box"/>
+  <text x="392" y="435" class="label">RequirementSpec</text>
+  <rect x="370" y="476" width="230" height="58" class="api-box"/>
+  <text x="392" y="511" class="label">SceneSpec</text>
+  <rect x="370" y="552" width="230" height="58" class="api-box"/>
+  <text x="392" y="587" class="label">ScenePatch</text>
+  <rect x="370" y="628" width="230" height="78" class="api-box"/>
+  <text x="392" y="658" class="label">Reports</text>
+  <text x="392" y="682" class="small">QA, geometry, trace</text>
+
+  <rect x="662" y="165" width="304" height="590" class="box"/>
+  <text x="688" y="205" class="layer-title">3. Document Intelligence</text>
+  <rect x="690" y="234" width="248" height="56" class="agent-box"/>
+  <text x="712" y="269" class="label">DocumentPack LangGraph</text>
+  <rect x="690" y="310" width="248" height="48" class="agent-box"/>
+  <text x="712" y="341" class="small">index + classification</text>
+  <rect x="690" y="374" width="248" height="66" class="agent-box"/>
+  <text x="712" y="402" class="small">PDF text / tables</text>
+  <text x="712" y="423" class="small">OCR selectif / DXF CAD</text>
+  <rect x="690" y="456" width="248" height="56" class="agent-box"/>
+  <text x="712" y="490" class="small">Groq bounded extraction</text>
+  <rect x="690" y="530" width="248" height="56" class="agent-box"/>
+  <text x="712" y="564" class="small">consolidation + QA</text>
+  <rect x="690" y="604" width="248" height="72" class="agent-box"/>
+  <text x="712" y="634" class="small">memory writeback</text>
+  <text x="712" y="655" class="tiny">metadata only, no large files</text>
+
+  <rect x="1002" y="165" width="405" height="590" class="box"/>
+  <text x="1028" y="205" class="layer-title">4. Multi-Agent Core</text>
+  <rect x="1030" y="234" width="164" height="54" class="agent-box"/>
+  <text x="1048" y="266" class="small">RequirementExtractor</text>
+  <rect x="1214" y="234" width="164" height="54" class="agent-box"/>
+  <text x="1234" y="266" class="small">RAG Context</text>
+  <rect x="1030" y="306" width="164" height="54" class="agent-box"/>
+  <text x="1048" y="338" class="small">Memory Recall</text>
+  <rect x="1214" y="306" width="164" height="54" class="agent-box"/>
+  <text x="1234" y="338" class="small">Asset Selection</text>
+  <rect x="1030" y="378" width="164" height="54" class="agent-box"/>
+  <text x="1048" y="410" class="small">Scene Planner</text>
+  <rect x="1214" y="378" width="164" height="54" class="agent-box"/>
+  <text x="1234" y="410" class="small">Scene Edit Agent</text>
+  <rect x="1030" y="450" width="164" height="54" class="agent-box"/>
+  <text x="1048" y="482" class="small">RF Engineer</text>
+  <rect x="1214" y="450" width="164" height="54" class="agent-box"/>
+  <text x="1234" y="482" class="small">Tower Engineer</text>
+  <rect x="1030" y="522" width="164" height="54" class="agent-box"/>
+  <text x="1048" y="554" class="small">Rules Engine</text>
+  <rect x="1214" y="522" width="164" height="54" class="agent-box"/>
+  <text x="1234" y="554" class="small">Repair Agent</text>
+  <rect x="1030" y="604" width="348" height="72" class="qa-box"/>
+  <text x="1052" y="634" class="label">LangGraph Orchestrator</text>
+  <text x="1052" y="658" class="small">routes, bounded repair, gates, events, trace</text>
+
+  <rect x="1444" y="165" width="418" height="590" class="box"/>
+  <text x="1470" y="205" class="layer-title">5. 3D Execution + QA</text>
+  <rect x="1474" y="234" width="160" height="62" class="agent-box"/>
+  <text x="1492" y="260" class="small">Asset Registry</text>
+  <text x="1492" y="281" class="tiny">GLB / fallback visible</text>
+  <rect x="1662" y="234" width="160" height="62" class="agent-box"/>
+  <text x="1682" y="260" class="small">Blender Worker</text>
+  <text x="1682" y="281" class="tiny">real generation</text>
+  <rect x="1474" y="320" width="348" height="56" class="qa-box"/>
+  <text x="1494" y="355" class="small">SceneSpec validation</text>
+  <rect x="1474" y="392" width="164" height="56" class="qa-box"/>
+  <text x="1494" y="427" class="small">GLB inspection</text>
+  <rect x="1658" y="392" width="164" height="56" class="qa-box"/>
+  <text x="1678" y="427" class="small">Geometry QA</text>
+  <rect x="1474" y="464" width="164" height="56" class="qa-box"/>
+  <text x="1494" y="499" class="small">Preview QA</text>
+  <rect x="1658" y="464" width="164" height="56" class="qa-box"/>
+  <text x="1678" y="499" class="small">Mapping loss</text>
+  <rect x="1474" y="548" width="348" height="72" class="output-box"/>
+  <text x="1494" y="578" class="label">Quality Gates</text>
+  <text x="1494" y="602" class="small">no silent fail, no fake asset claim</text>
+  <rect x="1474" y="640" width="348" height="66" class="output-box"/>
+  <text x="1494" y="668" class="label">Versioned Artifacts</text>
+  <text x="1494" y="690" class="small">GLB, preview, reports, archive</text>
+
+  <!-- Outputs row -->
+  <rect x="58" y="805" width="1804" height="182" class="box"/>
+  <text x="84" y="845" class="layer-title">6. Outputs consommables par le frontend Agentic 3D Studio</text>
+  <rect x="86" y="876" width="170" height="64" class="output-box"/>
+  <text x="110" y="902" class="label">design.glb</text>
+  <text x="110" y="925" class="tiny">viewer Three.js</text>
+  <rect x="280" y="876" width="170" height="64" class="output-box"/>
+  <text x="304" y="902" class="label">preview.png</text>
+  <text x="304" y="925" class="tiny">panel image</text>
+  <rect x="474" y="876" width="210" height="64" class="output-box"/>
+  <text x="498" y="902" class="label">QA reports</text>
+  <text x="498" y="925" class="tiny">validation / geometry</text>
+  <rect x="708" y="876" width="210" height="64" class="output-box"/>
+  <text x="732" y="902" class="label">workflow_trace</text>
+  <text x="732" y="925" class="tiny">timeline decisions</text>
+  <rect x="942" y="876" width="210" height="64" class="output-box"/>
+  <text x="966" y="902" class="label">versions + diff</text>
+  <text x="966" y="925" class="tiny">edit / rollback</text>
+  <rect x="1176" y="876" width="210" height="64" class="output-box"/>
+  <text x="1200" y="902" class="label">asset modes</text>
+  <text x="1200" y="925" class="tiny">imported / fallback</text>
+  <rect x="1410" y="876" width="210" height="64" class="output-box"/>
+  <text x="1434" y="902" class="label">events / SSE</text>
+  <text x="1434" y="925" class="tiny">agent console</text>
+  <rect x="1644" y="876" width="170" height="64" class="output-box"/>
+  <text x="1668" y="902" class="label">download</text>
+  <text x="1668" y="925" class="tiny">artifacts.zip</text>
+
+  <!-- Arrows -->
+  <path class="line" d="M 308 460 C 326 460, 326 430, 344 430"/>
+  <path class="line" d="M 626 430 C 644 430, 644 430, 662 430"/>
+  <path class="line" d="M 966 430 C 984 430, 984 430, 1002 430"/>
+  <path class="line" d="M 1407 430 C 1425 430, 1425 430, 1444 430"/>
+  <path class="line" d="M 183 755 C 183 780, 183 780, 183 805"/>
+  <path class="line" d="M 485 755 C 485 780, 485 780, 485 805"/>
+  <path class="line" d="M 814 755 C 814 780, 814 780, 814 805"/>
+  <path class="line" d="M 1204 755 C 1204 780, 1204 780, 1204 805"/>
+  <path class="line" d="M 1653 755 C 1653 780, 1653 780, 1653 805"/>
+
+  <!-- Feedback loops -->
+  <path class="loop" d="M 1515 548 C 1430 715, 1210 725, 1210 586"/>
+  <text x="1258" y="734" class="small" fill="#fbbf24">QA fail -> Repair -> revalidate</text>
+  <path class="loop" d="M 280 468 C 560 748, 1040 740, 1214 432"/>
+  <text x="624" y="738" class="small" fill="#fbbf24">edit prompt -> ScenePatch -> new version</text>
+  <path class="loop" d="M 1390 668 C 1260 768, 1048 750, 1110 360"/>
+  <text x="1100" y="776" class="small" fill="#fbbf24">memory writeback -> future recall</text>
+
+  <!-- Governance badges -->
+  <rect x="72" y="1002" width="270" height="32" class="badge"/>
+  <text x="92" y="1023" class="badge-text">No LLM Blender code execution</text>
+  <rect x="374" y="1002" width="258" height="32" class="badge"/>
+  <text x="394" y="1023" class="badge-text">Fallbacks visible and traced</text>
+  <rect x="664" y="1002" width="246" height="32" class="badge"/>
+  <text x="684" y="1023" class="badge-text">SceneSpec is source of truth</text>
+  <rect x="942" y="1002" width="232" height="32" class="badge"/>
+  <text x="962" y="1023" class="badge-text">QA gates before output</text>
+  <rect x="1206" y="1002" width="310" height="32" class="badge"/>
+  <text x="1226" y="1023" class="badge-text">Real GLB import or explicit fallback</text>
+  <rect x="1548" y="1002" width="270" height="32" class="badge"/>
+  <text x="1568" y="1023" class="badge-text">Versioned edit and rollback</text>
+</svg>

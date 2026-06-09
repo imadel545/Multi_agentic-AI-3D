@@ -2,7 +2,9 @@ import { Database, FileSearch, Network, ScrollText } from "lucide-react";
 
 import { useDocumentPack } from "../api/hooks";
 import type { StudioEvent } from "../api/types";
+import { Badge, StatusBadge } from "../components/Badge";
 import { JsonBlock } from "../components/JsonBlock";
+import { stringifyCompact } from "../lib/format";
 import { DocumentPackPanel } from "../features/document-pack/DocumentPackPanel";
 import { useStudioStore, type BottomTab } from "../stores/studioStore";
 
@@ -50,8 +52,14 @@ export function BottomDock({ events }: BottomDockProps) {
       ) : null}
       {bottomTab === "events" ? (
         <section className="dock-panel">
-          <h2>Raw workflow events</h2>
-          <JsonBlock value={events ?? pack.data?.events} empty="No events loaded." />
+          <div className="panel-heading compact">
+            <ScrollText size={16} />
+            <h2>Agent events</h2>
+            <Badge tone={(events ?? pack.data?.events)?.length ? "good" : "idle"}>
+              {(events ?? pack.data?.events)?.length ?? 0}
+            </Badge>
+          </div>
+          <EventDock events={events ?? pack.data?.events ?? []} />
         </section>
       ) : null}
       {bottomTab === "memory" ? (
@@ -61,5 +69,27 @@ export function BottomDock({ events }: BottomDockProps) {
         </section>
       ) : null}
     </footer>
+  );
+}
+
+function EventDock({ events }: { events: StudioEvent[] }) {
+  if (!events.length) return <div className="empty-state">No events loaded.</div>;
+  return (
+    <div className="event-table">
+      {events
+        .slice()
+        .reverse()
+        .slice(0, 18)
+        .map((event, index) => (
+          <article key={`${event.event_id ?? event.event_type}-${index}`}>
+            <div>
+              <strong>{event.event_type}</strong>
+              <p>{event.created_at ?? event.timestamp ?? "time pending"}</p>
+            </div>
+            <p>{event.payload ? stringifyCompact(event.payload).slice(0, 140) : "no payload"}</p>
+            <StatusBadge status={event.event_type.includes("failed") ? "failed" : "completed"} />
+          </article>
+        ))}
+    </div>
   );
 }

@@ -52,6 +52,7 @@ export function InspectorPanel({ workflow }: InspectorPanelProps) {
 
 function QAPanel({ workflow }: InspectorPanelProps) {
   const gates = workflow?.quality_gates ?? [];
+  const issues = compactIssues([...(workflow?.errors ?? []), ...(workflow?.warnings ?? [])]);
   return (
     <div className="inspector-content">
       <div className="metric-strip">
@@ -89,13 +90,27 @@ function QAPanel({ workflow }: InspectorPanelProps) {
         <div className="empty-state">No quality gates yet.</div>
       )}
       <h3>Warnings / errors</h3>
-      {[...(workflow?.errors ?? []), ...(workflow?.warnings ?? [])].length ? (
-        [...(workflow?.errors ?? []), ...(workflow?.warnings ?? [])].map((item, index) => (
-          <article className="qa-row warning" key={`${stringifyCompact(item.code)}-${index}`}>
-            <strong>{stringifyCompact(item.code ?? item.severity ?? "issue")}</strong>
-            <p>{stringifyCompact(item.message ?? item)}</p>
-          </article>
-        ))
+      {issues.length ? (
+        <div className="issue-list">
+          {issues.slice(0, 10).map((item, index) => (
+            <article
+              className={item.severity === "error" ? "issue-row error" : "issue-row"}
+              key={`${item.code}-${index}`}
+              title={item.message}
+            >
+              <header>
+                <strong className="issue-title">{item.code}</strong>
+                <Badge tone={item.severity === "error" ? "bad" : "warn"}>
+                  {item.count > 1 ? `${item.severity} x${item.count}` : item.severity}
+                </Badge>
+              </header>
+              <p>{item.message}</p>
+            </article>
+          ))}
+          {issues.length > 10 ? (
+            <p className="hint">{issues.length - 10} more issues available in QA summaries JSON.</p>
+          ) : null}
+        </div>
       ) : (
         <div className="empty-state">No warnings or errors exposed.</div>
       )}
@@ -113,6 +128,29 @@ function QAPanel({ workflow }: InspectorPanelProps) {
       </details>
     </div>
   );
+}
+
+function compactIssues(items: Array<Record<string, unknown>>) {
+  const byKey = new Map<
+    string,
+    { code: string; message: string; severity: "warning" | "error"; count: number }
+  >();
+  for (const item of items) {
+    const code = stringifyCompact(item.code ?? item.severity ?? "issue");
+    const message = stringifyCompact(item.message ?? item);
+    const severity = item.severity === "error" ? "error" : "warning";
+    const key = `${severity}:${code}:${message}`;
+    const current = byKey.get(key);
+    if (current) {
+      current.count += 1;
+      continue;
+    }
+    byKey.set(key, { code, message, severity, count: 1 });
+  }
+  return Array.from(byKey.values()).sort((left, right) => {
+    if (left.severity !== right.severity) return left.severity === "error" ? -1 : 1;
+    return right.count - left.count;
+  });
 }
 
 function AssetPanel({ workflow }: InspectorPanelProps) {

@@ -8,10 +8,12 @@ Structure:
 
 - `src/api`: typed backend client, TanStack Query hooks, artifact URL helpers.
 - `src/app`: studio shell, top bar, bottom dock.
-- `src/features/agent-console`: generation/edit commands and timeline.
+- `src/features/agent-console`: command center, generation/edit commands, quick prompts, agent-stage
+  lanes and timeline.
 - `src/features/document-pack`: pack list, document inventory, extracted fields, missing/conflicts.
-- `src/features/three-viewer`: lazy-loaded React Three Fiber GLB viewer.
-- `src/features/qa-panel`: QA, asset imports, versions, diff, rollback, downloads.
+- `src/features/three-viewer`: lazy-loaded React Three Fiber GLB viewer with artifact error boundary
+  and tower-oriented initial fit.
+- `src/features/qa-panel`: QA, compact issues, asset imports, versions, diff, rollback, downloads.
 - `src/stores`: Zustand UI state for active workflow, active pack, selected version/object, tabs and
   viewer toggles.
 
@@ -31,6 +33,7 @@ offline/empty states when data is not available.
 - The GLB viewer is lazy-loaded so initial app chrome does not block on Three.js.
 - Missing artifacts are linked through backend artifact routes and surface backend `404` instead of
   guessing local filesystem paths.
+- A missing GLB now renders an explicit viewer error state instead of taking down the canvas.
 
 ## Known Limitations
 
@@ -41,6 +44,8 @@ offline/empty states when data is not available.
 - Prompt edit is apply-and-generate. There is no non-committed patch preview endpoint yet.
 - Object metadata selection is based on GLB object names; deeper semantic picking can be added from
   `scene_metadata.json`.
+- The current command log is browser-session local; durable command history would need backend
+  persistence or workflow events for user-issued commands.
 
 ## Future
 

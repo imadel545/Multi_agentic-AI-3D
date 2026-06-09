@@ -19,9 +19,9 @@ This repository currently implements the local-first controlled generation pipel
 - FastAPI endpoints for design creation, status, validation, assets, and artifact download.
 - Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
   rollback, and event logging.
-- React/Vite Agentic 3D Studio frontend under `apps/frontend` with document-pack upload, agent
-  console, event timeline, GLB viewer, QA/assets/versions/diff/download panels, and real backend
-  artifact links.
+- React/Vite Agentic 3D Studio frontend under `apps/frontend` with document-pack upload, Agent
+  Command Center, event-derived agent stages, GLB viewer, compact QA/assets/versions/diff/download
+  panels, and real backend artifact links.
 - Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
 - Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
 - Geometry validation for expected antennas, beams, RRUs, cables, GPS, power cabinet, azimuths,
@@ -151,6 +151,8 @@ Known limitations:
 
 - The current asset library is `partial_import_ready`: a CC-BY lattice tower and internal
   cleaned/minimal telecom assets exist, but they are not a complete vendor-grade library.
+- The frontend is a credible local-first studio, but visual realism is still limited by the current
+  internal/minimal asset library and Blender scene composition.
 - The Blender worker imports available GLBs and uses controlled procedural fallback for missing
   assets only when fallback is allowed and visible in metadata. GPS and power-cabinet accessories
   are manifest-backed placements when explicitly requested.

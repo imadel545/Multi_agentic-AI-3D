@@ -74,11 +74,14 @@
 - Wire standalone prompt/document controls for mounting bracket and cable-tray accessory placement.
 - Add exact imported-asset bounding-box, pivot, mount-point, material, and LOD validation.
 - Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
-- Add frontend React/Three.js viewer.
+- Continue frontend Agentic 3D Studio hardening: resizable panels, command palette, semantic object
+  metadata inspector, polished document correction flows, and E2E smoke coverage.
 - Add Docling layout extraction only with timeout/cost controls.
 - Add production-grade table extraction for equipment inventories.
 - Use document-pack memory recall to suggest recurring corrections and APD conflict resolutions.
 - Add non-committed edit preview/apply workflow if the frontend needs preview before activation.
+- Replace internal/minimal assets with licensed vendor-grade telecom GLBs where possible and keep
+  attribution/source metadata visible.
 - Add richer Qdrant payload filters and semantic embeddings as default.
 - Add comparative design variants.
 - Add exact GLB transform, bounding-box, and material validation for imported vendor assets.

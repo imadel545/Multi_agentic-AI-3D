@@ -57,7 +57,7 @@ describe("StudioShell", () => {
     renderWithQuery();
 
     expect(await screen.findByText("Agentic Telecom Studio")).toBeInTheDocument();
-    expect(screen.getByText("Agent Console")).toBeInTheDocument();
+    expect(screen.getByText("Agent Command Center")).toBeInTheDocument();
     expect(await screen.findByText("GLB Scene Viewer")).toBeInTheDocument();
     expect(await screen.findByText("No GLB loaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Generate Design/i })).toBeInTheDocument();

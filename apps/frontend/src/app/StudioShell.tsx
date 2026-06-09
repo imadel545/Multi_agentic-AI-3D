@@ -30,8 +30,11 @@ export function StudioShell() {
   useStudioMutations(activeWorkflowId);
 
   useEffect(() => {
-    if (!activeWorkflowId && designs.data?.[0]?.workflow_id) {
-      setActiveWorkflowId(designs.data[0].workflow_id);
+    if (!activeWorkflowId && designs.data?.length) {
+      const preferredWorkflow =
+        designs.data.find((design) => design.status === "completed" && design.generation_mode)
+          ?.workflow_id ?? designs.data[0].workflow_id;
+      setActiveWorkflowId(preferredWorkflow);
     }
   }, [activeWorkflowId, designs.data, setActiveWorkflowId]);
 
@@ -46,7 +49,7 @@ export function StudioShell() {
       ) : null}
       <div className="studio-grid">
         <div className="left-rail">
-          <AgentConsole />
+          <AgentConsole workflow={workflow.data} events={events.data} />
           <Timeline workflowId={activeWorkflowId} events={events.data} />
         </div>
         <Suspense fallback={<div className="viewer-shell viewer-empty">Loading 3D viewer...</div>}>

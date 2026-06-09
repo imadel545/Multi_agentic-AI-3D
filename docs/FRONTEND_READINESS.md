@@ -92,11 +92,15 @@ entries must expose attribution.
 - The first React/Vite frontend is implemented under `apps/frontend` with agent console, document
   pack panel, timeline, GLB viewer, QA/assets/versions/diff/download inspector and backend artifact
   links.
+- The frontend now prefers completed workflows over failed workflows for automatic selection.
+- The viewer has a bounded missing-artifact error state and a stronger tower-first initial fit.
+- The inspector deduplicates warnings/errors into compact issue rows before exposing raw QA JSON.
 - Preview inspection is structural/image-stat based, not semantic design judging.
 - The API is synchronous for edit application. A separate preview-only edit workflow can be added
   later if the UI needs apply/reject before generation.
 - Events are file-backed and local-first; they are suitable for one local frontend session, not a
   distributed multi-user stream.
+- Asset visuals remain constrained by internal/minimal GLB assets and procedural fallback geometry.
 
 ## Future
 
