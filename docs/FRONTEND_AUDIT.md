@@ -1,31 +1,45 @@
 # Frontend Audit
 
-## Real Findings
+## Implemented
 
-| Finding | Risk | Action Taken | Remaining Risk |
-| --- | --- | --- | --- |
-| The app auto-selected the first workflow returned by `/designs`, even when that workflow had failed. | The viewer could open on a broken artifact and show an empty/crashed studio. | The shell now prefers a completed workflow with a generation mode before falling back to the first workflow. | A future workflow picker should let users intentionally inspect failed workflows. |
-| Missing GLB artifacts could crash the React Three Fiber canvas. | One stale workflow could break the main studio surface. | Added a viewer error boundary with a clear unavailable-artifact state. | Console may still contain historical dev-server logs until a clean reload. |
-| The studio used global page scroll and the 3D canvas could be partially hidden. | The app felt like a long dashboard instead of a controlled studio. | The shell is constrained to `100vh` with internal scrolling. | Mobile/tablet layout remains secondary. |
-| The GLB was framed around broad scene geometry instead of tower readability. | The telecom tower appeared small and weak. | Viewer fit now prioritizes vertical tower readability while bounding broad geometry. | Vendor-grade assets and richer Blender composition are still needed for premium visuals. |
-| QA warnings were shown as large raw-code cards. | The inspector became noisy and dev-centric. | Warnings/errors are deduplicated, compacted, and severity-tagged before JSON details. | Full user-facing translation of all technical warning codes remains future work. |
-| Events dock exposed raw JSON as the primary view. | Timeline evidence was hard for a non-developer user to read. | Added a compact event table and kept raw JSON secondary. | Document-pack events are still normal JSON endpoints, not document-pack SSE. |
+Runtime audit was performed before the reset:
 
-## Current State
+- Backend `GET /health` returned `{"status":"ok","version":"0.2.0"}`.
+- Frontend Vite served `http://127.0.0.1:5173`.
+- In-app Browser was attempted first, but the tab stayed in a crashed `This page crashed` state and
+  could not navigate to localhost.
+- Google Chrome headless was used as fallback for screenshots at `1440x900`.
 
-The frontend is now a stronger local-first Agentic Telecom 3D Studio:
+Confirmed pre-reset issues:
 
-- real backend status and completed-workflow preference;
-- command center with real workflow state, command log, quick edit prompts, and agent-stage lanes from events;
-- central GLB viewer with real artifact loading and missing-artifact handling;
-- smart inspector with QA, compact issues, asset import modes, versions, diff, rollback, and downloads;
-- intelligence dock for documents, provenance, events, and memory.
+| Finding | Risk | Action taken |
+| --- | --- | --- |
+| Layout still read as a developer dashboard. | User could not understand the product flow. | Replaced fixed grid with resizable studio shell: command center, 3D stage, smart inspector, intelligence dock. |
+| Command center exposed raw `edit_patch_rejected` and JSON-like payloads. | Agentic workflow felt like logs, not conversation. | Added conversation messages, command modes, quick actions, action summaries, and user-facing error explanations. |
+| Viewer could be visually blank in headless/WebGL screenshot. | Validation evidence and first impression were weak. | Added stronger GLB stage controls plus a real `preview.png` card labeled as a Blender preview artifact fallback. |
+| Warnings exposed backend codes directly. | Non-developer users could not judge impact or next action. | Added `issuePresenter` and `WarningCard` with title, impact, action, and collapsible technical detail. |
+| Timeline was a raw event list. | Agentic flow was not readable. | Added `eventPresenter` and grouped narrative phases. |
+| Document intelligence dock had weak empty states and little provenance context. | User did not know how documents affect generation. | Added pack metrics, extraction source labels, missing/conflict UX, correction form, and generate-from-pack action. |
 
-## Not Solved Yet
+## Available With Fallback
 
-- The 3D result is still constrained by internal/minimal GLB assets and procedural/fallback geometry.
-- There is no non-committed edit preview endpoint; edit still applies and regenerates.
-- Object metadata picking is name-based, not semantically linked to `scene_metadata.json`.
-- The UI is desktop-first. Mobile/tablet polish is not complete.
-- Browser smoke validates an existing completed workflow; full upload -> generate -> edit -> rollback E2E
-  should be added later.
+- Browser plugin remains preferred for visual validation. When it crashes, Chrome headless is used
+  and the exact fallback is reported.
+- WebGL screenshots can still show an empty canvas under headless Chrome; the UI now also exposes a
+  real Blender preview artifact so evidence is not visually empty.
+- SSE remains the intended timeline path; polling is still available through existing query hooks.
+
+## Known Limitations
+
+- The GLB viewer is still limited by the actual asset library and Blender composition. The UI now
+  reports internal/minimal/non-vendor assets instead of hiding the limitation.
+- The preview fallback is an image artifact, not the interactive GLB. It is explicitly labeled.
+- Full browser interaction proof for upload -> generate -> edit -> rollback still needs a dedicated
+  Playwright E2E workflow or a working Browser plugin session.
+- Mobile/tablet layout remains secondary; this reset targets desktop studio use.
+
+## Future
+
+- Add committed Playwright E2E once the frontend/backend smoke path is stable enough for CI.
+- Add backend object metadata endpoints if semantic picking needs more than `scene_metadata.json`.
+- Improve Blender camera/preview composition so the generated preview itself is more premium.

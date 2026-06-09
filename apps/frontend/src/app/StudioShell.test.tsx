@@ -58,8 +58,11 @@ describe("StudioShell", () => {
 
     expect(await screen.findByText("Agentic Telecom Studio")).toBeInTheDocument();
     expect(screen.getByText("Agent Command Center")).toBeInTheDocument();
-    expect(await screen.findByText("GLB Scene Viewer")).toBeInTheDocument();
+    expect(await screen.findByText("3D Design Stage")).toBeInTheDocument();
     expect(await screen.findByText("No GLB loaded")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Generate Design/i })).toBeInTheDocument();
+    expect(
+      await screen.findByText("Upload APD / PDF / DXF / ZIP to generate a 3D design"),
+    ).toBeInTheDocument();
   });
 });

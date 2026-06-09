@@ -2,53 +2,54 @@
 
 ## Implemented
 
-The frontend lives in `apps/frontend` and is a Vite + React + TypeScript application.
+The frontend is a Vite + React + TypeScript desktop studio under `apps/frontend`.
 
-Structure:
+Current structure:
 
-- `src/api`: typed backend client, TanStack Query hooks, artifact URL helpers.
-- `src/app`: studio shell, top bar, bottom dock.
-- `src/features/agent-console`: command center, generation/edit commands, quick prompts, agent-stage
-  lanes and timeline.
-- `src/features/document-pack`: pack list, document inventory, extracted fields, missing/conflicts.
-- `src/features/three-viewer`: lazy-loaded React Three Fiber GLB viewer with artifact error boundary
-  and tower-oriented initial fit.
-- `src/features/qa-panel`: QA, compact issues, asset imports, versions, diff, rollback, downloads.
-- `src/stores`: Zustand UI state for active workflow, active pack, selected version/object, tabs and
-  viewer toggles.
+- `src/api`: backend client, TanStack Query hooks, artifact URL helpers, artifact JSON loader.
+- `src/app`: product shell, top bar, bottom intelligence dock.
+- `src/features/agent-console`: conversational command center, generation/edit/document commands.
+- `src/features/three-viewer`: lazy React Three Fiber GLB stage, camera focus controls, real preview
+  fallback, metadata-backed scene object rail.
+- `src/features/qa-panel`: Smart Inspector for QA, assets, versions, diff, rollback, downloads.
+- `src/features/document-pack`: Document Intelligence workspace with provenance, fields,
+  missing/conflicts and corrections.
+- `src/components`: small reusable primitives for panels, metrics, commands, warnings, empty states.
+- `src/lib`: presenters for backend issues and events, formatting helpers.
+- `src/stores`: Zustand UI state only.
 
-State split:
+State ownership:
 
-- TanStack Query owns server state: health, designs, workflow status, events, versions, packs, assets.
-- Zustand owns local interaction state: active ids, selected object/version, inspector tab, dock tab,
-  viewer layers.
+- TanStack Query owns server state: health, designs, workflow status, events, versions, packs,
+  assets, JSON artifacts.
+- Zustand owns UI state: active workflow/pack, selected version/object, inspector tab, dock tab,
+  viewer toggles, camera focus.
 
-The frontend does not embed static design results. It calls the FastAPI backend and shows explicit
-offline/empty states when data is not available.
+The frontend does not contain permanent mock designs. It uses existing FastAPI endpoints and
+explicitly shows unavailable/offline/empty states.
 
 ## Available With Fallback
 
-- Workflow events use `EventSource` for `/designs/{workflow_id}/events/stream`; if SSE fails, the
-  UI falls back to polling `/designs/{workflow_id}/events`.
-- The GLB viewer is lazy-loaded so initial app chrome does not block on Three.js.
-- Missing artifacts are linked through backend artifact routes and surface backend `404` instead of
-  guessing local filesystem paths.
-- A missing GLB now renders an explicit viewer error state instead of taking down the canvas.
+- `react-resizable-panels` provides a 4-zone studio layout. In tests, it is mocked as pass-through
+  because jsdom does not provide the required layout primitives.
+- The GLB viewer is lazy-loaded; the heavy Three.js chunk is not part of the first app shell.
+- The stage displays the real `preview.png` artifact when WebGL/headless rendering does not produce
+  a useful canvas screenshot. This is labeled as a preview artifact, not as the interactive GLB.
+- Events are grouped through `eventPresenter`; raw event details remain collapsed.
 
 ## Known Limitations
 
-- The Three.js viewer chunk remains large because `three`, `@react-three/fiber`, and `drei` are
-  loaded together when the viewer activates.
-- Document-pack ingestion is synchronous backend-side, so the frontend shows post-processing trace
-  and events rather than live document-pack SSE.
-- Prompt edit is apply-and-generate. There is no non-committed patch preview endpoint yet.
-- Object metadata selection is based on GLB object names; deeper semantic picking can be added from
-  `scene_metadata.json`.
-- The current command log is browser-session local; durable command history would need backend
-  persistence or workflow events for user-issued commands.
+- `ThreeViewer` chunk remains large because `three`, `@react-three/fiber`, and `drei` are loaded
+  together after lazy activation.
+- Object selection is based on GLB object names and import metadata. Deep semantic picking is not
+  yet linked to every SceneSpec object.
+- Edit preview is still apply/regenerate; there is no backend endpoint for non-committed patch
+  preview.
+- Browser plugin was unavailable due to a crashed tab during this reset, so visual proof used Chrome
+  headless fallback.
 
 ## Future
 
-- Add route-level splitting if the studio grows beyond one app shell.
-- Add a generated OpenAPI TypeScript client once backend schemas stabilize.
-- Add Playwright E2E tests for upload -> generate -> edit -> rollback.
+- Add Playwright E2E for create -> edit -> version -> rollback.
+- Add semantic object metadata mapping if frontend needs richer object inspection.
+- Split Three.js vendor chunks if bundle size becomes a runtime issue.

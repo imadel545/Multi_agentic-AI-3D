@@ -2,64 +2,40 @@
 
 ## Implemented
 
-The frontend client in `apps/frontend/src/api/client.ts` maps these backend endpoints:
-
-- `GET /health`
-- `GET /designs`
-- `POST /designs`
-- `GET /designs/{workflow_id}`
-- `GET /designs/{workflow_id}/events`
-- `GET /designs/{workflow_id}/events/stream`
-- `POST /designs/{workflow_id}/edit`
-- `GET /designs/{workflow_id}/versions`
-- `POST /designs/{workflow_id}/versions/{version_id}/rollback`
-- `GET /designs/{workflow_id}/artifacts/{artifact_name}`
-- `GET /assets/inventory`
-- `GET /document-packs`
-- `POST /document-packs`
-- `GET /document-packs/{pack_id}`
-- `GET /document-packs/{pack_id}/documents`
-- `GET /document-packs/{pack_id}/extractions`
-- `GET /document-packs/{pack_id}/consolidated-spec`
-- `GET /document-packs/{pack_id}/conflicts`
-- `GET /document-packs/{pack_id}/missing-fields`
-- `GET /document-packs/{pack_id}/qa`
-- `GET /document-packs/{pack_id}/processing`
-- `GET /document-packs/{pack_id}/trace`
-- `GET /document-packs/{pack_id}/events`
-- `GET /document-packs/{pack_id}/memory-summary`
-- `POST /document-packs/{pack_id}/corrections`
-- `POST /document-packs/{pack_id}/generate-design`
-
-The artifact endpoint accepts whitelisted artifact names only:
-
-- `glb`
-- `preview`
-- `scene_spec`
-- `metadata`
-- `qa_report`
-- `geometry_validation`
-- `quality_gates`
-- `trace`
-- `download`
-- plus technical reports such as `validation_report`, `glb_inspection`, `scene_patch`, `scene_diff`.
-
-`version_id` is optional. Without it, the backend serves the active workflow artifact.
+| Frontend surface | Backend data |
+| --- | --- |
+| Top bar | `GET /health`, `GET /designs/{workflow_id}` |
+| Workflow selection | `GET /designs` with completed-workflow preference |
+| Agent Command Center | `POST /designs`, `POST /designs/{workflow_id}/edit`, `POST /document-packs`, `POST /document-packs/{pack_id}/generate-design`, workflow events |
+| 3D Design Stage | `/designs/{workflow_id}/artifacts/glb`, `/preview`, `/metadata` |
+| Scene object rail | `scene_metadata.json.asset_imports` plus workflow `asset_imports` fallback |
+| Smart Inspector QA | workflow `quality_gates`, QA summaries, warnings/errors |
+| Smart Inspector assets | `GET /assets/inventory`, workflow `asset_imports` |
+| Versions | `GET /designs/{workflow_id}/versions`, rollback endpoint |
+| Diff | selected version `diff_summary` |
+| Downloads | artifact endpoint whitelist |
+| Document Intelligence Dock | document-pack list, bundle endpoints, correction endpoint |
+| Events Dock | workflow events or document-pack events, grouped by `eventPresenter` |
 
 ## Available With Fallback
 
-- Design timeline uses SSE first, polling second.
-- Frontend upload sends raw ZIP bytes with `x-filename`, matching the current backend contract.
-- Artifact links do not check existence client-side; backend response is the source of truth.
+- `useArtifactJson` reads whitelisted JSON artifacts through the same artifact endpoint used by
+  downloads. Missing JSON returns a visible query error instead of local file guessing.
+- SSE helper still exists for `/events/stream`, while normal polling remains available through
+  TanStack Query.
+- Unknown warnings/events are humanized with a safe fallback but keep raw detail collapsed.
 
 ## Known Limitations
 
-- There is no multipart upload metadata contract yet.
-- There is no document-pack SSE endpoint yet.
-- There is no preview-only edit endpoint.
+- The frontend does not yet use a generated OpenAPI client. Types are manually maintained in
+  `src/api/types.ts`.
+- Some artifact names are conventional strings (`metadata`, `scene_spec`, `geometry_validation`).
+  Backend changes must keep those names stable or update the client.
+- Document-pack generate still depends on backend readiness flags; frontend does not bypass missing
+  fields.
 
 ## Future
 
-- Add OpenAPI schema export and client generation.
-- Add version-scoped artifact metadata endpoint if the UI needs richer file availability before link
-  rendering.
+- Generate TypeScript types from the FastAPI OpenAPI schema.
+- Add explicit backend endpoint for selected object details if SceneSpec/metadata mapping becomes
+  richer than artifact JSON.

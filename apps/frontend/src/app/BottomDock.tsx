@@ -4,8 +4,9 @@ import { useDocumentPack } from "../api/hooks";
 import type { StudioEvent } from "../api/types";
 import { Badge, StatusBadge } from "../components/Badge";
 import { JsonBlock } from "../components/JsonBlock";
-import { stringifyCompact } from "../lib/format";
+import { EmptyState } from "../components/Primitives";
 import { DocumentPackPanel } from "../features/document-pack/DocumentPackPanel";
+import { groupPresentedEvents } from "../lib/eventPresenter";
 import { useStudioStore, type BottomTab } from "../stores/studioStore";
 
 type BottomDockProps = {
@@ -26,7 +27,7 @@ export function BottomDock({ events }: BottomDockProps) {
   const pack = useDocumentPack(activePackId);
 
   return (
-    <footer className="bottom-dock">
+    <footer className="bottom-dock intelligence-dock">
       <div className="dock-tabs">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -47,7 +48,14 @@ export function BottomDock({ events }: BottomDockProps) {
       {bottomTab === "provenance" ? (
         <section className="dock-panel">
           <h2>Provenance and consolidated specification</h2>
-          <JsonBlock value={pack.data?.spec} empty="No ProjectDesignSpec loaded." />
+          {pack.data?.spec ? (
+            <JsonBlock value={pack.data.spec} />
+          ) : (
+            <EmptyState
+              title="No ProjectDesignSpec loaded"
+              description="Select a document pack to inspect extracted fields, source pages and corrections."
+            />
+          )}
         </section>
       ) : null}
       {bottomTab === "events" ? (
@@ -73,23 +81,47 @@ export function BottomDock({ events }: BottomDockProps) {
 }
 
 function EventDock({ events }: { events: StudioEvent[] }) {
-  if (!events.length) return <div className="empty-state">No events loaded.</div>;
+  if (!events.length) {
+    return (
+      <EmptyState
+        title="No agent event loaded"
+        description="Start a generation or select a workflow to see the agentic timeline."
+      />
+    );
+  }
+  const groups = groupPresentedEvents(events);
   return (
-    <div className="event-table">
-      {events
-        .slice()
-        .reverse()
-        .slice(0, 18)
-        .map((event, index) => (
-          <article key={`${event.event_id ?? event.event_type}-${index}`}>
-            <div>
-              <strong>{event.event_type}</strong>
-              <p>{event.created_at ?? event.timestamp ?? "time pending"}</p>
-            </div>
-            <p>{event.payload ? stringifyCompact(event.payload).slice(0, 140) : "no payload"}</p>
-            <StatusBadge status={event.event_type.includes("failed") ? "failed" : "completed"} />
-          </article>
-        ))}
+    <div className="event-phase-board">
+      {groups.map(([phase, items]) => (
+        <section className="event-phase" key={phase}>
+          <header>
+            <strong>{phase}</strong>
+            <Badge tone="idle">{items.length}</Badge>
+          </header>
+          {items
+            .slice()
+            .reverse()
+            .slice(0, 5)
+            .map((event, index) => (
+              <article className={`narrative-event event-${event.status}`} key={`${event.title}-${index}`}>
+                <div>
+                  <strong>{event.title}</strong>
+                  <p>{event.summary}</p>
+                  <span>
+                    {event.actor} · {event.time}
+                  </span>
+                </div>
+                <StatusBadge status={event.status} />
+                {event.detail ? (
+                  <details>
+                    <summary>Détail</summary>
+                    <code>{event.detail}</code>
+                  </details>
+                ) : null}
+              </article>
+            ))}
+        </section>
+      ))}
     </div>
   );
 }

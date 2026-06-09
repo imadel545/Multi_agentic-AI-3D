@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 
 import {
   useDesign,
@@ -8,7 +9,6 @@ import {
   useStudioMutations,
 } from "../api/hooks";
 import { AgentConsole } from "../features/agent-console/AgentConsole";
-import { Timeline } from "../features/agent-console/Timeline";
 import { InspectorPanel } from "../features/qa-panel/InspectorPanel";
 import { useStudioStore } from "../stores/studioStore";
 import { BottomDock } from "./BottomDock";
@@ -47,17 +47,33 @@ export function StudioShell() {
           generation, uploads and artifacts require FastAPI.
         </div>
       ) : null}
-      <div className="studio-grid">
-        <div className="left-rail">
-          <AgentConsole workflow={workflow.data} events={events.data} />
-          <Timeline workflowId={activeWorkflowId} events={events.data} />
-        </div>
-        <Suspense fallback={<div className="viewer-shell viewer-empty">Loading 3D viewer...</div>}>
-          <ThreeViewer workflow={workflow.data} />
-        </Suspense>
-        <InspectorPanel workflow={workflow.data} />
-      </div>
-      <BottomDock events={events.data} />
+      <main className="studio-product-shell">
+        <Group orientation="vertical">
+          <Panel defaultSize="73%" minSize="520px">
+            <Group orientation="horizontal" className="studio-workspace">
+              <Panel defaultSize="26%" minSize="320px" maxSize="440px">
+                <AgentConsole workflow={workflow.data} events={events.data} />
+              </Panel>
+              <Separator className="resize-handle resize-handle-vertical" />
+              <Panel defaultSize="50%" minSize="560px">
+                <Suspense
+                  fallback={<div className="viewer-shell viewer-empty">Loading 3D viewer...</div>}
+                >
+                  <ThreeViewer workflow={workflow.data} />
+                </Suspense>
+              </Panel>
+              <Separator className="resize-handle resize-handle-vertical" />
+              <Panel defaultSize="24%" minSize="320px" maxSize="440px">
+                <InspectorPanel workflow={workflow.data} />
+              </Panel>
+            </Group>
+          </Panel>
+          <Separator className="resize-handle resize-handle-horizontal" />
+          <Panel defaultSize="27%" minSize="150px" maxSize="360px">
+            <BottomDock events={events.data} />
+          </Panel>
+        </Group>
+      </main>
     </div>
   );
 }

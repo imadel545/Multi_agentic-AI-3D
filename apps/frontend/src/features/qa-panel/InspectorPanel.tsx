@@ -1,10 +1,20 @@
-import { Boxes, ClipboardCheck, GitCompare, History, PackageOpen } from "lucide-react";
+import {
+  Boxes,
+  ClipboardCheck,
+  Download,
+  GitCompare,
+  History,
+  Info,
+  PackageOpen,
+} from "lucide-react";
 
 import { artifactUrl, useAssetInventory, useStudioMutations, useVersions } from "../../api/hooks";
-import type { WorkflowStatus } from "../../api/types";
+import type { AssetImportRecord, WorkflowStatus } from "../../api/types";
 import { Badge, StatusBadge } from "../../components/Badge";
 import { JsonBlock } from "../../components/JsonBlock";
+import { EmptyState, MetricCard, PanelShell, WarningCard } from "../../components/Primitives";
 import { asPercent, shortId, stringifyCompact } from "../../lib/format";
+import { presentIssues } from "../../lib/issuePresenter";
 import { type InspectorTab, useStudioStore } from "../../stores/studioStore";
 
 type InspectorPanelProps = {
@@ -22,9 +32,15 @@ const tabs: Array<{ id: InspectorTab; label: string; icon: typeof ClipboardCheck
 export function InspectorPanel({ workflow }: InspectorPanelProps) {
   const activeTab = useStudioStore((state) => state.inspectorTab);
   const setTab = useStudioStore((state) => state.setInspectorTab);
+  const selectedObject = useStudioStore((state) => state.selectedObject);
 
   return (
-    <aside className="inspector-panel">
+    <PanelShell
+      className="inspector-panel"
+      title="Smart Inspector"
+      eyebrow={selectedObject ? `Selected · ${selectedObject}` : "workflow context"}
+      icon={<Info size={18} />}
+    >
       <div className="inspector-tabs">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -42,80 +58,90 @@ export function InspectorPanel({ workflow }: InspectorPanelProps) {
         })}
       </div>
       {activeTab === "qa" ? <QAPanel workflow={workflow} /> : null}
-      {activeTab === "assets" ? <AssetPanel workflow={workflow} /> : null}
+      {activeTab === "assets" ? <AssetPanel workflow={workflow} selectedObject={selectedObject} /> : null}
       {activeTab === "versions" ? <VersionsPanel workflow={workflow} /> : null}
       {activeTab === "diff" ? <DiffPanel workflow={workflow} /> : null}
       {activeTab === "downloads" ? <DownloadPanel workflow={workflow} /> : null}
-    </aside>
+    </PanelShell>
   );
 }
 
 function QAPanel({ workflow }: InspectorPanelProps) {
   const gates = workflow?.quality_gates ?? [];
-  const issues = compactIssues([...(workflow?.errors ?? []), ...(workflow?.warnings ?? [])]);
+  const issues = presentIssues([...(workflow?.errors ?? []), ...(workflow?.warnings ?? [])]);
+  const blockingCount = issues.filter((issue) => issue.severity === "error").length;
+  const warningCount = issues.filter((issue) => issue.severity !== "error").length;
+  const geometryStatus = stringifyCompact(workflow?.geometry_validation_summary?.status ?? "unknown");
   return (
     <div className="inspector-content">
-      <div className="metric-strip">
-        <div>
-          <span>QA score</span>
-          <strong>{asPercent(workflow?.qa_score)}</strong>
-        </div>
-        <div>
-          <span>Structural</span>
-          <StatusBadge status={workflow?.structural_qa_passed ? "passed" : "unknown"} />
-        </div>
-        <div>
-          <span>Preview</span>
-          <StatusBadge
-            status={
-              workflow?.preview_inspection_summary?.preview_qa_passed === true
-                ? "passed"
-                : "unknown"
-            }
+      <div className="metric-strip product-metrics">
+        <MetricCard label="QA score" value={asPercent(workflow?.qa_score)} tone={blockingCount ? "bad" : "good"} />
+        <MetricCard
+          label="Blocking"
+          value={blockingCount}
+          detail="errors"
+          tone={blockingCount ? "bad" : "good"}
+        />
+        <MetricCard
+          label="Warnings"
+          value={warningCount}
+          detail="visible"
+          tone={warningCount ? "warn" : "good"}
+        />
+      </div>
+
+      <section className="qa-check-summary">
+        <h3>Verified by backend</h3>
+        <div className="check-grid">
+          <CheckItem label="SceneSpec" passed={gatePassed(gates, "scene")} />
+          <CheckItem label="Structural QA" passed={workflow?.structural_qa_passed === true} />
+          <CheckItem label="Geometry" passed={geometryStatus === "passed"} />
+          <CheckItem
+            label="Preview"
+            passed={workflow?.preview_inspection_summary?.preview_qa_passed === true}
+          />
+          <CheckItem
+            label="Asset imports"
+            passed={Number(workflow?.asset_import_summary?.missing_file_count ?? 0) === 0}
           />
         </div>
-      </div>
-      <h3>Quality gates</h3>
-      {gates.length ? (
-        gates.map((gate, index) => (
-          <article className="qa-row" key={`${stringifyCompact(gate.name)}-${index}`}>
-            <div>
-              <strong>{stringifyCompact(gate.name ?? gate.gate_name ?? `gate_${index}`)}</strong>
-              <p>{stringifyCompact(gate.reason ?? gate.message ?? gate.status)}</p>
-            </div>
-            <StatusBadge status={gate.passed === true ? "passed" : "failed"} />
-          </article>
-        ))
-      ) : (
-        <div className="empty-state">No quality gates yet.</div>
-      )}
-      <h3>Warnings / errors</h3>
-      {issues.length ? (
-        <div className="issue-list">
-          {issues.slice(0, 10).map((item, index) => (
-            <article
-              className={item.severity === "error" ? "issue-row error" : "issue-row"}
-              key={`${item.code}-${index}`}
-              title={item.message}
-            >
-              <header>
-                <strong className="issue-title">{item.code}</strong>
-                <Badge tone={item.severity === "error" ? "bad" : "warn"}>
-                  {item.count > 1 ? `${item.severity} x${item.count}` : item.severity}
-                </Badge>
-              </header>
-              <p>{item.message}</p>
+      </section>
+
+      <section className="quality-gate-list">
+        <h3>Quality gates</h3>
+        {gates.length ? (
+          gates.map((gate, index) => (
+            <article className="qa-row" key={`${stringifyCompact(gate.name)}-${index}`}>
+              <div>
+                <strong>{humanGateName(gate.name ?? gate.gate_name ?? `gate_${index}`)}</strong>
+                <p>{stringifyCompact(gate.reason ?? gate.message ?? gate.status ?? "Validated")}</p>
+              </div>
+              <StatusBadge status={gate.passed === true ? "passed" : "failed"} />
             </article>
-          ))}
-          {issues.length > 10 ? (
-            <p className="hint">{issues.length - 10} more issues available in QA summaries JSON.</p>
-          ) : null}
-        </div>
-      ) : (
-        <div className="empty-state">No warnings or errors exposed.</div>
-      )}
+          ))
+        ) : (
+          <EmptyState
+            title="No gates yet"
+            description="Generate a design to see blocking quality gates and validation status."
+          />
+        )}
+      </section>
+
+      <section className="issue-section">
+        <h3>Warnings and errors</h3>
+        {issues.length ? (
+          <div className="issue-list">
+            {issues.slice(0, 8).map((issue, index) => (
+              <WarningCard issue={issue} key={`${issue.code}-${index}`} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No visible issue" description="No warnings or errors were exposed by the backend." />
+        )}
+      </section>
+
       <details className="technical-details">
-        <summary>QA summaries JSON</summary>
+        <summary>QA reports JSON</summary>
         <JsonBlock
           value={{
             glb: workflow?.glb_inspection_summary,
@@ -130,86 +156,81 @@ function QAPanel({ workflow }: InspectorPanelProps) {
   );
 }
 
-function compactIssues(items: Array<Record<string, unknown>>) {
-  const byKey = new Map<
-    string,
-    { code: string; message: string; severity: "warning" | "error"; count: number }
-  >();
-  for (const item of items) {
-    const code = stringifyCompact(item.code ?? item.severity ?? "issue");
-    const message = stringifyCompact(item.message ?? item);
-    const severity = item.severity === "error" ? "error" : "warning";
-    const key = `${severity}:${code}:${message}`;
-    const current = byKey.get(key);
-    if (current) {
-      current.count += 1;
-      continue;
-    }
-    byKey.set(key, { code, message, severity, count: 1 });
-  }
-  return Array.from(byKey.values()).sort((left, right) => {
-    if (left.severity !== right.severity) return left.severity === "error" ? -1 : 1;
-    return right.count - left.count;
-  });
-}
-
-function AssetPanel({ workflow }: InspectorPanelProps) {
+function AssetPanel({
+  workflow,
+  selectedObject,
+}: InspectorPanelProps & {
+  selectedObject?: string;
+}) {
   const inventory = useAssetInventory();
   const imports = workflow?.asset_imports ?? [];
+  const selectedImport = imports.find(
+    (record) => record.object_name === selectedObject || record.asset_id === selectedObject,
+  );
   return (
     <div className="inspector-content">
-      <div className="metric-strip">
-        <div>
-          <span>Inventory</span>
-          <StatusBadge status={inventory.data?.status ?? "loading"} />
-        </div>
-        <div>
-          <span>Real GLB</span>
-          <strong>{inventory.data?.real_glb_asset_count ?? "n/a"}</strong>
-        </div>
-        <div>
-          <span>Missing</span>
-          <strong>{inventory.data?.missing_file_count ?? "n/a"}</strong>
-        </div>
+      <div className="metric-strip product-metrics">
+        <MetricCard label="Real GLB" value={inventory.data?.real_glb_asset_count ?? "n/a"} tone="good" />
+        <MetricCard label="Missing" value={inventory.data?.missing_file_count ?? "n/a"} tone="warn" />
+        <MetricCard
+          label="Fallback"
+          value={inventory.data?.procedural_fallback_count ?? "n/a"}
+          tone={inventory.data?.procedural_fallback_count ? "warn" : "good"}
+        />
       </div>
-      <h3>Current scene imports</h3>
-      {imports.length ? (
-        imports.map((record, index) => (
-          <article className="asset-row" key={`${record.asset_id}-${index}`}>
-            <div>
-              <strong>{record.asset_id ?? "unknown_asset"}</strong>
-              <p>{record.object_role ?? "scene object"}</p>
-            </div>
-            <div className="row-badges">
-              <StatusBadge status={record.import_mode} />
-              {record.warnings?.map((warning) => (
-                <Badge key={warning} tone="warn">
-                  {warning}
-                </Badge>
-              ))}
-            </div>
-          </article>
-        ))
-      ) : (
-        <div className="empty-state">No scene asset import metadata yet.</div>
-      )}
-      <h3>Registry</h3>
-      <div className="inventory-list">
-        {inventory.data?.entries.map((entry) => (
-          <article className="asset-row" key={entry.asset_id}>
-            <div>
-              <strong>{entry.asset_id}</strong>
-              <p>
-                {entry.type} · {entry.source} · {entry.license ?? "license n/a"}
-              </p>
-            </div>
-            <div className="row-badges">
-              <StatusBadge status={entry.asset_import_mode} />
-              {entry.attribution_required ? <Badge tone="warn">attribution</Badge> : null}
-            </div>
-          </article>
-        ))}
-      </div>
+
+      <section>
+        <h3>Selected object</h3>
+        {selectedImport ? (
+          <AssetRecord record={selectedImport} />
+        ) : (
+          <EmptyState
+            title="No object selected"
+            description="Click an imported object in the viewer rail to inspect import mode and license."
+          />
+        )}
+      </section>
+
+      <section>
+        <h3>Current scene imports</h3>
+        {imports.length ? (
+          <div className="asset-card-list">
+            {imports.map((record, index) => (
+              <AssetRecord record={record} key={`${record.asset_id}-${record.object_name}-${index}`} />
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No import metadata"
+            description="The selected workflow has not exposed asset import metadata yet."
+          />
+        )}
+      </section>
+
+      <section>
+        <h3>Inventory readiness</h3>
+        <div className="inventory-list">
+          {inventory.data?.entries.slice(0, 18).map((entry) => (
+            <article className="asset-row" key={entry.asset_id}>
+              <div>
+                <strong>{entry.asset_id}</strong>
+                <p>
+                  {entry.type} · {entry.source} · {entry.license ?? "license n/a"}
+                </p>
+              </div>
+              <div className="row-badges">
+                <StatusBadge status={entry.asset_import_mode} />
+                {entry.attribution_required ? <Badge tone="warn">attribution</Badge> : null}
+              </div>
+            </article>
+          )) ?? (
+            <EmptyState
+              title="Inventory unavailable"
+              description="The asset inventory endpoint has not returned data yet."
+            />
+          )}
+        </div>
+      </section>
     </div>
   );
 }
@@ -224,30 +245,42 @@ function VersionsPanel({ workflow }: InspectorPanelProps) {
     <div className="inspector-content">
       <h3>Version history</h3>
       {versions.data?.length ? (
-        versions.data.map((version) => (
-          <article
-            className={selectedVersionId === version.version_id ? "version-row active" : "version-row"}
-            key={version.version_id}
-          >
-            <button type="button" onClick={() => setSelectedVersionId(version.version_id)}>
-              <strong>{version.version_id}</strong>
-              <span>{version.edit_description ?? "initial"}</span>
-            </button>
-            <div className="row-badges">
-              <StatusBadge status={version.status ?? undefined} />
-              <Badge tone={version.active ? "good" : "idle"}>{version.active ? "active" : "stored"}</Badge>
-              <button
-                type="button"
-                disabled={version.active || mutations.rollback.isPending}
-                onClick={() => mutations.rollback.mutate({ versionId: version.version_id })}
-              >
-                rollback
+        <div className="version-list">
+          {versions.data.map((version) => (
+            <article
+              className={selectedVersionId === version.version_id || version.active ? "version-row active" : "version-row"}
+              key={version.version_id}
+            >
+              <button type="button" onClick={() => setSelectedVersionId(version.version_id)}>
+                <strong>{version.version_id}</strong>
+                <span>{version.edit_description ?? "Initial design"}</span>
+                <small>
+                  QA {asPercent(version.qa_score)} · {version.generation_mode ?? "mode n/a"}
+                </small>
               </button>
-            </div>
-          </article>
-        ))
+              <div className="row-badges">
+                <StatusBadge status={version.status ?? undefined} />
+                <Badge tone={version.active ? "good" : "idle"}>{version.active ? "active" : "stored"}</Badge>
+                <button
+                  type="button"
+                  disabled={version.active || mutations.rollback.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Rollback to version ${version.version_id}?`)) {
+                      mutations.rollback.mutate({ versionId: version.version_id });
+                    }
+                  }}
+                >
+                  rollback
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
       ) : (
-        <div className="empty-state">No versions loaded.</div>
+        <EmptyState
+          title="No versions loaded"
+          description="Generate a design or apply a validated edit to create version history."
+        />
       )}
     </div>
   );
@@ -257,10 +290,19 @@ function DiffPanel({ workflow }: InspectorPanelProps) {
   const versions = useVersions(workflow?.workflow_id);
   const selectedVersionId = useStudioStore((state) => state.selectedVersionId);
   const selected = versions.data?.find((version) => version.version_id === selectedVersionId);
+  const active = versions.data?.find((version) => version.active);
+  const diff = selected?.diff_summary ?? active?.diff_summary;
   return (
     <div className="inspector-content">
       <h3>Before / after diff</h3>
-      <JsonBlock value={selected?.diff_summary ?? versions.data?.find((v) => v.active)?.diff_summary} />
+      {diff ? (
+        <JsonBlock value={diff} />
+      ) : (
+        <EmptyState
+          title="No diff for active version"
+          description="Apply a validated prompt edit to compare the new SceneSpec against its parent."
+        />
+      )}
     </div>
   );
 }
@@ -290,6 +332,7 @@ function DownloadPanel({ workflow }: InspectorPanelProps) {
             rel="noreferrer"
             aria-disabled={!workflow?.workflow_id}
           >
+            <Download size={14} />
             {name}
           </a>
         ))}
@@ -300,4 +343,50 @@ function DownloadPanel({ workflow }: InspectorPanelProps) {
       <p className="hint">Active workflow: {shortId(workflow?.workflow_id)}</p>
     </div>
   );
+}
+
+function CheckItem({ label, passed }: { label: string; passed: boolean }) {
+  return (
+    <article className={passed ? "check-item passed" : "check-item warning"}>
+      <span>{label}</span>
+      <StatusBadge status={passed ? "passed" : "check"} />
+    </article>
+  );
+}
+
+function AssetRecord({ record }: { record: AssetImportRecord }) {
+  return (
+    <article className="asset-row asset-record">
+      <div>
+        <strong>{record.asset_id ?? "unknown_asset"}</strong>
+        <p>{stringifyCompact(record.object_name ?? record.object_role ?? "scene object")}</p>
+        {record.asset_metadata && typeof record.asset_metadata === "object" ? (
+          <small>{stringifyCompact((record.asset_metadata as Record<string, unknown>).license)}</small>
+        ) : null}
+      </div>
+      <div className="row-badges">
+        <StatusBadge status={record.import_mode} />
+        {record.asset_file_exists === false ? <Badge tone="bad">missing file</Badge> : null}
+        {record.warnings?.map((warning) => (
+          <Badge key={warning} tone="warn">
+            {warning.replaceAll("_", " ").toLowerCase()}
+          </Badge>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function gatePassed(gates: Array<Record<string, unknown>>, needle: string) {
+  return gates.some((gate) => {
+    const name = stringifyCompact(gate.name ?? gate.gate_name).toLowerCase();
+    return name.includes(needle) && gate.passed === true;
+  });
+}
+
+function humanGateName(value: unknown) {
+  return stringifyCompact(value)
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

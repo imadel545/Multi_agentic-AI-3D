@@ -10,6 +10,12 @@ export const queryKeys = {
   events: (workflowId?: string) => ["events", workflowId],
   versions: (workflowId?: string) => ["versions", workflowId],
   inventory: ["assets", "inventory"],
+  artifactJson: (workflowId?: string, artifactName?: string, versionId?: string | null) => [
+    "artifact-json",
+    workflowId,
+    artifactName,
+    versionId,
+  ],
   packs: ["document-packs"],
   pack: (packId?: string) => ["document-pack", packId],
   capabilities: ["document-packs", "capabilities"],
@@ -59,6 +65,26 @@ export function useVersions(workflowId?: string) {
 
 export function useAssetInventory() {
   return useQuery({ queryKey: queryKeys.inventory, queryFn: studioApi.assetInventory });
+}
+
+export function useArtifactJson<T = Record<string, unknown>>(
+  workflowId: string | undefined,
+  artifactName: string,
+  versionId?: string | null,
+) {
+  return useQuery({
+    queryKey: queryKeys.artifactJson(workflowId, artifactName, versionId),
+    queryFn: async () => {
+      const url = artifactUrl(workflowId, artifactName, versionId);
+      if (!url) throw new Error("Artifact URL unavailable");
+      const response = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`${artifactName} artifact unavailable`);
+      return (await response.json()) as T;
+    },
+    enabled: Boolean(workflowId),
+    retry: false,
+    staleTime: 15000,
+  });
 }
 
 export function useDocumentPacks() {

@@ -2,34 +2,34 @@
 
 ## Implemented
 
-The first viewer is implemented in `apps/frontend/src/features/three-viewer/ThreeViewer.tsx`.
-
-Capabilities:
-
-- Loads generated `design.glb` through `GET /designs/{workflow_id}/artifacts/glb`.
-- Supports version-scoped GLB loading with `version_id`.
-- Uses React Three Fiber, Drei `Bounds`, `OrbitControls`, `Grid`, and environment lighting.
-- Provides layer toggles for beams, cables, labels, bounding boxes and sectors using GLB object
-  names.
-- Supports object click selection and exposes selected object name in the UI.
-- Does not show a fake scene when no GLB artifact exists.
+- The viewer is lazy-loaded through React Suspense so Three.js does not block initial app chrome.
+- GLB loading uses `@react-three/drei` `useGLTF` against the backend artifact URL.
+- The canvas uses camera focus presets: fit, tower, sectors, GPS/cabinet and reset.
+- Viewer toggles control beams, cables, labels, sectors and bounding boxes by object-name matching.
+- Scene object rail is metadata-backed through `scene_metadata.json.asset_imports`.
+- Asset import modes are visible through the stage banner and Smart Inspector.
+- The stage displays `preview.png` as a real Blender preview artifact fallback when WebGL capture is
+  visually blank or while GLB rendering is not useful.
 
 ## Available With Fallback
 
-- If no workflow/artifact is available, the viewer displays an explicit empty state.
-- If an artifact route returns `404`, the browser/network error is visible rather than replaced by a
-  fake model.
+- Missing GLB URL shows a clear no-GLB state.
+- GLB load errors are caught by a React error boundary.
+- Headless Chrome/WebGL can produce `SharedImage`/`ReadPixels` warnings and blank canvas captures;
+  the preview artifact remains visible and explicitly labeled.
 
 ## Known Limitations
 
-- Layer toggles rely on object naming conventions. This is workable with current Blender metadata,
-  but a richer object-role index from `scene_metadata.json` would be stronger.
-- The viewer chunk is lazy-loaded but still large due to Three.js/Drei.
-- No semantic bounding-box overlay is rendered yet.
+- The current preview artifact itself can be poorly framed by Blender. The UI zooms it for
+  inspection, but this does not solve Blender camera composition.
+- Object toggles rely on naming conventions. They do not yet use a formal object-role map for every
+  mesh.
+- The tower/sector/accessory camera presets are pragmatic defaults, not semantic bounding-box
+  fitting per object class.
+- The ThreeViewer chunk is large because R3F, drei and Three load together.
 
 ## Future
 
-- Load `scene_metadata.json`, `geometry_validation.json`, and `asset_import_summary` into a semantic
-  object index.
-- Add sector highlighting, azimuth arrows, HBA/tilt labels and measured overlays.
-- Add side-by-side version comparison.
+- Add semantic bounding boxes from `scene_metadata.json`.
+- Add per-object focus and inspector metadata once the backend exports stable object IDs.
+- Improve Blender preview camera and scene composition so fallback preview is inherently strong.

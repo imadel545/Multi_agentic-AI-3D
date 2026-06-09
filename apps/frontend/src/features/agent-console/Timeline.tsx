@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { openEventStream } from "../../api/hooks";
 import type { StudioEvent } from "../../api/types";
 import { Badge } from "../../components/Badge";
-import { stringifyCompact } from "../../lib/format";
+import { groupPresentedEvents } from "../../lib/eventPresenter";
 
 type TimelineProps = {
   workflowId?: string;
@@ -27,6 +27,7 @@ export function Timeline({ workflowId, events = [] }: TimelineProps) {
   }, [workflowId]);
 
   const merged = streamMode === "sse" && streamEvents.length ? streamEvents : events;
+  const groups = groupPresentedEvents(merged);
 
   return (
     <section className="timeline-panel">
@@ -36,22 +37,27 @@ export function Timeline({ workflowId, events = [] }: TimelineProps) {
         <Badge tone={streamMode === "sse" ? "good" : "warn"}>{streamMode}</Badge>
       </div>
       <div className="timeline-list">
-        {merged.length ? (
-          merged
-            .slice()
-            .reverse()
-            .map((event, index) => (
-              <article className="timeline-event" key={`${event.event_id ?? index}-${index}`}>
-                <div className="event-dot" />
-                <div>
-                  <strong>{event.event_type}</strong>
-                  <p>{event.created_at ?? event.timestamp ?? "time pending"}</p>
-                  {event.payload ? (
-                    <span>{stringifyCompact(event.payload).slice(0, 180)}</span>
-                  ) : null}
-                </div>
-              </article>
-            ))
+        {groups.length ? (
+          groups.map(([phase, phaseEvents]) => (
+            <section className="timeline-phase" key={phase}>
+              <h3>{phase}</h3>
+              {phaseEvents
+                .slice()
+                .reverse()
+                .map((event, index) => (
+                  <article className="timeline-event" key={`${event.title}-${index}`}>
+                    <div className={`event-dot event-${event.status}`} />
+                    <div>
+                      <strong>{event.title}</strong>
+                      <p>{event.summary}</p>
+                      <span>
+                        {event.actor} · {event.time}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+            </section>
+          ))
         ) : (
           <div className="empty-state">No workflow events yet</div>
         )}

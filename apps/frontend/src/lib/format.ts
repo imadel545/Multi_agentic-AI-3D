@@ -10,14 +10,20 @@ export function shortId(value: string | null | undefined): string {
 
 export function statusTone(status: string | null | undefined): "good" | "warn" | "bad" | "idle" {
   if (!status) return "idle";
-  if (["completed", "passed", "ok", "ready_for_import", "imported_glb"].includes(status)) {
+  if (["completed", "passed", "ok", "ready_for_import", "imported_glb", "good"].includes(status)) {
     return "good";
   }
   if (["failed", "error", "missing_file", "blocked"].includes(status)) return "bad";
   if (
-    ["warning", "partial_import_ready", "procedural_fallback", "fallback", "pending"].includes(
-      status,
-    )
+    [
+      "warning",
+      "partial_import_ready",
+      "procedural_fallback",
+      "fallback",
+      "pending",
+      "running",
+      "check",
+    ].includes(status)
   ) {
     return "warn";
   }

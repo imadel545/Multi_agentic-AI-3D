@@ -19,9 +19,10 @@ This repository currently implements the local-first controlled generation pipel
 - FastAPI endpoints for design creation, status, validation, assets, and artifact download.
 - Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
   rollback, and event logging.
-- React/Vite Agentic 3D Studio frontend under `apps/frontend` with document-pack upload, Agent
-  Command Center, event-derived agent stages, GLB viewer, compact QA/assets/versions/diff/download
-  panels, and real backend artifact links.
+- React/Vite Agentic 3D Studio frontend under `apps/frontend` with a 4-zone studio layout:
+  conversational Agent Command Center, central GLB/preview Design Stage, Smart Inspector for
+  QA/assets/versions/diff/downloads, Intelligence Dock for documents/provenance/events/memory, and
+  real backend artifact links.
 - Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
 - Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
 - Geometry validation for expected antennas, beams, RRUs, cables, GPS, power cabinet, azimuths,
@@ -102,6 +103,17 @@ npm run typecheck
 npm run test
 npm run build
 ```
+
+Visual frontend smoke:
+
+```bash
+cd apps/frontend
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open `http://127.0.0.1:5173` after the backend is running. The central stage uses the real GLB
+artifact when WebGL is available and also shows the real Blender `preview.png` artifact as an
+explicit fallback/reference when a browser capture cannot render WebGL.
 
 Focused eval suites:
 
