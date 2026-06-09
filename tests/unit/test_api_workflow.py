@@ -318,6 +318,39 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
 
 
+def test_design_artifact_endpoint_serves_active_and_version_files(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles et faisceaux."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+        status = client.get(f"/designs/{workflow_id}").json()
+        version_id = status["active_version_id"]
+
+        scene_response = client.get(f"/designs/{workflow_id}/artifacts/scene_spec")
+        version_scene_response = client.get(
+            f"/designs/{workflow_id}/artifacts/scene_spec?version_id={version_id}"
+        )
+        traversal_response = client.get(f"/designs/{workflow_id}/artifacts/../../pyproject")
+
+        assert scene_response.status_code == 200
+        assert scene_response.json()["network_type"] == "5G"
+        assert version_scene_response.status_code == 200
+        assert version_scene_response.json()["network_type"] == "5G"
+        assert traversal_response.status_code == 404
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
 def test_global_exception_handler_returns_json_500(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     original_get_status = workflow_service.get_status

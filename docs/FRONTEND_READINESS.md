@@ -11,6 +11,8 @@ The backend exposes the data needed for an advanced local-first frontend:
 - `GET /designs/{workflow_id}/events` returns the append-only workflow timeline.
 - `GET /designs/{workflow_id}/events/stream` streams events with clean `404` behavior for unknown
   workflows and a bounded idle timeout.
+- `GET /designs/{workflow_id}/artifacts/{artifact_name}` serves whitelisted GLB, preview, reports,
+  metadata, patch/diff, trace and archive artifacts for the active workflow or a `version_id`.
 - `POST /designs/{workflow_id}/edit` applies a prompt as a validated patch, generates a new
   version, reruns QA, and activates the version only when it passes.
 - `GET /designs/{workflow_id}/versions` exposes version history, active flag, artifacts, QA score,
@@ -87,6 +89,9 @@ entries must expose attribution.
 - GPS and power-cabinet accessories are imported as GLB placements when explicitly requested and
   their files exist. Mounting bracket and cable-tray manifests are inventory-ready but not yet
   automatically placed as standalone requested accessories.
+- The first React/Vite frontend is implemented under `apps/frontend` with agent console, document
+  pack panel, timeline, GLB viewer, QA/assets/versions/diff/download inspector and backend artifact
+  links.
 - Preview inspection is structural/image-stat based, not semantic design judging.
 - The API is synchronous for edit application. A separate preview-only edit workflow can be added
   later if the UI needs apply/reject before generation.
@@ -95,7 +100,7 @@ entries must expose attribution.
 
 ## Future
 
-- Add frontend viewer routes that serve artifacts by version without exposing raw filesystem paths.
+- Expand the frontend correction UI and semantic object metadata inspector.
 - Add patch preview/apply endpoints if the UX needs non-committed edit previews.
 - Add vendor-grade asset replacement, exact pivot/mount-point validation, and stricter
   imported-GLB dimension QA.

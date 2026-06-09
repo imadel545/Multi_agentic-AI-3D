@@ -163,6 +163,19 @@ def download_design(workflow_id: str) -> FileResponse:
     return FileResponse(path=path, filename=f"{workflow_id}_artifacts.zip")
 
 
+@app.get("/designs/{workflow_id}/artifacts/{artifact_name}")
+def get_design_artifact(
+    workflow_id: str,
+    artifact_name: str,
+    version_id: str | None = None,
+) -> FileResponse:
+    try:
+        path = workflow_service.artifact_path(workflow_id, artifact_name, version_id=version_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="artifact not found") from exc
+    return FileResponse(path=path, filename=path.name)
+
+
 @app.post("/scene-spec/validate", response_model=ValidationReport)
 def validate_scene_spec_endpoint(scene: SceneSpec) -> ValidationReport:
     return workflow_service.validate_scene(scene)

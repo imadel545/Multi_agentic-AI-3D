@@ -19,6 +19,9 @@ This repository currently implements the local-first controlled generation pipel
 - FastAPI endpoints for design creation, status, validation, assets, and artifact download.
 - Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
   rollback, and event logging.
+- React/Vite Agentic 3D Studio frontend under `apps/frontend` with document-pack upload, agent
+  console, event timeline, GLB viewer, QA/assets/versions/diff/download panels, and real backend
+  artifact links.
 - Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
 - Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
 - Geometry validation for expected antennas, beams, RRUs, cables, GPS, power cabinet, azimuths,
@@ -32,6 +35,8 @@ This repository currently implements the local-first controlled generation pipel
 
 ## Run locally
 
+Backend:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -40,6 +45,17 @@ uvicorn apps.api.telecom_studio_api.main:app --reload
 ```
 
 Open API docs at `http://127.0.0.1:8000/docs`.
+
+Frontend:
+
+```bash
+cd apps/frontend
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`. Set `VITE_API_BASE_URL` if the FastAPI backend is not running on
+`http://127.0.0.1:8000`.
 
 Optional Qdrant Docker service:
 
@@ -78,6 +94,15 @@ OCR/CAD/conversion succeeded when a tool is missing.
 pytest
 ```
 
+Frontend checks:
+
+```bash
+cd apps/frontend
+npm run typecheck
+npm run test
+npm run build
+```
+
 Focused eval suites:
 
 ```bash
@@ -95,6 +120,8 @@ Implemented:
   tolerate a transient `404`.
 - `GET /designs/{workflow_id}/events`: agentic event log.
 - `GET /designs/{workflow_id}/events/stream`: SSE event stream; unknown workflows return `404`.
+- `GET /designs/{workflow_id}/artifacts/{artifact_name}`: whitelisted GLB, preview, reports,
+  metadata, patch/diff, trace and archive artifact serving for active or versioned artifacts.
 - `POST /designs/{workflow_id}/edit`: create a structured patch from a prompt, validate it,
   generate a new version, rerun QA, and activate it only if the revision passes.
 - `GET /designs/{workflow_id}/versions`: version history with active flag, artifacts, QA score,

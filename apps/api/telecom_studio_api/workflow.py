@@ -284,6 +284,41 @@ class WorkflowService:
             raise KeyError(workflow_id)
         return path
 
+    def artifact_path(
+        self,
+        workflow_id: str,
+        artifact_name: str,
+        version_id: str | None = None,
+    ) -> Path:
+        self._sync_output_services()
+        if artifact_name not in _ALLOWED_ARTIFACT_FILES:
+            raise KeyError(artifact_name)
+        workflow_dir = (self.outputs_dir / workflow_id).resolve()
+        if not workflow_dir.exists():
+            raise KeyError(workflow_id)
+
+        path: Path | None = None
+        if version_id:
+            version = self.versioning.get_version(workflow_id, version_id)
+            if version is None or not version.artifact_dir:
+                raise KeyError(version_id)
+            artifact_dir = Path(version.artifact_dir).resolve()
+            path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
+        else:
+            status = self.get_status(workflow_id)
+            artifact_value = status.get("artifacts", {}).get(artifact_name)
+            path = Path(artifact_value).resolve() if artifact_value else None
+            if path is None:
+                path = workflow_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
+
+        if path is None or not path.exists() or not path.is_file():
+            raise KeyError(artifact_name)
+        try:
+            path.relative_to(workflow_dir)
+        except ValueError as exc:
+            raise KeyError(artifact_name) from exc
+        return path
+
     def list_designs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         self._sync_output_services()
         designs = []
@@ -1009,3 +1044,26 @@ def _geometry_qa_status(result: OrchestratorResult) -> str:
     if result.geometry_validation is None:
         return "not_run"
     return result.geometry_validation.status
+
+
+_ALLOWED_ARTIFACT_FILES = {
+    "requirements_spec": "requirements_spec.json",
+    "extraction_report": "extraction_report.json",
+    "scene_spec": "scene_spec.json",
+    "validation_report": "validation_report.json",
+    "quality_gates": "quality_gates.json",
+    "qa_report": "qa_report.json",
+    "generation_report": "generation_report.json",
+    "glb_inspection": "glb_inspection.json",
+    "geometry_validation": "geometry_validation.json",
+    "preview_inspection": "preview_inspection.json",
+    "memory_recall": "memory_recall.json",
+    "technical_report": "technical_report.md",
+    "glb": "design.glb",
+    "preview": "preview.png",
+    "metadata": "scene_metadata.json",
+    "download": "artifacts.zip",
+    "trace": "workflow_trace.json",
+    "scene_patch": "scene_patch.json",
+    "scene_diff": "scene_diff.json",
+}

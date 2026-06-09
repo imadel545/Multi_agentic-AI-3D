@@ -9,6 +9,7 @@ Core backend surfaces for the future Agentic 3D Studio:
 - `GET /designs/{workflow_id}`
 - `GET /designs/{workflow_id}/events`
 - `GET /designs/{workflow_id}/events/stream`
+- `GET /designs/{workflow_id}/artifacts/{artifact_name}`
 - `POST /designs/{workflow_id}/edit`
 - `GET /designs/{workflow_id}/versions`
 - `POST /designs/{workflow_id}/versions/{version_id}/rollback`
@@ -41,6 +42,9 @@ header.
 
 - `events/stream` returns `404` for unknown workflows and closes after terminal events or bounded
   idle timeout.
+- `GET /designs/{workflow_id}/artifacts/{artifact_name}` serves only whitelisted files under the
+  workflow/version artifact directory. Optional `version_id` serves a stored version; without it the
+  active workflow artifact is served.
 - Design status exposes fallback information for LLM, Blender, asset import, QA, RAG, and memory.
 - Document-pack status exposes unavailable OCR/PDF/CAD/coordinate tooling instead of hiding it.
 - `POST /document-packs/{pack_id}/generate-design` uses `ProjectDesignSpec -> RequirementSpec`
@@ -50,14 +54,14 @@ header.
 
 ## Known Limitations
 
-- Artifact serving by version still uses status paths and download archives; dedicated
-  `/artifacts/...` routes can be added for the frontend.
+- Artifact serving is available for the current whitelist. If the frontend needs file availability
+  metadata per artifact before rendering links, add a dedicated manifest endpoint.
 - Document-pack upload currently accepts raw ZIP bytes, not multipart metadata.
 - Edit is apply-and-generate, not a separate preview-only patch flow.
 - Document-pack ingestion remains synchronous; large packs may justify async processing later.
 
 ## Future
 
-- Add version-scoped artifact routes for GLB, preview, reports, and archives.
+- Add version-scoped artifact manifests for UI preflight.
 - Add patch preview/apply endpoints if the frontend needs a non-committed edit review step.
 - Add document-pack SSE events if ingestion becomes asynchronous.

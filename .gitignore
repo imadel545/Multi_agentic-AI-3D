@@ -10,6 +10,8 @@ __pycache__/
 *.egg-info/
 *.log
 *.pid
+apps/frontend/node_modules/
+apps/frontend/dist/
 outputs/temp/*
 !outputs/temp/.gitkeep
 data/sqlite/
