@@ -25,6 +25,8 @@ class ScenePlanner:
             include_azimuth_arrows=True,
             include_height_markers=True,
             include_labels=requirements.include_labels,
+            include_power_cabinet=requirements.include_power_cabinet,
+            include_gps_antenna=requirements.include_gps_antenna,
         )
         beamwidth = requirements.beamwidth_deg
         install_height = requirements.antenna_install_height_m

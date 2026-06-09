@@ -26,7 +26,9 @@ This repository currently implements the local-first controlled generation pipel
 - Local Qdrant RAG indexing and search over rules, docs, templates, and asset manifests.
 - Document-pack intelligence for ZIP ingestion, classification, deterministic extraction,
   provenance, missing/conflict detection, manual corrections, QA, processing capabilities, and
-  mapping into the existing design workflow.
+  mapping into the existing design workflow. Confirmed GPS antenna and power-cabinet evidence is
+  preserved into SceneSpec visual flags, and confirmed uniform mechanical tilt is preserved in
+  requirements; unsupported fields stay visible as warnings.
 
 ## Run locally
 
@@ -161,7 +163,7 @@ zip pack
 → ProjectDesignSpec resolver
 → document-pack QA
 → user corrections when needed
-→ RequirementSpec mapping
+→ RequirementSpec mapping with provenance warnings
 → existing design workflow
 ```
 

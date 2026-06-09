@@ -36,6 +36,10 @@ The backend exposes the data needed for an advanced local-first frontend:
   consolidated spec, and stores `user_correction` provenance.
 - `POST /document-packs/{pack_id}/generate-design` maps a provenance-backed `ProjectDesignSpec`
   to `RequirementSpec` and launches the design workflow without prompt text reparsing.
+- Confirmed document-pack GPS antenna and power-cabinet evidence is preserved into
+  `SceneSpec.visual_elements`; confirmed uniform mechanical tilt is preserved into
+  `RequirementSpec.mechanical_tilt_deg`; unsupported extracted fields remain visible as mapper
+  warnings.
 
 ## Asset Data Exposed
 
@@ -81,7 +85,8 @@ entries must expose attribution.
   tower and internal cleaned/minimal telecom assets. Monopole, rooftop mast, and small-cell tower
   vendor GLBs are still missing.
 - Accessory assets for GPS, power cabinet, bracket, and cable tray are inventory-ready, but not
-  yet imported as worker placements.
+  yet imported as worker placements. GPS and power-cabinet requests can be generated from
+  confirmed evidence, but those accessory meshes are still procedural in the worker.
 - Preview inspection is structural/image-stat based, not semantic design judging.
 - The API is synchronous for edit application. A separate preview-only edit workflow can be added
   later if the UI needs apply/reject before generation.

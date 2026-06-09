@@ -30,6 +30,10 @@
   bounded Groq document extraction when configured, conflict/missing detection,
   `ProjectDesignSpec`, manual corrections, document-pack QA, direct `RequirementSpec` generation,
   trace/events, and frontend-ready endpoints.
+- Document-pack accessory mapping: confirmed GPS antenna and power-cabinet evidence is carried into
+  `RequirementSpec` and `SceneSpec.visual_elements` without RAG-driven decorative activation.
+- Document-pack tilt mapping: confirmed uniform mechanical tilt is carried into `RequirementSpec`
+  instead of silently using the default.
 - Document-pack memory writeback: compact `memory_summary.json`, SQLite
   `document_pack_memory`/`document_pack_issue_memory`, optional Qdrant runtime
   `document_pack_memory`, and `/memory/stats` counts.

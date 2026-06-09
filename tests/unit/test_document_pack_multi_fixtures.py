@@ -129,6 +129,93 @@ def test_document_pack_parses_comma_separated_azimuths_without_spaces(tmp_path: 
     assert mapping.requirements["azimuths_deg"] == [0.0, 120.0, 240.0]
 
 
+def test_document_pack_mapping_preserves_confirmed_accessories(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "APD/accessoires.txt": (
+                    "Pylône treillis H=30m\n"
+                    "Azimuts: 0, 120, 240\n"
+                    "HBA: 24m, 24m, 24m\n"
+                    "Bandes NR700 NR3500 5G\n"
+                    "Ajouter une antenne GPS GNSS au sommet.\n"
+                    "Prévoir une armoire énergie 48V au pied du pylône.\n"
+                )
+            }
+        )
+    )
+    spec = service.get_spec(summary.pack_id)
+    mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
+
+    assert summary.can_generate_design is True
+    assert spec.compound_spec["gps"].status == "confirmed"
+    assert spec.compound_spec["power_cabinet"].status == "confirmed"
+    assert mapping.status == "mapped"
+    assert mapping.requirements is not None
+    assert mapping.requirements["include_gps_antenna"] is True
+    assert mapping.requirements["include_power_cabinet"] is True
+    warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
+    assert "DOC_ACCESSORY_GPS_ENABLED_FROM_EVIDENCE" in warning_codes
+    assert "DOC_ACCESSORY_POWER_CABINET_ENABLED_FROM_EVIDENCE" in warning_codes
+
+
+def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "APD/tilt.txt": (
+                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nHBA: 24m, 24m, 24m\nTilt: 5\n"
+                )
+            }
+        )
+    )
+    spec = service.get_spec(summary.pack_id)
+    mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
+
+    assert summary.can_generate_design is True
+    assert spec.radio_sectors[0].mechanical_tilt_deg is not None
+    assert spec.radio_sectors[0].mechanical_tilt_deg.value == 5.0
+    assert mapping.status == "mapped"
+    assert mapping.requirements is not None
+    assert mapping.requirements["mechanical_tilt_deg"] == 5.0
+    warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
+    assert "DOC_DEFAULT_MECHANICAL_TILT_USED" not in warning_codes
+
+
+def test_document_pack_mapping_respects_explicit_rru_false_correction(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "APD/radio.txt": (
+                    "Pylône treillis H=30m\n"
+                    "Azimuts: 0, 120, 240\n"
+                    "HBA: 24m, 24m, 24m\n"
+                    "RRU remote radio unit mentionnée dans une ancienne note\n"
+                )
+            }
+        )
+    )
+    service.apply_correction(
+        summary.pack_id,
+        DocumentPackCorrection(
+            field="radio.include_rru",
+            value=False,
+            reason="Current APD confirms that RRU is not installed on the tower.",
+        ),
+    )
+    mapping = ProjectDesignSpecMapper().map_to_requirements(service.get_spec(summary.pack_id))
+
+    assert mapping.status == "mapped"
+    assert mapping.requirements is not None
+    assert mapping.requirements["include_rru"] is False
+
+
 def test_dwg_and_scanned_pdf_are_inventory_only_without_hallucination(tmp_path: Path) -> None:
     service = DocumentPackService(tmp_path)
 

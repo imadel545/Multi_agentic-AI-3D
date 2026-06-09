@@ -62,6 +62,21 @@ def test_scene_planner_reads_memory_error_patterns_key() -> None:
     assert scene.visual_elements.include_gps_antenna is False
 
 
+def test_scene_planner_carries_explicit_requirement_accessories() -> None:
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_planner_accessories",
+        requirements=_requirements().model_copy(
+            update={"include_gps_antenna": True, "include_power_cabinet": True}
+        ),
+        tower=_tower(),
+        antenna=_antenna(),
+        radio=_radio(),
+    )
+
+    assert scene.visual_elements.include_gps_antenna is True
+    assert scene.visual_elements.include_power_cabinet is True
+
+
 def test_scene_planner_carries_asset_license_metadata() -> None:
     scene = ScenePlanner().build_scene_spec(
         workflow_id="wf_asset_metadata",

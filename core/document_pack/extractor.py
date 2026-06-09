@@ -392,6 +392,7 @@ def _missing_fields(resolved: dict[str, ExtractedField]) -> list[ExtractedField]
 def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
     azimuth_field = resolved.get("radio.azimuths_deg")
     hba_field = resolved.get("radio.hba_m")
+    mechanical_tilt_field = resolved.get("radio.mechanical_tilt_deg")
     if (
         not azimuth_field
         or azimuth_field.status != "confirmed"
@@ -420,6 +421,11 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
                 severity="blocking",
             )
         )
+        mechanical_tilt = _sector_optional_numeric_field(
+            mechanical_tilt_field,
+            index,
+            field=f"radio_sectors[{index}].mechanical_tilt_deg",
+        )
         sectors.append(
             {
                 "sector_id": f"S{index + 1}",
@@ -432,10 +438,36 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
                 ),
                 "hba_m": hba,
                 "bands": resolved.get("radio.bands"),
+                "mechanical_tilt_deg": mechanical_tilt,
                 "rru": resolved.get("radio.include_rru"),
             }
         )
     return sectors
+
+
+def _sector_optional_numeric_field(
+    source: ExtractedField | None,
+    index: int,
+    *,
+    field: str,
+) -> ExtractedField | None:
+    if not source or source.status != "confirmed":
+        return None
+    if isinstance(source.value, list):
+        if not source.value:
+            return None
+        raw_value = source.value[index] if index < len(source.value) else source.value[0]
+    else:
+        raw_value = source.value
+    if not isinstance(raw_value, float | int):
+        return None
+    return ExtractedField(
+        field=field,
+        value=float(raw_value),
+        status="confirmed",
+        confidence=source.confidence,
+        sources=source.sources,
+    )
 
 
 def _rru_inventory(resolved: dict[str, ExtractedField]) -> list[dict[str, ExtractedField]]:

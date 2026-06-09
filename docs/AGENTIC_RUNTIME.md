@@ -41,6 +41,10 @@ Pack-to-design generation now uses `ProjectDesignSpec -> RequirementSpec` direct
 `WorkflowService.create_design_from_requirements()` and `DesignOrchestrator.run_requirements()`.
 It does not reparse a generated prompt.
 
+Confirmed document-pack GPS antenna and power-cabinet fields are mapped into
+`SceneSpec.visual_elements` through `RequirementSpec`. RAG text matches and memory recalls do not
+activate those visual accessories.
+
 `pre_blender_gate` checks:
 
 - extracted requirements are valid

@@ -36,7 +36,8 @@ Next checks:
 
 - Visual semantic inspection of generated scenes.
 - Exact GLB transform/material inspection beyond object metadata.
-- OCR/CAD semantic QA once optional adapters are installed.
+- OCR layout bounding boxes, table row semantics, and CAD geometry semantics beyond extracted text
+  and layer provenance.
 
 ## Quality Gates
 
@@ -71,8 +72,8 @@ Known limitations:
 - `metadata_fallback` validates expected procedural object metadata, not GLB binary structure.
 - GPS/power-cabinet presence is generated and reported through metadata/procedural objects, but
   dedicated geometry count gates for those accessories remain future work.
-- Document-pack QA cannot validate scanned pages or CAD geometry until OCR/CAD adapters are
-  installed and smoke-tested.
+- Document-pack QA validates selected OCR and DXF extraction when the local adapters are available,
+  but it does not yet validate OCR layout bounding boxes or CAD geometry dimensions.
 
 ## Structural 3D QA
 

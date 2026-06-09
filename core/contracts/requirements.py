@@ -31,6 +31,8 @@ class RequirementSpec(StrictModel):
     include_cables: bool = True
     include_beams: bool = True
     include_labels: bool = True
+    include_power_cabinet: bool = False
+    include_gps_antenna: bool = False
     detail_level: DetailLevel = "high"
     warnings: list[WarningItem] = Field(default_factory=list)
     repair_events: list[RepairEvent] = Field(default_factory=list)

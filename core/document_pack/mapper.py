@@ -1,3 +1,4 @@
+from core.contracts.common import WarningItem
 from core.contracts.document_pack import ProjectDesignSpec, RequirementMappingResult
 from core.contracts.requirements import RequirementSpec
 from core.contracts.tower import TowerCharacteristics
@@ -22,11 +23,18 @@ class ProjectDesignSpecMapper:
         hba_values = _required_float_list(spec, "radio_sectors", "hba_m")
         install_height = min(hba_values) if hba_values else tower_height
         network_type = _network_type(spec)
-        include_rru = _confirmed_bool(spec.cabling_spec.get("include_rru")) or bool(
-            spec.rru_inventory
-        )
+        include_rru = _confirmed_bool(spec.cabling_spec.get("include_rru"))
         include_cables = _confirmed_bool(spec.cabling_spec.get("include_cables"))
+        include_gps_antenna = _confirmed_bool(spec.compound_spec.get("gps"))
+        include_power_cabinet = _confirmed_bool(spec.compound_spec.get("power_cabinet"))
+        mechanical_tilt = _uniform_confirmed_sector_float(spec, "mechanical_tilt_deg")
         characteristics = _tower_characteristics(spec, tower_type)
+        warnings = _mapping_warnings(
+            spec,
+            include_gps_antenna=include_gps_antenna,
+            include_power_cabinet=include_power_cabinet,
+            mechanical_tilt_confirmed=mechanical_tilt is not None,
+        )
         requirements = RequirementSpec(
             network_type=network_type,
             site_type="telecom_site",
@@ -37,11 +45,15 @@ class ProjectDesignSpecMapper:
             antenna_type="microwave_dish" if network_type == "MW" else "panel_5g",
             antenna_install_height_m=install_height,
             azimuths_deg=azimuths,
+            mechanical_tilt_deg=mechanical_tilt if mechanical_tilt is not None else 3.0,
             include_rru=include_rru if network_type != "MW" else False,
             include_cables=include_cables,
             include_beams=True,
             include_labels=True,
+            include_gps_antenna=include_gps_antenna,
+            include_power_cabinet=include_power_cabinet,
             detail_level=detail_level,  # type: ignore[arg-type]
+            warnings=warnings,
         )
         return RequirementMappingResult(
             status="mapped",
@@ -75,6 +87,99 @@ def _required_float_list(spec: ProjectDesignSpec, source: str, field: str) -> li
 
 def _confirmed_bool(field) -> bool:
     return bool(field and field.status == "confirmed" and field.value is True)
+
+
+def _confirmed_field(spec: ProjectDesignSpec, section: str, field: str):
+    candidate = getattr(spec, section).get(field)
+    return candidate if candidate and candidate.status == "confirmed" else None
+
+
+def _mapping_warnings(
+    spec: ProjectDesignSpec,
+    *,
+    include_gps_antenna: bool,
+    include_power_cabinet: bool,
+    mechanical_tilt_confirmed: bool,
+) -> list[WarningItem]:
+    warnings: list[WarningItem] = []
+    if include_gps_antenna:
+        warnings.append(
+            WarningItem(
+                code="DOC_ACCESSORY_GPS_ENABLED_FROM_EVIDENCE",
+                message="GPS antenna enabled from confirmed document-pack evidence.",
+            )
+        )
+    if include_power_cabinet:
+        warnings.append(
+            WarningItem(
+                code="DOC_ACCESSORY_POWER_CABINET_ENABLED_FROM_EVIDENCE",
+                message="Power cabinet enabled from confirmed document-pack evidence.",
+            )
+        )
+    if _confirmed_field(spec, "site_info", "site_name"):
+        warnings.append(
+            WarningItem(
+                code="DOC_FIELD_NOT_MODELED_SITE_NAME",
+                message="Site name is extracted but not yet represented in SceneSpec.",
+            )
+        )
+    if _confirmed_field(spec, "coordinate_info", "latitude") or _confirmed_field(
+        spec, "coordinate_info", "longitude"
+    ):
+        warnings.append(
+            WarningItem(
+                code="DOC_FIELD_NOT_MODELED_COORDINATES",
+                message="Coordinates are extracted but not yet represented in SceneSpec.",
+            )
+        )
+    if spec.grounding_spec:
+        warnings.append(
+            WarningItem(
+                code="DOC_FIELD_NOT_MODELED_GROUNDING",
+                message=(
+                    "Grounding/adduction evidence is extracted but not yet represented "
+                    "in SceneSpec."
+                ),
+            )
+        )
+    if _confirmed_field(spec, "tower_spec", "color_ral"):
+        warnings.append(
+            WarningItem(
+                code="DOC_FIELD_NOT_MODELED_COLOR_RAL",
+                message=(
+                    "Tower color/RAL evidence is extracted but not yet represented "
+                    "in SceneSpec materials."
+                ),
+            )
+        )
+    if not mechanical_tilt_confirmed:
+        warnings.append(
+            WarningItem(
+                code="DOC_DEFAULT_MECHANICAL_TILT_USED",
+                message=(
+                    "Mechanical tilt was not confirmed in the document pack; "
+                    "default 3 degrees is used."
+                ),
+            )
+        )
+    return warnings
+
+
+def _uniform_confirmed_sector_float(spec: ProjectDesignSpec, field: str) -> float | None:
+    values = []
+    for sector in spec.radio_sectors:
+        candidate = getattr(sector, field)
+        if not candidate or candidate.status != "confirmed":
+            return None
+        if not isinstance(candidate.value, float | int):
+            return None
+        values.append(float(candidate.value))
+    if not values:
+        return None
+    first = values[0]
+    if all(abs(value - first) < 0.05 for value in values):
+        return first
+    return None
 
 
 def _network_type(spec: ProjectDesignSpec) -> str:

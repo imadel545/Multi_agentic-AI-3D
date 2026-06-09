@@ -25,7 +25,8 @@ Core validation rules:
 - Radio assets are present when RRU generation is requested by the current MVP flow.
 - Cables are optional and valid when all sectors consistently disable them.
 - `include_power_cabinet` and `include_gps_antenna` default to `false`; they are generated only
-  when explicitly requested or patched into `visual_elements`.
+  when explicitly requested, patched into `visual_elements`, or mapped from confirmed
+  document-pack evidence.
 
 Geometry QA derives expected antennas, RRUs, cables, beams, azimuth arrows, heights, and azimuth
 metadata from the SceneSpec. Tower metadata also carries structure, leg count, base/top width,
