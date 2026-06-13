@@ -21,9 +21,9 @@ Ces limitations sont connues et doivent rester visibles pour les utilisateurs et
 
 ## Frontend
 
-- **Frontend actuel refusé** : layout dashboard 4 zones, pas chat-first, viewer non dominant.
-- **Pas de vrai SSE** : le backend fait du polling, le frontend aussi.
-- **Codes techniques exposés** : l'UI actuelle montre des codes backend et du JSON brut.
+- **Aucun frontend opérationnel** : l'ancien frontend sous `apps/frontend` a été supprimé.
+- **Pas de vrai SSE** : le backend fait du polling ; le futur frontend devra gérer cette limitation.
+- L'API produit backend est prête, mais le frontend chat-first / 3D-first n'est pas encore reconstruit.
 
 ## Assets
 

@@ -2,8 +2,8 @@
 
 Local-first pipeline for transforming telecom requirements into a validated `SceneSpec`, controlled 3D generation artifacts, and compliance reports.
 
-> ⚠️ **Project reset in progress.**<br>
-> The current frontend under `apps/frontend` is rejected and will be rebuilt.<br>
+> ⚠️ **Frontend removed.**<br>
+> The old frontend under `apps/frontend` has been deleted. A chat-first / 3D-first frontend will be rebuilt later.<br>
 > See `docs/PROJECT_SOURCE_OF_TRUTH.md` for the single source of truth, `docs/BACKEND_CAPABILITY_MATRIX.md` for backend capabilities, and `docs/KNOWN_LIMITATIONS.md` for honest limitations.
 
 ---
@@ -87,15 +87,6 @@ Backend:
 pytest
 ```
 
-Frontend (current frontend is rejected; only kept for reference):
-
-```bash
-cd apps/frontend
-npm run typecheck
-npm run test
-npm run build
-```
-
 ---
 
 ## Core flow
@@ -135,4 +126,5 @@ requirements_text or document pack
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
 - Assets: 12 manifests with local GLBs, mostly internal/CC-BY, not vendor-grade.
-- Frontend: rejected; rebuild planned as chat-first / 3D-first studio.
+- Product API: `/studio/summary`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` are available.
+- Frontend: old dashboard frontend deleted; rebuild planned as chat-first / 3D-first.

@@ -9,13 +9,20 @@ from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
     CreateDesignRequest,
     CreateDesignResponse,
+    CurrentOperation,
     EditDesignRequest,
     EditDesignResponse,
     ParseRequirementsRequest,
     ParseRequirementsResponse,
     RagSearchResponse,
+    StudioSummary,
+    TimelineSummary,
+    UserIssuesResponse,
+    UserSummary,
+    ViewerBundle,
     WorkflowStatus,
 )
+from apps.api.telecom_studio_api.product import ProductNotFound, ProductService
 from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
@@ -130,11 +137,17 @@ workflow_service = WorkflowService(
     orchestrator=orchestrator,
     scene_edit_agent=scene_edit_agent,
 )
+product_service = ProductService(workflow_service, asset_inventory_service)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "version": "0.2.0"}
+
+
+@app.get("/studio/summary", response_model=StudioSummary)
+def get_studio_summary() -> dict:
+    return product_service.studio_summary()
 
 
 @app.post("/designs", response_model=CreateDesignResponse)
@@ -151,6 +164,46 @@ def get_design(workflow_id: str) -> dict:
     try:
         return workflow_service.get_status(workflow_id)
     except KeyError as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+
+
+@app.get("/designs/{workflow_id}/user-summary", response_model=UserSummary)
+def get_user_summary(workflow_id: str) -> dict:
+    try:
+        return product_service.user_summary(workflow_id)
+    except ProductNotFound as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+
+
+@app.get("/designs/{workflow_id}/current-operation", response_model=CurrentOperation)
+def get_current_operation(workflow_id: str) -> dict:
+    try:
+        return product_service.current_operation(workflow_id)
+    except ProductNotFound as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+
+
+@app.get("/designs/{workflow_id}/user-issues", response_model=UserIssuesResponse)
+def get_user_issues(workflow_id: str) -> dict:
+    try:
+        return product_service.user_issues(workflow_id)
+    except ProductNotFound as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+
+
+@app.get("/designs/{workflow_id}/viewer-bundle", response_model=ViewerBundle)
+def get_viewer_bundle(workflow_id: str) -> dict:
+    try:
+        return product_service.viewer_bundle(workflow_id)
+    except ProductNotFound as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
+
+
+@app.get("/designs/{workflow_id}/timeline-summary", response_model=TimelineSummary)
+def get_timeline_summary(workflow_id: str) -> dict:
+    try:
+        return product_service.timeline_summary(workflow_id)
+    except ProductNotFound as exc:
         raise HTTPException(status_code=404, detail="workflow not found") from exc
 
 

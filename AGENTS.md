@@ -31,14 +31,29 @@ Il est court, strict et non négociable.
 - **Assets** : les manifests JSON sous `assets/manifests` et l'existence réelle des fichiers GLB.
 - **LLM** : Groq `openai/gpt-oss-120b` par défaut ; extraction déterministe comme fallback explicite.
 
-## 4. Fallbacks et warnings
+## 4. Documents actifs vs archive
+
+Les documents actifs du projet sont :
+
+- `AGENTS.md`
+- `docs/PROJECT_SOURCE_OF_TRUTH.md`
+- `docs/BACKEND_CAPABILITY_MATRIX.md`
+- `docs/FRONTEND_PRODUCT_BLUEPRINT.md`
+- `docs/FRONTEND_ACCEPTANCE_CRITERIA.md`
+- `docs/CODEX_WORKING_METHOD.md`
+- `docs/API_FRONTEND_CONTRACT.md`
+- `docs/KNOWN_LIMITATIONS.md`
+
+`docs/archive/` est historique uniquement et ne doit pas être utilisé comme source de vérité active sauf demande explicite.
+
+## 5. Fallbacks et warnings
 
 - Tout fallback doit être **visible** dans l'API, les rapports, et l'UI finale.
 - Les warnings doivent être exprimés en **langage utilisateur**, pas en codes techniques.
 - Si Blender manque, le workflow doit échouer proprement ou être explicitement marqué comme fallback non valide.
 - Si une extraction LLM échoue, le fallback déterministe est utilisé et signalé.
 
-## 5. Frontend
+## 6. Frontend
 
 - Le frontend actuel sous `apps/frontend` est **refusé**.
 - Le prochain frontend sera :
@@ -48,7 +63,7 @@ Il est court, strict et non négociable.
   - **simple** : l'utilisateur comprend quoi faire en moins de 5 secondes.
 - Ne pas reconstruire le frontend dans cette mission sans autorisation explicite.
 
-## 6. Méthode de travail
+## 7. Méthode de travail
 
 1. Audit.
 2. Diagnostic.
@@ -62,14 +77,14 @@ Il est court, strict et non négociable.
 10. Commit sélectif.
 11. Rapport honnête.
 
-## 7. Scope
+## 8. Scope
 
 - Local-first, mono-utilisateur.
 - Pas de SaaS multi-user, pas de PostgreSQL, pas de Kubernetes, pas de microservices.
 - Pas de génération libre de code Blender par LLM.
 - Pas de fusion avec image réelle, pas de RA mobile, pas de Google Maps.
 
-## 8. Rappel final
+## 9. Rappel final
 
 > Ce projet produit des modèles 3D techniques vérifiables, pas des démos visuelles.  
 > La qualité est mesurée par la vérité du backend, pas par l'optimisme des docs.

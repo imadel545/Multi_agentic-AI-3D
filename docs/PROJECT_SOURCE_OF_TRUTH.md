@@ -40,10 +40,10 @@ Le cœur est le pipeline backend Python/FastAPI. Le frontend est un client React
 
 ## Current frontend truth
 
-- Un frontend React/Vite existe sous `apps/frontend`.
-- **Il est refusé** : layout dashboard 4 zones, pas chat-first, viewer non dominant, pas de vrai SSE.
-- Le frontend actuel ne sera pas patché. Il sera supprimé/reconstruit.
-- Seuls `api/types.ts` et `api/client.ts` peuvent être conservés comme base.
+- L'ancien frontend React/Vite sous `apps/frontend` a été **supprimé**.
+- Il était un dashboard 4 zones, pas chat-first, viewer non dominant, pas de vrai SSE.
+- Aucun frontend opérationnel n'existe actuellement.
+- Le prochain frontend sera chat-first / 3D-first, avec drawers contextuels, construit from scratch.
 
 ## Current 3D truth
 
@@ -88,8 +88,10 @@ Le cœur est le pipeline backend Python/FastAPI. Le frontend est un client React
 
 ## Next correct sequence
 
-1. Nettoyer la documentation et établir cette source de vérité.
-2. Corriger le backend : empêcher les fallback d'être validés comme succès.
-3. Renforcer l'extraction (LLM structuré, validation) pour les vrais cahiers des charges.
-4. Remplacer l'embedding déterministe par un vrai modèle d'embedding.
-5. Reconstruire le frontend chat-first / 3D-first.
+1. ✅ Nettoyer la documentation et établir cette source de vérité.
+2. ✅ Ajouter une API produit orientée utilisateur (`/studio/summary`, `/designs/{id}/user-summary`, etc.).
+3. ✅ Supprimer l'ancien frontend refusé.
+4. Corriger le backend : empêcher les fallback d'être validés comme succès.
+5. Renforcer l'extraction (LLM structuré, validation) pour les vrais cahiers des charges.
+6. Remplacer l'embedding déterministe par un vrai modèle d'embedding.
+7. Reconstruire le frontend chat-first / 3D-first.

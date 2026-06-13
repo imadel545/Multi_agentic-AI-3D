@@ -1,7 +1,7 @@
 # Frontend Product Blueprint
 
 Vision du frontend cible.  
-Le frontend actuel sous `apps/frontend` est refusé et sera remplacé.
+L'ancien frontend sous `apps/frontend` a été supprimé. Le blueprint ci-dessous guide la reconstruction.
 
 ---
 
@@ -61,4 +61,6 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 
 ## Statut
 
-Non implémenté. Le frontend actuel doit être supprimé/reconstruit.
+- L'ancien frontend a été supprimé.
+- Les endpoints produit backend sont prêts (`/studio/summary`, `/designs/{id}/user-summary`, etc.).
+- Le frontend chat-first / 3D-first n'est pas encore implémenté.

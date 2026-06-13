@@ -112,3 +112,90 @@ class VersionInfo(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     qa_score: float | None = None
     generation_mode: str | None = None
+
+
+# Product-oriented response models
+
+
+class UserIssue(BaseModel):
+    title: str
+    severity: Literal["info", "warning", "error"]
+    impact: str
+    recommended_action: str
+    technical_code: str | None = None
+
+
+class UserSummary(BaseModel):
+    workflow_id: str
+    status: str
+    current_operation: str
+    next_recommended_action: str
+    qa_summary: str
+    human_readable_issues: list[UserIssue]
+    active_version: str | None = None
+    generation_mode: str | None = None
+    asset_quality_summary: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+
+class UserIssuesResponse(BaseModel):
+    workflow_id: str
+    status: str
+    human_readable_issues: list[UserIssue]
+
+
+class CurrentOperation(BaseModel):
+    workflow_id: str
+    status: str
+    current_operation: str
+    next_recommended_action: str
+    progress_indicator: str | None = None
+
+
+class ViewerArtifact(BaseModel):
+    name: str
+    url: str
+    content_type: str
+    available: bool
+
+
+class ViewerBundle(BaseModel):
+    workflow_id: str
+    status: str
+    active_version: str | None = None
+    viewer_artifacts: list[ViewerArtifact]
+
+
+class TimelineStep(BaseModel):
+    step: str
+    status: Literal["pending", "running", "completed", "failed", "skipped"]
+    timestamp: str | None = None
+    human_readable: str
+
+
+class TimelineSummary(BaseModel):
+    workflow_id: str
+    status: str
+    timeline_steps: list[TimelineStep]
+
+
+class DesignListSummary(BaseModel):
+    workflow_id: str
+    status: str
+    created_at: str | None = None
+    qa_score: float | None = None
+    generation_mode: str | None = None
+    current_operation: str | None = None
+
+
+class StudioSummary(BaseModel):
+    designs: list[DesignListSummary]
+    total_designs: int
+    active_designs: int
+    completed_designs: int
+    failed_designs: int
+    pending_designs: int
+    asset_inventory_status: str
+    blender_available: bool | None = None
+    groq_available: bool | None = None
+    warnings: list[UserIssue] = Field(default_factory=list)

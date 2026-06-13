@@ -42,6 +42,7 @@ Légende des status :
 | Memory writeback | IMPLEMENTED_LIMITED | `core/memory/service.py` | SQLite + Qdrant optionnel ; recall par matching exact. | Apprentissage limité des cas passés. |
 | RAG | IMPLEMENTED_LIMITED | `core/rag/service.py` | Embedding déterministe par défaut ; FastEmbed optionnel. | Recherche lexicale/hash, pas sémantique. |
 | Artifact downloads | IMPLEMENTED | `GET /designs/{id}/artifacts/{name}` | Whitelist de noms d'artifacts. | Téléchargement des GLB, PNG, rapports. |
+| Product-oriented API | IMPLEMENTED | `GET /studio/summary`, `GET /designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` | Couche de présentation au-dessus du statut technique ; ne résout pas les problèmes de fond (fallback Blender, etc.). | Le frontend peut afficher un résumé utilisateur sans parser du JSON technique. |
 
 ---
 
