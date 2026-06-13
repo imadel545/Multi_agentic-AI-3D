@@ -11,7 +11,7 @@
 - Each OCR evidence page records `source_type = ocr`, page, mean confidence, and low-confidence
   warnings.
 - Tesseract calls use a bounded timeout to prevent silent hangs.
-- Docling is installed/importable, but not enabled as the default layout path.
+- Docling is installed and used as a fallback when PyMuPDF, pdfplumber, and OCR produce no evidence.
 - Dependency packaging keeps Docling in the separate `document-layout` extra; `document-intel`
   contains the lighter PDF/OCR/CAD/coordinate stack.
 
@@ -22,23 +22,20 @@
 - If Tesseract, `pytesseract`, or `PIL` is missing, OCR is unavailable and the pack reports that
   limit explicitly.
 - If OCR produces no text or low confidence, the warning is stored in `processing_warnings`.
-- If Docling is unavailable or too heavy for local runtime, deterministic PDF/OCR extraction remains
-  the default path.
-- In the current acceptance run, `docling.document_converter.DocumentConverter` imports
-  successfully, but conversion smoke can fail with `OSError` when the model cache is absent and the
-  disk has too little free space for rehydration.
+- If Docling is unavailable or fails on a file, deterministic PDF/OCR extraction remains visible and
+  the fallback warning is stored.
 
 ## Known Limitations
 
 - OCR does not yet produce layout bounding boxes or region-level provenance.
 - OCR is not run for low-priority photos/photomontages unless filename signals technical evidence.
-- Docling is not used automatically because it downloads/runs heavy models and needs a bounded
-  runtime policy before production use.
+- Docling fallback can be heavier than PyMuPDF/Tesseract and may hydrate local model cache on first
+  use.
 - Table extraction is text-based; equipment table schema normalization is still basic.
 
 ## Future
 
-- Add optional Docling layout node with timeout and artifact-level cost reporting.
+- Add artifact-level Docling duration/cost reporting.
 - Add page-region provenance for APD/elevation plans.
 - Add equipment-list table normalization for antenna/RRU/cabinet inventories.
 - Add OCR quality metrics per page to frontend timeline.

@@ -1,64 +1,55 @@
 # Agentic AI 3D Telecom Design Studio
 
-Local-first platform foundation for transforming telecom requirements into a validated
-`SceneSpec`, controlled 3D generation artifacts, and compliance reports.
+Local-first pipeline for transforming telecom requirements into a validated `SceneSpec`, controlled 3D generation artifacts, and compliance reports.
 
-This repository currently implements the local-first controlled generation pipeline:
+> ⚠️ **Project reset in progress.**<br>
+> The current frontend under `apps/frontend` is rejected and will be rebuilt.<br>
+> See `docs/PROJECT_SOURCE_OF_TRUTH.md` for the single source of truth, `docs/BACKEND_CAPABILITY_MATRIX.md` for backend capabilities, and `docs/KNOWN_LIMITATIONS.md` for honest limitations.
 
-- Pydantic contracts for `RequirementSpec`, `AssetManifest`, `SceneSpec`, and validation reports.
-- Deterministic requirement normalization for common telecom prompts.
-- Typed pylon characteristics extraction for structure, legs, base/top width, foundation,
-  platforms, ladder, lightning rod, aviation light, and material.
-- Groq structured extraction with strict JSON Schema and deterministic fallback.
-- LangGraph orchestration with typed trace nodes, timings, and workflow metrics.
-- Durable SQLite memory for workflow recall and writeback.
-- Rule engine and SceneSpec validator.
-- Local asset manifest registry.
-- Asset inventory/import metadata with explicit `imported_glb`, `procedural_fallback`, and
-  `missing_file` modes.
-- FastAPI endpoints for design creation, status, validation, assets, and artifact download.
-- Prompt-based SceneSpec editing with patch validation, per-version artifacts, QA rerun, diff,
-  rollback, and event logging.
-- React/Vite Agentic 3D Studio frontend under `apps/frontend` with a 4-zone studio layout:
-  conversational Agent Command Center, central GLB/preview Design Stage, Smart Inspector for
-  QA/assets/versions/diff/downloads, Intelligence Dock for documents/provenance/events/memory, and
-  real backend artifact links.
-- Controlled Blender runner that executes Blender when available and falls back explicitly otherwise.
-- Generation QA checks for GLB, preview, geometry metadata, sector count, and fallback warnings.
-- Geometry validation for expected antennas, beams, RRUs, cables, GPS, power cabinet, azimuths,
-  tilt metadata, and tower/antenna heights.
-- Local Qdrant RAG indexing and search over rules, docs, templates, and asset manifests.
-- Document-pack intelligence for ZIP ingestion, classification, deterministic extraction,
-  provenance, missing/conflict detection, manual corrections, QA, processing capabilities, and
-  mapping into the existing design workflow. Confirmed GPS antenna and power-cabinet evidence is
-  preserved into SceneSpec visual flags, and confirmed uniform mechanical tilt is preserved in
-  requirements; unsupported fields stay visible as warnings.
+---
+
+## What it does
+
+- Takes a technical brief or a document pack (ZIP with PDF/DXF/images) as input.
+- Extracts structured requirements (`RequirementSpec`) or a provenance-backed design spec (`ProjectDesignSpec`).
+- Plans a controlled 3D scene (`SceneSpec`).
+- Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
+- Runs structural and geometry QA.
+- Supports prompt edits, versioning, and rollback.
+
+## What it does not do yet
+
+- It is not a polished end-user product.
+- It does not guarantee vendor-grade visual realism (current assets are internal/CC-BY).
+- It does not run without a local Blender install for real 3D output.
+- It does not provide a production-ready frontend today.
+
+---
 
 ## Run locally
 
-Backend:
+### Backend
 
 ```bash
-python -m venv .venv
+uv python install 3.12.7
+uv venv --python 3.12.7
 source .venv/bin/activate
-pip install -e ".[dev]"
+uv pip install -e ".[dev,rag,document-intel]"
 uvicorn apps.api.telecom_studio_api.main:app --reload
 ```
 
 Open API docs at `http://127.0.0.1:8000/docs`.
 
-Frontend:
+### Optional: Blender
 
-```bash
-cd apps/frontend
-npm install
-npm run dev
-```
+Real `design.glb` generation requires Blender 4.5+ installed locally. The runner searches:
 
-Open `http://127.0.0.1:5173`. Set `VITE_API_BASE_URL` if the FastAPI backend is not running on
-`http://127.0.0.1:8000`.
+- `BLENDER_BINARY` env var
+- `TELECOM_STUDIO_BLENDER_BINARY` env var
+- `blender` in `PATH`
+- `/Applications/Blender.app/Contents/MacOS/Blender`
 
-Optional Qdrant Docker service:
+### Optional: Qdrant
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d qdrant
@@ -67,35 +58,36 @@ TELECOM_STUDIO_QDRANT_URL=http://127.0.0.1:6333 uvicorn apps.api.telecom_studio_
 
 Without `TELECOM_STUDIO_QDRANT_URL`, the API uses Qdrant local mode under `data/qdrant`.
 
-Groq extraction:
+### Optional: Groq
 
 ```bash
-# Supported names, in environment or .env:
 GROQ_API_KEY=...
-groq_api=...
-TELECOM_STUDIO_GROQ_API_KEY=...
+# or TELECOM_STUDIO_GROQ_API_KEY=...
 ```
 
-The API uses `openai/gpt-oss-120b` by default. Per request, set
-`options.use_llm=false` to force deterministic extraction.
+The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to force deterministic extraction.
 
-Optional document-intelligence tooling:
+### Optional: document-intelligence tooling
 
 ```bash
-pip install -e ".[document-intel]"
+uv pip install -e ".[document-intel,document-layout]"
+brew install tesseract tesseract-lang
+brew install libredwg
 ```
 
-This enables optional local adapters when available (`fitz`, `pdfplumber`, `ezdxf`, `pyproj`,
-`pytesseract`, `PIL`). The backend still reports each capability explicitly and does not pretend
-OCR/CAD/conversion succeeded when a tool is missing.
+The backend reports each capability explicitly and does not pretend extraction succeeded when a tool is missing.
+
+---
 
 ## Test
+
+Backend:
 
 ```bash
 pytest
 ```
 
-Frontend checks:
+Frontend (current frontend is rejected; only kept for reference):
 
 ```bash
 cd apps/frontend
@@ -104,83 +96,15 @@ npm run test
 npm run build
 ```
 
-Visual frontend smoke:
-
-```bash
-cd apps/frontend
-VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Open `http://127.0.0.1:5173` after the backend is running. The central stage uses the real GLB
-artifact when WebGL is available and also shows the real Blender `preview.png` artifact as an
-explicit fallback/reference when a browser capture cannot render WebGL.
-
-Focused eval suites:
-
-```bash
-pytest tests/rag_eval tests/memory_eval
-```
-
-## API surface
-
-Implemented:
-
-- `POST /designs`: start a design workflow.
-- `GET /designs/{workflow_id}`: active workflow/version status, reports, artifacts, QA summaries,
-  LLM provider/fallback state, RAG/memory counts, asset import summary, and download URL.
-  A pending status file is available immediately after creation, so polling does not need to
-  tolerate a transient `404`.
-- `GET /designs/{workflow_id}/events`: agentic event log.
-- `GET /designs/{workflow_id}/events/stream`: SSE event stream; unknown workflows return `404`.
-- `GET /designs/{workflow_id}/artifacts/{artifact_name}`: whitelisted GLB, preview, reports,
-  metadata, patch/diff, trace and archive artifact serving for active or versioned artifacts.
-- `POST /designs/{workflow_id}/edit`: create a structured patch from a prompt, validate it,
-  generate a new version, rerun QA, and activate it only if the revision passes.
-- `GET /designs/{workflow_id}/versions`: version history with active flag, artifacts, QA score,
-  generation mode, and diff summary.
-- `POST /designs/{workflow_id}/versions/{version_id}/rollback`: set an existing version active
-  without deleting history.
-- `GET /assets/inventory`: GLB readiness inventory with missing/present files, source, fallback
-  policy, and warnings.
-- `POST /document-packs`: ingest a ZIP as raw bytes and write JSON-only pack artifacts.
-- `GET /document-packs/capabilities`: local PDF/OCR/CAD/coordinate/Groq document-pack tool status.
-- `GET /document-packs/{pack_id}/documents`: classified document inventory.
-- `GET /document-packs/{pack_id}/consolidated-spec`: provenance-backed `ProjectDesignSpec`.
-- `GET /document-packs/{pack_id}/processing`: per-document extraction status/tools/warnings.
-- `GET /document-packs/{pack_id}/qa`: document-pack QA score, checks, and blocking issues.
-- `POST /document-packs/{pack_id}/corrections`: apply a manual correction with provenance.
-- `GET /document-packs/{pack_id}/memory-summary`: compact no-large-file memory summary artifact.
-- `POST /document-packs/{pack_id}/generate-design`: map an unblocked pack into the design flow.
-
-Available with fallback:
-
-- Groq `openai/gpt-oss-120b` extraction and edit patching fall back to deterministic logic when
-  provider access fails or `options.use_llm=false` is set for creation.
-- Blender fallback artifacts are explicit and still pass through QA/gates.
-- PDF/OCR/CAD/coordinate tooling is optional and reported through `/document-packs/capabilities`.
-
-Known limitations:
-
-- The current asset library is `partial_import_ready`: a CC-BY lattice tower and internal
-  cleaned/minimal telecom assets exist, but they are not a complete vendor-grade library.
-- The frontend is a credible local-first studio, but visual realism is still limited by the current
-  internal/minimal asset library and Blender scene composition.
-- The Blender worker imports available GLBs and uses controlled procedural fallback for missing
-  assets only when fallback is allowed and visible in metadata. GPS and power-cabinet accessories
-  are manifest-backed placements when explicitly requested.
-- Preview QA is structural/image-stat based, not semantic visual judging.
-- Document-pack PDF text/table, selected OCR, DXF parsing, coordinate conversion, and Groq bounded
-  extraction are capability-gated and report unavailable tools explicitly. Docling is currently
-  `installed_import_only`, not part of the default extraction path. DWG remains
-  `unsupported_without_converter` unless a local ODA/FreeCAD/dwgread converter is installed.
+---
 
 ## Core flow
 
 ```text
-requirements_text
+requirements_text or document pack
 → LangGraph orchestrator
 → Groq structured RequirementSpec or deterministic fallback
-→ Qdrant RAG context
+→ Qdrant RAG context (advisory)
 → SQLite memory recall
 → asset registry
 → rule engine
@@ -193,39 +117,22 @@ requirements_text
 → compliance report
 ```
 
-Document-pack flow:
+---
 
-```text
-zip pack
-→ safe inventory
-→ document classification
-→ optional local text/table/CAD capability checks
-→ deterministic telecom extraction
-→ coordinate conversion status
-→ ProjectDesignSpec resolver
-→ document-pack QA
-→ user corrections when needed
-→ RequirementSpec mapping with provenance warnings
-→ existing design workflow
-```
+## Key documentation
 
-Edit flow:
+- `AGENTS.md` — rules for Codex agents.
+- `docs/PROJECT_SOURCE_OF_TRUTH.md` — what the project is and is not.
+- `docs/BACKEND_CAPABILITY_MATRIX.md` — backend capabilities and limits.
+- `docs/FRONTEND_PRODUCT_BLUEPRINT.md` — target frontend vision.
+- `docs/FRONTEND_ACCEPTANCE_CRITERIA.md` — criteria to accept a future frontend.
+- `docs/KNOWN_LIMITATIONS.md` — honest limitations.
+- `docs/API_FRONTEND_CONTRACT.md` — minimal API contract for the frontend.
 
-```text
-edit prompt
-→ SceneEditAgent structured patch
-→ PatchApplier
-→ SceneSpec validation
-→ revision orchestration from patched SceneSpec
-→ Tower/RF/rule validation
-→ Blender generation
-→ GLB/geometry/preview QA
-→ quality gates
-→ version artifacts + status
-→ active version switch only on success
-```
+---
 
-FastEmbed/BGE-M3 and vendor-grade Blender assets remain extension points. Qdrant,
-Groq structured extraction, LangGraph orchestration, controlled Blender execution, GLB import
-metadata, and generation QA are implemented. SQLite memory is stored under `data/sqlite` by
-default.
+## Status
+
+- Backend: functional local-first pipeline with real Blender output when Blender is installed.
+- Assets: 12 manifests with local GLBs, mostly internal/CC-BY, not vendor-grade.
+- Frontend: rejected; rebuild planned as chat-first / 3D-first studio.

@@ -44,8 +44,8 @@ and exposed in the manifest, inventory, and Blender metadata. The other newly ad
 project-authored internal cleaned assets. Existing 5G panel/RRU assets remain
 `internal_test_minimal`.
 
-Missing vendor GLB files remain for monopole, rooftop mast, and small-cell pole manifests.
-The expected inventory status is therefore `partial_import_ready`, not fully vendor-ready.
+Monopole, rooftop mast, and small-cell pole manifests now have project-authored internal GLBs.
+The expected inventory status is therefore `ready_for_import`, while still not fully vendor-ready.
 
 ## Standards
 

@@ -54,14 +54,16 @@ GLB files currently present:
 
 `TOWER_LATTICE_30M` is an integrated CC Attribution asset from GetGLB. The source file is kept
 under `assets/source_downloads/getglb/cell_tower_replica/`, and attribution is required.
+`TOWER_MONOPOLE_30M`, `TOWER_ROOFTOP_12M`, and `TOWER_SMALL_CELL_10M` are project-authored
+internal cleaned GLBs generated from controlled Blender primitives.
 `ANT_PANEL_4G_001`, `ANT_MICROWAVE_DISH_001`, `POWER_CABINET_001`, `GPS_ANTENNA_001`,
 `MOUNTING_BRACKET_001`, and `CABLE_TRAY_001` are project-authored internal cleaned GLBs.
 `ANT_PANEL_5G_001` and `RRU_SMALL_001` are still internal minimal test assets.
 
 ## Available With Fallback
 
-- Monopole, rooftop mast, and small-cell pole tower manifests still use controlled procedural
-  fallback when their GLB files are absent and fallback is allowed.
+- All current tower manifests have local GLB files. Controlled procedural fallback remains available
+  only for future missing/import-failed assets when fallback is explicitly allowed.
 - GPS antenna and power cabinet now have manifest-backed internal cleaned GLBs and worker
   placements. They are imported as `imported_glb` when explicitly requested and the files exist.
 - Non-Blender generation writes explicit fallback metadata instead of pretending assets were
@@ -113,7 +115,8 @@ Future:
 
 1. Replace internal minimal/cleaned GLBs with vendor-grade or project-owned production assets
    without changing stable IDs.
-2. Add real monopole, rooftop mast, and small-cell pole GLBs.
+2. Replace the internal monopole, rooftop mast, and small-cell pole GLBs with vendor-grade assets
+   when licensed files are available.
 3. Wire manifest-backed accessory import placement for brackets and cable trays when the SceneSpec
    requests them.
 4. Tighten GLB dimension/material QA once production assets are present.
@@ -121,8 +124,8 @@ Future:
 
 ## Known Limitations
 
-- Inventory is `partial_import_ready`, not fully vendor-ready.
+- Inventory is `ready_for_import`, not fully vendor-grade.
 - Current internal cleaned/minimal GLBs are useful for pipeline validation and MVP visuals, but
   not vendor-grade.
-- Procedural fallback still carries monopole/rooftop/small-cell tower visual quality.
+- Procedural fallback remains a controlled resilience path for future missing/import-failed assets.
 - GLB parser QA does not yet verify exact transforms or material quality.

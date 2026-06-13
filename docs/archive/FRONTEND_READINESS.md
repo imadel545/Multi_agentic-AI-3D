@@ -81,11 +81,10 @@ entries must expose attribution.
 
 - Document-pack intelligence is operational but still bounded: PDF text/table, selected OCR, DXF,
   Groq bounded extraction when configured, corrections, provenance, QA, processing reports, trace,
-  events, direct generation, and memory writeback are implemented. Docling layout and DWG conversion
-  are not default runtime paths.
-- Asset library is `partial_import_ready`: nine GLBs are present, including one CC Attribution
-  tower and internal cleaned/minimal telecom assets. Monopole, rooftop mast, and small-cell tower
-  vendor GLBs are still missing.
+  events, direct generation, and memory writeback are implemented. Docling fallback and local
+  `dwgread` DWG conversion are available when their dependencies are installed.
+- Asset library is `ready_for_import`: all 12 manifests have local GLBs, including one CC
+  Attribution tower and internal cleaned/minimal telecom assets. It is still not vendor-grade.
 - GPS and power-cabinet accessories are imported as GLB placements when explicitly requested and
   their files exist. Mounting bracket and cable-tray manifests are inventory-ready but not yet
   automatically placed as standalone requested accessories.

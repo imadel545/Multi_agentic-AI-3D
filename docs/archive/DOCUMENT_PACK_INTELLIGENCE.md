@@ -135,18 +135,19 @@ The QA report exposes `ready_confidence`, `recommended_user_actions`, `tool_fail
 - PDF text: PyMuPDF/`fitz`.
 - PDF tables: `pdfplumber`.
 - OCR: local `tesseract` + `pytesseract` + `PIL`, selected only for high-value scanned evidence.
-- Layout: Docling is installed/importable, but not used by default because it is heavy and
-  model-driven. Model-based conversion needs enough free disk to hydrate its local cache.
+- Layout: Docling is installed and used as a bounded fallback after PyMuPDF/pdfplumber/OCR produce
+  no evidence. Model-based conversion needs enough free disk to hydrate its local cache.
 - DXF: `ezdxf` parses layers, TEXT, MTEXT, INSERT, DIMENSION, POINT, LINE, and LWPOLYLINE evidence.
-- DWG: unsupported without a local converter; no cloud conversion is attempted.
+- DWG: local `dwgread` conversion to DXF is attempted when available; no cloud conversion is
+  attempted.
 - Coordinates: `pyproj` converts recognized Lambert 93/Lambert II to WGS84.
 - Groq: enabled only when a Groq client/key is configured; deterministic fallback is visible.
 
 ## Known Limitations
 
 - OCR is selected and bounded, not a full layout understanding engine.
-- Docling is not part of the default ingestion path yet.
-- DWG conversion is still not executed without ODA/FreeCAD/dwgread.
+- Docling is a fallback path, not the first extraction path, to keep normal ingestion fast.
+- Invalid/proprietary DWG files can still fail conversion and remain inventory-only with warnings.
 - DXF geometry is exposed as evidence, not yet transformed into mount-zone geometry.
 - Groq evidence is useful but never bypasses contracts, rules, conflicts, or QA.
 - The document-pack flow is synchronous; endpoints expose trace/events after ingestion, not SSE.
@@ -154,7 +155,7 @@ The QA report exposes `ready_confidence`, `recommended_user_actions`, `tool_fail
 ## Future
 
 - Add asynchronous document-pack processing and SSE if ingestion grows heavier.
-- Add Docling layout region provenance only after a bounded runtime policy is implemented.
-- Add DWG-to-DXF conversion when a local converter exists.
+- Add Docling layout region provenance after more layout fixtures are available.
+- Add ODA/FreeCAD adapters if `dwgread` is insufficient for vendor DWG samples.
 - Add richer table semantics for equipment lists.
 - Add CAD geometry QA for mount zones, antenna levels, cable routes, and compound layouts.
