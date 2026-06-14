@@ -26,6 +26,7 @@ from core.memory import MemoryService
 from core.performance import knowledge_index_hash, requirements_hash, scene_spec_hash
 from core.qa import GenerationQA, GLBGeometryValidator, GLBInspector, PreviewInspector
 from core.rag import RagService
+from core.repair.scene_repair import repair_scene_spec
 from core.rules import RuleEngine
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
@@ -302,7 +303,7 @@ class DesignOrchestrator:
             "trace": [],
             "errors": [],
             "rag_context": [],
-            "max_repair_attempts": 0,
+            "max_repair_attempts": 2,
             "repair_attempts": 0,
             "scene_repair_recorded": False,
             "route_history": [],
@@ -929,16 +930,50 @@ class DesignOrchestrator:
         started = time.perf_counter()
         attempt = state.get("repair_attempts", 0) + 1
         report = state["scene_report"]
-        repair_events = [
-            event.model_dump() for event in state["requirements"].repair_events if event.success
-        ]
-        if repair_events and report.status == "passed" and not state.get("scene_repair_recorded"):
+
+        # First, try deterministic SceneSpec repairs (height, azimuth normalization).
+        scene = state["scene"]
+        repaired_scene, repair_report = repair_scene_spec(scene, attempt=attempt)
+        if repair_report.events:
+            repair_events = [event.model_dump() for event in repair_report.events]
             route = _route_event(
                 state,
                 "scene_repair_handler",
                 "scene_repair",
                 attempt=attempt,
                 events=repair_events,
+            )
+            return {
+                "scene": repaired_scene,
+                "scene_spec_hash": scene_spec_hash(repaired_scene),
+                "repair_attempts": attempt,
+                "report": report,
+                "route_history": route,
+                "trace": _trace(
+                    state,
+                    "scene_repair_handler",
+                    f"repaired:{len(repair_report.events)} events",
+                    started,
+                    warnings=[event.warning_code for event in repair_report.events],
+                    route="scene_repair",
+                    attempt=attempt,
+                ),
+            }
+
+        # If the scene passed validation but requirement-level repairs were applied,
+        # record them once so the trace is honest.
+        requirement_repair_events = [
+            event.model_dump() for event in state["requirements"].repair_events if event.success
+        ]
+        if requirement_repair_events and report.status == "passed" and not state.get(
+            "scene_repair_recorded"
+        ):
+            route = _route_event(
+                state,
+                "scene_repair_handler",
+                "scene_repair",
+                attempt=attempt,
+                events=requirement_repair_events,
             )
             return {
                 "repair_attempts": attempt,
@@ -948,13 +983,14 @@ class DesignOrchestrator:
                 "trace": _trace(
                     state,
                     "scene_repair_handler",
-                    f"repaired:{len(repair_events)} events",
+                    f"recorded:{len(requirement_repair_events)} events",
                     started,
-                    warnings=[event["warning_code"] for event in repair_events],
+                    warnings=[event["warning_code"] for event in requirement_repair_events],
                     route="scene_repair",
                     attempt=attempt,
                 ),
             }
+
         route = _route_event(state, "scene_repair_handler", "scene_repair", attempt=attempt)
         return {
             "repair_attempts": attempt,
@@ -963,7 +999,7 @@ class DesignOrchestrator:
             "trace": _trace(
                 state,
                 "scene_repair_handler",
-                "attempted:no_mutation_foundation",
+                "blocked:non_repairable_scene",
                 started,
                 status="failed",
                 errors=[error.code for error in report.errors],
@@ -1072,6 +1108,7 @@ class DesignOrchestrator:
                 gate,
             )
         )
+        started = time.perf_counter()
         return {
             "post_blender_gate": gate,
             "quality_gate_reports": [*state.get("quality_gate_reports", []), gate.model_dump()],
@@ -1080,7 +1117,7 @@ class DesignOrchestrator:
                 state,
                 "post_blender_gate",
                 "passed" if gate.passed else "failed",
-                time.perf_counter() - (gate.duration_ms / 1000),
+                started,
                 status="passed" if gate.passed else "failed",
                 warnings=gate.warnings,
                 errors=gate.critical_errors,
@@ -1543,7 +1580,7 @@ def _merge_reports(design_id: str, reports: list[ValidationReport]) -> Validatio
         glb_inspection = report.glb_inspection or glb_inspection
         geometry_validation = report.geometry_validation or geometry_validation
         preview_inspection = report.preview_inspection or preview_inspection
-    score = sum(1 for passed in checks.values() if passed) / len(checks)
+    score = sum(1 for passed in checks.values() if passed) / len(checks) if checks else 1.0
     return ValidationReport(
         design_id=design_id,
         status="passed" if not errors else "failed",

@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import PatchOperation, ScenePatch
 from core.llm.groq import GroqStructuredClient
+
+logger = logging.getLogger(__name__)
 
 
 class SceneEditAgent:
@@ -20,7 +23,11 @@ class SceneEditAgent:
             try:
                 return self._llm_patch(scene, edit_prompt)
             except Exception:
-                pass
+                logger.warning(
+                    "LLM scene edit failed for workflow %s; falling back to deterministic parser.",
+                    workflow_id,
+                    exc_info=True,
+                )
         return self._fallback_patch(scene, edit_prompt)
 
     def _llm_patch(self, scene: SceneSpec, edit_prompt: str) -> ScenePatch:

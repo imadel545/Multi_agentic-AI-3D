@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 from core.contracts.repair import RepairEvent, RepairReport
+from core.contracts.scene import SceneSpec, SectorSpec
 
 ANTENNA_HEIGHT_SAFETY_MARGIN_M = 3.0
 
@@ -86,3 +87,61 @@ def _repair_sector_count(candidate: dict, events: list[RepairEvent], attempt: in
             success=True,
         )
     )
+
+
+def repair_scene_spec(scene: SceneSpec, attempt: int = 1) -> tuple[SceneSpec, RepairReport]:
+    """Attempt deterministic repairs on a SceneSpec.
+
+    Current repairs:
+    - Clamp antenna install heights to tower height minus safety margin.
+    - Normalize azimuths to [0, 360).
+    """
+    events: list[RepairEvent] = []
+    tower_height = scene.tower.height_m
+    safe_height = max(1.0, tower_height - ANTENNA_HEIGHT_SAFETY_MARGIN_M)
+
+    repaired_sectors: list[SectorSpec] = []
+    for sector in scene.sectors:
+        new_sector = sector
+        if sector.install_height_m > tower_height:
+            new_sector = sector.model_copy(update={"install_height_m": safe_height})
+            events.append(
+                RepairEvent(
+                    attempt=attempt,
+                    handler="scene_repair_handler",
+                    reason="antenna_height_above_tower",
+                    before={
+                        "sector_id": sector.sector_id,
+                        "install_height_m": sector.install_height_m,
+                    },
+                    after={
+                        "sector_id": new_sector.sector_id,
+                        "install_height_m": new_sector.install_height_m,
+                    },
+                    warning_code="SCENE_SPEC_REPAIRED_ANTENNA_HEIGHT",
+                    success=True,
+                )
+            )
+        normalized_azimuth = sector.azimuth_deg % 360
+        if normalized_azimuth != sector.azimuth_deg:
+            new_sector = new_sector.model_copy(update={"azimuth_deg": normalized_azimuth})
+            events.append(
+                RepairEvent(
+                    attempt=attempt,
+                    handler="scene_repair_handler",
+                    reason="azimuth_out_of_range",
+                    before={"sector_id": sector.sector_id, "azimuth_deg": sector.azimuth_deg},
+                    after={
+                        "sector_id": new_sector.sector_id,
+                        "azimuth_deg": new_sector.azimuth_deg,
+                    },
+                    warning_code="SCENE_SPEC_REPAIRED_AZIMUTH_NORMALIZED",
+                    success=True,
+                )
+            )
+        repaired_sectors.append(new_sector)
+
+    if events:
+        scene = scene.model_copy(update={"sectors": repaired_sectors})
+
+    return scene, RepairReport(status="repaired" if events else "not_needed", events=events)
