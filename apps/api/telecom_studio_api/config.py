@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     embedding_model: str = "baai/bge-m3"
     nvidia_api_key: str | None = Field(default=None, repr=False)
     allow_blender_fallback: bool = False
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 
     @property
     def manifests_dir(self) -> Path:
@@ -54,6 +55,10 @@ class Settings(BaseSettings):
     @property
     def resolved_blender_binary(self) -> str:
         return os.getenv("BLENDER_BINARY") or self.blender_binary
+
+    @property
+    def resolved_cors_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
 
 def _read_env_file_value(path: Path, names: list[str]) -> str | None:

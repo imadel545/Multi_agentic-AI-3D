@@ -29,7 +29,7 @@
   classification, PDF text/table extraction, selected OCR, DXF parsing with layer provenance,
   bounded Groq document extraction when configured, conflict/missing detection,
   `ProjectDesignSpec`, manual corrections, document-pack QA, direct `RequirementSpec` generation,
-  trace/events, and frontend-ready endpoints.
+  trace/events, and backend endpoints available for a future frontend.
 - Document-pack accessory mapping: confirmed GPS antenna and power-cabinet evidence is carried into
   `RequirementSpec`, `SceneSpec.visual_elements`, and manifest-backed `SceneSpec.accessory_assets`
   without RAG-driven decorative activation.
@@ -44,8 +44,10 @@
 ## Available With Fallback
 
 - Groq extraction falls back to deterministic parser.
-- FastEmbed setting falls back to deterministic hashing if FastEmbed is not installed.
-- Blender generation falls back explicitly if Blender is absent or fails.
+- NVIDIA BGE-M3 embedding falls back to local `sentence-transformers`, then deterministic hash as
+  emergency/test fallback.
+- Blender generation falls back explicitly if Blender is absent or fails; fallback is not a valid
+  product result by default.
 - Missing asset files fall back to procedural geometry only when the manifest allows it, and the
   fallback is visible in `scene_metadata.json`, QA, and API status.
 - Current internal cleaned/minimal assets support MVP visuals but are not vendor-grade.
@@ -74,15 +76,14 @@
 - Wire standalone prompt/document controls for mounting bracket and cable-tray accessory placement.
 - Add exact imported-asset bounding-box, pivot, mount-point, material, and LOD validation.
 - Wire cleanup TTL into an explicit CLI/admin action and add SQLite row cleanup.
-- Continue frontend Agentic 3D Studio hardening: resizable panels, command palette, semantic object
-  metadata inspector, polished document correction flows, and E2E smoke coverage.
+- Rebuild frontend from scratch as chat-first / 3D-first after backend truth surfaces are stable.
 - Add Docling layout extraction only with timeout/cost controls.
 - Add production-grade table extraction for equipment inventories.
 - Use document-pack memory recall to suggest recurring corrections and APD conflict resolutions.
 - Add non-committed edit preview/apply workflow if the frontend needs preview before activation.
 - Replace internal/minimal assets with licensed vendor-grade telecom GLBs where possible and keep
   attribution/source metadata visible.
-- Add richer Qdrant payload filters and semantic embeddings as default.
+- Add richer Qdrant payload filters and evaluate domain-specific retrieval quality.
 - Add comparative design variants.
 - Add exact GLB transform, bounding-box, and material validation for imported vendor assets.
 - Add rendered preview visual semantic checks.

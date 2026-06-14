@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from apps.api.telecom_studio_api import main as api_main
 from core.rag.embeddings import HashEmbeddingProvider
 from core.rag.reranker import PassthroughReranker
+from core.rag.service import RagIndexCompatibilityError
 
 
 def test_rag_api_reindex_and_search(tmp_path: Path) -> None:
@@ -48,3 +49,18 @@ def test_rag_api_reindex_and_search(tmp_path: Path) -> None:
         api_main.rag_service._reranker = original_reranker
         api_main.rag_service.qdrant_path = original_path
         api_main.rag_service._client = original_client
+
+
+def test_rag_api_reports_dimension_mismatch(monkeypatch) -> None:
+    def _raise_dimension_mismatch(*args, **kwargs):
+        raise RagIndexCompatibilityError("RAG index vector dimension is incompatible.")
+
+    monkeypatch.setattr(api_main.rag_service, "search", _raise_dimension_mismatch)
+    client = TestClient(api_main.app)
+
+    response = client.get("/rag/search", params={"q": "pylône treillis 5G"})
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "RAG_INDEX_DIMENSION_MISMATCH"
+    assert "POST /rag/reindex" in detail["recommended_action"]

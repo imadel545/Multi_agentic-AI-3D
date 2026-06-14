@@ -150,6 +150,9 @@ class CurrentOperation(BaseModel):
     current_operation: str
     next_recommended_action: str
     progress_indicator: str | None = None
+    current_phase: str | None = None
+    current_node: str | None = None
+    event_source: str = "status"
 
 
 class ViewerArtifact(BaseModel):
@@ -163,6 +166,11 @@ class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
     active_version: str | None = None
+    generation_mode: str | None = None
+    qa_score: float | None = None
+    asset_import_summary: dict | None = None
+    human_warnings_count: int = 0
+    human_errors_count: int = 0
     viewer_artifacts: list[ViewerArtifact]
 
 
@@ -196,6 +204,9 @@ class StudioSummary(BaseModel):
     failed_designs: int
     pending_designs: int
     asset_inventory_status: str
+    asset_count: int = 0
+    real_glb_asset_count: int = 0
+    missing_file_count: int = 0
     blender_available: bool | None = None
     groq_available: bool | None = None
     warnings: list[UserIssue] = Field(default_factory=list)

@@ -38,6 +38,7 @@ class WorkflowService:
         self.cleanup_service = CleanupService(outputs_dir)
         self.diff_engine = DiffEngine()
         self._lock = threading.Lock()
+        self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
     def _sync_output_services(self) -> None:
         if self.versioning.outputs_dir == self.outputs_dir:
@@ -45,6 +46,7 @@ class WorkflowService:
         self.versioning = SceneVersioningService(self.outputs_dir)
         self.event_log = EventLogService(self.outputs_dir)
         self.cleanup_service = CleanupService(self.outputs_dir)
+        self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
     def create_design(
         self,
@@ -66,7 +68,6 @@ class WorkflowService:
 
         def _run() -> None:
             try:
-                self.event_log.emit(workflow_id, "blender_started", {"node": "generate_blender"})
                 result = self.orchestrator.run(
                     workflow_id=workflow_id,
                     requirements_text=requirements_text,
@@ -179,7 +180,6 @@ class WorkflowService:
                     "validated_requirements_received",
                     {"source": source_label, "node": "use_validated_requirements"},
                 )
-                self.event_log.emit(workflow_id, "blender_started", {"node": "generate_blender"})
                 result = self.orchestrator.run_requirements(
                     workflow_id=workflow_id,
                     requirements=requirements,
@@ -478,11 +478,6 @@ class WorkflowService:
                 "version_id": version.version_id,
                 "parent_version_id": active_version.version_id,
             },
-        )
-        self.event_log.emit(
-            workflow_id,
-            "blender_started",
-            {"trigger": "edit", "version_id": version.version_id, "node": "generate_blender"},
         )
         result = self.orchestrator.run_scene_revision(
             workflow_id=workflow_id,

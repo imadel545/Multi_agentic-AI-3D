@@ -1,43 +1,58 @@
 # Known Limitations
 
-Liste honnête des limitations actuelles.  
-Ces limitations sont connues et doivent rester visibles pour les utilisateurs et les agents.
+Limitations actives à garder visibles dans l'API, les rapports et le futur frontend.
 
----
+## Bloquants avant frontend avancé
 
-## Backend
+- Product API encore à surveiller: elle doit refléter les vrais warnings, assets et events.
+- Aucun frontend opérationnel; ancien dashboard refusé.
+- `events/stream` est `polling_sse`, pas vrai streaming push.
+- Timeline runtime dépend des events de nœuds + trace fichier; pas encore de reprise/replay robuste.
+- Les 3 tours monopole/rooftop/small-cell n'ont pas de GLB local.
 
-- **Fallback Blender non bloquant** : sans Blender, le backend génère des artefacts fallback (GLB texte, PNG procédural) et la QA peut les valider. C'est une faille critique.
-- **Extraction déterministe fragile** : `core/services/requirement_parser.py` repose sur des regex. Les cahiers des charges complexes, les synonymes, et les tableaux sont mal traités.
-- **RAG limité** : NVIDIA API `baai/bge-m3` par défaut ; fallback local `sentence-transformers` ; hash déterministe en dernier recours. Pas de re-ranking ni de modèle spécialisé telecom.
-- **Mémoire par matching exact** : le recall mémoire utilise `network_type`, `tower_type`, `sector_count`, pas de similarité sémantique.
-- **Agents non agentiques** : la plupart des "agents" sont des fonctions déterministes ou des wrappers LLM sans réflexion multi-étapes.
-- **LangGraph contourné** : `run_requirements` et `run_scene_revision` exécutent la logique en impératif hors graphe.
-- **Document pack synchrone** : upload 80 Mo max, tout chargé en mémoire.
-- **DWG non supporté nativement** : nécessite `dwgread` ou un convertisseur externe.
-- **Docling non actif par défaut** : installable mais non utilisé par défaut à cause du poids/cache.
-- **OCR limité** : 8 pages max par document.
-- **QA géométrique limitée** : vérifie counts, présence, hauteurs, azimuts ; pas de transforms/mesh exacts.
+## Backend et agents
 
-## Frontend
+- Extraction déterministe fragile sur cahiers des charges complexes.
+- Groq améliore l'extraction seulement si une clé réelle est configurée.
+- Les agents sont majoritairement des fonctions déterministes ou wrappers LLM.
+- Certains chemins contournent le graphe LangGraph compilé.
+- Pas de cancellation/retry manager robuste; exécution async par thread local.
 
-- **Aucun frontend opérationnel** : l'ancien frontend sous `apps/frontend` a été supprimé.
-- **Pas de vrai SSE** : le backend fait du polling ; le futur frontend devra gérer cette limitation.
-- L'API produit backend est prête, mais le frontend chat-first / 3D-first n'est pas encore reconstruit.
+## RAG et mémoire
 
-## Assets
+- NVIDIA `baai/bge-m3` est le provider principal.
+- Fallback local `sentence-transformers`, puis hash en dernier recours; le hash n'est pas une
+  qualité production.
+- Après changement de provider/dimension, l'index Qdrant local doit être reconstruit avec
+  `POST /rag/reindex`; sinon `/rag/search` retourne `409 RAG_INDEX_DIMENSION_MISMATCH`.
+- Reranker local best-effort; passthrough si modèle indisponible.
+- Mémoire encore limitée, avec recall sémantique incomplet.
 
-- **Non vendor-grade** : la plupart des assets sont internes/CC-BY.
-- **Monopole/rooftop/small-cell** : générés en interne, pas des modèles vendor.
+## Documents
 
-## 3D
+- Document-pack synchrone, 80 Mo max.
+- OCR limité et dépendant de Tesseract + langues installées.
+- Docling est import-only/non actif par défaut.
+- DXF extrait texte/couches; DWG dépend d'un convertisseur local.
 
-- **Visual realism limitée** : dépend de la bibliothèque d'assets internes.
-- **Preview Blender** : cadrage basique, pas de jugement esthétique automatique.
+## 3D et QA
 
-## Correctifs prioritaires
+- Blender réel est requis pour un vrai GLB.
+- Fallback Blender est refusé par défaut, mais des assets manquants peuvent encore devenir
+  géométrie procédurale visible pendant une génération Blender réelle.
+- QA actuelle:
+  - `glb_parse_structural`
+  - `object_name_based_geometry`
+  - `metadata_based_height_azimuth`
+  - `preview_luminance_only`
+- Pas encore de validation exacte des transforms, matériaux ou dimensions mesh.
+- Assets internes/CC-BY non vendor-grade.
 
-1. Empêcher les fallback d'être validés comme succès.
-2. Renforcer l'extraction par LLM structuré pour les vrais cahiers des charges.
-3. Passer à un vrai embedding sémantique.
-4. Reconstruire le frontend chat-first / 3D-first.
+## Ce qui peut attendre
+
+- WebSocket.
+- Queue/job manager.
+- Refonte LangGraph complète.
+- Mesh-level QA avancée.
+- Docling production.
+- Nouveau frontend.

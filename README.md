@@ -3,7 +3,7 @@
 Local-first pipeline for transforming telecom requirements into a validated `SceneSpec`, controlled 3D generation artifacts, and compliance reports.
 
 > ⚠️ **Frontend removed.**<br>
-> The old frontend under `apps/frontend` has been deleted. A chat-first / 3D-first frontend will be rebuilt later.<br>
+> The old frontend has been deleted/refused. `apps/frontend` is not an operational app. A chat-first / 3D-first frontend will be rebuilt later only after backend truth fixes.<br>
 > See `docs/PROJECT_SOURCE_OF_TRUTH.md` for the single source of truth, `docs/BACKEND_CAPABILITY_MATRIX.md` for backend capabilities, and `docs/KNOWN_LIMITATIONS.md` for honest limitations.
 
 ---
@@ -15,6 +15,7 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - Plans a controlled 3D scene (`SceneSpec`).
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.
+- Current geometry QA is proxy/metadata based, not exact mesh-transform QA.
 - Supports prompt edits, versioning, and rollback.
 
 ## What it does not do yet
@@ -39,6 +40,9 @@ uvicorn apps.api.telecom_studio_api.main:app --reload
 ```
 
 Open API docs at `http://127.0.0.1:8000/docs`.
+
+Default CORS is local only: `http://127.0.0.1:5173,http://localhost:5173`.
+Override with `TELECOM_STUDIO_CORS_ORIGINS` when a future frontend uses a different local origin.
 
 ### Optional: Blender
 
@@ -125,6 +129,6 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 12 manifests with local GLBs, mostly internal/CC-BY, not vendor-grade.
-- Product API: `/studio/summary`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` are available.
+- Assets: 12 manifests, 9 local GLBs, 3 missing tower GLBs, `partial_import_ready`, not vendor-grade.
+- Product API: `/studio/summary`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` are available and must stay truthful.
 - Frontend: old dashboard frontend deleted; rebuild planned as chat-first / 3D-first.

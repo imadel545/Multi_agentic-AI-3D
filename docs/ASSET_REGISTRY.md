@@ -1,40 +1,30 @@
 # Asset Registry
 
-The asset registry is manifest-first. Blender assets are selected only through validated
-JSON manifests in `assets/manifests`.
+Le registre est manifest-first. Blender ne sélectionne que des assets décrits dans
+`assets/manifests`.
 
-Manifest fields:
+## Vérité actuelle
 
-- `asset_id`
-- `type`
-- `file`
-- `height_m`
-- `dimensions_m`
-- `compatible_networks`
-- `compatible_tower_types`
-- `mount_zones`
-- `status`
-- `version`
-- `source`
-- `import_fallback_allowed`
+- 12 manifests.
+- 9 fichiers GLB locaux présents.
+- 3 fichiers GLB manquants:
+  - `TOWER_MONOPOLE_30M`
+  - `TOWER_ROOFTOP_12M`
+  - `TOWER_SMALL_CELL_10M`
+- `/assets/inventory` doit retourner `status = partial_import_ready`.
+- Les entrées manquantes ont `effective_generation_mode = procedural_fallback` quand le manifest
+  l'autorise.
 
-Only `status = validated` assets are eligible for automatic selection.
+## Sources
 
-Implemented:
+- `cc_by`: attribution requise, non vendor-grade.
+- `internal_cleaned`: importable mais interne, non vendor-grade.
+- `internal_test_minimal`: asset minimal de validation pipeline, non vendor-grade.
 
-- Two internal minimal GLB files are present for pipeline validation:
-  - `ANT_PANEL_5G_001`
-  - `RRU_SMALL_001`
-- Inventory reports these as `imported_glb` readiness and warns that they are
-  `internal_test_minimal`, not vendor-grade.
-- Missing manifest files are reported as `missing_file`, with `effective_generation_mode =
-  procedural_fallback` when fallback is allowed.
+## Règles
 
-Current limitation:
-
-- Vendor-grade tower, 4G panel, and microwave dish GLB files are not present yet.
-- The Blender worker imports available GLBs and uses controlled procedural fallback for missing
-  files only when the manifest allows it.
-
-See `docs/ASSET_PIPELINE.md` and `docs/ASSET_STRATEGY.md` for import standards, replacement plan,
-and quality requirements.
+- Ne pas présenter un fallback procédural comme un asset réel.
+- Ne pas sélectionner un asset absent sans warning utilisateur.
+- Garder `entries`, `missing_files`, `real_glb_asset_count` et `missing_file_count` stables
+  pour le frontend.
+- Remplacer les tours manquantes par des GLB réels avant validation produit.

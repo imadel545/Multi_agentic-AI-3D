@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,9 @@ from core.validation.quality_gates import (
     evaluate_post_blender_gate,
     evaluate_pre_blender_gate,
 )
+
+RuntimeEventSink = Callable[[str, str, dict], Any]
+_RUNTIME_EVENT_SINKS: dict[str, RuntimeEventSink] = {}
 
 
 class WorkflowState(TypedDict, total=False):
@@ -123,6 +127,7 @@ class DesignOrchestrator:
         memory_service: MemoryService | None = None,
         checkpoint_saver: Any | None = None,
         allow_blender_fallback: bool = False,
+        runtime_event_sink: RuntimeEventSink | None = None,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -130,6 +135,7 @@ class DesignOrchestrator:
         self.memory_service = memory_service
         self.blender_runner = blender_runner
         self.allow_blender_fallback = allow_blender_fallback
+        self.runtime_event_sink = runtime_event_sink
         self.checkpoint_saver = checkpoint_saver
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
@@ -140,6 +146,16 @@ class DesignOrchestrator:
         self.geometry_validator = GLBGeometryValidator()
         self.preview_inspector = PreviewInspector()
         self.graph = self._build_graph()
+
+    def set_runtime_event_sink(self, runtime_event_sink: RuntimeEventSink | None) -> None:
+        self.runtime_event_sink = runtime_event_sink
+
+    def _register_runtime_event_sink(self, workflow_id: str) -> None:
+        if self.runtime_event_sink is not None:
+            _RUNTIME_EVENT_SINKS[workflow_id] = self.runtime_event_sink
+
+    def _clear_runtime_event_sink(self, workflow_id: str) -> None:
+        _RUNTIME_EVENT_SINKS.pop(workflow_id, None)
 
     def run(
         self,
@@ -165,7 +181,11 @@ class DesignOrchestrator:
             "scene_repair_recorded": False,
             "route_history": [],
         }
-        state = self.graph.invoke(initial_state, config=config)
+        self._register_runtime_event_sink(workflow_id)
+        try:
+            state = self.graph.invoke(initial_state, config=config)
+        finally:
+            self._clear_runtime_event_sink(workflow_id)
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -203,61 +223,65 @@ class DesignOrchestrator:
             "quality_gate_reports": [],
             "cache_metrics": self._cache_metrics(),
         }
-        state["trace"] = _trace(state, "use_validated_requirements", source_label, started)
+        self._register_runtime_event_sink(workflow_id)
+        try:
+            state["trace"] = _trace(state, "use_validated_requirements", source_label, started)
 
-        self._apply_update(state, self._retrieve_rag_context(state))
-        if self.memory_service is not None:
-            self._apply_update(state, self._memory_recall(state))
+            self._apply_update(state, self._retrieve_rag_context(state))
+            if self.memory_service is not None:
+                self._apply_update(state, self._memory_recall(state))
 
-        self._apply_update(state, self._select_assets(state))
-        if _asset_route(state) == "asset_fallback":
-            self._apply_update(state, self._asset_fallback_handler(state))
-            if _asset_fallback_route(state) != "continue":
+            self._apply_update(state, self._select_assets(state))
+            if _asset_route(state) == "asset_fallback":
+                self._apply_update(state, self._asset_fallback_handler(state))
+                if _asset_fallback_route(state) != "continue":
+                    state["total_duration_ms"] = _duration_ms(started)
+                    return _result_from_state(state)
+
+            self._apply_update(state, self._validate_requirements(state))
+            if _requirements_route(state) != "continue":
+                self._apply_update(state, self._rule_violation_handler(state))
                 state["total_duration_ms"] = _duration_ms(started)
                 return _result_from_state(state)
 
-        self._apply_update(state, self._validate_requirements(state))
-        if _requirements_route(state) != "continue":
-            self._apply_update(state, self._rule_violation_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._plan_scene(state))
-        self._apply_update(state, self._validate_scene(state))
-        if _scene_route(state) != "continue":
-            self._apply_update(state, self._scene_repair_handler(state))
-            if _scene_repair_route(state) == "retry":
-                self._apply_update(state, self._validate_scene(state))
+            self._apply_update(state, self._plan_scene(state))
+            self._apply_update(state, self._validate_scene(state))
             if _scene_route(state) != "continue":
+                self._apply_update(state, self._scene_repair_handler(state))
+                if _scene_repair_route(state) == "retry":
+                    self._apply_update(state, self._validate_scene(state))
+                if _scene_route(state) != "continue":
+                    state["total_duration_ms"] = _duration_ms(started)
+                    return _result_from_state(state)
+
+            self._apply_update(state, self._pre_blender_gate(state))
+            if _pre_blender_gate_route(state) != "continue":
+                self._apply_update(state, self._quality_gate_failure_handler(state))
                 state["total_duration_ms"] = _duration_ms(started)
                 return _result_from_state(state)
 
-        self._apply_update(state, self._pre_blender_gate(state))
-        if _pre_blender_gate_route(state) != "continue":
-            self._apply_update(state, self._quality_gate_failure_handler(state))
+            self._apply_update(state, self._generate_blender(state))
+            if _generation_route(state) == "blender_failure":
+                self._apply_update(state, self._blender_failure_handler(state))
+
+            self._apply_update(state, self._qa_generation(state))
+            if _qa_route(state) != "continue":
+                self._apply_update(state, self._qa_failure_handler(state))
+                state["total_duration_ms"] = _duration_ms(started)
+                return _result_from_state(state)
+
+            self._apply_update(state, self._post_blender_gate(state))
+            if _post_blender_gate_route(state) != "continue":
+                self._apply_update(state, self._quality_gate_failure_handler(state))
+                state["total_duration_ms"] = _duration_ms(started)
+                return _result_from_state(state)
+
+            if self.memory_service is not None:
+                self._apply_update(state, self._memory_writeback(state))
             state["total_duration_ms"] = _duration_ms(started)
             return _result_from_state(state)
-
-        self._apply_update(state, self._generate_blender(state))
-        if _generation_route(state) == "blender_failure":
-            self._apply_update(state, self._blender_failure_handler(state))
-
-        self._apply_update(state, self._qa_generation(state))
-        if _qa_route(state) != "continue":
-            self._apply_update(state, self._qa_failure_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._post_blender_gate(state))
-        if _post_blender_gate_route(state) != "continue":
-            self._apply_update(state, self._quality_gate_failure_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            return _result_from_state(state)
-
-        if self.memory_service is not None:
-            self._apply_update(state, self._memory_writeback(state))
-        state["total_duration_ms"] = _duration_ms(started)
-        return _result_from_state(state)
+        finally:
+            self._clear_runtime_event_sink(workflow_id)
 
     def run_scene_revision(
         self,
@@ -293,6 +317,7 @@ class DesignOrchestrator:
             "extraction_fallback_used": False,
             "extraction_error": None,
         }
+        self._register_runtime_event_sink(workflow_id)
         try:
             scene = _scene_with_required_accessories(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
@@ -318,6 +343,7 @@ class DesignOrchestrator:
                 }
             )
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         state.update(
@@ -348,18 +374,21 @@ class DesignOrchestrator:
         if _requirements_route(state) != "continue":
             self._apply_update(state, self._rule_violation_handler(state))
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         self._apply_update(state, self._validate_scene(state))
         if _scene_route(state) != "continue":
             self._apply_update(state, self._scene_repair_handler(state))
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         self._apply_update(state, self._pre_blender_gate(state))
         if _pre_blender_gate_route(state) != "continue":
             self._apply_update(state, self._quality_gate_failure_handler(state))
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         self._apply_update(state, self._generate_blender(state))
@@ -370,17 +399,20 @@ class DesignOrchestrator:
         if _qa_route(state) != "continue":
             self._apply_update(state, self._qa_failure_handler(state))
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         self._apply_update(state, self._post_blender_gate(state))
         if _post_blender_gate_route(state) != "continue":
             self._apply_update(state, self._quality_gate_failure_handler(state))
             state["total_duration_ms"] = _duration_ms(started)
+            self._clear_runtime_event_sink(workflow_id)
             return _result_from_state(state)
 
         if self.memory_service is not None:
             self._apply_update(state, self._memory_writeback(state))
         state["total_duration_ms"] = _duration_ms(started)
+        self._clear_runtime_event_sink(workflow_id)
         return _result_from_state(state)
 
     def _build_graph(self):
@@ -1415,7 +1447,53 @@ def _trace(
         route=route,
         attempt=attempt,
     )
+    _emit_node_runtime_event(state, step)
     return state.get("trace", []) + [step.model_dump()]
+
+
+def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None:
+    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    if sink is None:
+        return
+    event_type = {
+        "failed": "node_failed",
+        "skipped": "node_skipped",
+    }.get(step.status, "node_completed")
+    sink(
+        state["workflow_id"],
+        event_type,
+        {
+            "node": step.node,
+            "phase": _phase_for_node(step.node),
+            "status": step.status,
+            "detail": step.detail,
+            "duration_ms": step.duration_ms,
+            "warnings": step.warnings,
+            "errors": step.errors,
+            "route": step.route,
+            "attempt": step.attempt,
+        },
+    )
+
+
+def _phase_for_node(node: str) -> str:
+    if node in {"extract_requirements", "use_validated_requirements", "validate_requirements"}:
+        return "requirements"
+    if node == "retrieve_rag_context":
+        return "rag"
+    if node in {"memory_recall", "memory_writeback"}:
+        return "memory"
+    if node in {"select_assets", "asset_fallback_handler"}:
+        return "assets"
+    if node in {"plan_scene", "validate_scene", "scene_repair_handler"}:
+        return "scene"
+    if node in {"pre_blender_gate", "post_blender_gate", "quality_gate_failure_handler"}:
+        return "quality_gate"
+    if node in {"generate_blender", "blender_failure_handler"}:
+        return "blender"
+    if node in {"qa_generation", "qa_failure_handler"}:
+        return "qa"
+    return "workflow"
 
 
 def _duration_ms(started: float) -> int:

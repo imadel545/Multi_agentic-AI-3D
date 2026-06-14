@@ -1,78 +1,69 @@
 # RAG Strategy
 
-RAG is implemented with Qdrant through `core/rag`. The default mode uses Qdrant local
-storage at `data/qdrant`; setting `TELECOM_STUDIO_QDRANT_URL` switches the service to a
-running Qdrant instance, such as the Docker service in `infra/docker-compose.yml`.
+RAG est advisory: il enrichit le contexte, mais ne contourne jamais le rule engine,
+l'asset registry, le `SceneSpec` validator ou les quality gates.
 
-Target collections:
+## Provider principal
 
-- `telecom_rules`
-- `asset_manifests`
-- `scene_templates`
-- `validation_cases`
-- `design_patterns`
-- `blender_generation_guides`
+- Provider: NVIDIA API.
+- Modèle: `baai/bge-m3`.
+- Objectif: recherche sémantique multilingue, notamment cahiers des charges français.
+- Dimension attendue: 1024.
 
-RAG will supply context to agents, but final decisions remain controlled by:
+Configuration publique sans secret:
 
 ```text
-Rule Engine -> Asset Registry -> SceneSpec Validator -> QA Agent
+NVIDIA_API_KEY=<your-nvidia-api-key>
+TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
+TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
 ```
 
-Scene planning only accepts RAG-driven modifications through structured
-`payload.planning_hints`. The planner no longer parses arbitrary retrieved text for dimensions,
-GPS, cabinet, cables, or beamwidth. This keeps RAG useful as a controlled signal instead of a
-silent scene mutator.
+## Fallback chain
 
-## Embedding Provider
+1. NVIDIA API `baai/bge-m3`.
+2. Local `sentence-transformers` avec `baai/bge-m3`.
+3. Hash déterministe d'urgence/test uniquement.
 
-Completed:
+`TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY=1` refuse le fallback hash quand la qualité
+sémantique est obligatoire.
 
-- Qdrant local mode under `data/qdrant`.
-- Optional Qdrant URL through `TELECOM_STUDIO_QDRANT_URL`.
-- Reindexing of knowledge files, asset manifests, and project docs.
-- Search across all collections.
-- Filtered search by `network_type`, `tower_type`, and `doc_type`.
-- Deterministic hashing embedding as the local fallback.
-- Eval tests under `tests/rag_eval` for:
-  - `5G lattice tower 3 sectors`
-  - `microwave dish on lattice tower`
-  - `small cell pole`
-- Unit coverage for structured planning hints and rejection of unstructured decorative hints.
-- Compact document-pack memory summaries are written as JSON artifacts, SQLite metadata rows, and
-  optional Qdrant runtime `document_pack_memory` points.
+## Reranker
 
-Available with fallback:
+- `core/rag/reranker.py` tente `BAAI/bge-reranker-v2-m3` en local.
+- Si le modèle ou ses dépendances ne sont pas disponibles, le reranker devient passthrough.
+- Ce mode est best-effort et doit rester visible dans les diagnostics.
 
-- `TELECOM_STUDIO_EMBEDDING_PROVIDER=fastembed` attempts to use FastEmbed when installed.
-- If FastEmbed is unavailable, the service falls back to deterministic hashing.
+## Stockage
 
-Settings:
+- Qdrant local par défaut sous `data/qdrant`.
+- `TELECOM_STUDIO_QDRANT_URL` permet une instance Qdrant externe.
+- Collections statiques: règles telecom, manifests assets, templates, cas validation,
+  patterns design, guides Blender.
+- Collection runtime possible: `document_pack_memory`.
 
-```bash
-TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic|fastembed
-TELECOM_STUDIO_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
-```
+## Ce que RAG peut faire
 
-The deterministic provider is an MVP fallback, not semantic production embedding quality.
+- Retrouver des assets, règles et exemples proches d'une demande.
+- Fournir des `payload.planning_hints` structurés au planner.
+- Améliorer les requêtes françaises et mixtes via BGE-M3.
 
-## Known Limitations
+## Ce que RAG ne doit pas faire
 
-- RAG context is advisory and cannot bypass the rule engine, asset registry, SceneSpec validator, or
-  quality gates.
-- RAG does not add GPS/power cabinet by text match. Those objects require explicit SceneSpec flags
-  from the user prompt/edit or a future typed rule.
-- Current seeds are small. Retrieval quality depends heavily on explicit seed text until a stronger
-  embedding provider and larger domain corpus are used.
-- Runtime memory collections are separate from static `/rag/reindex` collections.
-- Document-pack memory can be indexed into Qdrant collection `document_pack_memory` when a RAG
-  service is configured. This runtime collection is compact and not part of static `/rag/reindex`.
-- Document-pack Groq extraction is active only when a Groq client/key is configured. It is bounded,
-  evidence-checked, and cannot override provenance, resolver decisions, conflicts, or QA.
+- Muter silencieusement la scène par texte libre.
+- Ajouter GPS/cabinet/câbles sans signal structuré.
+- Masquer un fallback embedding.
+- Remplacer les validations déterministes.
 
-## API
+## Tests attendus
 
-- `POST /rag/reindex`: indexes knowledge files, asset manifests, and project docs.
-- `GET /rag/search?q=5G+lattice+tower+3+sectors`: searches all RAG collections.
-- `GET /rag/search?...&network_type=5G&tower_type=lattice_tower&doc_type=asset_manifest`
-  applies metadata filters.
+- Recherche française avec NVIDIA BGE-M3 quand la clé est présente.
+- Fallback explicite quand NVIDIA est indisponible.
+- Filtrage par `network_type`, `tower_type`, `doc_type`.
+- Rejet des hints décoratifs non structurés.
+
+## Index compatibility
+
+Un index Qdrant local créé avec un ancien provider ou une ancienne dimension d'embedding
+est incompatible avec NVIDIA BGE-M3 (`1024` dimensions). Dans ce cas, `/rag/search` doit
+retourner `409 RAG_INDEX_DIMENSION_MISMATCH` avec action recommandée `POST /rag/reindex`,
+pas un 500 et pas un fallback silencieux.

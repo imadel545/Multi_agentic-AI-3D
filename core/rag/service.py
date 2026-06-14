@@ -36,6 +36,10 @@ RUNTIME_MEMORY_COLLECTIONS = [
 ]
 
 
+class RagIndexCompatibilityError(RuntimeError):
+    """Raised when a persisted Qdrant index was built with another embedding dimension."""
+
+
 class RagService:
     def __init__(
         self,
@@ -126,13 +130,22 @@ class RagService:
         for collection_name in collections:
             if not self.client.collection_exists(collection_name):
                 continue
-            response = self.client.query_points(
-                collection_name=collection_name,
-                query=vector,
-                limit=limit,
-                with_payload=True,
-                query_filter=_build_filter(filters),
-            )
+            try:
+                response = self.client.query_points(
+                    collection_name=collection_name,
+                    query=vector,
+                    limit=limit,
+                    with_payload=True,
+                    query_filter=_build_filter(filters),
+                )
+            except ValueError as exc:
+                if _is_vector_dimension_mismatch(exc):
+                    raise RagIndexCompatibilityError(
+                        "RAG index vector dimension is incompatible with the active "
+                        f"embedding provider ({self.embedding_provider.name}, "
+                        f"{self.embedding_provider.dimensions} dimensions). Run /rag/reindex."
+                    ) from exc
+                raise
             for point in response.points:
                 payload = point.payload or {}
                 text = str(payload.get("text", ""))
@@ -256,3 +269,8 @@ def _build_filter(filters: dict[str, str | int | float | bool | None] | None) ->
     if not conditions:
         return None
     return Filter(must=conditions)
+
+
+def _is_vector_dimension_mismatch(exc: ValueError) -> bool:
+    message = str(exc)
+    return "shapes" in message and "not aligned" in message

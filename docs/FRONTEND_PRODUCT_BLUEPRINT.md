@@ -62,5 +62,5 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 ## Statut
 
 - L'ancien frontend a été supprimé.
-- Les endpoints produit backend sont prêts (`/studio/summary`, `/designs/{id}/user-summary`, etc.).
+- Les endpoints produit backend existent, mais doivent rester sous tests de vérité avant frontend.
 - Le frontend chat-first / 3D-first n'est pas encore implémenté.

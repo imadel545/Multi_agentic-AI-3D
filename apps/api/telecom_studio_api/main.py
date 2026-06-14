@@ -37,6 +37,7 @@ from core.orchestration import DesignOrchestrator
 from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
+from core.rag.service import RagIndexCompatibilityError
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
@@ -56,7 +57,7 @@ app = FastAPI(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.resolved_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -545,19 +546,27 @@ def rag_search(
 ) -> dict:
     if limit < 1 or limit > 25:
         raise HTTPException(status_code=422, detail="limit must be between 1 and 25")
+    try:
+        results = rag_service.search(
+            query=q,
+            limit=limit,
+            collection=collection,
+            filters={
+                "network_type": network_type,
+                "tower_type": tower_type,
+                "doc_type": doc_type,
+            },
+        )
+    except RagIndexCompatibilityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RAG_INDEX_DIMENSION_MISMATCH",
+                "message": str(exc),
+                "recommended_action": "Run POST /rag/reindex with the active embedding provider.",
+            },
+        ) from exc
     return {
         "query": q,
-        "results": [
-            result.model_dump()
-            for result in rag_service.search(
-                query=q,
-                limit=limit,
-                collection=collection,
-                filters={
-                    "network_type": network_type,
-                    "tower_type": tower_type,
-                    "doc_type": doc_type,
-                },
-            )
-        ],
+        "results": [result.model_dump() for result in results],
     }

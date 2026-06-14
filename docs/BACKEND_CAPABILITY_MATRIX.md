@@ -1,51 +1,37 @@
 # Backend Capability Matrix
 
-Matrice des capacités backend avec statut précis, preuve, limitation et signification frontend.
+Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
+`UNSUPPORTED_WITHOUT_TOOL`, `ADVISORY`, `FUTURE`, `REJECTED`.
 
-Légende des status :
-
-- `IMPLEMENTED` : opérationnel dans le code et les tests.
-- `IMPLEMENTED_LIMITED` : opérationnel mais avec des limites significatives.
-- `IMPORT_ONLY` : dépendance installable/importable mais non active par défaut.
-- `UNSUPPORTED_WITHOUT_TOOL` : nécessite un outil externe non inclus.
-- `ADVISORY` : fournit du contexte mais ne décide pas.
-- `FUTURE` : pas implémenté.
-- `REJECTED` : explicitement hors scope.
-
----
-
-| Capability | Status | Evidence | Limitation | Frontend Meaning |
-|---|---|---|---|---|
-| requirements_text generation | IMPLEMENTED_LIMITED | `POST /designs`, `core/services/requirement_parser.py` | Parser déterministe basé sur regex ; Groq structuré optionnel. | L'utilisateur peut saisir un brief, mais des cahiers des charges complexes peuvent être mal extraits. |
-| document pack upload | IMPLEMENTED_LIMITED | `POST /document-packs`, `core/document_pack/service.py` | 80 Mo max, chargement synchrone en mémoire. | Upload ZIP possible pour des packs modestes ; pas de streaming. |
-| PDF text extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | PyMuPDF optionnel ; pas de layout structuré. | Texte PDF extrait si outil installé ; tableaux mal normalisés. |
-| PDF table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | pdfplumber optionnel ; extraction texte brute. | Tables converties en texte `\|` ; pas de sémantique d'équipement. |
-| OCR selected extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | 8 pages max par document, Tesseract optionnel. | PDF/images scannées partiellement lues ; limites visibles. |
-| Docling | IMPORT_ONLY | `core/document_pack/text_extractor.py` | Installable via `[document-layout]` mais non utilisé par défaut. | Non fiable en production sans config modèle/cache. |
-| DXF parsing | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | `ezdxf` optionnel ; extraction de texte/couches uniquement. | DXF lu si outil installé ; géométrie CAD non exploitée. |
-| DWG parsing/conversion | UNSUPPORTED_WITHOUT_TOOL | `core/document_pack/cad.py` | Nécessite `dwgread`/LibreDWG ou ODA/FreeCAD. | DWG reste inventory-only sans convertisseur local. |
-| pyproj coordinates | IMPLEMENTED_LIMITED | `core/document_pack/coordinates.py` | `pyproj` optionnel ; conversion CRS limitée. | Coordonnées converties si outil + CRS connus. |
-| Groq bounded extraction | IMPLEMENTED_LIMITED | `core/document_pack/groq_extractor.py` | Nécessite clé Groq ; 12 chunks max, 2500 car/chunk. | Champs extraits par LLM uniquement avec preuve documentaire. |
-| ProjectDesignSpec | IMPLEMENTED | `core/contracts/document_pack.py`, `core/document_pack/extractor.py` | Mapping vers RequirementSpec, pas synthèse directe SceneSpec. | Spec consolidée visible avec preuves, conflits, champs manquants. |
-| RequirementSpec | IMPLEMENTED | `core/contracts/requirements.py` | Construit par parser déterministe ou Groq. | Contrat d'entrée pour la génération 3D. |
-| SceneSpec | IMPLEMENTED | `core/contracts/scene.py` | Source de vérité de la génération. | Description complète de la scène 3D. |
-| Asset inventory | IMPLEMENTED | `GET /assets/inventory`, `core/services/asset_inventory.py` | Assets non vendor-grade. | État d'import GLB, fallback, licences, warnings. |
-| GLB import | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Dépend de l'existence et de la qualité des GLB. | GLB importés quand présents ; fallback procédural sinon. |
-| Blender generation | IMPLEMENTED | `core/services/blender_runner.py` | Nécessite Blender installé localement. | Génération réelle si Blender trouvé ; fallback si absent. |
-| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py` | Vérifie counts, présence, hauteurs, azimuts ; pas de transforms exacts. | QA structurelle mais pas de validation mesh fine. |
-| Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | Stats image (résolution, luminance) ; pas de jugement visuel sémantique. | Preview PNG vérifié mais pas esthétiquement. |
-| Document QA | IMPLEMENTED | `core/document_pack/service.py` | Vérifie preuves, conflits, champs bloquants, plausibilité. | Pack prêt ou bloqué avec raisons. |
-| Edit prompt | IMPLEMENTED_LIMITED | `POST /designs/{id}/edit` | Apply-and-generate, pas de preview non commitée. | Édition par prompt crée une nouvelle version. |
-| Versioning | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem. | Historique des versions avec active flag. |
-| Rollback | IMPLEMENTED | `POST /designs/{id}/versions/{vid}/rollback` | Change le pointeur actif. | Retour à une version antérieure. |
-| Events/SSE | IMPLEMENTED_LIMITED | `GET /designs/{id}/events`, `/events/stream` | SSE backend fait du polling ; frontend utilise aussi du polling. | Pas de vrai temps réel. |
-| Memory writeback | IMPLEMENTED_LIMITED | `core/memory/service.py` | SQLite + Qdrant optionnel ; recall par matching exact. | Apprentissage limité des cas passés. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag/service.py` | NVIDIA API pour `baai/bge-m3` par défaut ; fallback local `sentence-transformers` ; hash déterministe en dernier recours. | Recherche sémantique multilingue (français inclus). |
-| Artifact downloads | IMPLEMENTED | `GET /designs/{id}/artifacts/{name}` | Whitelist de noms d'artifacts. | Téléchargement des GLB, PNG, rapports. |
-| Product-oriented API | IMPLEMENTED | `GET /studio/summary`, `GET /designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` | Couche de présentation au-dessus du statut technique ; ne résout pas les problèmes de fond (fallback Blender, etc.). | Le frontend peut afficher un résumé utilisateur sans parser du JSON technique. |
-
----
+| Capability | Status | Evidence | Limite / vérité frontend |
+|---|---|---|---|
+| Backend API | IMPLEMENTED | `apps/api/telecom_studio_api/main.py` | Local-first, mono-utilisateur. |
+| Product API | IMPLEMENTED_LIMITED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary` | Doit rester honnête: warnings humains, pas de chemins filesystem, timeline issue du runtime. |
+| Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
+| Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py` | Synchrone, 80 Mo, extraction en mémoire. |
+| PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |
+| OCR | IMPLEMENTED_LIMITED | Tesseract + `pytesseract` | Limité à une sélection de pages; langues système requises. |
+| Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
+| DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
+| DWG | UNSUPPORTED_WITHOUT_TOOL | `dwgread`/ODA/FreeCAD detection | Conversion dépend d'outil local. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag` | NVIDIA `baai/bge-m3` principal; fallback local puis hash visible. |
+| Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Local best-effort; passthrough si modèle indisponible. |
+| Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
+| LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Graphe présent, mais certains chemins sont impératifs. |
+| Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 9 GLB, 3 fichiers manquants, `partial_import_ready`. |
+| Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
+| Missing asset fallback | IMPLEMENTED_LIMITED | `apps/blender_worker/generate_scene.py` | Les tours manquantes passent en procédural visible; pas vendor-ready. |
+| GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
+| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py` | `object_name_based_geometry` + `metadata_based_height_azimuth`. |
+| Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | `preview_luminance_only`, pas jugement visuel sémantique. |
+| Repair loop | IMPLEMENTED_LIMITED | `core/orchestration/langgraph_orchestrator.py` | Répare certains défauts de SceneSpec; pas boucle autonome générale. |
+| Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles; contrat runtime local-first. |
+| SSE | IMPLEMENTED_LIMITED | `/events/stream` | `polling_sse`, pas vrai push. |
+| Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur. |
+| Frontend | FUTURE | `apps/frontend` vide ou absent | Ancien dashboard refusé; ne pas reconstruire maintenant. |
 
 ## Synthèse
 
-Le backend a une surface riche et fonctionnelle en local, mais plusieurs capabilities clés restent limitées ou dépendantes d'outils/configurations optionnels. Avant une reconstruction frontend, il faut corriger la validation des fallback Blender et améliorer l'extraction pour les vrais cahiers des charges.
+Le backend est riche et testable, mais le produit n'est pas prêt frontend avancé tant que la
+vérité Product API, les fallbacks assets, la timeline et les docs ne sont pas verrouillés par
+tests et smoke runtime.

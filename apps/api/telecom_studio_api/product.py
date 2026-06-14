@@ -7,9 +7,13 @@ instead of parsing raw JSON technical reports.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
+from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.services.asset_inventory import AssetInventoryService
 
@@ -27,8 +31,8 @@ class ProductService:
         designs = self.workflow_service.list_designs(limit=200, offset=0)
         inventory = self.asset_inventory_service.inspect()
         inventory_status = _inventory_status(inventory)
-        blender_available = _blender_available_from_inventory(inventory)
-        groq_available = _groq_available_from_inventory(inventory)
+        blender_available = _blender_available()
+        groq_available = bool(settings.resolved_groq_api_key)
 
         counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
         summaries = []
@@ -57,6 +61,9 @@ class ProductService:
             "failed_designs": counts["failed"],
             "pending_designs": counts["pending"],
             "asset_inventory_status": inventory_status,
+            "asset_count": int(inventory.get("asset_count") or 0),
+            "real_glb_asset_count": int(inventory.get("real_glb_asset_count") or 0),
+            "missing_file_count": int(inventory.get("missing_file_count") or 0),
             "blender_available": blender_available,
             "groq_available": groq_available,
             "warnings": _studio_warnings(inventory),
@@ -64,13 +71,14 @@ class ProductService:
 
     def user_summary(self, workflow_id: str) -> dict:
         status = self._status_or_raise(workflow_id)
-        issues = _collect_user_issues(status)
+        events = self.workflow_service.get_events(workflow_id)
+        issues = _collect_user_issues(status, events)
         qa_summary = _qa_summary(status)
         next_action = _next_recommended_action(status, issues)
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
-            "current_operation": _current_operation(status),
+            "current_operation": _current_operation(status, events),
             "next_recommended_action": next_action,
             "qa_summary": qa_summary,
             "human_readable_issues": issues,
@@ -82,21 +90,27 @@ class ProductService:
 
     def current_operation(self, workflow_id: str) -> dict:
         status = self._status_or_raise(workflow_id)
-        issues = _collect_user_issues(status)
+        events = self.workflow_service.get_events(workflow_id)
+        issues = _collect_user_issues(status, events)
+        runtime = _current_runtime_state(events)
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
-            "current_operation": _current_operation(status),
+            "current_operation": _current_operation(status, events),
             "next_recommended_action": _next_recommended_action(status, issues),
             "progress_indicator": _progress_indicator(status),
+            "current_phase": runtime.get("phase"),
+            "current_node": runtime.get("node"),
+            "event_source": runtime.get("source", "status"),
         }
 
     def user_issues(self, workflow_id: str) -> dict:
         status = self._status_or_raise(workflow_id)
+        events = self.workflow_service.get_events(workflow_id)
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
-            "human_readable_issues": _collect_user_issues(status),
+            "human_readable_issues": _collect_user_issues(status, events),
         }
 
     def viewer_bundle(self, workflow_id: str) -> dict:
@@ -104,6 +118,7 @@ class ProductService:
         active_version = status.get("active_version_id")
         base_url = f"/designs/{workflow_id}/artifacts"
         viewer_artifacts = []
+        issues = _collect_user_issues(status, self.workflow_service.get_events(workflow_id))
 
         def _artifact(name: str, content_type: str, filename: str) -> dict:
             url = f"{base_url}/{filename}"
@@ -127,6 +142,11 @@ class ProductService:
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
             "active_version": active_version,
+            "generation_mode": status.get("generation_mode"),
+            "qa_score": status.get("qa_score"),
+            "asset_import_summary": status.get("asset_import_summary"),
+            "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
+            "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
             "viewer_artifacts": viewer_artifacts,
         }
 
@@ -163,25 +183,50 @@ class ProductNotFound(Exception):
 
 
 def _inventory_status(inventory: dict) -> str:
-    summaries = inventory.get("asset_summaries", [])
-    if not summaries:
+    status = inventory.get("status")
+    if isinstance(status, str) and status:
+        return status
+    entries = inventory.get("entries", [])
+    if not entries:
         return "unknown"
-    total = len(summaries)
-    ready = sum(1 for s in summaries if s.get("glb_ready"))
-    fallback = sum(1 for s in summaries if s.get("fallback_used"))
+    total = len(entries)
+    ready = sum(1 for entry in entries if entry.get("asset_import_mode") == "imported_glb")
+    fallback = sum(
+        1 for entry in entries if entry.get("effective_generation_mode") == "procedural_fallback"
+    )
     if ready == total and total > 0:
-        return "ready"
+        return "ready_for_import"
     if fallback > 0:
-        return f"partial ({fallback} fallback)"
+        return "partial_import_ready"
     return "incomplete"
 
 
-def _blender_available_from_inventory(inventory: dict) -> bool | None:
-    return inventory.get("blender_available")
+def _blender_available() -> bool:
+    return _resolve_blender_binary(settings.resolved_blender_binary) is not None
 
 
-def _groq_available_from_inventory(inventory: dict) -> bool | None:
-    return inventory.get("groq_available")
+def _resolve_blender_binary(binary: str) -> Path | None:
+    candidates = [os.getenv("BLENDER_BINARY"), binary]
+    if binary == "blender":
+        candidates.extend(
+            [
+                shutil.which("blender"),
+                "/Applications/Blender.app/Contents/MacOS/Blender",
+                "/Applications/Blender 4.5.app/Contents/MacOS/Blender",
+                "/Applications/Blender 4.4.app/Contents/MacOS/Blender",
+                "/Applications/Blender 4.3.app/Contents/MacOS/Blender",
+            ]
+        )
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate).expanduser()
+        if path.exists() and os.access(path, os.X_OK):
+            return path
+        resolved = shutil.which(str(candidate))
+        if resolved:
+            return Path(resolved)
+    return None
 
 
 def _operation_for_status(status: str) -> str:
@@ -194,7 +239,7 @@ def _operation_for_status(status: str) -> str:
     return mapping.get(status, status)
 
 
-def _current_operation(status: dict) -> str:
+def _current_operation(status: dict, events: list[dict] | None = None) -> str:
     backend_status = status.get("status", "unknown")
     metrics = status.get("metrics", {})
     if backend_status == "pending":
@@ -203,10 +248,61 @@ def _current_operation(status: dict) -> str:
         return "Le design a échoué. Consultez les problèmes pour corriger la situation."
     if backend_status == "completed":
         return "Le design est terminé. Vous pouvez l'inspecter en 3D."
+    runtime = _current_runtime_state(events or [])
+    if runtime.get("node"):
+        return runtime["operation"]
     running_step = metrics.get("current_step")
     if running_step:
         return f"Étape en cours : {running_step}"
     return f"Traitement en cours ({backend_status})"
+
+
+def _current_runtime_state(events: list[dict]) -> dict:
+    for event in reversed(events):
+        event_type = event.get("event_type")
+        payload = event.get("payload")
+        if event_type in {"node_completed", "node_failed", "node_skipped"} and isinstance(
+            payload, dict
+        ):
+            node = payload.get("node")
+            if not isinstance(node, str):
+                continue
+            return {
+                "node": node,
+                "phase": payload.get("phase"),
+                "source": "runtime_events",
+                "operation": _next_operation_after_node(node, payload),
+                "node_status": payload.get("status"),
+            }
+    return {"source": "status"}
+
+
+def _next_operation_after_node(node: str, payload: dict) -> str:
+    if payload.get("status") == "failed":
+        return f"Échec pendant : {_trace_node_label(node)}."
+    next_step = {
+        "extract_requirements": "Recherche RAG",
+        "use_validated_requirements": "Recherche RAG",
+        "retrieve_rag_context": "Rappel mémoire",
+        "memory_recall": "Sélection des assets",
+        "select_assets": "Validation des exigences",
+        "asset_fallback_handler": "Validation des exigences avec fallback asset visible",
+        "validate_requirements": "Planification de la scène",
+        "plan_scene": "Validation SceneSpec",
+        "validate_scene": "Contrôle qualité pré-Blender",
+        "scene_repair_handler": "Nouvelle validation SceneSpec",
+        "pre_blender_gate": "Génération Blender",
+        "generate_blender": "Contrôle qualité",
+        "blender_failure_handler": "Analyse qualité après échec Blender",
+        "qa_generation": "Contrôle qualité final",
+        "post_blender_gate": "Écriture mémoire",
+        "memory_writeback": "Finalisation du workflow",
+    }.get(node)
+    if next_step:
+        return (
+            f"Dernière étape terminée : {_trace_node_label(node)}. Prochaine étape : {next_step}."
+        )
+    return f"Dernière étape terminée : {_trace_node_label(node)}."
 
 
 def _progress_indicator(status: dict) -> str | None:
@@ -245,9 +341,28 @@ def _asset_quality_summary(status: dict) -> str | None:
             return f"Asset source : {source}"
         return None
     fallback_count = sum(1 for a in asset_imports if a.get("fallback_used"))
-    internal_count = sum(1 for a in asset_imports if a.get("source") == "internal")
+    procedural_count = sum(
+        1
+        for a in asset_imports
+        if a.get("import_mode") == "procedural_fallback"
+        or a.get("effective_generation_mode") == "procedural_fallback"
+    )
+    missing_count = sum(
+        1
+        for a in asset_imports
+        if a.get("import_mode") == "missing_file" or a.get("asset_file_exists") is False
+    )
+    internal_count = sum(
+        1
+        for a in asset_imports
+        if str(a.get("asset_source") or a.get("source", "")).startswith("internal")
+    )
+    fallback_count = max(fallback_count, procedural_count)
     if fallback_count:
-        return f"{fallback_count} asset(s) en fallback, {internal_count} asset(s) interne(s)."
+        return (
+            f"{fallback_count} asset(s) en fallback procédural, "
+            f"{missing_count} fichier(s) GLB manquant(s), {internal_count} asset(s) interne(s)."
+        )
     return f"{len(asset_imports)} asset(s) importé(s) correctement."
 
 
@@ -262,6 +377,11 @@ def _collect_limitations(status: dict) -> list[str]:
     generation_mode = status.get("generation_mode")
     if generation_mode in {"fallback", "procedural_fallback"}:
         limitations.append("Le mode de génération est un fallback.")
+    asset_summary = status.get("asset_import_summary") or {}
+    if asset_summary.get("procedural_fallback_count", 0):
+        limitations.append(
+            "Au moins un asset a été remplacé par une géométrie procédurale faute de GLB réel."
+        )
     return limitations
 
 
@@ -278,7 +398,7 @@ def _next_recommended_action(status: dict, issues: list[dict]) -> str:
     return "Le traitement est en cours ; patientez ou consultez l'opération actuelle."
 
 
-def _collect_user_issues(status: dict) -> list[dict]:
+def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list[dict]:
     issues: list[dict] = []
     for item in status.get("warnings", []):
         issue = _warning_to_user_issue(item)
@@ -319,7 +439,68 @@ def _collect_user_issues(status: dict) -> list[dict]:
                 "technical_code": "LLM_FALLBACK_USED_INFERRED",
             }
         )
+    asset_summary = status.get("asset_import_summary") or {}
+    if asset_summary.get("procedural_fallback_count", 0) and not any(
+        i.get("technical_code") == "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED" for i in issues
+    ):
+        issues.append(
+            {
+                "title": "Asset remplacé par une géométrie procédurale",
+                "severity": "warning",
+                "impact": (
+                    "Un fichier GLB attendu manque ; Blender a créé une forme procédurale "
+                    "à la place d'un asset réel."
+                ),
+                "recommended_action": (
+                    "Ajouter le GLB manquant ou choisir un asset réellement importable "
+                    "avant validation produit."
+                ),
+                "technical_code": "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED",
+            }
+        )
+    issues.extend(_collect_runtime_event_issues(events or [], status))
     return issues
+
+
+def _collect_runtime_event_issues(events: list[dict], status: dict) -> list[dict]:
+    issues: list[dict] = []
+    seen: set[str] = set()
+    workflow_status = status.get("status", "unknown")
+    for event in events:
+        if event.get("event_type") != "node_failed":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        node = str(payload.get("node") or "unknown_node")
+        if node in seen:
+            continue
+        seen.add(node)
+        errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
+        detail = str(errors[0]) if errors else str(payload.get("detail") or "Étape échouée.")
+        issues.append(
+            {
+                "title": f"{_trace_node_label(node)} en mode dégradé",
+                "severity": "error" if workflow_status == "failed" else "warning",
+                "impact": detail,
+                "recommended_action": _runtime_node_recommended_action(node),
+                "technical_code": f"RUNTIME_NODE_FAILED:{node}",
+            }
+        )
+    return issues
+
+
+def _runtime_node_recommended_action(node: str) -> str:
+    if node == "retrieve_rag_context":
+        return (
+            "Vérifiez Qdrant ou utilisez un serveur Qdrant externe si plusieurs processus "
+            "accèdent au stockage local."
+        )
+    if node == "generate_blender":
+        return "Vérifiez Blender, les assets et les artefacts avant de relancer."
+    if node == "qa_generation":
+        return "Ouvrez le résumé QA et corrigez les erreurs bloquantes avant validation."
+    return "Consultez la timeline et les rapports techniques pour corriger cette étape."
 
 
 _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
@@ -327,6 +508,49 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
         "title": "Asset interne minimal",
         "impact": "Le design est valide techniquement mais l'asset n'est pas vendor-grade.",
         "recommended_action": "Remplacer plus tard par un asset constructeur réaliste.",
+    },
+    "ASSET_IMPORT_INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE": {
+        "title": "Asset interne minimal",
+        "impact": "Le design est valide techniquement mais l'asset n'est pas vendor-grade.",
+        "recommended_action": "Remplacer plus tard par un asset constructeur réaliste.",
+    },
+    "ASSET_IMPORT_INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE": {
+        "title": "Asset interne nettoyé",
+        "impact": (
+            "L'asset est importable mais reste une ressource interne, pas un modèle constructeur."
+        ),
+        "recommended_action": "Remplacer par un asset vendor-grade avant livraison finale.",
+    },
+    "ASSET_IMPORT_CC_BY_ASSET_NOT_VENDOR_GRADE": {
+        "title": "Asset CC-BY non vendor-grade",
+        "impact": "L'asset est réel/importé mais sa qualité et sa licence doivent rester visibles.",
+        "recommended_action": (
+            "Conserver l'attribution et prévoir un asset constructeur si nécessaire."
+        ),
+    },
+    "ASSET_IMPORT_ATTRIBUTION_REQUIRED": {
+        "title": "Attribution requise",
+        "impact": "Un asset utilisé impose une attribution de licence.",
+        "recommended_action": "Afficher l'attribution dans le rapport et les exports.",
+    },
+    "ASSET_IMPORT_ASSET_FILE_MISSING": {
+        "title": "Fichier GLB manquant",
+        "impact": "Un asset référencé par manifest n'a pas de fichier GLB local.",
+        "recommended_action": (
+            "Ajouter le fichier GLB ou refuser cet asset pour les workflows qualité."
+        ),
+    },
+    "ASSET_IMPORT_PROCEDURAL_FALLBACK": {
+        "title": "Fallback procédural d'asset",
+        "impact": "La scène contient une géométrie générée à la place d'un asset GLB réel.",
+        "recommended_action": (
+            "Ajouter le GLB manquant avant de considérer le résultat prêt produit."
+        ),
+    },
+    "BLENDER_FALLBACK_USED": {
+        "title": "Fallback Blender utilisé",
+        "impact": "La génération n'est pas un vrai rendu Blender valide.",
+        "recommended_action": "Corrigez Blender ou relancez avec un environnement valide.",
     },
     "FALLBACK_DETERMINISTIC_EXTRACTION_USED": {
         "title": "Extraction déterministe utilisée",
@@ -395,17 +619,30 @@ def _warning_to_user_issue(item: dict) -> dict | None:
 
 def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
     steps = []
-    for event in events:
+    for index, event in enumerate(events):
         event_type = event.get("event_type", "")
-        human = _event_to_human(event_type, event.get("data", {}))
+        payload = event.get("payload", {})
+        step_name = _event_step_name(event_type, payload if isinstance(payload, dict) else {})
+        human = _event_to_human(event_type, payload if isinstance(payload, dict) else {})
         steps.append(
             {
-                "step": event_type,
-                "status": _event_status(event_type, status.get("status", "unknown")),
+                "step": step_name,
+                "status": _event_status(
+                    event_type,
+                    status.get("status", "unknown"),
+                    index=index,
+                    total=len(events),
+                ),
                 "timestamp": event.get("timestamp"),
                 "human_readable": human,
             }
         )
+    terminal_step = None
+    if steps and steps[-1]["step"] in {"workflow_completed", "workflow_failed"}:
+        terminal_step = steps.pop()
+    steps.extend(_trace_to_timeline(status, existing_steps={step["step"] for step in steps}))
+    if terminal_step:
+        steps.append(terminal_step)
     # Ensure terminal state is represented
     if not steps or steps[-1]["step"] not in {"workflow_completed", "workflow_failed"}:
         backend_status = status.get("status", "unknown")
@@ -430,16 +667,32 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
     return steps
 
 
-def _event_status(event_type: str, workflow_status: str) -> str:
+def _event_status(event_type: str, workflow_status: str, *, index: int, total: int) -> str:
+    if event_type == "node_failed":
+        return "failed"
+    if event_type == "node_skipped":
+        return "skipped"
+    if event_type == "node_completed":
+        return "completed"
     terminal = {"workflow_completed": "completed", "workflow_failed": "failed"}
     if event_type in terminal:
         return terminal[event_type]
+    if workflow_status == "running" and index == total - 1:
+        return "running"
     if workflow_status in {"completed", "failed"}:
         return "completed"
     return "running"
 
 
 def _event_to_human(event_type: str, data: dict) -> str:
+    if event_type in {"node_completed", "node_failed", "node_skipped"}:
+        node = str(data.get("node") or "workflow")
+        label = _trace_node_to_human(node, data)
+        if event_type == "node_failed":
+            return f"{label} en échec"
+        if event_type == "node_skipped":
+            return f"{label} ignoré"
+        return label
     mapping: dict[str, str] = {
         "design_created": "Design créé",
         "blender_started": "Génération 3D démarrée",
@@ -456,12 +709,90 @@ def _event_to_human(event_type: str, data: dict) -> str:
         "qa_completed": "Contrôle qualité terminé",
         "qa_failed": "Contrôle qualité en échec",
     }
-    return mapping.get(event_type, event_type.replace("_", " ").capitalize())
+    human = mapping.get(event_type, event_type.replace("_", " ").capitalize())
+    if event_type == "workflow_failed" and data.get("error"):
+        return f"{human} : {data['error']}"
+    return human
+
+
+def _event_step_name(event_type: str, payload: dict) -> str:
+    if event_type in {"node_completed", "node_failed", "node_skipped"}:
+        node = payload.get("node")
+        if isinstance(node, str) and node:
+            return node
+    return event_type
+
+
+def _trace_to_timeline(status: dict, *, existing_steps: set[str]) -> list[dict]:
+    trace_path = status.get("trace_path")
+    if not trace_path:
+        return []
+    path = Path(trace_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    trace_steps = payload.get("steps", [])
+    if not isinstance(trace_steps, list):
+        return []
+    timeline = []
+    for trace in trace_steps:
+        if not isinstance(trace, dict):
+            continue
+        node = trace.get("node")
+        if not isinstance(node, str) or node in existing_steps:
+            continue
+        timeline.append(
+            {
+                "step": node,
+                "status": _trace_status(trace),
+                "timestamp": None,
+                "human_readable": _trace_node_to_human(node, trace),
+            }
+        )
+    return timeline
+
+
+def _trace_status(trace: dict) -> str:
+    status = trace.get("status")
+    if status in {"passed", "completed"}:
+        return "completed"
+    if status == "failed":
+        return "failed"
+    if status == "skipped":
+        return "skipped"
+    return "completed"
+
+
+def _trace_node_to_human(node: str, trace: dict) -> str:
+    label = _trace_node_label(node)
+    detail = trace.get("detail")
+    return f"{label} ({detail})" if detail else label
+
+
+def _trace_node_label(node: str) -> str:
+    mapping = {
+        "parse_requirements": "Extraction des exigences",
+        "extract_requirements": "Extraction des exigences",
+        "retrieve_rag_context": "Recherche RAG",
+        "memory_recall": "Rappel mémoire",
+        "select_assets": "Sélection des assets",
+        "asset_fallback_handler": "Sélection fallback des assets",
+        "validate_requirements": "Validation des exigences",
+        "plan_scene": "Planification SceneSpec",
+        "validate_scene": "Validation SceneSpec",
+        "scene_repair_handler": "Réparation SceneSpec",
+        "generate_blender": "Génération Blender",
+        "qa_generation": "Contrôle qualité",
+        "qa_failure_handler": "Analyse d'échec QA",
+        "memory_writeback": "Écriture mémoire",
+    }
+    return mapping.get(node, node.replace("_", " ").capitalize())
 
 
 def _studio_warnings(inventory: dict) -> list[dict]:
     warnings: list[dict] = []
-    if inventory.get("blender_available") is False:
+    if not _blender_available():
         warnings.append(
             {
                 "title": "Blender non installé",
@@ -473,8 +804,8 @@ def _studio_warnings(inventory: dict) -> list[dict]:
                 "technical_code": "STUDIO_BLENDER_NOT_AVAILABLE",
             }
         )
-    summaries = inventory.get("asset_summaries", [])
-    if not any(s.get("glb_ready") for s in summaries):
+    entries = inventory.get("entries", [])
+    if entries and not any(entry.get("asset_import_mode") == "imported_glb" for entry in entries):
         warnings.append(
             {
                 "title": "Aucun asset GLB prêt",
@@ -484,6 +815,19 @@ def _studio_warnings(inventory: dict) -> list[dict]:
                     "Vérifiez les manifests et les fichiers GLB sous assets/manifests."
                 ),
                 "technical_code": "STUDIO_NO_GLB_READY_ASSETS",
+            }
+        )
+    missing_count = int(inventory.get("missing_file_count") or 0)
+    if missing_count:
+        warnings.append(
+            {
+                "title": "Inventaire asset partiel",
+                "severity": "warning",
+                "impact": (
+                    f"{missing_count} asset(s) référencé(s) par manifest n'ont pas de GLB local."
+                ),
+                "recommended_action": "Ajouter les GLB manquants ou rendre leur fallback visible.",
+                "technical_code": "STUDIO_PARTIAL_ASSET_INVENTORY",
             }
         )
     return warnings

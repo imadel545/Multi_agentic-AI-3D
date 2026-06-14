@@ -1,69 +1,21 @@
 # Blender Worker
 
-Completed:
+`core/services/blender_runner.py` lance Blender headless avec
+`apps/blender_worker/generate_scene.py`. Le worker consomme uniquement `SceneSpec`.
 
-- `core/services/blender_runner.py` detects Blender through:
-  - `BLENDER_BINARY`
-  - `TELECOM_STUDIO_BLENDER_BINARY`
-  - `blender` in `PATH`
-  - `/Applications/Blender.app/Contents/MacOS/Blender`
-  - common versioned macOS app paths.
-- `apps/blender_worker/generate_scene.py` consumes only `SceneSpec`.
-- The worker creates controlled procedural geometry:
-  - lattice/monopole/generic tower;
-  - tower platforms, ladder, lightning rod, and aviation light when present in SceneSpec;
-  - panel antennas;
-  - microwave dish antenna;
-  - RRU boxes;
-  - cables;
-  - sector beams;
-  - azimuth arrows;
-  - height marker;
-  - GPS antenna and power cabinet procedural fallback only when explicitly requested and GLB import
-    cannot be used;
-  - metadata labels.
-- The worker imports manifest-backed GLB assets when the referenced file exists and import succeeds.
-  Current imported MVP assets include:
-  - `TOWER_LATTICE_30M` as a normalized CC Attribution GLB;
-  - `ANT_PANEL_4G_001` as an internal cleaned GLB;
-  - `ANT_MICROWAVE_DISH_001` as an internal cleaned GLB;
-  - `GPS_ANTENNA_001` as an internal cleaned GLB when explicitly requested;
-  - `POWER_CABINET_001` as an internal cleaned GLB when explicitly requested;
-  - `ANT_PANEL_5G_001` as an internal minimal test GLB;
-  - `RRU_SMALL_001` as an internal minimal test GLB.
-- Missing or failed imports use controlled procedural fallback only when
-  `import_fallback_allowed = true`.
-- Real Blender output is `generation_mode = real_blender`.
-- Missing Blender output is `generation_mode = fallback_no_blender`.
-- Runner verifies required artifacts after Blender exits.
-- Fallback preview generation writes a PNG with the SceneSpec preview dimensions so technical
-  preview validation remains meaningful without Blender.
-- Prompt edits regenerate a version-specific artifact directory; Blender artifacts from older
-  versions are not reused as QA evidence for a new version.
+## Résolution Blender
 
-Implemented QA outputs:
+Ordre de recherche:
 
-- `glb_inspection.json`
-- `geometry_validation.json`
-- `preview_inspection.json`
+- `BLENDER_BINARY`
+- `TELECOM_STUDIO_BLENDER_BINARY`
+- `blender` dans le `PATH`
+- `/Applications/Blender.app/Contents/MacOS/Blender`
+- chemins macOS versionnés connus
 
-Requires Local Blender Install:
+Sur ce poste, Blender est disponible sous `/Applications/Blender.app/Contents/MacOS/Blender`.
 
-- True GLB/PNG generation requires a local Blender executable.
-- On this machine Blender was detected at:
-
-```text
-/Applications/Blender.app/Contents/MacOS/Blender
-```
-
-Fallback:
-
-- If Blender is absent or fails, the runner creates explicit fallback artifacts and metadata.
-- Fallback artifacts are not represented as real generation.
-- Fallback `design.glb` is not treated as a valid GLB. Structural QA uses
-  `inspection_mode = metadata_fallback` when metadata is available.
-
-Required artifacts:
+## Artefacts
 
 - `design.glb`
 - `preview.png`
@@ -71,41 +23,37 @@ Required artifacts:
 - `glb_inspection.json`
 - `geometry_validation.json`
 - `preview_inspection.json`
+- `quality_gates.json`
+- `workflow_trace.json`
 
-Metadata fields:
+## Generation modes
 
-- `scene_id`
-- `schema_version`
-- `generation_mode`
-- `assets_used`
-- `procedural_objects_created`
-- `asset_imports`
-- `asset_import_summary`
-- `sector_count`
-- `network_type`
-- `tower_height_m`
-- `tower_characteristics`
-- `azimuths_deg`
-- `antenna_heights_m`
-- `mechanical_tilts_deg`
-- `visual_elements`
-- `accessory_assets`
+- `real_blender`: Blender réel a produit les artefacts requis.
+- `fallback_no_blender`, `fallback_blender_error`, `fallback_blender_timeout`,
+  `fallback_blender_missing_artifacts`: fallback explicite.
+
+`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0` est le défaut qualité. Les fallbacks Blender ne doivent
+pas être présentés comme design valide.
+
+## Asset imports
+
+Le worker importe les GLB manifest-backed si le fichier existe et si l'import réussit.
+Sinon, il peut créer une géométrie procédurale contrôlée seulement si
+`import_fallback_allowed = true`.
+
+Chaque record `asset_imports` doit exposer:
+
+- `asset_id`
+- `asset_file`
+- `asset_source`
+- `asset_file_exists`
+- `asset_import_success`
+- `import_mode`
+- `effective_generation_mode`
 - `warnings`
 
-Each `asset_imports` entry includes `asset_id`, `asset_file`, `asset_source`,
-`asset_metadata`, `asset_file_exists`, `asset_import_success`, `asset_dimensions_checked`,
-`import_mode`, `effective_generation_mode`, imported object names, and warnings.
+## Limites
 
-Known limitations:
-
-- The worker imports available GLBs, but current project-owned/internal assets are not vendor-grade.
-- `TOWER_LATTICE_30M` is an accepted CC Attribution MVP asset, not a vendor-grade tower.
-- Monopole, rooftop mast, and small-cell pole GLB files are still missing and therefore use visible
-  procedural fallback when selected and allowed.
-- `GET /assets/inventory` exposes whether manifests have real GLB files available for import and
-  whether fallback will be needed.
-- GPS antenna and power cabinet have manifest-backed GLB placement when requested. Mounting
-  bracket and cable tray have inventory GLBs but are not yet exposed as standalone requested
-  accessory placements.
-- GLB structural and geometry QA check object presence, counts, heights, azimuth metadata, and
-  bounding-box reasonableness, not visual aesthetics or material quality.
+- Les tours monopole, rooftop et small-cell n'ont pas encore de GLB.
+- Les assets actuels ne sont pas vendor-grade.
+- La QA lit structure/metadata/proxies, pas mesh transforms exacts.

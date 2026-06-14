@@ -1,67 +1,52 @@
 # Architecture
 
-Local-first, single-user generation pipeline. The deterministic core is the safety net; agentic layers are added around it.
+Pipeline local-first mono-utilisateur. Les contrats Pydantic et validations déterministes
+sont la base; les couches agentiques et RAG restent contrôlées.
 
-## High-level flow
+## Flow
 
 ```text
-FastAPI Local Gateway
-  -> Document Pack Intelligence (optional entry)
-  -> ProjectDesignSpec / RequirementSpec mapping
-  -> LangGraph Orchestrator
-  -> RAG Retrieval (advisory)
-  -> Groq Structured Extraction or Deterministic Parser
-  -> SQLite Memory Recall
-  -> Asset Registry
-  -> Rule Engine
-  -> Scene Planner
-  -> SceneSpec Validator
-  -> Pre-Blender Quality Gate
-  -> Blender Runner
-  -> Asset GLB Import or Explicit Procedural Fallback
-  -> GLB Structural Inspector
-  -> GLB Geometry Validator
-  -> Preview Inspector
-  -> Generation QA
-  -> Post-Blender Quality Gate
-  -> SQLite Memory Writeback
-  -> Artifact Writer
+FastAPI
+  -> requirements text or document pack
+  -> RequirementSpec / ProjectDesignSpec
+  -> LangGraph-orchestrated pipeline (partly imperative on some paths)
+  -> Groq extraction or deterministic fallback
+  -> NVIDIA BGE-M3 RAG context (advisory)
+  -> SQLite memory recall
+  -> asset registry + inventory
+  -> SceneSpec planner
+  -> SceneSpec validation + quality gates
+  -> Blender runner
+  -> GLB/preview/metadata artifacts
+  -> structural/proxy geometry/preview QA
+  -> memory writeback
+  -> Product API summaries
 ```
 
-## Key modules
+## Modules
 
-- `core/contracts`: strict Pydantic contracts.
-- `core/document_pack`: ZIP ingestion, classification, extraction, consolidation, QA.
-- `core/services`: asset registry, inventory, versioning, events, Blender runner.
-- `core/llm`: Groq structured extraction client.
-- `core/agents`: extraction, planning, edit, tower/RF validation (mostly deterministic wrappers).
-- `core/orchestration`: LangGraph workflow.
-- `core/memory`: SQLite workflow memory.
-- `core/rules`: business rule validation.
-- `core/validation`: SceneSpec validator and quality gates.
-- `core/qa`: GLB/geometry/preview QA.
-- `core/rag`: Qdrant indexing/search.
-- `apps/api`: FastAPI gateway.
-- `apps/blender_worker`: SceneSpec-driven Blender entrypoint.
+- `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
+- `apps/blender_worker`: SceneSpec-driven Blender script.
+- `core/contracts`: strict contracts.
+- `core/document_pack`: ZIP/PDF/OCR/DXF extraction and `ProjectDesignSpec`.
+- `core/orchestration`: LangGraph workflow and route logic.
+- `core/agents`: deterministic/LLM wrappers for extraction, planning, editing, RF/tower checks.
+- `core/rag`: Qdrant, NVIDIA BGE-M3 embeddings, local fallback, reranker best-effort.
+- `core/memory`: SQLite workflow/document-pack memory.
+- `core/services`: assets, events, versioning, Blender runner, cleanup.
+- `core/qa`: GLB structural parse, proxy geometry, preview luminance QA.
 
-## Important architectural facts
+## Runtime truths
 
-- `DesignOrchestrator.run_requirements` and `run_scene_revision` currently bypass the compiled LangGraph graph and execute the same sequence imperatively. The checkpoint saver is therefore unused for these paths.
-- RAG and memory provide context only; they do not override deterministic rules or validation.
-- Default RAG embedding is deterministic hashing, not semantic. FastEmbed is optional.
-- Memory recall uses exact matching on network_type, tower_type, sector_count.
-- Without Blender, the runner produces explicit fallback artifacts. The current QA may incorrectly pass these artifacts; this is a known limitation.
+- `outputs/temp` contains ignored workflow artifacts.
+- `data/sqlite` and `data/qdrant` are local ignored runtime stores.
+- `.env` contains real secrets and must never be committed.
+- `.env.example` contains placeholders only.
+- `apps/frontend` is not an operational app.
 
-## Local runtime
+## Known weak points
 
-- SQLite under `data/sqlite`.
-- Qdrant local under `data/qdrant` or remote via `TELECOM_STUDIO_QDRANT_URL`.
-- Workflow artifacts under `outputs/temp`.
-
-## Future
-
-- Make Blender output mandatory for `completed` status.
-- Use real semantic embeddings by default.
-- Make memory recall similarity-based.
-- Run all orchestration through the compiled LangGraph graph.
-- Rebuild the frontend as chat-first / 3D-first.
+- Some orchestration paths do not use the compiled LangGraph graph end to end.
+- Events are sparse and SSE is polling.
+- Missing tower GLBs trigger procedural fallback inside real Blender generation.
+- Geometry QA is object/name/count/metadata based, not mesh-transform exact.
