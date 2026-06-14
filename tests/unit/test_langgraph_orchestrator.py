@@ -23,6 +23,7 @@ def test_langgraph_orchestrator_runs_full_controlled_workflow(tmp_path: Path) ->
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
     result = orchestrator.run(
@@ -90,6 +91,7 @@ def test_glb_inspection_integrated_in_qa(tmp_path: Path) -> None:
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
     result = orchestrator.run(
@@ -124,6 +126,7 @@ def test_langgraph_orchestrator_recalls_and_writes_sqlite_memory(tmp_path: Path)
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
     prompt = (
         "Créer un site 5G sur pylône treillis 30m. Installer 3 secteurs à 24m. "
@@ -172,6 +175,7 @@ def test_invalid_rule_blocks_blender(tmp_path: Path) -> None:
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
     result = orchestrator.run(

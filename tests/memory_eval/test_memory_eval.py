@@ -22,6 +22,7 @@ def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_quer
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
     first = orchestrator.run(

@@ -61,6 +61,7 @@ def test_scene_repair_exhausts_attempts_without_blender(tmp_path: Path) -> None:
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
     orchestrator.scene_planner = BrokenScenePlanner()
 
@@ -92,6 +93,7 @@ def _run_prompt(tmp_path: Path, prompt: str):
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
     return orchestrator.run(
         workflow_id="wf_scene_repair",

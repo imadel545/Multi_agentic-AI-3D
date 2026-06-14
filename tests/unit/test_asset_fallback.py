@@ -105,6 +105,7 @@ def _run_with_requirements(
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
     return orchestrator.run(
         workflow_id="wf_asset_fallback",

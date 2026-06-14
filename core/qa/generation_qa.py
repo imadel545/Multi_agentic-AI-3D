@@ -16,6 +16,7 @@ class GenerationQA:
         glb_inspection: GlbInspectionReport,
         preview_inspection: PreviewInspectionReport,
         geometry_validation: GeometryValidationReport,
+        allow_fallback: bool = False,
     ) -> ValidationReport:
         glb_path = Path(generation.artifacts.get("glb", ""))
         preview_path = Path(generation.artifacts.get("preview", ""))
@@ -61,17 +62,17 @@ class GenerationQA:
             "metadata_no_missing_asset_without_fallback": not any(
                 record.get("import_mode") == "missing_file" for record in asset_imports
             ),
-            "generation_completed_or_fallback": generation.status in {"generated", "fallback"},
-            "glb_inspection_available": glb_inspection.inspection_mode
-            in {"glb_parse", "metadata_fallback"},
+            "generation_real_blender": allow_fallback
+            or (generation.status == "generated" and generation.mode == "real_blender"),
+            "glb_inspection_available": allow_fallback
+            or glb_inspection.inspection_mode == "glb_parse",
             "glb_structure_valid": glb_inspection.structural_qa_passed,
             "expected_objects_present": glb_inspection.checks.get(
                 "expected_objects_present", False
             ),
             "preview_inspection_available": preview_inspection.inspection_mode == "png_parse",
             "preview_resolution_valid": preview_inspection.minimum_resolution_valid,
-            "preview_visual_quality_valid": generation.mode != "real_blender"
-            or preview_inspection.visual_quality_valid,
+            "preview_visual_quality_valid": preview_inspection.visual_quality_valid,
             "geometry_validation_valid": geometry_validation.status == "passed",
         }
         warnings = []

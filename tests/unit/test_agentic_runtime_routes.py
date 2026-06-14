@@ -156,6 +156,7 @@ def _orchestrator(memory_service: MemoryService | None = None) -> DesignOrchestr
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
 

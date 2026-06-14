@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from core.rag import RagService
+from core.rag.reranker import PassthroughReranker
 
 
 def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
@@ -8,6 +9,7 @@ def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
         project_root=Path.cwd(),
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
+        reranker=PassthroughReranker(),
     )
 
     report = service.reindex()
@@ -29,6 +31,7 @@ def test_rag_filtered_search_by_network_and_tower(tmp_path: Path) -> None:
         project_root=Path.cwd(),
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
+        reranker=PassthroughReranker(),
     )
     service.reindex()
 

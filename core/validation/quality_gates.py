@@ -73,6 +73,7 @@ def evaluate_post_blender_gate(
     glb_inspection: GlbInspectionReport | None = None,
     preview_inspection: PreviewInspectionReport | None = None,
     geometry_validation: GeometryValidationReport | None = None,
+    allow_fallback: bool = False,
 ) -> QualityGateReport:
     started = time.perf_counter()
     artifacts = generation.artifacts if generation else {}
@@ -81,8 +82,14 @@ def evaluate_post_blender_gate(
     metadata_path = Path(artifacts.get("metadata", ""))
     model_exists = glb_path.exists()
     artifact_size_bytes = glb_path.stat().st_size if model_exists else 0
+    real_blender = (
+        generation is not None
+        and generation.status == "generated"
+        and generation.mode == "real_blender"
+    )
     checks = {
         "generation_mode_explicit": bool(generation and generation.mode),
+        "real_blender_generation": allow_fallback or real_blender,
         "model_exists": model_exists
         and (
             generation is None

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     embedding_provider: str = "nvidia"
     embedding_model: str = "baai/bge-m3"
     nvidia_api_key: str | None = Field(default=None, repr=False)
+    allow_blender_fallback: bool = False
 
     @property
     def manifests_dir(self) -> Path:

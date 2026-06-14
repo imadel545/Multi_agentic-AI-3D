@@ -18,6 +18,7 @@ from core.performance import TTLCache, knowledge_index_hash, rag_query_hash
 from core.rag.documents import load_rag_documents
 from core.rag.embeddings import EmbeddingProvider, build_embedding_provider
 from core.rag.models import RagDocument, RagIndexReport, RagSearchResult
+from core.rag.reranker import Reranker, build_reranker
 
 RAG_COLLECTIONS = [
     "telecom_rules",
@@ -44,6 +45,8 @@ class RagService:
         embedding_provider: EmbeddingProvider | None = None,
         embedding_provider_name: str = "deterministic",
         embedding_model: str = "BAAI/bge-small-en-v1.5",
+        reranker: Reranker | None = None,
+        reranker_model: str = "BAAI/bge-reranker-v2-m3",
         query_cache_ttl_s: float = 30.0,
     ) -> None:
         self.project_root = project_root
@@ -52,6 +55,8 @@ class RagService:
         self.embedding_provider = embedding_provider or build_embedding_provider(
             embedding_provider_name, embedding_model
         )
+        self._reranker = reranker
+        self._reranker_model = reranker_model
         self._client: QdrantClient | None = None
         self.query_cache: TTLCache[list[RagSearchResult]] = TTLCache(ttl_s=query_cache_ttl_s)
 
@@ -64,6 +69,12 @@ class RagService:
                 self.qdrant_path.mkdir(parents=True, exist_ok=True)
                 self._client = QdrantClient(path=str(self.qdrant_path))
         return self._client
+
+    @property
+    def reranker(self) -> Reranker:
+        if self._reranker is None:
+            self._reranker = build_reranker(self._reranker_model)
+        return self._reranker
 
     def reindex(self) -> RagIndexReport:
         documents = load_rag_documents(self.project_root)
@@ -134,10 +145,11 @@ class RagService:
                         payload={key: value for key, value in payload.items() if key != "text"},
                     )
                 )
-        sorted_results = sorted(results, key=lambda result: result.score, reverse=True)[:limit]
+        sorted_results = sorted(results, key=lambda result: result.score, reverse=True)
+        reranked = self.reranker.rerank(query, sorted_results, top_k=limit)
         if cacheable:
-            self.query_cache.set(query_hash, sorted_results)
-        return sorted_results
+            self.query_cache.set(query_hash, reranked)
+        return reranked
 
     def cache_stats(self) -> dict[str, int]:
         stats = self.query_cache.snapshot()

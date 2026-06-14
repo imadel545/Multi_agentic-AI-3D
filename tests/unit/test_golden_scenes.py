@@ -33,6 +33,7 @@ def test_golden_scene_pipeline(scene_name: str, tmp_path: Path) -> None:
             project_root=Path.cwd(),
             blender_binary="definitely-missing-blender-binary",
         ),
+        allow_blender_fallback=True,
     )
 
     result = orchestrator.run(
@@ -75,6 +76,7 @@ def test_golden_glb_structure_if_blender_available(scene_name: str, tmp_path: Pa
         extractor=RequirementExtractor(enabled=False),
         rag_service=None,
         blender_runner=BlenderRunner(project_root=Path.cwd()),
+        allow_blender_fallback=True,
     )
 
     result = orchestrator.run(

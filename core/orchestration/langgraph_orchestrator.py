@@ -122,12 +122,14 @@ class DesignOrchestrator:
         blender_runner: BlenderRunner,
         memory_service: MemoryService | None = None,
         checkpoint_saver: Any | None = None,
+        allow_blender_fallback: bool = False,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
         self.rag_service = rag_service
         self.memory_service = memory_service
         self.blender_runner = blender_runner
+        self.allow_blender_fallback = allow_blender_fallback
         self.checkpoint_saver = checkpoint_saver
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
@@ -941,6 +943,9 @@ class DesignOrchestrator:
     def _generate_blender(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         generation = self.blender_runner.generate(state["scene"], state["output_dir"])
+        real_generation = generation.status == "generated" and generation.mode == "real_blender"
+        fallback_allowed = self.allow_blender_fallback and generation.status == "fallback"
+        status = "passed" if (real_generation or fallback_allowed) else "failed"
         return {
             "generation": generation,
             "trace": _trace(
@@ -948,7 +953,7 @@ class DesignOrchestrator:
                 "generate_blender",
                 generation.mode,
                 started,
-                status="passed" if generation.status in {"generated", "fallback"} else "failed",
+                status=status,
                 errors=[generation.error] if generation.error else [],
             ),
         }
@@ -994,6 +999,7 @@ class DesignOrchestrator:
             glb_inspection,
             preview_inspection,
             geometry_validation,
+            allow_fallback=self.allow_blender_fallback,
         )
         merged = _merge_reports(
             state["scene"].scene_id,
@@ -1023,6 +1029,7 @@ class DesignOrchestrator:
             glb_inspection=state.get("glb_inspection"),
             preview_inspection=state.get("preview_inspection"),
             geometry_validation=state.get("geometry_validation"),
+            allow_fallback=self.allow_blender_fallback,
         )
         report = (
             state["report"]
@@ -1369,7 +1376,8 @@ def _scene_repair_route(state: WorkflowState) -> str:
 
 def _generation_route(state: WorkflowState) -> str:
     generation = state["generation"]
-    if generation.status != "generated" or generation.mode != "real_blender":
+    real_generation = generation.status == "generated" and generation.mode == "real_blender"
+    if not real_generation:
         return "blender_failure"
     return "continue"
 

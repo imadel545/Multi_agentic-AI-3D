@@ -36,6 +36,7 @@ from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
 from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
+from core.rag.reranker import build_reranker
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
@@ -93,11 +94,13 @@ rag_embedding_provider = build_embedding_provider(
     settings.embedding_model,
     api_key=settings.nvidia_api_key,
 )
+rag_reranker = build_reranker()
 rag_service = RagService(
     project_root=settings.project_root,
     qdrant_path=settings.local_qdrant_path,
     qdrant_url=settings.qdrant_url,
     embedding_provider=rag_embedding_provider,
+    reranker=rag_reranker,
 )
 memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_service)
 groq_client = (
@@ -134,6 +137,7 @@ orchestrator = DesignOrchestrator(
     memory_service=memory_service,
     blender_runner=blender_runner,
     checkpoint_saver=checkpoint_saver,
+    allow_blender_fallback=settings.allow_blender_fallback,
 )
 scene_edit_agent = SceneEditAgent(groq_client=groq_client)
 workflow_service = WorkflowService(

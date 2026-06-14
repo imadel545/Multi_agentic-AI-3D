@@ -4,13 +4,16 @@ from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api import main as api_main
 from core.rag.embeddings import HashEmbeddingProvider
+from core.rag.reranker import PassthroughReranker
 
 
 def test_rag_api_reindex_and_search(tmp_path: Path) -> None:
     original_provider = api_main.rag_service.embedding_provider
+    original_reranker = api_main.rag_service._reranker
     original_path = api_main.rag_service.qdrant_path
     original_client = api_main.rag_service._client
     api_main.rag_service.embedding_provider = HashEmbeddingProvider()
+    api_main.rag_service._reranker = PassthroughReranker()
     api_main.rag_service.qdrant_path = tmp_path / "qdrant"
     api_main.rag_service._client = None
     client = TestClient(api_main.app)
@@ -42,5 +45,6 @@ def test_rag_api_reindex_and_search(tmp_path: Path) -> None:
         assert filtered_response.json()["results"]
     finally:
         api_main.rag_service.embedding_provider = original_provider
+        api_main.rag_service._reranker = original_reranker
         api_main.rag_service.qdrant_path = original_path
         api_main.rag_service._client = original_client
