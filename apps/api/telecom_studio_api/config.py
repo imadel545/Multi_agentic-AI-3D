@@ -21,8 +21,9 @@ class Settings(BaseSettings):
     use_langgraph: bool = True
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
-    embedding_provider: str = "deterministic"
-    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_provider: str = "nvidia"
+    embedding_model: str = "baai/bge-m3"
+    nvidia_api_key: str | None = Field(default=None, repr=False)
 
     @property
     def manifests_dir(self) -> Path:

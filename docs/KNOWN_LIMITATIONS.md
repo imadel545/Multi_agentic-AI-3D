@@ -9,7 +9,7 @@ Ces limitations sont connues et doivent rester visibles pour les utilisateurs et
 
 - **Fallback Blender non bloquant** : sans Blender, le backend génère des artefacts fallback (GLB texte, PNG procédural) et la QA peut les valider. C'est une faille critique.
 - **Extraction déterministe fragile** : `core/services/requirement_parser.py` repose sur des regex. Les cahiers des charges complexes, les synonymes, et les tableaux sont mal traités.
-- **RAG non sémantique** : l'embedding par défaut est un hash déterministe. FastEmbed est optionnel.
+- **RAG limité** : NVIDIA API `baai/bge-m3` par défaut ; fallback local `sentence-transformers` ; hash déterministe en dernier recours. Pas de re-ranking ni de modèle spécialisé telecom.
 - **Mémoire par matching exact** : le recall mémoire utilise `network_type`, `tower_type`, `sector_count`, pas de similarité sémantique.
 - **Agents non agentiques** : la plupart des "agents" sont des fonctions déterministes ou des wrappers LLM sans réflexion multi-étapes.
 - **LangGraph contourné** : `run_requirements` et `run_scene_revision` exécutent la logique en impératif hors graphe.

@@ -36,7 +36,7 @@ Le cœur est le pipeline backend Python/FastAPI. Le frontend est un client React
 - **Blender** : génère vraiment des GLB/PNG quand Blender est installé et trouvé.
 - **QA** : validation Pydantic, règles métier, quality gates, inspection GLB, géométrie métadonnées, preview PNG.
 - **Mémoire** : SQLite local + Qdrant optionnel.
-- **RAG** : Qdrant local avec embedding déterministe par défaut ; FastEmbed optionnel.
+- **RAG** : Qdrant local avec NVIDIA API `baai/bge-m3` par défaut ; fallback local `sentence-transformers` ; hash déterministe en dernier recours.
 
 ## Current frontend truth
 

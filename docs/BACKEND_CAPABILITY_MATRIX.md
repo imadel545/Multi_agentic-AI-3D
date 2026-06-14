@@ -40,7 +40,7 @@ Légende des status :
 | Rollback | IMPLEMENTED | `POST /designs/{id}/versions/{vid}/rollback` | Change le pointeur actif. | Retour à une version antérieure. |
 | Events/SSE | IMPLEMENTED_LIMITED | `GET /designs/{id}/events`, `/events/stream` | SSE backend fait du polling ; frontend utilise aussi du polling. | Pas de vrai temps réel. |
 | Memory writeback | IMPLEMENTED_LIMITED | `core/memory/service.py` | SQLite + Qdrant optionnel ; recall par matching exact. | Apprentissage limité des cas passés. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag/service.py` | Embedding déterministe par défaut ; FastEmbed optionnel. | Recherche lexicale/hash, pas sémantique. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag/service.py` | NVIDIA API pour `baai/bge-m3` par défaut ; fallback local `sentence-transformers` ; hash déterministe en dernier recours. | Recherche sémantique multilingue (français inclus). |
 | Artifact downloads | IMPLEMENTED | `GET /designs/{id}/artifacts/{name}` | Whitelist de noms d'artifacts. | Téléchargement des GLB, PNG, rapports. |
 | Product-oriented API | IMPLEMENTED | `GET /studio/summary`, `GET /designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` | Couche de présentation au-dessus du statut technique ; ne résout pas les problèmes de fond (fallback Blender, etc.). | Le frontend peut afficher un résumé utilisateur sans parser du JSON technique. |
 

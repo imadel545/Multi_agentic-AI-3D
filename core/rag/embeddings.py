@@ -1,9 +1,32 @@
+"""Embedding providers.
+
+Primary: NVIDIA API for BAAI/bge-m3 (fast, no local GPU/VRAM needed).
+Fallback local: sentence-transformers with BAAI/bge-m3.
+Emergency fallback: deterministic hash embedding for tests and bootstrap only.
+
+The project prefers API-first for quality and speed. Local model is kept only as
+an offline fallback. If the NVIDIA API is working, the local cache is removed
+to free disk space and avoid slowing down startup.
+"""
+
+from __future__ import annotations
+
 import hashlib
+import logging
 import math
+import os
 import re
-from typing import Protocol
+import shutil
+from pathlib import Path
+from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL = "baai/bge-m3"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
 
+@runtime_checkable
 class EmbeddingProvider(Protocol):
     dimensions: int
     name: str
@@ -12,9 +35,9 @@ class EmbeddingProvider(Protocol):
 
 
 class HashEmbeddingProvider:
-    """Small deterministic embedding provider for local smoke RAG without model downloads."""
+    """Deterministic hash embedding. No external dependency. Test / emergency fallback only."""
 
-    def __init__(self, dimensions: int = 384) -> None:
+    def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
         self.name = f"hashing-{dimensions}"
 
@@ -32,26 +55,126 @@ class HashEmbeddingProvider:
         return [value / norm for value in vector]
 
 
-class FastEmbedProvider:
-    def __init__(self, model_name: str) -> None:
+class NvidiaEmbeddingProvider:
+    """NVIDIA API provider for BAAI/bge-m3. OpenAI-compatible endpoint."""
+
+    def __init__(self, model_name: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
         try:
-            from fastembed import TextEmbedding
+            from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError("fastembed is not installed") from exc
+            raise RuntimeError("openai package is not installed") from exc
+
         self.model_name = model_name
-        self.model = TextEmbedding(model_name=model_name)
-        self.name = f"fastembed:{model_name}"
+        self.api_key = (
+            api_key or os.getenv("NVIDIA_API_KEY") or os.getenv("TELECOM_STUDIO_NVIDIA_API_KEY")
+        )
+        if not self.api_key:
+            raise RuntimeError("NVIDIA API key is required")
+        self.client = OpenAI(api_key=self.api_key, base_url=NVIDIA_BASE_URL)
+        self.name = f"nvidia:{model_name}"
         sample = self.embed("dimension probe")
         self.dimensions = len(sample)
 
     def embed(self, text: str) -> list[float]:
-        return list(next(self.model.embed([text])))
+        response = self.client.embeddings.create(
+            input=[text],
+            model=self.model_name,
+            encoding_format="float",
+            extra_body={"truncate": "NONE"},
+        )
+        return response.data[0].embedding
 
 
-def build_embedding_provider(provider_name: str, model_name: str) -> EmbeddingProvider:
-    if provider_name == "fastembed":
+class SentenceTransformersProvider:
+    """Local sentence-transformers provider. Default model: BAAI/bge-m3."""
+
+    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self.model_name = model_name
+        self.model = SentenceTransformer(model_name, trust_remote_code=False)
+        self.name = f"sentence-transformers:{model_name}"
+        self.dimensions = self.model.get_embedding_dimension()
+
+    def embed(self, text: str) -> list[float]:
+        return self.model.encode(text, convert_to_numpy=True).tolist()
+
+
+def _strict_quality_mode() -> bool:
+    return os.getenv("TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY", "").lower() in {"1", "true", "yes"}
+
+
+def _local_model_cache_dir() -> Path | None:
+    """Return the Hugging Face cache directory for BAAI/bge-m3 if it exists."""
+    try:
+        hf_home = Path(os.path.expanduser(os.getenv("HF_HOME", "~/.cache/huggingface")))
+        candidate = hf_home / "hub" / "models--BAAI--bge-m3"
+        return candidate if candidate.exists() else None
+    except Exception:
+        return None
+
+
+def _remove_local_model_cache(model_name: str) -> None:
+    """Remove the local model cache to free disk space when API is used."""
+    if model_name != DEFAULT_MODEL:
+        return
+    cache_dir = _local_model_cache_dir()
+    if cache_dir and cache_dir.exists():
+        logger.info("Removing local embedding model cache to free disk space: %s", cache_dir)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def build_embedding_provider(
+    provider_name: str,
+    model_name: str,
+    *,
+    api_key: str | None = None,
+) -> EmbeddingProvider:
+    """Build the embedding provider.
+
+    Strategy:
+    - "nvidia" or default: try NVIDIA API first.
+    - "sentence-transformers": load local model.
+    - "deterministic": hash fallback explicitly.
+
+    If NVIDIA succeeds, the local model cache is removed to save disk space.
+    If the local model fails and strict quality mode is on, raise.
+    Otherwise fall back to hash with a visible warning.
+    """
+    requested = f"{provider_name}:{model_name}"
+
+    if provider_name == "deterministic":
+        logger.info("Using deterministic hash embedding as requested: %s", requested)
+        return HashEmbeddingProvider()
+
+    if provider_name in {"nvidia", "auto", "sentence-transformers"}:
         try:
-            return FastEmbedProvider(model_name)
-        except RuntimeError:
-            return HashEmbeddingProvider()
-    return HashEmbeddingProvider()
+            provider = NvidiaEmbeddingProvider(model_name, api_key=api_key)
+            logger.info("Using NVIDIA API embedding provider: %s", provider.name)
+            _remove_local_model_cache(model_name)
+            return provider
+        except Exception as exc:
+            logger.warning("NVIDIA API embedding provider failed: %s", exc)
+            if provider_name == "nvidia":
+                if _strict_quality_mode():
+                    raise
+                logger.warning("Falling back from NVIDIA API to local sentence-transformers")
+
+    try:
+        provider = SentenceTransformersProvider(model_name)
+        logger.info("Using local sentence-transformers provider: %s", provider.name)
+        return provider
+    except Exception as exc:
+        if _strict_quality_mode():
+            raise RuntimeError(
+                f"Embedding model {model_name} could not be loaded and strict quality mode is on. "
+                "Set NVIDIA_API_KEY or download the model."
+            ) from exc
+        logger.warning(
+            "Local embedding model %s failed to load (%s). "
+            "Falling back to deterministic hash embedding. "
+            "Set TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY=1 to refuse fallback.",
+            model_name,
+            exc,
+        )
+        return HashEmbeddingProvider()

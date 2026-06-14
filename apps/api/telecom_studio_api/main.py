@@ -35,6 +35,7 @@ from core.llm import GroqStructuredClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
 from core.rag import RagService
+from core.rag.embeddings import build_embedding_provider
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
@@ -87,12 +88,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 registry = AssetRegistry(settings.manifests_dir)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
 project_spec_mapper = ProjectDesignSpecMapper()
+rag_embedding_provider = build_embedding_provider(
+    settings.embedding_provider,
+    settings.embedding_model,
+    api_key=settings.nvidia_api_key,
+)
 rag_service = RagService(
     project_root=settings.project_root,
     qdrant_path=settings.local_qdrant_path,
     qdrant_url=settings.qdrant_url,
-    embedding_provider_name=settings.embedding_provider,
-    embedding_model=settings.embedding_model,
+    embedding_provider=rag_embedding_provider,
 )
 memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_service)
 groq_client = (

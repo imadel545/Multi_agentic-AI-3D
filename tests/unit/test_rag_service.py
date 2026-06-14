@@ -7,6 +7,7 @@ def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
     service = RagService(
         project_root=Path.cwd(),
         qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
     )
 
     report = service.reindex()
@@ -24,7 +25,11 @@ def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
 
 
 def test_rag_filtered_search_by_network_and_tower(tmp_path: Path) -> None:
-    service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service.reindex()
 
     results = service.search(
