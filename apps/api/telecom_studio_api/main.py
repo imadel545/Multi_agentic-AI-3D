@@ -319,28 +319,9 @@ def stream_events(workflow_id: str):
 
     def event_generator():
         import json
-        import time
 
-        seen = 0
-        idle_ticks = 0
-        max_idle_ticks = 300
-        while True:
-            events = workflow_service.get_events(workflow_id)
-            for event in events[seen:]:
-                yield f"data: {json.dumps(event)}\n\n"
-                seen += 1
-                idle_ticks = 0
-            # If workflow completed or failed, send one more update then close
-            if events and events[-1].get("event_type") in (
-                "workflow_completed",
-                "workflow_failed",
-            ):
-                break
-            idle_ticks += 1
-            if idle_ticks >= max_idle_ticks:
-                yield 'event: timeout\ndata: {"detail":"event stream timeout"}\n\n'
-                break
-            time.sleep(1)
+        for event in workflow_service.stream_events(workflow_id):
+            yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

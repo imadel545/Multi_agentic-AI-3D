@@ -1,4 +1,5 @@
 import json
+import queue
 import shutil
 import tempfile
 import threading
@@ -38,6 +39,7 @@ class WorkflowService:
         self.cleanup_service = CleanupService(outputs_dir)
         self.diff_engine = DiffEngine()
         self._lock = threading.Lock()
+        self._event_queues: dict[str, queue.Queue] = {}
         self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
     def _sync_output_services(self) -> None:
@@ -47,6 +49,28 @@ class WorkflowService:
         self.event_log = EventLogService(self.outputs_dir)
         self.cleanup_service = CleanupService(self.outputs_dir)
         self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+
+    def _event_sink_for(self, workflow_id: str):
+        def _sink(workflow_id_: str, event_type: str, payload: dict) -> None:
+            self.event_log.emit(workflow_id_, event_type, payload)
+            q = self._event_queues.get(workflow_id_)
+            if q is not None:
+                try:
+                    q.put_nowait({"event_type": event_type, "payload": payload})
+                except queue.Full:
+                    pass
+
+        return _sink
+
+    def _register_workflow_queue(self, workflow_id: str) -> queue.Queue:
+        with self._lock:
+            q = queue.Queue(maxsize=1000)
+            self._event_queues[workflow_id] = q
+            return q
+
+    def _unregister_workflow_queue(self, workflow_id: str) -> None:
+        with self._lock:
+            self._event_queues.pop(workflow_id, None)
 
     def create_design(
         self,
@@ -65,8 +89,10 @@ class WorkflowService:
             workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
         )
         self._write_pending_status(workflow_id, output_dir, detail_level, use_llm)
+        self._register_workflow_queue(workflow_id)
 
         def _run() -> None:
+            self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
                 result = self.orchestrator.run(
                     workflow_id=workflow_id,
@@ -140,6 +166,9 @@ class WorkflowService:
                 )
                 # Write a minimal failed status
                 self._write_failed_status(workflow_id, output_dir, str(exc))
+            finally:
+                self._unregister_workflow_queue(workflow_id)
+                self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
         if _synchronous:
             _run()
@@ -172,8 +201,10 @@ class WorkflowService:
             {"detail_level": detail_level, "use_llm": False, "source": source_label},
         )
         self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
+        self._register_workflow_queue(workflow_id)
 
         def _run() -> None:
+            self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
                 self.event_log.emit(
                     workflow_id,
@@ -251,6 +282,9 @@ class WorkflowService:
                     {"error": str(exc), "error_type": type(exc).__name__},
                 )
                 self._write_failed_status(workflow_id, output_dir, str(exc))
+            finally:
+                self._unregister_workflow_queue(workflow_id)
+                self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
         if _synchronous:
             _run()
@@ -263,6 +297,28 @@ class WorkflowService:
         thread = threading.Thread(target=_run, name=f"workflow-{workflow_id}")
         thread.start()
         return {"workflow_id": workflow_id, "status": "pending"}
+
+    def _run_scene_revision_with_sink(
+        self,
+        workflow_id: str,
+        scene: SceneSpec,
+        output_dir: Path,
+        detail_level: str,
+        revision_id: str,
+    ) -> OrchestratorResult:
+        self._register_workflow_queue(workflow_id)
+        self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
+        try:
+            return self.orchestrator.run_scene_revision(
+                workflow_id=workflow_id,
+                scene=scene,
+                output_dir=output_dir,
+                detail_level=detail_level,
+                revision_id=revision_id,
+            )
+        finally:
+            self._unregister_workflow_queue(workflow_id)
+            self.orchestrator.set_runtime_event_sink(self.event_log.emit)
 
     def get_status(self, workflow_id: str) -> dict:
         self._sync_output_services()
@@ -479,7 +535,7 @@ class WorkflowService:
                 "parent_version_id": active_version.version_id,
             },
         )
-        result = self.orchestrator.run_scene_revision(
+        result = self._run_scene_revision_with_sink(
             workflow_id=workflow_id,
             scene=patched_scene,
             output_dir=version_output_dir,
@@ -648,6 +704,44 @@ class WorkflowService:
     def get_events(self, workflow_id: str) -> list[dict]:
         self._sync_output_services()
         return [e.model_dump() for e in self.event_log.list_events(workflow_id)]
+
+    def stream_events(self, workflow_id: str):
+        """Yield events for a workflow in near real-time.
+
+        First yields all persisted events, then listens to the in-memory queue
+        for new events until the workflow emits a terminal event.
+        """
+        self._sync_output_services()
+        seen = 0
+        q = self._event_queues.get(workflow_id)
+        terminal = {"workflow_completed", "workflow_failed"}
+
+        while True:
+            events = self.get_events(workflow_id)
+            for event in events[seen:]:
+                yield event
+                seen += 1
+                if event.get("event_type") in terminal:
+                    return
+
+            if q is None:
+                # Workflow thread is no longer registered; emit remaining persisted
+                # events one final time and stop.
+                events = self.get_events(workflow_id)
+                for event in events[seen:]:
+                    yield event
+                    seen += 1
+                return
+
+            try:
+                event = q.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            if event is not None:
+                yield event
+                seen += 1
+                if event.get("event_type") in terminal:
+                    return
 
     def workflow_exists(self, workflow_id: str) -> bool:
         self._sync_output_services()

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command
 
 from core.agents import ScenePlanner
 from core.agents.requirement_extractor import RequirementExtractor
@@ -42,6 +43,8 @@ _RUNTIME_EVENT_SINKS: dict[str, RuntimeEventSink] = {}
 
 class WorkflowState(TypedDict, total=False):
     workflow_id: str
+    entry_mode: str
+    revision_id: str | None
     requirements_text: str
     detail_level: str
     use_llm: bool | None
@@ -199,8 +202,9 @@ class DesignOrchestrator:
         source_label: str = "project_design_spec",
     ) -> OrchestratorResult:
         started = time.perf_counter()
-        state: WorkflowState = {
+        initial_state: WorkflowState = {
             "workflow_id": workflow_id,
+            "entry_mode": "validated_requirements",
             "requirements_text": _requirements_context_text(requirements, source_label),
             "detail_level": detail_level,
             "use_llm": False,
@@ -226,63 +230,13 @@ class DesignOrchestrator:
         }
         self._register_runtime_event_sink(workflow_id)
         try:
-            state["trace"] = _trace(state, "use_validated_requirements", source_label, started)
-
-            self._apply_update(state, self._retrieve_rag_context(state))
-            if self.memory_service is not None:
-                self._apply_update(state, self._memory_recall(state))
-
-            self._apply_update(state, self._select_assets(state))
-            if _asset_route(state) == "asset_fallback":
-                self._apply_update(state, self._asset_fallback_handler(state))
-                if _asset_fallback_route(state) != "continue":
-                    state["total_duration_ms"] = _duration_ms(started)
-                    return _result_from_state(state)
-
-            self._apply_update(state, self._validate_requirements(state))
-            if _requirements_route(state) != "continue":
-                self._apply_update(state, self._rule_violation_handler(state))
-                state["total_duration_ms"] = _duration_ms(started)
-                return _result_from_state(state)
-
-            self._apply_update(state, self._plan_scene(state))
-            self._apply_update(state, self._validate_scene(state))
-            if _scene_route(state) != "continue":
-                self._apply_update(state, self._scene_repair_handler(state))
-                if _scene_repair_route(state) == "retry":
-                    self._apply_update(state, self._validate_scene(state))
-                if _scene_route(state) != "continue":
-                    state["total_duration_ms"] = _duration_ms(started)
-                    return _result_from_state(state)
-
-            self._apply_update(state, self._pre_blender_gate(state))
-            if _pre_blender_gate_route(state) != "continue":
-                self._apply_update(state, self._quality_gate_failure_handler(state))
-                state["total_duration_ms"] = _duration_ms(started)
-                return _result_from_state(state)
-
-            self._apply_update(state, self._generate_blender(state))
-            if _generation_route(state) == "blender_failure":
-                self._apply_update(state, self._blender_failure_handler(state))
-
-            self._apply_update(state, self._qa_generation(state))
-            if _qa_route(state) != "continue":
-                self._apply_update(state, self._qa_failure_handler(state))
-                state["total_duration_ms"] = _duration_ms(started)
-                return _result_from_state(state)
-
-            self._apply_update(state, self._post_blender_gate(state))
-            if _post_blender_gate_route(state) != "continue":
-                self._apply_update(state, self._quality_gate_failure_handler(state))
-                state["total_duration_ms"] = _duration_ms(started)
-                return _result_from_state(state)
-
-            if self.memory_service is not None:
-                self._apply_update(state, self._memory_writeback(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            return _result_from_state(state)
+            state = self.graph.invoke(
+                initial_state, config={"configurable": {"thread_id": workflow_id}}
+            )
         finally:
             self._clear_runtime_event_sink(workflow_id)
+        state["total_duration_ms"] = _duration_ms(started)
+        return _result_from_state(state)
 
     def run_scene_revision(
         self,
@@ -293,13 +247,15 @@ class DesignOrchestrator:
         revision_id: str | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
-        state: WorkflowState = {
+        initial_state: WorkflowState = {
             "workflow_id": workflow_id,
+            "entry_mode": "scene_revision",
             "requirements_text": f"validated scene revision {revision_id or 'unknown'}",
             "detail_level": detail_level,
             "use_llm": False,
             "output_dir": output_dir,
             "scene": scene,
+            "revision_id": revision_id,
             "trace": [],
             "errors": [],
             "rag_context": [],
@@ -320,105 +276,19 @@ class DesignOrchestrator:
         }
         self._register_runtime_event_sink(workflow_id)
         try:
-            scene = _scene_with_required_accessories(scene, self.registry)
-            selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
-            scene = _scene_with_asset_metadata(scene, selected_assets)
-            requirements = _requirements_from_scene(scene, tower, antenna, radio, detail_level)
-        except (KeyError, ValueError) as exc:
-            report = _failed_report(
-                design_id=workflow_id,
-                code="SCENE_REVISION_ASSET_ERROR",
-                message=str(exc),
+            state = self.graph.invoke(
+                initial_state, config={"configurable": {"thread_id": workflow_id}}
             )
-            state.update(
-                {
-                    "report": report,
-                    "trace": _trace(
-                        state,
-                        "edit_prepare_revision",
-                        "asset_lookup_failed",
-                        started,
-                        status="failed",
-                        errors=["SCENE_REVISION_ASSET_ERROR"],
-                    ),
-                }
-            )
-            state["total_duration_ms"] = _duration_ms(started)
+        finally:
             self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        state.update(
-            {
-                "requirements": requirements,
-                "requirements_hash": requirements_hash(requirements),
-                "scene": scene,
-                "scene_spec_hash": scene_spec_hash(scene),
-                "tower": tower,
-                "antenna": antenna,
-                "radio": radio,
-                "accessory_assets": [
-                    asset
-                    for asset in selected_assets
-                    if asset.asset_id in _scene_accessory_ids(scene)
-                ],
-                "selected_assets": selected_assets,
-                "trace": _trace(
-                    state,
-                    "edit_prepare_revision",
-                    revision_id or "scene_revision",
-                    started,
-                ),
-            }
-        )
-
-        self._apply_update(state, self._validate_requirements(state))
-        if _requirements_route(state) != "continue":
-            self._apply_update(state, self._rule_violation_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._validate_scene(state))
-        if _scene_route(state) != "continue":
-            self._apply_update(state, self._scene_repair_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._pre_blender_gate(state))
-        if _pre_blender_gate_route(state) != "continue":
-            self._apply_update(state, self._quality_gate_failure_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._generate_blender(state))
-        if _generation_route(state) == "blender_failure":
-            self._apply_update(state, self._blender_failure_handler(state))
-
-        self._apply_update(state, self._qa_generation(state))
-        if _qa_route(state) != "continue":
-            self._apply_update(state, self._qa_failure_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        self._apply_update(state, self._post_blender_gate(state))
-        if _post_blender_gate_route(state) != "continue":
-            self._apply_update(state, self._quality_gate_failure_handler(state))
-            state["total_duration_ms"] = _duration_ms(started)
-            self._clear_runtime_event_sink(workflow_id)
-            return _result_from_state(state)
-
-        if self.memory_service is not None:
-            self._apply_update(state, self._memory_writeback(state))
         state["total_duration_ms"] = _duration_ms(started)
-        self._clear_runtime_event_sink(workflow_id)
         return _result_from_state(state)
 
     def _build_graph(self):
         graph = StateGraph(WorkflowState)
         terminal_node = "memory_writeback" if self.memory_service is not None else END
+        graph.add_node("_entry_point", self._entry_point)
+        graph.add_node("_prepare_scene_revision", self._prepare_scene_revision)
         graph.add_node("extract_requirements", self._extract_requirements)
         graph.add_node("missing_data_handler", self._missing_data_handler)
         graph.add_node("retrieve_rag_context", self._retrieve_rag_context)
@@ -439,7 +309,17 @@ class DesignOrchestrator:
         graph.add_node("post_blender_gate", self._post_blender_gate)
         graph.add_node("qa_failure_handler", self._qa_failure_handler)
         graph.add_node("quality_gate_failure_handler", self._quality_gate_failure_handler)
-        graph.set_entry_point("extract_requirements")
+        graph.set_entry_point("_entry_point")
+        graph.add_conditional_edges(
+            "_entry_point",
+            _entry_route,
+            {
+                "natural_language": "extract_requirements",
+                "validated_requirements": "retrieve_rag_context",
+                "scene_revision": "_prepare_scene_revision",
+            },
+        )
+        graph.add_edge("_prepare_scene_revision", "validate_requirements")
         graph.add_conditional_edges(
             "extract_requirements",
             _extraction_route,
@@ -466,6 +346,7 @@ class DesignOrchestrator:
             _requirements_route,
             {
                 "continue": "plan_scene",
+                "validate_scene": "validate_scene",
                 "rule_violation": "rule_violation_handler",
             },
         )
@@ -536,6 +417,80 @@ class DesignOrchestrator:
     @staticmethod
     def _apply_update(state: WorkflowState, update: dict) -> None:
         state.update(update)
+
+    def _entry_point(self, state: WorkflowState) -> Command:
+        mode = state.get("entry_mode", "natural_language")
+        if mode == "validated_requirements":
+            return Command(
+                goto="retrieve_rag_context",
+                update={
+                    "trace": _trace(
+                        state,
+                        "use_validated_requirements",
+                        state.get("extraction_provider", "project_design_spec"),
+                        time.perf_counter(),
+                    )
+                },
+            )
+        if mode == "scene_revision":
+            return Command(goto="_prepare_scene_revision", update={})
+        return Command(goto="extract_requirements", update={})
+
+    def _prepare_scene_revision(self, state: WorkflowState) -> Command:
+        started = time.perf_counter()
+        scene = state["scene"]
+        try:
+            scene = _scene_with_required_accessories(scene, self.registry)
+            selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
+            scene = _scene_with_asset_metadata(scene, selected_assets)
+            requirements = _requirements_from_scene(
+                scene, tower, antenna, radio, state["detail_level"]
+            )
+        except (KeyError, ValueError) as exc:
+            report = _failed_report(
+                design_id=state["workflow_id"],
+                code="SCENE_REVISION_ASSET_ERROR",
+                message=str(exc),
+            )
+            return Command(
+                goto=END,
+                update={
+                    "report": report,
+                    "trace": _trace(
+                        state,
+                        "edit_prepare_revision",
+                        "asset_lookup_failed",
+                        started,
+                        status="failed",
+                        errors=["SCENE_REVISION_ASSET_ERROR"],
+                    ),
+                },
+            )
+        accessory_assets = [
+            asset for asset in selected_assets if asset.asset_id in _scene_accessory_ids(scene)
+        ]
+        return Command(
+            goto="validate_requirements",
+            update={
+                "scene": scene,
+                "scene_spec_hash": scene_spec_hash(scene),
+                "requirements": requirements,
+                "requirements_hash": requirements_hash(requirements),
+                "tower": tower,
+                "antenna": antenna,
+                "radio": radio,
+                "accessory_assets": accessory_assets,
+                "selected_assets": selected_assets,
+                "trace": [
+                    *_trace(
+                        state,
+                        "edit_prepare_revision",
+                        state.get("revision_id") or "scene_revision",
+                        started,
+                    )
+                ],
+            },
+        )
 
     def _extract_requirements(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
@@ -1207,6 +1162,10 @@ class DesignOrchestrator:
         }
 
 
+def _entry_route(state: WorkflowState) -> str:
+    return state.get("entry_mode", "natural_language")
+
+
 def _extraction_route(state: WorkflowState) -> str:
     return "continue" if state.get("requirements") is not None else "missing_data"
 
@@ -1420,11 +1379,11 @@ def _asset_fallback_route(state: WorkflowState) -> str:
 
 
 def _requirements_route(state: WorkflowState) -> str:
-    return (
-        "continue"
-        if state["requirement_report"].status in ("passed", "warning")
-        else "rule_violation"
-    )
+    if state["requirement_report"].status not in ("passed", "warning"):
+        return "rule_violation"
+    if state.get("entry_mode") == "scene_revision" and state.get("scene") is not None:
+        return "validate_scene"
+    return "continue"
 
 
 def _scene_route(state: WorkflowState) -> str:
