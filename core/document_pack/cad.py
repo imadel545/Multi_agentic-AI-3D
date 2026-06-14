@@ -21,10 +21,12 @@ def extract_cad_text_pages(document: DocumentReference, content: bytes) -> CadEx
         return CadExtractionResult([], "not_attempted", document.cad_status, [], [])
     if document.extension == "dwg":
         converter = _local_dwg_converter()
+        # DWG remains unsupported at extraction time; a local converter merely
+        # signals that conversion to DXF could be attempted as a separate step.
         return CadExtractionResult(
             [],
-            "unsupported" if converter is None else "inventory_only",
-            "unsupported" if converter is None else "inventory_only",
+            "unsupported",
+            "unsupported",
             [converter.name] if converter else [],
             [
                 "DWG requires local conversion to DXF before ezdxf parsing; "
