@@ -6,7 +6,7 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 | Capability | Status | Evidence | Limite / vérité frontend |
 |---|---|---|---|
 | Backend API | IMPLEMENTED | `apps/api/telecom_studio_api/main.py` | Local-first, mono-utilisateur. |
-| Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, actions disponibles, timeline lisible, progression `push_sse`. |
+| Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, viewer/QA bundle, actions disponibles, timeline lisible, progression `push_sse`. |
 | Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
 | Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py` | Synchrone, 80 Mo, extraction en mémoire. |
 | PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |

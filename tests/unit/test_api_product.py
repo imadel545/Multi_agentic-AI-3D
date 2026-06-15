@@ -135,6 +135,14 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["primary_glb_url"]
         assert bundle["preview_url"]
         assert bundle["report_url"]
+        assert bundle["metadata_url"]
+        assert bundle["scene_spec_url"]
+        assert bundle["qa_report_url"]
+        assert bundle["generation_report_url"]
+        assert bundle["geometry_validation_url"]
+        assert bundle["qa_summary"]["mesh_qa_level"]
+        assert isinstance(bundle["qa_summary"]["checks_passed"], list)
+        assert isinstance(bundle["qa_summary"]["checks_failed"], list)
         assert bundle["primary_glb_url"].startswith(f"/designs/{workflow_id}/artifacts/glb")
         assert "/Users/" not in bundle["primary_glb_url"]
         assert "open_viewer" in bundle["available_actions"]
@@ -144,6 +152,9 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         names = {a["name"] for a in bundle["viewer_artifacts"]}
         assert "design.glb" in names
         assert "preview.png" in names
+        assert "scene_metadata.json" in names
+        assert "qa_report.json" in names
+        assert "geometry_validation.json" in names
         for artifact in bundle["viewer_artifacts"]:
             assert artifact["url"].startswith(f"/designs/{workflow_id}/artifacts/")
             assert "/Users/" not in artifact["url"]
@@ -236,6 +247,18 @@ def test_workflow_events_expose_runtime_nodes_without_premature_blender_event(
         assert all(event.get("timestamp") for event in events)
         assert all(event.get("event_id") for event in events)
         assert all(event.get("event_source") == "workflow_events_jsonl" for event in events)
+        required_payload_fields = {
+            "phase",
+            "node",
+            "human_label",
+            "progress_message",
+            "status",
+            "duration_ms",
+            "warnings",
+            "errors",
+            "artifact_refs",
+        }
+        assert all(required_payload_fields.issubset(event["payload"]) for event in events)
         assert "node_started" in event_types
         assert "artifact_ready" in event_types
         assert "qa_completed" in event_types

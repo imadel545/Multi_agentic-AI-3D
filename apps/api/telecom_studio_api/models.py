@@ -213,6 +213,12 @@ class ViewerBundle(BaseModel):
     primary_glb_url: str | None = None
     preview_url: str | None = None
     report_url: str | None = None
+    metadata_url: str | None = None
+    scene_spec_url: str | None = None
+    qa_report_url: str | None = None
+    generation_report_url: str | None = None
+    geometry_validation_url: str | None = None
+    qa_summary: dict | None = None
     viewer_artifacts: list[ViewerArtifact]
     limitations: list[str] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)

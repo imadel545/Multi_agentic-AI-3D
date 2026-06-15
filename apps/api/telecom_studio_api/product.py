@@ -159,11 +159,25 @@ class ProductService:
 
         viewer_artifacts.append(_artifact("design.glb", "model/gltf-binary", "glb"))
         viewer_artifacts.append(_artifact("preview.png", "image/png", "preview"))
+        viewer_artifacts.append(_artifact("scene_metadata.json", "application/json", "metadata"))
+        viewer_artifacts.append(_artifact("scene_spec.json", "application/json", "scene_spec"))
+        viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
+        viewer_artifacts.append(
+            _artifact("generation_report.json", "application/json", "generation_report")
+        )
+        viewer_artifacts.append(
+            _artifact("geometry_validation.json", "application/json", "geometry_validation")
+        )
         viewer_artifacts.append(
             _artifact("technical_report.md", "text/markdown", "technical_report")
         )
         primary_glb = _artifact_by_name(viewer_artifacts, "design.glb")
         preview = _artifact_by_name(viewer_artifacts, "preview.png")
+        metadata = _artifact_by_name(viewer_artifacts, "scene_metadata.json")
+        scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
+        qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
+        generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
+        geometry_validation = _artifact_by_name(viewer_artifacts, "geometry_validation.json")
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
 
         return {
@@ -182,6 +196,14 @@ class ProductService:
             "primary_glb_url": primary_glb.get("url") if primary_glb else None,
             "preview_url": preview.get("url") if preview else None,
             "report_url": report.get("url") if report else None,
+            "metadata_url": metadata.get("url") if metadata else None,
+            "scene_spec_url": scene_spec.get("url") if scene_spec else None,
+            "qa_report_url": qa_report.get("url") if qa_report else None,
+            "generation_report_url": generation_report.get("url") if generation_report else None,
+            "geometry_validation_url": geometry_validation.get("url")
+            if geometry_validation
+            else None,
+            "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
             "limitations": _collect_limitations(status),
             "available_actions": _available_actions(status, issues),
@@ -424,6 +446,47 @@ def _qa_summary(status: dict) -> str:
     if qa_score >= 0.5:
         return f"Qualité limitée ({qa_score:.0%}). Vérifiez les problèmes signalés."
     return f"Qualité insuffisante ({qa_score:.0%}). Un correctif est probablement nécessaire."
+
+
+def _viewer_qa_summary(status: dict) -> dict:
+    geometry = status.get("geometry_validation_summary") or {}
+    glb = status.get("glb_inspection_summary") or {}
+    preview = status.get("preview_inspection_summary") or {}
+    if not isinstance(geometry, dict):
+        geometry = {}
+    if not isinstance(glb, dict):
+        glb = {}
+    if not isinstance(preview, dict):
+        preview = {}
+    checks = geometry.get("checks") if isinstance(geometry.get("checks"), dict) else {}
+    checks_passed = sorted(name for name, passed in checks.items() if passed is True)
+    checks_failed = sorted(name for name, passed in checks.items() if passed is False)
+    warnings = [
+        item.get("code") or item.get("message")
+        for item in status.get("warnings", [])
+        if isinstance(item, dict)
+    ]
+    errors = [
+        item.get("code") or item.get("message")
+        for item in status.get("errors", [])
+        if isinstance(item, dict)
+    ]
+    return {
+        "mesh_qa_level": status.get("mesh_qa_level"),
+        "mesh_qa_passed": status.get("mesh_qa_passed"),
+        "qa_score": status.get("qa_score"),
+        "checks_passed": checks_passed,
+        "checks_failed": checks_failed,
+        "warnings": [warning for warning in warnings if warning],
+        "errors": [error for error in errors if error],
+        "limitations": _collect_limitations(status),
+        "geometry_source": status.get("geometry_source"),
+        "generation_strategy": status.get("generation_strategy"),
+        "object_counts": geometry.get("object_counts"),
+        "missing_objects": geometry.get("missing_objects"),
+        "glb_parse_structural": glb.get("structural_qa_passed"),
+        "preview_luminance_only": preview.get("inspection_mode") == "png_parse",
+    }
 
 
 def _asset_quality_summary(status: dict) -> str | None:

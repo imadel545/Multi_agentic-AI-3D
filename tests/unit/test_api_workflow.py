@@ -433,6 +433,18 @@ def test_event_stream_replays_complete_push_sse_events(tmp_path: Path) -> None:
         assert all(event["timestamp"] for event in events)
         assert all(event["event_id"] for event in events)
         assert all(event["event_source"] == "push_sse" for event in events)
+        required_payload_fields = {
+            "phase",
+            "node",
+            "human_label",
+            "progress_message",
+            "status",
+            "duration_ms",
+            "warnings",
+            "errors",
+            "artifact_refs",
+        }
+        assert all(required_payload_fields.issubset(event["payload"]) for event in events)
         assert any(event["event_type"] == "artifact_ready" for event in events)
     finally:
         workflow_service.outputs_dir = original_outputs

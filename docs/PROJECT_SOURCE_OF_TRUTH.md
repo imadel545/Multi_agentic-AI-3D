@@ -93,6 +93,10 @@ yet.
   progress message, detail, `duration_ms`, warnings, and errors.
 - Product events include `artifact_ready`, `qa_completed` / `qa_failed`, and
   `user_issue_created` when relevant.
+- Every public workflow event carries `event_id`, `workflow_id`, `timestamp`,
+  `event_source`, and payload fields for `phase`, `node`, `human_label`,
+  `progress_message`, `status`, `duration_ms`, warnings, errors, and
+  artifact refs.
 - `/current-operation` exposes `current_phase`, `current_node`, and
   `event_source`, plus frontend labels, terminal/running flags, last event time,
   and available actions.
@@ -101,6 +105,9 @@ yet.
   error count, progress message, and artifact refs when available.
 - Public workflow/edit/version responses expose artifact URLs, not local
   filesystem paths. `asset_imports[].resolved_path` remains internal only.
+- `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
+  metadata, SceneSpec, QA report, generation report, geometry validation, and
+  technical report, plus a compact QA summary for drawers.
 - Streaming is local-process only: no cross-process broker, cancellation, or
   durable resume manager yet.
 

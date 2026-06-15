@@ -107,6 +107,12 @@ restent internes au backend.
 - `primary_glb_url`
 - `preview_url`
 - `report_url`
+- `metadata_url`
+- `scene_spec_url`
+- `qa_report_url`
+- `generation_report_url`
+- `geometry_validation_url`
+- `qa_summary`
 - `viewer_artifacts[]`
 - `limitations`
 - `available_actions`
@@ -194,9 +200,10 @@ Events runtime attendus:
 - `workflow_failed`
 
 Les events portent `event_id`, `workflow_id`, `timestamp`, `event_source` et
-`payload`. Les events de nœud portent `payload.node`, `payload.phase`,
+`payload`. Tous les payloads publics portent `payload.node`, `payload.phase`,
 `payload.status`, `payload.human_label`, `payload.progress_message`,
-`payload.detail`, `payload.duration_ms`, `payload.warnings`, `payload.errors`.
+`payload.duration_ms`, `payload.warnings`, `payload.errors` et
+`payload.artifact_refs`. Les events de nœud ajoutent aussi `payload.detail`.
 
 Un `node_failed` doit aussi apparaître dans `/user-issues` comme issue humaine. Si le workflow
 termine malgré l'échec du nœud, la sévérité est `warning`; si le workflow échoue, elle est
