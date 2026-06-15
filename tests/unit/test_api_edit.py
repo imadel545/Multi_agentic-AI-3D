@@ -110,7 +110,17 @@ def test_edit_design_creates_version(client, tmp_path):
         first_version = versions[0]["version_id"]
         rollback_resp = client.post(f"/designs/{workflow_id}/versions/{first_version}/rollback")
         assert rollback_resp.status_code == 200
-        assert rollback_resp.json()["rolled_back"] is True
+        rollback_payload = rollback_resp.json()
+        assert rollback_payload["rolled_back"] is True
+        assert rollback_payload["status"] == "rolled_back"
+        assert rollback_payload["active_version_id"] == first_version
+        assert rollback_payload["viewer_bundle_url"] == f"/designs/{workflow_id}/viewer-bundle"
+        assert rollback_payload["timeline_url"] == f"/designs/{workflow_id}/timeline-summary"
+        assert rollback_payload["user_issues_url"] == f"/designs/{workflow_id}/user-issues"
+        assert rollback_payload["current_operation_url"] == (
+            f"/designs/{workflow_id}/current-operation"
+        )
+        assert "open_viewer" in rollback_payload["available_actions"]
         rolled_status = client.get(f"/designs/{workflow_id}").json()
         assert rolled_status["active_version_id"] == first_version
 
@@ -120,6 +130,9 @@ def test_edit_design_creates_version(client, tmp_path):
         events = events_resp.json()
         assert any(e["event_type"] == "edit_patch_applied" for e in events)
         assert any(e["payload"].get("version_id") == version_id for e in events)
+        rollback_event = next(e for e in events if e["event_type"] == "version_rolled_back")
+        assert rollback_event["payload"]["version_id"] == first_version
+        assert rollback_event["payload"]["human_label"] == "Version restaurée"
     finally:
         workflow_service.outputs_dir = original_outputs
 

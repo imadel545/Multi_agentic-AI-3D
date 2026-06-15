@@ -1,7 +1,9 @@
 # LangGraph Workflow
 
-LangGraph est présent et structure le pipeline, mais il ne faut pas prétendre que tous les
-chemins passent proprement par le graphe compilé.
+LangGraph structure le pipeline de génération. Les entrées prompt, exigences validées issues
+du document-pack, et génération de révision entrent toutes dans le graphe compilé avec un
+`entry_mode` explicite. La création du patch d'édition, la copie d'artefacts et le versioning
+restent des responsabilités `WorkflowService` hors graphe.
 
 ## Noeuds principaux
 
@@ -26,9 +28,9 @@ memory_writeback
 
 ## Vérité runtime
 
-- `DesignOrchestrator.run()` utilise le workflow principal.
-- `run_requirements()` et `run_scene_revision()` exécutent encore une séquence impérative
-  équivalente pour certains cas.
+- `DesignOrchestrator.run()` utilise le workflow principal depuis texte libre.
+- `run_requirements()` entre dans le graphe avec `entry_mode=validated_requirements`.
+- `run_scene_revision()` entre dans le graphe avec `entry_mode=scene_revision`.
 - Le checkpoint saver existe, mais il n'est pas encore une vraie base de reprise/cancellation.
 - Les nœuds émettent maintenant `node_started`, puis `node_completed`,
   `node_failed` ou `node_skipped` avec phase, label humain, message de
@@ -45,7 +47,8 @@ memory_writeback
 
 ## À corriger plus tard
 
-- Faire passer tous les chemins par le graphe compilé.
+- Décider si la création de patch d'édition et le versioning doivent devenir des nœuds LangGraph
+  si le frontend exige une progression plus fine sur ces actions.
 - Ajouter cancellation/retry/recovery et reprise durable si l'expérience frontend
   dépasse le modèle local-thread.
 - Décider queue/job manager seulement si le runtime local-thread devient bloquant.

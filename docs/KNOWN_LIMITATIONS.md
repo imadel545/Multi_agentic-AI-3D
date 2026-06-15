@@ -3,7 +3,7 @@
 Active limitations that must remain visible in the API, reports, and future
 frontend.
 
-## Blocking before advanced frontend
+## Visible during frontend build
 
 - No operational frontend yet; old dashboard rejected.
 - `events/stream` is `push_sse` inside the local FastAPI process, with JSONL
@@ -19,7 +19,8 @@ frontend.
 - Deterministic extraction is fragile on complex requirements.
 - Groq improves extraction only when a real key is configured.
 - Agents are mostly deterministic functions or LLM wrappers.
-- Some paths bypass the compiled LangGraph graph.
+- Prompt workflows, document-pack generated requirements, and scene revisions enter the
+  compiled LangGraph graph; edit patch creation and version bookkeeping remain service-level.
 - No robust cancellation/retry manager; async execution uses local threads.
 
 ## RAG and memory

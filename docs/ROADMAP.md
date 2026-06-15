@@ -71,7 +71,7 @@
 
 ## Future
 
-- Replace internal cleaned/minimal GLBs and missing tower manifests with vendor-grade or
+- Replace internal cleaned/minimal GLBs and project-generated tower GLBs with vendor-grade or
   project-owned production GLB assets.
 - Wire standalone prompt/document controls for mounting bracket and cable-tray accessory placement.
 - Add exact imported-asset bounding-box, pivot, mount-point, material, and LOD validation.

@@ -9,7 +9,7 @@ sont la base; les couches agentiques et RAG restent contrôlées.
 FastAPI
   -> requirements text or document pack
   -> RequirementSpec / ProjectDesignSpec
-  -> LangGraph-orchestrated pipeline (partly imperative on some paths)
+  -> LangGraph-orchestrated generation pipeline
   -> Groq extraction or deterministic fallback
   -> NVIDIA BGE-M3 RAG context (advisory)
   -> SQLite memory recall
@@ -46,7 +46,10 @@ FastAPI
 
 ## Known weak points
 
-- Some orchestration paths do not use the compiled LangGraph graph end to end.
-- Events are sparse and SSE is polling.
-- Missing tower GLBs trigger procedural fallback inside real Blender generation.
+- Edit patch creation, artifact copying, and version bookkeeping are service-level concerns
+  outside the graph; generation paths enter the compiled LangGraph graph.
+- Events are frontend-readable and `/events/stream` is `push_sse` local-process, but there is
+  no broker, cancellation manager, or durable resume yet.
+- Asset import fallback can still create procedural geometry if an import fails, but the active
+  inventory has 12 manifests, 12 GLB files, and 0 missing files.
 - Geometry QA is object/name/count/metadata based, not mesh-transform exact.

@@ -133,6 +133,18 @@ restent internes au backend.
 `/designs/{id}/versions` expose l'historique sans `artifact_dir`; les artefacts
 de chaque version sont des URLs versionnées.
 
+`/designs/{id}/versions/{vid}/rollback` expose, en cas de succès:
+
+- `rolled_back=true`
+- `status=rolled_back`
+- `active_version_id`
+- `message`
+- `viewer_bundle_url`
+- `timeline_url`
+- `user_issues_url`
+- `current_operation_url`
+- `available_actions`
+
 `/current-operation` expose:
 
 - `current_operation`

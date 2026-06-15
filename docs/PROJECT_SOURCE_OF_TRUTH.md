@@ -24,8 +24,9 @@ yet.
 
 - FastAPI exposes design workflow, document-pack, RAG, memory, asset, and
   Product APIs.
-- LangGraph is used, but some paths (`run_requirements`, scene revision) still
-  execute the sequence imperatively.
+- LangGraph is used for prompt workflows, document-pack generated requirements,
+  and scene revision generation. Edit patch creation and version bookkeeping
+  remain service-level logic outside the graph.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
 - Primary RAG: NVIDIA API `baai/bge-m3`.
@@ -108,6 +109,9 @@ yet.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation, and
   technical report, plus a compact QA summary for drawers.
+- Edit and rollback responses expose frontend action URLs (`viewer-bundle`,
+  `timeline-summary`, `user-issues`, `current-operation`) and available actions
+  so the UI does not infer post-action state.
 - Streaming is local-process only: no cross-process broker, cancellation, or
   durable resume manager yet.
 

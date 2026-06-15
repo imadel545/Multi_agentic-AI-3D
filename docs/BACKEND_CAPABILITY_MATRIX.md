@@ -17,7 +17,7 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 | RAG | IMPLEMENTED_LIMITED | `core/rag` | NVIDIA `baai/bge-m3` principal; fallback local puis hash visible. |
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Local best-effort; passthrough si modèle indisponible. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
-| LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Graphe présent, mais certains chemins sont impératifs. |
+| LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
 | Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
 | Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |

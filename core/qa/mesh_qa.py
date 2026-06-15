@@ -218,6 +218,7 @@ def _compute_glb_bounding_box(glb_path: Path) -> BoundingBoxM | None:
 def _object_prefix_counts(object_names: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for name in object_names:
+        normalized = _normalize_object_name(name)
         for prefix in (
             "tower",
             "antenna",
@@ -228,10 +229,14 @@ def _object_prefix_counts(object_names: list[str]) -> dict[str, int]:
             "power_cabinet",
             "gps",
         ):
-            if prefix in name.lower():
+            if normalized == prefix or normalized.startswith(f"{prefix}_"):
                 counts[prefix] = counts.get(prefix, 0) + 1
                 break
     return counts
+
+
+def _normalize_object_name(name: str) -> str:
+    return str(name).lower().replace(":", "_").replace("-", "_")
 
 
 def _guess_geometry_source(scene: SceneSpec) -> GeometrySource:

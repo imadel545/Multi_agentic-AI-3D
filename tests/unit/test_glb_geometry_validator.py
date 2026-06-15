@@ -4,6 +4,7 @@ from pathlib import Path
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.glb_inspection import GlbInspectionReport
 from core.qa.glb_geometry_validator import GLBGeometryValidator
+from core.qa.mesh_qa import _object_prefix_counts
 from core.services.asset_registry import AssetRegistry
 from core.services.requirement_parser import parse_requirements_text
 
@@ -134,6 +135,20 @@ def test_geometry_validation_requires_requested_accessories(tmp_path: Path) -> N
     assert missing.status == "failed"
     assert "gps_antenna" in missing.missing_objects
     assert "power_cabinet" in missing.missing_objects
+
+
+def test_mesh_qa_prefix_counts_do_not_treat_gps_as_sector_antenna() -> None:
+    counts = _object_prefix_counts(
+        [
+            "tower_TOWER_LATTICE_30M",
+            "gps_antenna_GPS_ANTENNA_001",
+            "power_cabinet_POWER_CABINET_001",
+        ]
+    )
+
+    assert counts.get("antenna", 0) == 0
+    assert counts["gps"] == 1
+    assert counts["power_cabinet"] == 1
 
 
 def _scene(prompt: str | None = None):

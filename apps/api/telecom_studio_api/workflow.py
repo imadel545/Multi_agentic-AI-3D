@@ -787,12 +787,26 @@ class WorkflowService:
         self._emit_workflow_event(
             workflow_id,
             "version_rolled_back",
-            {"version_id": version_id},
+            {
+                "version_id": version_id,
+                "status": "completed",
+                "human_label": "Version restaurée",
+                "progress_message": "La version active a été restaurée.",
+            },
         )
+        status = self.get_status(workflow_id)
         return {
             "workflow_id": workflow_id,
             "version_id": version_id,
+            "active_version_id": version_id,
             "rolled_back": True,
+            "status": "rolled_back",
+            "message": "La version active a été restaurée.",
+            "viewer_bundle_url": f"/designs/{workflow_id}/viewer-bundle",
+            "timeline_url": f"/designs/{workflow_id}/timeline-summary",
+            "user_issues_url": f"/designs/{workflow_id}/user-issues",
+            "current_operation_url": f"/designs/{workflow_id}/current-operation",
+            "available_actions": _status_available_actions(status),
         }
 
     def get_events(self, workflow_id: str) -> list[dict]:
