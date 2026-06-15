@@ -30,14 +30,15 @@ memory_writeback
 - `run_requirements()` et `run_scene_revision()` exécutent encore une séquence impérative
   équivalente pour certains cas.
 - Le checkpoint saver existe, mais il n'est pas encore une vraie base de reprise/cancellation.
-- Les nœuds émettent maintenant des events runtime `node_completed`, `node_failed`,
-  `node_skipped` avec phase, détail, durée, warnings et errors.
+- Les nœuds émettent maintenant `node_started`, puis `node_completed`,
+  `node_failed` ou `node_skipped` avec phase, label humain, message de
+  progression, détail, durée, warnings et errors.
 - `workflow_trace.json` reste la preuve complète post-run.
 
 ## Frontend impact
 
-- Ne pas vendre un "live agent trace" complet tant que le transport reste polling.
-- Afficher `events/stream` comme `polling_sse`.
+- Afficher `events/stream` comme `push_sse` local-process: replay JSONL puis
+  queue live jusqu'au terminal.
 - Utiliser `/timeline-summary` pour une timeline lisible dérivée des events runtime + trace.
 - Utiliser `/current-operation` pour `current_phase`, `current_node` et action suivante.
 - Garder raw trace JSON en détail secondaire seulement.
@@ -45,6 +46,6 @@ memory_writeback
 ## À corriger plus tard
 
 - Faire passer tous les chemins par le graphe compilé.
-- Ajouter cancellation/retry/recovery.
-- Passer de `polling_sse` à un vrai transport push uniquement si l'expérience frontend le prouve.
+- Ajouter cancellation/retry/recovery et reprise durable si l'expérience frontend
+  dépasse le modèle local-thread.
 - Décider queue/job manager seulement si le runtime local-thread devient bloquant.

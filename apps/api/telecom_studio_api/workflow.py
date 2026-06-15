@@ -52,15 +52,20 @@ class WorkflowService:
 
     def _event_sink_for(self, workflow_id: str):
         def _sink(workflow_id_: str, event_type: str, payload: dict) -> None:
-            self.event_log.emit(workflow_id_, event_type, payload)
-            q = self._event_queues.get(workflow_id_)
-            if q is not None:
-                try:
-                    q.put_nowait({"event_type": event_type, "payload": payload})
-                except queue.Full:
-                    pass
+            self._emit_workflow_event(workflow_id_, event_type, payload)
 
         return _sink
+
+    def _emit_workflow_event(self, workflow_id: str, event_type: str, payload: dict) -> dict:
+        event = self.event_log.emit(workflow_id, event_type, payload)
+        event_payload = event.model_dump()
+        q = self._event_queues.get(workflow_id)
+        if q is not None:
+            try:
+                q.put_nowait(event_payload)
+            except queue.Full:
+                pass
+        return event_payload
 
     def _register_workflow_queue(self, workflow_id: str) -> queue.Queue:
         with self._lock:
@@ -84,16 +89,16 @@ class WorkflowService:
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
 
-        # Emit design created event
-        self.event_log.emit(
-            workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
-        )
         self._write_pending_status(workflow_id, output_dir, detail_level, use_llm)
         self._register_workflow_queue(workflow_id)
+        self._emit_workflow_event(
+            workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
+        )
 
         def _run() -> None:
             self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
+                self._write_running_status(workflow_id, output_dir)
                 result = self.orchestrator.run(
                     workflow_id=workflow_id,
                     requirements_text=requirements_text,
@@ -148,7 +153,12 @@ class WorkflowService:
                         active=True,
                     )
                     self._copy_active_status_to_root(workflow_id, version_dir)
-                self.event_log.emit(
+                self._emit_result_product_events(
+                    workflow_id,
+                    result,
+                    version_id=self.versioning.active_version_id(workflow_id),
+                )
+                self._emit_workflow_event(
                     workflow_id,
                     "workflow_completed" if result.status != "failed" else "workflow_failed",
                     {
@@ -159,7 +169,15 @@ class WorkflowService:
                     },
                 )
             except Exception as exc:
-                self.event_log.emit(
+                self._emit_user_issue_event(
+                    workflow_id,
+                    {
+                        "code": "WORKFLOW_EXCEPTION",
+                        "message": str(exc),
+                        "severity": "error",
+                    },
+                )
+                self._emit_workflow_event(
                     workflow_id,
                     "workflow_failed",
                     {"error": str(exc), "error_type": type(exc).__name__},
@@ -195,18 +213,19 @@ class WorkflowService:
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
         context_text = _requirements_context_text(requirements, source_label)
-        self.event_log.emit(
+        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
+        self._register_workflow_queue(workflow_id)
+        self._emit_workflow_event(
             workflow_id,
             "design_created",
             {"detail_level": detail_level, "use_llm": False, "source": source_label},
         )
-        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
-        self._register_workflow_queue(workflow_id)
 
         def _run() -> None:
             self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
-                self.event_log.emit(
+                self._write_running_status(workflow_id, output_dir)
+                self._emit_workflow_event(
                     workflow_id,
                     "validated_requirements_received",
                     {"source": source_label, "node": "use_validated_requirements"},
@@ -265,7 +284,12 @@ class WorkflowService:
                         active=True,
                     )
                     self._copy_active_status_to_root(workflow_id, version_dir)
-                self.event_log.emit(
+                self._emit_result_product_events(
+                    workflow_id,
+                    result,
+                    version_id=self.versioning.active_version_id(workflow_id),
+                )
+                self._emit_workflow_event(
                     workflow_id,
                     "workflow_completed" if result.status != "failed" else "workflow_failed",
                     {
@@ -276,7 +300,15 @@ class WorkflowService:
                     },
                 )
             except Exception as exc:
-                self.event_log.emit(
+                self._emit_user_issue_event(
+                    workflow_id,
+                    {
+                        "code": "WORKFLOW_EXCEPTION",
+                        "message": str(exc),
+                        "severity": "error",
+                    },
+                )
+                self._emit_workflow_event(
                     workflow_id,
                     "workflow_failed",
                     {"error": str(exc), "error_type": type(exc).__name__},
@@ -465,7 +497,7 @@ class WorkflowService:
         original_scene = active_version.scene
         edit_id = f"edit_{uuid.uuid4().hex[:8]}"
 
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "edit_patch_created",
             {
@@ -479,7 +511,7 @@ class WorkflowService:
         try:
             patch = self.scene_edit_agent.create_patch(workflow_id, original_scene, edit_prompt)
         except Exception as exc:
-            self.event_log.emit(
+            self._emit_workflow_event(
                 workflow_id,
                 "edit_patch_rejected",
                 {"edit_id": edit_id, "reason": str(exc)},
@@ -501,7 +533,7 @@ class WorkflowService:
         patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
 
         if validation_report.status == "failed":
-            self.event_log.emit(
+            self._emit_workflow_event(
                 workflow_id,
                 "edit_patch_rejected",
                 {
@@ -531,7 +563,7 @@ class WorkflowService:
             activate=False,
         )
         version_output_dir = self.versioning.version_artifacts_dir(workflow_id, version.version_id)
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "version_created",
             {
@@ -579,7 +611,7 @@ class WorkflowService:
             active=False,
         )
 
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "blender_completed"
             if result.generation and result.generation.status in {"generated", "fallback"}
@@ -591,7 +623,7 @@ class WorkflowService:
                 "node": "generate_blender",
             },
         )
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "qa_completed" if result.status == "completed" else "qa_failed",
             {
@@ -603,7 +635,7 @@ class WorkflowService:
 
         if result.status != "completed":
             self.versioning.update_version(workflow_id, version.version_id, status="failed")
-            self.event_log.emit(
+            self._emit_workflow_event(
                 workflow_id,
                 "edit_patch_rejected",
                 {
@@ -643,7 +675,7 @@ class WorkflowService:
             active_version_id=version.version_id,
         )
         self._copy_active_status_to_root(workflow_id, version_output_dir)
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "edit_patch_applied",
             {"edit_id": edit_id, "version_id": version.version_id, "status": result.status},
@@ -751,7 +783,7 @@ class WorkflowService:
         if not version.artifact_dir:
             raise KeyError(version_id)
         self._copy_active_status_to_root(workflow_id, Path(version.artifact_dir))
-        self.event_log.emit(
+        self._emit_workflow_event(
             workflow_id,
             "version_rolled_back",
             {"version_id": version_id},
@@ -764,7 +796,10 @@ class WorkflowService:
 
     def get_events(self, workflow_id: str) -> list[dict]:
         self._sync_output_services()
-        return [e.model_dump() for e in self.event_log.list_events(workflow_id)]
+        return [
+            e.model_dump() | {"event_source": "workflow_events_jsonl"}
+            for e in self.event_log.list_events(workflow_id)
+        ]
 
     def stream_events(self, workflow_id: str):
         """Yield events for a workflow in near real-time.
@@ -773,25 +808,27 @@ class WorkflowService:
         for new events until the workflow emits a terminal event.
         """
         self._sync_output_services()
-        seen = 0
+        seen_event_ids: set[str] = set()
         q = self._event_queues.get(workflow_id)
         terminal = {"workflow_completed", "workflow_failed"}
 
-        while True:
-            events = self.get_events(workflow_id)
-            for event in events[seen:]:
-                yield event
-                seen += 1
-                if event.get("event_type") in terminal:
-                    return
+        for event in self.get_events(workflow_id):
+            seen_event_ids.add(_event_identity(event))
+            yield event | {"event_source": "push_sse"}
+            if event.get("event_type") in terminal:
+                return
 
-            if q is None:
-                # Workflow thread is no longer registered; emit remaining persisted
-                # events one final time and stop.
-                events = self.get_events(workflow_id)
-                for event in events[seen:]:
-                    yield event
-                    seen += 1
+        if q is None:
+            return
+
+        while True:
+            if self._event_queues.get(workflow_id) is not q and q.empty():
+                for event in self.get_events(workflow_id):
+                    identity = _event_identity(event)
+                    if identity in seen_event_ids:
+                        continue
+                    seen_event_ids.add(identity)
+                    yield event | {"event_source": "push_sse"}
                 return
 
             try:
@@ -799,14 +836,88 @@ class WorkflowService:
             except queue.Empty:
                 continue
             if event is not None:
-                yield event
-                seen += 1
+                identity = _event_identity(event)
+                if identity in seen_event_ids:
+                    continue
+                seen_event_ids.add(identity)
+                yield event | {"event_source": "push_sse"}
                 if event.get("event_type") in terminal:
                     return
 
     def workflow_exists(self, workflow_id: str) -> bool:
         self._sync_output_services()
         return (self.outputs_dir / workflow_id).exists()
+
+    def _emit_result_product_events(
+        self,
+        workflow_id: str,
+        result: OrchestratorResult,
+        *,
+        version_id: str | None,
+    ) -> None:
+        if result.generation is not None and result.generation.artifacts:
+            artifacts = _public_artifact_urls(
+                workflow_id,
+                result.generation.artifacts,
+                version_id=version_id,
+            )
+            self._emit_workflow_event(
+                workflow_id,
+                "artifact_ready",
+                {
+                    "node": "generate_blender",
+                    "phase": "viewer",
+                    "status": result.generation.status,
+                    "version_id": version_id,
+                    "generation_mode": result.generation.mode,
+                    "artifact_refs": list(artifacts.values()),
+                    "artifacts": artifacts,
+                    "human_label": "Préparation du viewer 3D",
+                    "progress_message": "Les artefacts du viewer 3D sont disponibles.",
+                },
+            )
+        if result.qa_report is not None:
+            geometry = result.geometry_validation
+            self._emit_workflow_event(
+                workflow_id,
+                "qa_completed" if result.qa_report.status == "passed" else "qa_failed",
+                {
+                    "node": "qa_generation",
+                    "phase": "qa",
+                    "status": result.qa_report.status,
+                    "version_id": version_id,
+                    "qa_score": result.qa_report.score,
+                    "mesh_qa_level": geometry.mesh_qa_level if geometry else None,
+                    "mesh_qa_passed": geometry.mesh_qa.mesh_qa_passed
+                    if geometry and geometry.mesh_qa
+                    else None,
+                    "geometry_source": geometry.geometry_source if geometry else None,
+                    "generation_strategy": geometry.generation_strategy if geometry else None,
+                    "warnings": [warning.code for warning in result.qa_report.warnings],
+                    "errors": [error.code for error in result.qa_report.errors],
+                    "human_label": "Vérification géométrique",
+                    "progress_message": "Le contrôle qualité du modèle 3D est terminé.",
+                },
+            )
+        for warning in result.report.warnings:
+            self._emit_user_issue_event(workflow_id, warning.model_dump())
+        for error in result.report.errors:
+            self._emit_user_issue_event(workflow_id, error.model_dump())
+
+    def _emit_user_issue_event(self, workflow_id: str, issue: dict) -> None:
+        self._emit_workflow_event(
+            workflow_id,
+            "user_issue_created",
+            {
+                "phase": "issues",
+                "status": issue.get("severity", "warning"),
+                "code": issue.get("code"),
+                "message": issue.get("message"),
+                "severity": issue.get("severity", "warning"),
+                "human_label": _issue_event_title(issue),
+                "progress_message": issue.get("message") or "Une issue utilisateur a été créée.",
+            },
+        )
 
     def _write_status(
         self,
@@ -892,6 +1003,19 @@ class WorkflowService:
             "rf_validation": result.rf_validation.model_dump() if result.rf_validation else None,
         }
         self._write_json(output_dir / "status.json", payload)
+
+    def _write_running_status(self, workflow_id: str, output_dir: Path) -> None:
+        status_path = output_dir / "status.json"
+        if not status_path.exists():
+            return
+        try:
+            payload = self._read_json(status_path)
+        except (OSError, json.JSONDecodeError):
+            return
+        payload["status"] = "running"
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+        payload["metrics"] = metrics | {"status": "running"}
+        self._write_json(status_path, payload)
 
     def _write_failed_status(self, workflow_id: str, output_dir: Path, error: str) -> None:
         payload = {
@@ -1302,6 +1426,37 @@ def _edit_available_actions(result: SceneEditResult) -> list[str]:
     if result.status == "rejected":
         return ["review_issues", "edit_prompt_again"]
     return ["review_issues", "edit_prompt_again"]
+
+
+def _event_identity(event: dict) -> str:
+    event_id = event.get("event_id")
+    if isinstance(event_id, str) and event_id:
+        return event_id
+    return json.dumps(
+        {
+            "event_type": event.get("event_type"),
+            "workflow_id": event.get("workflow_id"),
+            "timestamp": event.get("timestamp"),
+            "payload": event.get("payload"),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def _issue_event_title(issue: dict) -> str:
+    code = str(issue.get("code") or "")
+    if code == "WORKFLOW_EXCEPTION":
+        return "Échec du workflow"
+    if code.startswith("ASSET_"):
+        return "Issue asset détectée"
+    if code.startswith("BLENDER_"):
+        return "Issue Blender détectée"
+    if code.startswith("QA_") or code.startswith("GEOMETRY_"):
+        return "Issue qualité détectée"
+    if issue.get("severity") == "error":
+        return "Erreur détectée"
+    return "Avertissement détecté"
 
 
 def _structural_qa_status(result: OrchestratorResult) -> str:

@@ -5,13 +5,11 @@ frontend.
 
 ## Blocking before advanced frontend
 
-- Product API public surfaces are now frontend-safe for artifact URLs, status,
-  edit, versions, timeline, and user issues; they still need a contract freeze
-  review before UI implementation.
 - No operational frontend yet; old dashboard rejected.
-- `events/stream` is `polling_sse`, not true push streaming.
-- Runtime timeline depends on node events + trace file; robust resume/replay is
-  not yet implemented.
+- `events/stream` is `push_sse` inside the local FastAPI process, with JSONL
+  replay and queue live events. It is not a cross-process broker.
+- Runtime timeline depends on node events + trace file; robust cancellation,
+  retry, and durable resume are not yet implemented.
 - LangGraph checkpointing currently emits compatibility warnings for custom
   Pydantic/dataclass types during msgpack deserialization; this is not blocking
   local runtime, but should be cleaned before relying on strict checkpoint mode.

@@ -304,7 +304,8 @@ def stream_events(workflow_id: str):
         import json
 
         for event in workflow_service.stream_events(workflow_id):
-            yield f"data: {json.dumps(event)}\n\n"
+            event_type = event.get("event_type", "workflow_event")
+            yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -348,10 +349,41 @@ def list_document_packs() -> list[dict]:
 def get_document_pack_capabilities() -> dict:
     capabilities = document_pack_service.capabilities()
     payload = capabilities.model_dump()
+    status_map = capabilities.status_map()
+    available_tools = [
+        name
+        for name, tool_status in status_map.items()
+        if tool_status in {"available", "conversion_available"}
+    ]
+    disabled_tools = [
+        name
+        for name, tool_status in status_map.items()
+        if tool_status not in {"available", "conversion_available"}
+    ]
     payload.update(
         {
             "document_pack_status": "limited",
             "supported_upload_format": "zip",
+            "supported_inputs": {
+                "upload": "zip",
+                "extensions": [
+                    ".pdf",
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".tif",
+                    ".tiff",
+                    ".dxf",
+                    ".dwg",
+                    ".txt",
+                    ".csv",
+                    ".xlsx",
+                ],
+                "notes": [
+                    "Les fichiers doivent être groupés dans un ZIP.",
+                    "Le traitement est local et synchrone.",
+                ],
+            },
             "supported_extensions": [
                 ".pdf",
                 ".png",
@@ -370,12 +402,31 @@ def get_document_pack_capabilities() -> dict:
                 "max_member_size_mb": 15,
                 "processing_mode": "synchronous_local",
             },
+            "max_size": {
+                "zip_mb": 80,
+                "member_mb": 15,
+            },
+            "available_tools": available_tools,
+            "disabled_tools": disabled_tools,
+            "limitations": [
+                "Document-pack est limité et synchrone.",
+                "Docling est détecté en import seulement, pas actif par défaut.",
+                "OCR dépend de Tesseract et des langues installées localement.",
+                "DXF extrait texte/couches ; DWG exige un convertisseur local.",
+                "La génération depuis pack peut rester bloquée si des champs essentiels manquent.",
+            ],
             "truth": {
                 "advanced_ingestion": False,
                 "docling_default_enabled": False,
                 "ocr_requires_local_tesseract_languages": True,
                 "dwg_requires_local_converter": True,
+                "processing_mode": "synchronous_local",
+                "generation_from_pack": "available_when_required_fields_are_confirmed",
             },
+            "next_action": (
+                "Uploader un ZIP de documents techniques, vérifier les champs manquants, "
+                "corriger si nécessaire, puis générer le design."
+            ),
             "capabilities": payload.copy(),
         }
     )

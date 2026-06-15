@@ -109,7 +109,8 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
             "workflow",
         }
         assert operation["current_node"]
-        assert operation["event_source"] == "runtime_events"
+        assert operation["event_source"] == "push_sse"
+        assert operation["state_source"] == "runtime_events"
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -166,6 +167,7 @@ def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
         timeline = client.get(f"/designs/{workflow_id}/timeline-summary").json()
 
         assert timeline["workflow_id"] == workflow_id
+        assert timeline["event_source"] == "push_sse"
         assert isinstance(timeline["timeline_steps"], list)
         assert len(timeline["timeline_steps"]) > 0
         step_names = {step["step"] for step in timeline["timeline_steps"]}
@@ -179,7 +181,10 @@ def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
         assert timeline["timeline_steps"][-1]["step"] == "workflow_completed"
         for step in timeline["timeline_steps"]:
             assert "step" in step
+            assert "node" in step
             assert "label" in step
+            assert "human_label" in step
+            assert "progress_message" in step
             assert "phase" in step
             assert "status" in step
             assert "started_at" in step
@@ -187,6 +192,7 @@ def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
             assert "duration_ms" in step
             assert "warnings_count" in step
             assert "errors_count" in step
+            assert "artifact_refs" in step
             assert "human_readable" in step
     finally:
         workflow_service.outputs_dir = original_outputs
@@ -214,7 +220,8 @@ def test_workflow_events_expose_runtime_nodes_without_premature_blender_event(
         node_events = [
             event
             for event in events
-            if event["event_type"] in {"node_completed", "node_failed", "node_skipped"}
+            if event["event_type"]
+            in {"node_started", "node_completed", "node_failed", "node_skipped"}
         ]
         assert node_events
         nodes = [event["payload"]["node"] for event in node_events]
@@ -225,6 +232,13 @@ def test_workflow_events_expose_runtime_nodes_without_premature_blender_event(
         assert "generate_blender" in nodes
         assert "qa_generation" in nodes
         assert all(event["payload"].get("phase") for event in node_events)
+        assert all(event.get("workflow_id") == workflow_id for event in events)
+        assert all(event.get("timestamp") for event in events)
+        assert all(event.get("event_id") for event in events)
+        assert all(event.get("event_source") == "workflow_events_jsonl" for event in events)
+        assert "node_started" in event_types
+        assert "artifact_ready" in event_types
+        assert "qa_completed" in event_types
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -290,8 +304,14 @@ def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
 
     assert payload["document_pack_status"] == "limited"
     assert payload["supported_upload_format"] == "zip"
+    assert payload["supported_inputs"]["upload"] == "zip"
     assert ".pdf" in payload["supported_extensions"]
     assert payload["limits"]["max_zip_size_mb"] == 80
+    assert payload["max_size"]["zip_mb"] == 80
+    assert "available_tools" in payload
+    assert "disabled_tools" in payload
+    assert isinstance(payload["limitations"], list)
+    assert payload["next_action"]
     assert payload["truth"]["advanced_ingestion"] is False
     assert payload["truth"]["docling_default_enabled"] is False
     assert "pdf_text_extraction" in payload["capabilities"]

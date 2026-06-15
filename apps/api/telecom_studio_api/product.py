@@ -84,6 +84,10 @@ class ProductService:
             "human_readable_issues": issues,
             "active_version": status.get("active_version_id"),
             "generation_mode": status.get("generation_mode"),
+            "generation_strategy": status.get("generation_strategy"),
+            "geometry_source": status.get("geometry_source"),
+            "mesh_qa_level": status.get("mesh_qa_level"),
+            "mesh_qa_passed": status.get("mesh_qa_passed"),
             "asset_quality_summary": _asset_quality_summary(status),
             "limitations": _collect_limitations(status),
         }
@@ -109,7 +113,8 @@ class ProductService:
             "progress_indicator": _progress_indicator(status),
             "current_phase": phase,
             "current_node": current_node,
-            "event_source": runtime.get("source", "status"),
+            "event_source": "push_sse" if events else "status",
+            "state_source": runtime.get("source", "status"),
             "is_running": backend_status in {"pending", "running"},
             "is_terminal": backend_status in {"completed", "failed"},
             "last_event_at": runtime.get("timestamp"),
@@ -188,7 +193,7 @@ class ProductService:
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
-            "event_source": "workflow_events_jsonl",
+            "event_source": "push_sse",
             "timeline_steps": _events_to_timeline(events, status),
         }
 
@@ -275,13 +280,15 @@ def _operation_for_status(status: str) -> str:
 def _current_operation(status: dict, events: list[dict] | None = None) -> str:
     backend_status = status.get("status", "unknown")
     metrics = status.get("metrics", {})
+    runtime = _current_runtime_state(events or [])
+    if backend_status in {"pending", "running"} and runtime.get("node"):
+        return runtime["operation"]
     if backend_status == "pending":
         return "Le design est en file d'attente et va démarrer."
     if backend_status == "failed":
         return "Le design a échoué. Consultez les problèmes pour corriger la situation."
     if backend_status == "completed":
         return "Le design est terminé. Vous pouvez l'inspecter en 3D."
-    runtime = _current_runtime_state(events or [])
     if runtime.get("node"):
         return runtime["operation"]
     running_step = metrics.get("current_step")
@@ -294,6 +301,21 @@ def _current_runtime_state(events: list[dict]) -> dict:
     for event in reversed(events):
         event_type = event.get("event_type")
         payload = event.get("payload")
+        if event_type == "node_started" and isinstance(payload, dict):
+            node = payload.get("node")
+            if not isinstance(node, str):
+                continue
+            return {
+                "node": node,
+                "phase": payload.get("phase"),
+                "source": "runtime_events",
+                "operation": str(
+                    payload.get("progress_message")
+                    or f"Étape en cours : {_trace_node_label(node)}."
+                ),
+                "node_status": "running",
+                "timestamp": event.get("timestamp"),
+            }
         if event_type in {"node_completed", "node_failed", "node_skipped"} and isinstance(
             payload, dict
         ):
@@ -705,6 +727,7 @@ def _warning_to_user_issue(item: dict) -> dict | None:
 
 def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
     steps = []
+    step_index: dict[str, int] = {}
     for index, event in enumerate(events):
         event_type = event.get("event_type", "")
         payload = event.get("payload", {})
@@ -717,23 +740,53 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
             index=index,
             total=len(events),
         )
-        steps.append(
-            {
-                "step": step_name,
-                "label": human,
-                "phase": data.get("phase") or _phase_for_step(step_name),
-                "status": event_status,
-                "timestamp": event.get("timestamp"),
-                "started_at": None,
-                "completed_at": event.get("timestamp")
-                if event_status in {"completed", "failed", "skipped"}
-                else None,
-                "duration_ms": data.get("duration_ms"),
-                "warnings_count": len(data.get("warnings") or []),
-                "errors_count": len(data.get("errors") or []),
-                "human_readable": human,
-            }
+        node = data.get("node") if isinstance(data.get("node"), str) else step_name
+        artifact_refs = (
+            data.get("artifact_refs") if isinstance(data.get("artifact_refs"), list) else []
         )
+        row = {
+            "step": step_name,
+            "node": node,
+            "label": human,
+            "human_label": data.get("human_label") or human,
+            "progress_message": data.get("progress_message") or human,
+            "phase": data.get("phase") or _phase_for_step(step_name),
+            "status": event_status,
+            "timestamp": event.get("timestamp"),
+            "started_at": event.get("timestamp") if event_type == "node_started" else None,
+            "completed_at": event.get("timestamp")
+            if event_status in {"completed", "failed", "skipped"}
+            else None,
+            "duration_ms": data.get("duration_ms"),
+            "warnings_count": len(data.get("warnings") or []),
+            "errors_count": len(data.get("errors") or []),
+            "artifact_refs": [str(ref) for ref in artifact_refs],
+            "human_readable": human,
+        }
+        if event_type == "node_started":
+            step_index[step_name] = len(steps)
+            steps.append(row)
+            continue
+        if (
+            event_type in {"node_completed", "node_failed", "node_skipped"}
+            and step_name in step_index
+        ):
+            existing = steps[step_index[step_name]]
+            existing.update(
+                {
+                    "label": human,
+                    "human_label": data.get("human_label") or existing.get("human_label"),
+                    "progress_message": data.get("progress_message") or human,
+                    "status": event_status,
+                    "completed_at": event.get("timestamp"),
+                    "duration_ms": data.get("duration_ms"),
+                    "warnings_count": len(data.get("warnings") or []),
+                    "errors_count": len(data.get("errors") or []),
+                    "human_readable": human,
+                }
+            )
+            continue
+        steps.append(row)
     terminal_step = None
     if steps and steps[-1]["step"] in {"workflow_completed", "workflow_failed"}:
         terminal_step = steps.pop()
@@ -747,7 +800,10 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
             steps.append(
                 {
                     "step": "workflow_completed",
+                    "node": "workflow",
                     "label": "Workflow terminé",
+                    "human_label": "Workflow terminé",
+                    "progress_message": "Le design est prêt pour inspection 3D.",
                     "phase": "workflow",
                     "status": "completed",
                     "timestamp": None,
@@ -757,6 +813,7 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
                     or status.get("total_duration_ms"),
                     "warnings_count": len(status.get("warnings") or []),
                     "errors_count": len(status.get("errors") or []),
+                    "artifact_refs": [],
                     "human_readable": "Le workflow s'est terminé avec succès.",
                 }
             )
@@ -764,7 +821,10 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
             steps.append(
                 {
                     "step": "workflow_failed",
+                    "node": "workflow",
                     "label": "Workflow en échec",
+                    "human_label": "Workflow en échec",
+                    "progress_message": "Le design n'a pas pu être terminé.",
                     "phase": "workflow",
                     "status": "failed",
                     "timestamp": None,
@@ -774,6 +834,7 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
                     or status.get("total_duration_ms"),
                     "warnings_count": len(status.get("warnings") or []),
                     "errors_count": len(status.get("errors") or []),
+                    "artifact_refs": [],
                     "human_readable": "Le workflow a échoué.",
                 }
             )
@@ -785,6 +846,8 @@ def _event_status(event_type: str, workflow_status: str, *, index: int, total: i
         return "failed"
     if event_type == "node_skipped":
         return "skipped"
+    if event_type == "node_started":
+        return "running"
     if event_type == "node_completed":
         return "completed"
     terminal = {"workflow_completed": "completed", "workflow_failed": "failed"}
@@ -798,9 +861,11 @@ def _event_status(event_type: str, workflow_status: str, *, index: int, total: i
 
 
 def _event_to_human(event_type: str, data: dict) -> str:
-    if event_type in {"node_completed", "node_failed", "node_skipped"}:
+    if event_type in {"node_started", "node_completed", "node_failed", "node_skipped"}:
         node = str(data.get("node") or "workflow")
         label = _trace_node_to_human(node, data)
+        if event_type == "node_started":
+            return str(data.get("progress_message") or f"{label} démarré")
         if event_type == "node_failed":
             return f"{label} en échec"
         if event_type == "node_skipped":
@@ -821,6 +886,8 @@ def _event_to_human(event_type: str, data: dict) -> str:
         "blender_failed": "Génération 3D en échec",
         "qa_completed": "Contrôle qualité terminé",
         "qa_failed": "Contrôle qualité en échec",
+        "artifact_ready": "Artefacts viewer prêts",
+        "user_issue_created": "Issue utilisateur créée",
     }
     human = mapping.get(event_type, event_type.replace("_", " ").capitalize())
     if event_type == "workflow_failed" and data.get("error"):
@@ -829,7 +896,7 @@ def _event_to_human(event_type: str, data: dict) -> str:
 
 
 def _event_step_name(event_type: str, payload: dict) -> str:
-    if event_type in {"node_completed", "node_failed", "node_skipped"}:
+    if event_type in {"node_started", "node_completed", "node_failed", "node_skipped"}:
         node = payload.get("node")
         if isinstance(node, str) and node:
             return node
@@ -858,7 +925,10 @@ def _trace_to_timeline(status: dict, *, existing_steps: set[str]) -> list[dict]:
         timeline.append(
             {
                 "step": node,
+                "node": node,
                 "label": _trace_node_to_human(node, trace),
+                "human_label": _trace_node_label(node),
+                "progress_message": _trace_node_to_human(node, trace),
                 "phase": trace.get("phase") or _phase_for_step(node),
                 "status": _trace_status(trace),
                 "timestamp": None,
@@ -867,6 +937,7 @@ def _trace_to_timeline(status: dict, *, existing_steps: set[str]) -> list[dict]:
                 "duration_ms": trace.get("duration_ms"),
                 "warnings_count": len(trace.get("warnings") or []),
                 "errors_count": len(trace.get("errors") or []),
+                "artifact_refs": [],
                 "human_readable": _trace_node_to_human(node, trace),
             }
         )
@@ -895,6 +966,10 @@ def _phase_for_step(step: str) -> str | None:
         "memory_writeback": "memory",
         "workflow_completed": "workflow",
         "workflow_failed": "workflow",
+        "artifact_ready": "viewer",
+        "qa_completed": "qa",
+        "qa_failed": "qa",
+        "user_issue_created": "issues",
         "edit_patch_created": "edit",
         "edit_patch_rejected": "edit",
         "edit_patch_applied": "edit",
@@ -924,18 +999,26 @@ def _trace_node_label(node: str) -> str:
     mapping = {
         "parse_requirements": "Extraction des exigences",
         "extract_requirements": "Extraction des exigences",
+        "use_validated_requirements": "Lecture des exigences validées",
+        "missing_data_handler": "Données manquantes",
         "retrieve_rag_context": "Recherche RAG",
         "memory_recall": "Rappel mémoire",
         "select_assets": "Sélection des assets",
         "asset_fallback_handler": "Sélection fallback des assets",
         "validate_requirements": "Validation des exigences",
+        "rule_violation_handler": "Blocage par règle métier",
         "plan_scene": "Planification SceneSpec",
         "validate_scene": "Validation SceneSpec",
         "scene_repair_handler": "Réparation SceneSpec",
+        "pre_blender_gate": "Contrôle avant Blender",
         "generate_blender": "Génération Blender",
+        "blender_failure_handler": "Analyse d'échec Blender",
         "qa_generation": "Contrôle qualité",
+        "post_blender_gate": "Contrôle final",
         "qa_failure_handler": "Analyse d'échec QA",
+        "quality_gate_failure_handler": "Blocage qualité",
         "memory_writeback": "Écriture mémoire",
+        "edit_prepare_revision": "Préparation de la révision",
     }
     return mapping.get(node, node.replace("_", " ").capitalize())
 

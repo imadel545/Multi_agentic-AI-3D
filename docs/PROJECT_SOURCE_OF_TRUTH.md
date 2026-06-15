@@ -83,24 +83,33 @@ yet.
 
 ## Events and runtime
 
-- Events are persisted in JSONL.
-- Orchestration nodes emit `node_completed`, `node_failed`, or `node_skipped`
-  with `node`, `phase`, `status`, `detail`, `duration_ms`, warnings, and errors.
+- Events are persisted in JSONL and pushed through an in-memory queue per
+  workflow while the local workflow thread is alive.
+- `/events/stream` is now `push_sse`: it replays persisted JSONL events first,
+  then streams live queue events until `workflow_completed` or
+  `workflow_failed`.
+- Orchestration nodes emit `node_started`, then `node_completed`,
+  `node_failed`, or `node_skipped` with `node`, `phase`, `status`, human label,
+  progress message, detail, `duration_ms`, warnings, and errors.
+- Product events include `artifact_ready`, `qa_completed` / `qa_failed`, and
+  `user_issue_created` when relevant.
 - `/current-operation` exposes `current_phase`, `current_node`, and
   `event_source`, plus frontend labels, terminal/running flags, last event time,
   and available actions.
 - `/timeline-summary` exposes frontend-readable timeline steps with label,
-  phase, status, duration, warning count, and error count.
+  phase, node, status, started/completed timestamps, duration, warning count,
+  error count, progress message, and artifact refs when available.
 - Public workflow/edit/version responses expose artifact URLs, not local
   filesystem paths. `asset_imports[].resolved_path` remains internal only.
-- `/events/stream` is `polling_sse`, not true real-time push.
-- The future frontend must display this limitation clearly.
+- Streaming is local-process only: no cross-process broker, cancellation, or
+  durable resume manager yet.
 
 ## Current verdict
 
-`BACKEND_CONTRACT_READY_FOR_FRONTEND_BUILD`
+`BACKEND_PRODUCT_READY_FOR_FRONTEND_BUILD`
 
-The backend can generate tested local 3D workflows and now exposes
-frontend-safe public API surfaces for status, viewer bundle, edit, versions,
-timeline, current operation, and user issues. The frontend still does not
-exist; the next step is to build it against this frozen backend contract.
+The backend can generate tested local 3D workflows and exposes frontend-safe
+product surfaces for status, live progression, viewer bundle, edit, versions,
+timeline, current operation, document-pack capabilities, and user issues. The
+frontend still does not exist; the next step is to build it against this
+backend product contract, while keeping the documented limitations visible.

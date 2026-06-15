@@ -28,7 +28,7 @@ Ces endpoints retournent des données orientées utilisateur. Le frontend ne doi
 | `POST` | `/designs` | Créer un design depuis un prompt. |
 | `GET` | `/designs/{id}` | Statut complet public: artefacts en URLs backend, pas en chemins locaux. |
 | `GET` | `/designs/{id}/events` | Timeline des events bruts. |
-| `GET` | `/designs/{id}/events/stream` | `polling_sse` côté backend, pas vrai push. |
+| `GET` | `/designs/{id}/events/stream` | `push_sse`: replay JSONL puis events live jusqu'au terminal. |
 | `GET` | `/designs/{id}/versions` | Historique des versions. |
 | `POST` | `/designs/{id}/edit` | Éditer par prompt. |
 | `POST` | `/designs/{id}/versions/{vid}/rollback` | Rollback vers une version. |
@@ -76,7 +76,8 @@ restent internes au backend.
 
 ## Limites connues du contrat
 
-- `events/stream` est du `polling_sse` toutes les secondes côté backend ; pas de vrai push.
+- `events/stream` est du `push_sse` local-process, pas un broker durable
+  multi-processus.
 - L'upload document pack est synchrone et limité à 80 Mo.
 - Les endpoints produit sont une couche de présentation au-dessus des données techniques ; ils ne remplacent pas la validation backend.
 
@@ -136,6 +137,7 @@ de chaque version sont des URLs versionnées.
 - `progress_message`
 - `progress_label`
 - `event_source`
+- `state_source`
 - `progress_indicator`
 - `is_running`
 - `is_terminal`
@@ -145,7 +147,10 @@ de chaque version sont des URLs versionnées.
 `/timeline-summary` expose des étapes lisibles:
 
 - `step`
+- `node`
 - `label`
+- `human_label`
+- `progress_message`
 - `phase`
 - `status`
 - `timestamp`
@@ -154,29 +159,43 @@ de chaque version sont des URLs versionnées.
 - `duration_ms`
 - `warnings_count`
 - `errors_count`
+- `artifact_refs`
 - `human_readable`
 
 `/document-packs/capabilities` expose:
 
 - `document_pack_status=limited`
 - `supported_upload_format=zip`
+- `supported_inputs`
 - `supported_extensions`
 - `limits.max_zip_size_mb=80`
 - `limits.max_member_size_mb=15`
+- `max_size`
+- `available_tools`
+- `disabled_tools`
+- `limitations`
 - `truth.advanced_ingestion=false`
 - `truth.docling_default_enabled=false`
+- `next_action`
 - `capabilities` avec les outils réels et leurs statuts
 
 Events runtime attendus:
 
 - `design_created`
+- `node_started`
 - `node_completed`
 - `node_failed`
 - `node_skipped`
+- `artifact_ready`
+- `qa_completed`
+- `qa_failed`
+- `user_issue_created`
 - `workflow_completed`
 - `workflow_failed`
 
-Les events de nœud portent `payload.node`, `payload.phase`, `payload.status`,
+Les events portent `event_id`, `workflow_id`, `timestamp`, `event_source` et
+`payload`. Les events de nœud portent `payload.node`, `payload.phase`,
+`payload.status`, `payload.human_label`, `payload.progress_message`,
 `payload.detail`, `payload.duration_ms`, `payload.warnings`, `payload.errors`.
 
 Un `node_failed` doit aussi apparaître dans `/user-issues` comme issue humaine. Si le workflow

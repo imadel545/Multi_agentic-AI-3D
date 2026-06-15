@@ -294,27 +294,74 @@ class DesignOrchestrator:
         graph = StateGraph(WorkflowState)
         terminal_node = "memory_writeback" if self.memory_service is not None else END
         graph.add_node("_entry_point", self._entry_point)
-        graph.add_node("_prepare_scene_revision", self._prepare_scene_revision)
-        graph.add_node("extract_requirements", self._extract_requirements)
-        graph.add_node("missing_data_handler", self._missing_data_handler)
-        graph.add_node("retrieve_rag_context", self._retrieve_rag_context)
+        graph.add_node(
+            "_prepare_scene_revision",
+            self._runtime_node("edit_prepare_revision", self._prepare_scene_revision),
+        )
+        graph.add_node(
+            "extract_requirements",
+            self._runtime_node("extract_requirements", self._extract_requirements),
+        )
+        graph.add_node(
+            "missing_data_handler",
+            self._runtime_node("missing_data_handler", self._missing_data_handler),
+        )
+        graph.add_node(
+            "retrieve_rag_context",
+            self._runtime_node("retrieve_rag_context", self._retrieve_rag_context),
+        )
         if self.memory_service is not None:
-            graph.add_node("memory_recall", self._memory_recall)
-            graph.add_node("memory_writeback", self._memory_writeback)
-        graph.add_node("select_assets", self._select_assets)
-        graph.add_node("asset_fallback_handler", self._asset_fallback_handler)
-        graph.add_node("validate_requirements", self._validate_requirements)
-        graph.add_node("rule_violation_handler", self._rule_violation_handler)
-        graph.add_node("plan_scene", self._plan_scene)
-        graph.add_node("validate_scene", self._validate_scene)
-        graph.add_node("scene_repair_handler", self._scene_repair_handler)
-        graph.add_node("pre_blender_gate", self._pre_blender_gate)
-        graph.add_node("generate_blender", self._generate_blender)
-        graph.add_node("blender_failure_handler", self._blender_failure_handler)
-        graph.add_node("qa_generation", self._qa_generation)
-        graph.add_node("post_blender_gate", self._post_blender_gate)
-        graph.add_node("qa_failure_handler", self._qa_failure_handler)
-        graph.add_node("quality_gate_failure_handler", self._quality_gate_failure_handler)
+            graph.add_node(
+                "memory_recall", self._runtime_node("memory_recall", self._memory_recall)
+            )
+            graph.add_node(
+                "memory_writeback",
+                self._runtime_node("memory_writeback", self._memory_writeback),
+            )
+        graph.add_node("select_assets", self._runtime_node("select_assets", self._select_assets))
+        graph.add_node(
+            "asset_fallback_handler",
+            self._runtime_node("asset_fallback_handler", self._asset_fallback_handler),
+        )
+        graph.add_node(
+            "validate_requirements",
+            self._runtime_node("validate_requirements", self._validate_requirements),
+        )
+        graph.add_node(
+            "rule_violation_handler",
+            self._runtime_node("rule_violation_handler", self._rule_violation_handler),
+        )
+        graph.add_node("plan_scene", self._runtime_node("plan_scene", self._plan_scene))
+        graph.add_node("validate_scene", self._runtime_node("validate_scene", self._validate_scene))
+        graph.add_node(
+            "scene_repair_handler",
+            self._runtime_node("scene_repair_handler", self._scene_repair_handler),
+        )
+        graph.add_node(
+            "pre_blender_gate",
+            self._runtime_node("pre_blender_gate", self._pre_blender_gate),
+        )
+        graph.add_node(
+            "generate_blender",
+            self._runtime_node("generate_blender", self._generate_blender),
+        )
+        graph.add_node(
+            "blender_failure_handler",
+            self._runtime_node("blender_failure_handler", self._blender_failure_handler),
+        )
+        graph.add_node("qa_generation", self._runtime_node("qa_generation", self._qa_generation))
+        graph.add_node(
+            "post_blender_gate",
+            self._runtime_node("post_blender_gate", self._post_blender_gate),
+        )
+        graph.add_node(
+            "qa_failure_handler",
+            self._runtime_node("qa_failure_handler", self._qa_failure_handler),
+        )
+        graph.add_node(
+            "quality_gate_failure_handler",
+            self._runtime_node("quality_gate_failure_handler", self._quality_gate_failure_handler),
+        )
         graph.set_entry_point("_entry_point")
         graph.add_conditional_edges(
             "_entry_point",
@@ -405,6 +452,21 @@ class DesignOrchestrator:
     def _cache_metrics(self) -> dict[str, int]:
         rag_stats = self.rag_service.cache_stats() if self.rag_service is not None else {}
         return self.registry.cache_stats() | rag_stats
+
+    def _runtime_node(
+        self,
+        node: str,
+        handler: Callable[[WorkflowState], dict | Command],
+    ) -> Callable[[WorkflowState], dict | Command]:
+        def _wrapped(state: WorkflowState) -> dict | Command:
+            _emit_node_started_runtime_event(state, node)
+            try:
+                return handler(state)
+            except Exception as exc:
+                _emit_node_exception_runtime_event(state, node, exc)
+                raise
+
+        return _wrapped
 
     def _assets_for_scene_revision(
         self, scene: SceneSpec
@@ -1507,6 +1569,52 @@ def _trace(
     return state.get("trace", []) + [step.model_dump()]
 
 
+def _emit_node_started_runtime_event(state: WorkflowState, node: str) -> None:
+    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    if sink is None:
+        return
+    sink(
+        state["workflow_id"],
+        "node_started",
+        {
+            "node": node,
+            "phase": _phase_for_node(node),
+            "status": "running",
+            "detail": "started",
+            "duration_ms": None,
+            "warnings": [],
+            "errors": [],
+            "human_label": _human_label_for_node(node),
+            "progress_message": _progress_message_for_node(node),
+        },
+    )
+
+
+def _emit_node_exception_runtime_event(
+    state: WorkflowState,
+    node: str,
+    exc: Exception,
+) -> None:
+    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    if sink is None:
+        return
+    sink(
+        state["workflow_id"],
+        "node_failed",
+        {
+            "node": node,
+            "phase": _phase_for_node(node),
+            "status": "failed",
+            "detail": type(exc).__name__,
+            "duration_ms": None,
+            "warnings": [],
+            "errors": [str(exc)],
+            "human_label": _human_label_for_node(node),
+            "progress_message": f"Échec pendant : {_human_label_for_node(node)}.",
+        },
+    )
+
+
 def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None:
     sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
     if sink is None:
@@ -1528,12 +1636,20 @@ def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None
             "errors": step.errors,
             "route": step.route,
             "attempt": step.attempt,
+            "human_label": _human_label_for_node(step.node),
+            "progress_message": _completed_message_for_node(step.node, step.status),
         },
     )
 
 
 def _phase_for_node(node: str) -> str:
-    if node in {"extract_requirements", "use_validated_requirements", "validate_requirements"}:
+    if node in {
+        "extract_requirements",
+        "use_validated_requirements",
+        "validate_requirements",
+        "missing_data_handler",
+        "rule_violation_handler",
+    }:
         return "requirements"
     if node == "retrieve_rag_context":
         return "rag"
@@ -1549,7 +1665,61 @@ def _phase_for_node(node: str) -> str:
         return "blender"
     if node in {"qa_generation", "qa_failure_handler"}:
         return "qa"
+    if node == "edit_prepare_revision":
+        return "edit"
     return "workflow"
+
+
+def _human_label_for_node(node: str) -> str:
+    return {
+        "extract_requirements": "Analyse du cahier de charge",
+        "use_validated_requirements": "Lecture des exigences validées",
+        "missing_data_handler": "Vérification des données manquantes",
+        "retrieve_rag_context": "Recherche dans la connaissance telecom",
+        "memory_recall": "Rappel mémoire projet",
+        "select_assets": "Sélection des assets telecom",
+        "asset_fallback_handler": "Sélection d'un asset alternatif",
+        "validate_requirements": "Validation des contraintes telecom",
+        "rule_violation_handler": "Blocage par règle métier",
+        "plan_scene": "Construction de la scène 3D",
+        "validate_scene": "Validation SceneSpec",
+        "scene_repair_handler": "Réparation SceneSpec",
+        "pre_blender_gate": "Contrôle avant Blender",
+        "generate_blender": "Génération Blender",
+        "blender_failure_handler": "Analyse d'échec Blender",
+        "qa_generation": "Vérification géométrique",
+        "post_blender_gate": "Contrôle final",
+        "qa_failure_handler": "Analyse d'échec QA",
+        "quality_gate_failure_handler": "Blocage qualité",
+        "memory_writeback": "Écriture mémoire",
+        "edit_prepare_revision": "Préparation de la révision",
+    }.get(node, node.replace("_", " ").capitalize())
+
+
+def _progress_message_for_node(node: str) -> str:
+    return {
+        "extract_requirements": "Le backend extrait les contraintes importantes du brief.",
+        "retrieve_rag_context": "Le backend cherche le contexte telecom pertinent.",
+        "memory_recall": "Le backend récupère les souvenirs utiles de designs précédents.",
+        "select_assets": "Le backend choisit les assets compatibles avec le site.",
+        "validate_requirements": "Le backend vérifie les contraintes radio et pylône.",
+        "plan_scene": "Le backend place le pylône, les secteurs, antennes et équipements.",
+        "validate_scene": "Le backend vérifie que la SceneSpec est cohérente.",
+        "pre_blender_gate": "Le backend vérifie que la génération 3D peut démarrer.",
+        "generate_blender": "Blender génère le GLB, la preview et les métadonnées.",
+        "qa_generation": "Le backend inspecte le GLB, la géométrie et la preview.",
+        "post_blender_gate": "Le backend vérifie que le résultat est exploitable.",
+        "memory_writeback": "Le backend sauvegarde un résumé dans la mémoire locale.",
+        "edit_prepare_revision": "Le backend prépare la scène modifiée avant régénération.",
+    }.get(node, f"Étape en cours : {_human_label_for_node(node)}.")
+
+
+def _completed_message_for_node(node: str, status: str) -> str:
+    if status == "failed":
+        return f"Échec pendant : {_human_label_for_node(node)}."
+    if status == "skipped":
+        return f"Étape ignorée : {_human_label_for_node(node)}."
+    return f"Étape terminée : {_human_label_for_node(node)}."
 
 
 def _duration_ms(started: float) -> int:

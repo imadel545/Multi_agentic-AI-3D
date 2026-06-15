@@ -177,7 +177,7 @@ def test_create_design_async_status_is_available_immediately(tmp_path: Path) -> 
         status_response = client.get(f"/designs/{workflow_id}")
 
         assert status_response.status_code == 200
-        assert status_response.json()["status"] in {"pending", "completed"}
+        assert status_response.json()["status"] in {"pending", "running", "completed"}
         for _ in range(60):
             status = client.get(f"/designs/{workflow_id}").json()["status"]
             if status in {"completed", "failed"}:
@@ -399,6 +399,43 @@ def test_event_stream_unknown_workflow_returns_404(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
     assert response.status_code == 404
+
+
+def test_event_stream_replays_complete_push_sse_events(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+
+        with client.stream("GET", f"/designs/{workflow_id}/events/stream") as stream:
+            assert stream.status_code == 200
+            body = "".join(stream.iter_text())
+
+        assert "event: node_started" in body
+        assert "event: workflow_completed" in body
+        events = [
+            json.loads(line.removeprefix("data: "))
+            for line in body.splitlines()
+            if line.startswith("data: ")
+        ]
+        assert events
+        assert all(event["workflow_id"] == workflow_id for event in events)
+        assert all(event["timestamp"] for event in events)
+        assert all(event["event_id"] for event in events)
+        assert all(event["event_source"] == "push_sse" for event in events)
+        assert any(event["event_type"] == "artifact_ready" for event in events)
+    finally:
+        workflow_service.outputs_dir = original_outputs
 
 
 class RecordingRequirementProvider:

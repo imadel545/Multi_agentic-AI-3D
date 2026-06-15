@@ -68,6 +68,18 @@ def test_patch_applier_replace_sector_azimuth(sample_scene):
     assert patched.sectors[0].azimuth_deg == 45
 
 
+def test_patch_applier_replace_all_sector_heights_with_wildcard(sample_scene):
+    applier = PatchApplier()
+    patch = ScenePatch(
+        edit_description="raise all antennas",
+        operations=[PatchOperation(op="replace", path="/sectors/*/install_height_m", value=26)],
+    )
+    patched, report = applier.apply(sample_scene, patch)
+
+    assert report.status == "passed"
+    assert [sector.install_height_m for sector in patched.sectors] == [26, 26]
+
+
 def test_diff_engine_detects_changes(sample_scene):
     applier = PatchApplier()
     patch = ScenePatch(

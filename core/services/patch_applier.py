@@ -69,20 +69,41 @@ class PatchApplier:
         parts = op.path.strip("/").split("/")
         if not parts:
             raise ValueError("Empty path")
+        self._apply_parts(data, parts, op)
 
-        target = data
-        for part in parts[:-1]:
-            if part.isdigit():
-                idx = int(part)
-                if not isinstance(target, list) or idx >= len(target):
-                    raise IndexError(f"Index {idx} out of range")
-                target = target[idx]
-            else:
-                if part not in target:
-                    target[part] = {}
-                target = target[part]
+    def _apply_parts(self, target: Any, parts: list[str], op: PatchOperation) -> None:
+        if not parts:
+            raise ValueError("Empty path")
+        part = parts[0]
+        if part == "*":
+            if not isinstance(target, list):
+                raise TypeError("Wildcard target is not a list")
+            for item in target:
+                self._apply_parts(item, parts[1:], op)
+            return
+        if len(parts) == 1:
+            self._apply_leaf(target, part, op)
+            return
+        next_target = self._resolve_next_target(target, part)
+        self._apply_parts(next_target, parts[1:], op)
 
-        key = parts[-1]
+    @staticmethod
+    def _resolve_next_target(target: Any, part: str) -> Any:
+        if part.isdigit():
+            idx = int(part)
+            if not isinstance(target, list) or idx >= len(target):
+                raise IndexError(f"Index {idx} out of range")
+            return target[idx]
+        if not isinstance(target, dict):
+            raise TypeError(f"Cannot access key {part} on non-object target")
+        if part not in target:
+            target[part] = {}
+        return target[part]
+
+    @staticmethod
+    def _apply_leaf(target: Any, key: str, op: PatchOperation) -> None:
+        if key == "*":
+            raise ValueError("Leaf wildcard is not supported")
         if op.op == "replace":
             if key.isdigit():
                 idx = int(key)
@@ -90,6 +111,8 @@ class PatchApplier:
                     raise IndexError(f"Index {idx} out of range")
                 target[idx] = op.value
             else:
+                if not isinstance(target, dict):
+                    raise TypeError(f"Cannot replace key {key} on non-object target")
                 target[key] = op.value
         elif op.op == "add":
             if key.isdigit():
@@ -98,6 +121,8 @@ class PatchApplier:
                     raise TypeError("Target is not a list")
                 target.insert(idx, op.value)
             else:
+                if not isinstance(target, dict):
+                    raise TypeError(f"Cannot add key {key} on non-object target")
                 target[key] = op.value
         elif op.op == "remove":
             if key.isdigit():
@@ -106,6 +131,8 @@ class PatchApplier:
                     raise IndexError(f"Index {idx} out of range")
                 target.pop(idx)
             else:
+                if not isinstance(target, dict):
+                    raise TypeError(f"Cannot remove key {key} on non-object target")
                 if key not in target:
                     raise KeyError(f"Key {key} not found")
                 del target[key]

@@ -175,6 +175,7 @@ class CurrentOperation(BaseModel):
     current_phase: str | None = None
     current_node: str | None = None
     event_source: str = "status"
+    state_source: str | None = None
     is_running: bool = False
     is_terminal: bool = False
     last_event_at: str | None = None
@@ -219,7 +220,10 @@ class ViewerBundle(BaseModel):
 
 class TimelineStep(BaseModel):
     step: str
+    node: str | None = None
     label: str | None = None
+    human_label: str | None = None
+    progress_message: str | None = None
     phase: str | None = None
     status: Literal["pending", "running", "completed", "failed", "skipped"]
     timestamp: str | None = None
@@ -228,6 +232,7 @@ class TimelineStep(BaseModel):
     duration_ms: int | None = None
     warnings_count: int = 0
     errors_count: int = 0
+    artifact_refs: list[str] = Field(default_factory=list)
     human_readable: str
 
 
