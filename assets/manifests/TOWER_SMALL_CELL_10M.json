@@ -18,5 +18,15 @@
     }
   ],
   "status": "validated",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "source": "internal_project_generated",
+  "license": "internal_project_generated",
+  "attribution_required": false,
+  "attribution": "Project-authored procedural small-cell pole GLB generated with Blender. Not vendor-grade.",
+  "original_url": null,
+  "original_author": "Codex Agent",
+  "normalized_by": "Codex Agent",
+  "pivot_policy": "base_center_ground",
+  "front_axis": "+Y",
+  "import_fallback_allowed": true
 }

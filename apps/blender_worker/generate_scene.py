@@ -15,6 +15,13 @@ import zlib
 from binascii import crc32
 from pathlib import Path
 
+# Make project root importable when this script is executed inside Blender.
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from apps.blender_worker import parametric_builder  # noqa: E402
+
 
 def main() -> int:
     scene_spec_path, output_dir = _parse_args(sys.argv)
@@ -45,6 +52,7 @@ def main() -> int:
     glb_path = output_dir / "design.glb"
     preview_path = output_dir / "preview.png"
     bpy.ops.export_scene.gltf(filepath=str(glb_path), export_format="GLB")
+    bounding_box_m = _compute_scene_bounding_box(bpy)
     _create_preview_backdrop(bpy, scene)
     camera_metadata["render_backdrop"] = "preview_only_light_plane"
     bpy.context.scene.render.filepath = str(preview_path)
@@ -57,6 +65,7 @@ def main() -> int:
         asset_warnings,
         camera_metadata,
         asset_imports,
+        bounding_box_m,
     )
     return 0
 
@@ -133,48 +142,80 @@ def _create_tower(
     characteristics = scene["tower"].get("characteristics", {})
     tower_type = scene["tower"]["asset_id"].lower()
     base_width = float(characteristics.get("base_width_m") or 4.0)
-    tower_mode = _try_import_glb_asset(
-        bpy=bpy,
-        asset_id=scene["tower"]["asset_id"],
-        asset_file=scene["tower"].get("asset_file"),
-        asset_source=scene["tower"].get("asset_source"),
-        asset_metadata=scene["tower"].get("asset_metadata"),
-        fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
-        object_role="tower",
-        object_name=f"tower_{scene['tower']['asset_id']}",
-        location=(0.0, 0.0, height / 2),
-        rotation=(0.0, 0.0, 0.0),
-        dimensions=scene["tower"].get("dimensions_m")
-        or {
-            "width": base_width,
-            "depth": base_width,
-            "height": height,
-        },
-        asset_imports=asset_imports,
-        warnings=asset_warnings,
-    )
-    if tower_mode != "imported_glb" and scene["tower"].get("import_fallback_allowed", True):
-        if "lattice" in tower_type:
-            _create_lattice_tower(bpy, height, characteristics)
-            procedural_objects.append("tower:lattice_procedural")
-        elif "monopole" in tower_type:
-            radius = base_width / 2
-            bpy.ops.mesh.primitive_cylinder_add(
-                vertices=32, radius=radius, depth=height, location=(0, 0, height / 2)
-            )
-            obj = bpy.context.object
-            obj.name = f"tower_{scene['tower']['asset_id']}"
-            obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
-            procedural_objects.append("tower:monopole_procedural")
-        else:
-            radius = base_width / 2
-            bpy.ops.mesh.primitive_cylinder_add(
-                vertices=12, radius=radius, depth=height, location=(0, 0, height / 2)
-            )
-            obj = bpy.context.object
-            obj.name = f"tower_{scene['tower']['asset_id']}"
-            obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
-            procedural_objects.append("tower:generic_procedural")
+    strategy = scene["tower"].get("generation_strategy", "parametric_generated")
+
+    if strategy == "parametric_generated":
+        structure = characteristics.get("structure", "lattice")
+        created = parametric_builder.build_parametric_tower(
+            bpy=bpy,
+            asset_id=scene["tower"]["asset_id"],
+            height=height,
+            structure=structure,
+            base_width=base_width,
+            top_width=characteristics.get("top_width_m"),
+            leg_count=int(characteristics.get("leg_count") or 4),
+        )
+        for obj in created:
+            if obj.name.startswith("tower_"):
+                obj.name = f"tower_{scene['tower']['asset_id']}"
+        procedural_objects.append(f"tower:{structure}_parametric")
+        _record_asset_generation(
+            asset_imports,
+            asset_warnings,
+            asset_id=scene["tower"]["asset_id"],
+            asset_file=scene["tower"].get("asset_file"),
+            asset_source=scene["tower"].get("asset_source"),
+            asset_metadata=scene["tower"].get("asset_metadata"),
+            object_role="tower",
+            object_name=f"tower_{scene['tower']['asset_id']}",
+            dimensions=scene["tower"].get("dimensions_m"),
+            location=(0.0, 0.0, height / 2),
+            rotation=(0.0, 0.0, 0.0),
+            generation_strategy=strategy,
+        )
+    else:
+        tower_mode = _try_import_glb_asset(
+            bpy=bpy,
+            asset_id=scene["tower"]["asset_id"],
+            asset_file=scene["tower"].get("asset_file"),
+            asset_source=scene["tower"].get("asset_source"),
+            asset_metadata=scene["tower"].get("asset_metadata"),
+            fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
+            object_role="tower",
+            object_name=f"tower_{scene['tower']['asset_id']}",
+            location=(0.0, 0.0, height / 2),
+            rotation=(0.0, 0.0, 0.0),
+            dimensions=scene["tower"].get("dimensions_m")
+            or {
+                "width": base_width,
+                "depth": base_width,
+                "height": height,
+            },
+            asset_imports=asset_imports,
+            warnings=asset_warnings,
+        )
+        if tower_mode != "imported_glb" and scene["tower"].get("import_fallback_allowed", True):
+            if "lattice" in tower_type:
+                _create_lattice_tower(bpy, height, characteristics)
+                procedural_objects.append("tower:lattice_procedural")
+            elif "monopole" in tower_type:
+                radius = base_width / 2
+                bpy.ops.mesh.primitive_cylinder_add(
+                    vertices=32, radius=radius, depth=height, location=(0, 0, height / 2)
+                )
+                obj = bpy.context.object
+                obj.name = f"tower_{scene['tower']['asset_id']}"
+                obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
+                procedural_objects.append("tower:monopole_procedural")
+            else:
+                radius = base_width / 2
+                bpy.ops.mesh.primitive_cylinder_add(
+                    vertices=12, radius=radius, depth=height, location=(0, 0, height / 2)
+                )
+                obj = bpy.context.object
+                obj.name = f"tower_{scene['tower']['asset_id']}"
+                obj.data.materials.append(_material(bpy, "galvanized_steel", (0.48, 0.51, 0.54, 1)))
+                procedural_objects.append("tower:generic_procedural")
     _create_foundation(bpy, characteristics, procedural_objects)
     _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
@@ -305,50 +346,101 @@ def _create_sectors(
         procedural_objects.append(f"mount_bracket:{sector['sector_id']}")
 
         total_tilt = tilt_deg + float(sector.get("electrical_tilt_deg") or 0.0)
-        antenna_mode = _try_import_glb_asset(
-            bpy=bpy,
-            asset_id=sector["antenna_asset_id"],
-            asset_file=sector.get("antenna_asset_file"),
-            asset_source=sector.get("antenna_asset_source"),
-            asset_metadata=sector.get("antenna_asset_metadata"),
-            fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
-            object_role="antenna",
-            object_name=f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}",
-            location=(x, y, z),
-            rotation=(-azimuth, math.radians(total_tilt), 0.0),
-            rotation_mode="ZXY",
-            dimensions=sector.get("antenna_dimensions_m"),
-            asset_imports=asset_imports,
-            warnings=asset_warnings,
-        )
-        if antenna_mode != "imported_glb" and sector.get("antenna_import_fallback_allowed", True):
-            if "dish" in sector["antenna_asset_id"].lower():
-                _create_dish(bpy, sector, x, y, z, azimuth, tilt_deg)
-                procedural_objects.append(f"antenna_dish:{sector['sector_id']}")
-            else:
-                _create_panel_antenna(bpy, sector, x, y, z, azimuth, tilt_deg)
-                procedural_objects.append(f"antenna_panel:{sector['sector_id']}")
-
-        if sector.get("radio_asset_id"):
-            radio_mode = _try_import_glb_asset(
+        antenna_strategy = sector.get("antenna_generation_strategy", "internal_project_generated")
+        antenna_location = (x, y, z)
+        antenna_rotation = (-azimuth, math.radians(total_tilt), 0.0)
+        antenna_object_name = f"antenna_{sector['sector_id']}_{sector['antenna_asset_id']}"
+        if antenna_strategy == "imported_glb_exact":
+            _try_import_glb_asset(
                 bpy=bpy,
-                asset_id=sector["radio_asset_id"],
-                asset_file=sector.get("radio_asset_file"),
-                asset_source=sector.get("radio_asset_source"),
-                asset_metadata=sector.get("radio_asset_metadata"),
-                fallback_allowed=sector.get("radio_import_fallback_allowed", True),
-                object_role="radio",
-                object_name=f"radio_{sector['sector_id']}_{sector['radio_asset_id']}",
-                location=(x * 0.92, y * 0.92, z - 1.0),
-                rotation=(0.0, 0.0, 0.0),
-                rotation_mode="XYZ",
-                dimensions=sector.get("radio_dimensions_m"),
+                asset_id=sector["antenna_asset_id"],
+                asset_file=sector.get("antenna_asset_file"),
+                asset_source=sector.get("antenna_asset_source"),
+                asset_metadata=sector.get("antenna_asset_metadata"),
+                fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
+                object_role="antenna",
+                object_name=antenna_object_name,
+                location=antenna_location,
+                rotation=antenna_rotation,
+                rotation_mode="ZXY",
+                dimensions=sector.get("antenna_dimensions_m"),
                 asset_imports=asset_imports,
                 warnings=asset_warnings,
             )
-            if radio_mode != "imported_glb" and sector.get("radio_import_fallback_allowed", True):
-                _create_radio(bpy, sector, x * 0.92, y * 0.92, z - 1.0)
+        else:
+            dims = sector.get("antenna_dimensions_m") or {}
+            parametric_builder.build_parametric_panel_antenna(
+                bpy=bpy,
+                name=antenna_object_name,
+                width=float(dims.get("width") or 0.45),
+                depth=float(dims.get("depth") or 0.18),
+                height=float(dims.get("height") or 1.6),
+                location=antenna_location,
+                rotation=antenna_rotation,
+            )
+            procedural_objects.append(f"antenna_panel:{sector['sector_id']}")
+            _record_asset_generation(
+                asset_imports,
+                asset_warnings,
+                asset_id=sector["antenna_asset_id"],
+                asset_file=sector.get("antenna_asset_file"),
+                asset_source=sector.get("antenna_asset_source"),
+                asset_metadata=sector.get("antenna_asset_metadata"),
+                object_role="antenna",
+                object_name=antenna_object_name,
+                dimensions=sector.get("antenna_dimensions_m"),
+                location=antenna_location,
+                rotation=antenna_rotation,
+                generation_strategy=antenna_strategy,
+            )
+
+        if sector.get("radio_asset_id"):
+            radio_strategy = sector.get("radio_generation_strategy", "internal_project_generated")
+            radio_location = (x * 0.92, y * 0.92, z - 1.0)
+            radio_object_name = f"radio_{sector['sector_id']}_{sector['radio_asset_id']}"
+            if radio_strategy == "imported_glb_exact":
+                _try_import_glb_asset(
+                    bpy=bpy,
+                    asset_id=sector["radio_asset_id"],
+                    asset_file=sector.get("radio_asset_file"),
+                    asset_source=sector.get("radio_asset_source"),
+                    asset_metadata=sector.get("radio_asset_metadata"),
+                    fallback_allowed=sector.get("radio_import_fallback_allowed", True),
+                    object_role="radio",
+                    object_name=radio_object_name,
+                    location=radio_location,
+                    rotation=(0.0, 0.0, 0.0),
+                    rotation_mode="XYZ",
+                    dimensions=sector.get("radio_dimensions_m"),
+                    asset_imports=asset_imports,
+                    warnings=asset_warnings,
+                )
+            else:
+                dims = sector.get("radio_dimensions_m") or {}
+                parametric_builder.build_parametric_radio(
+                    bpy=bpy,
+                    name=radio_object_name,
+                    width=float(dims.get("width") or 0.35),
+                    depth=float(dims.get("depth") or 0.18),
+                    height=float(dims.get("height") or 0.6),
+                    location=radio_location,
+                    rotation=(0.0, 0.0, 0.0),
+                )
                 procedural_objects.append(f"radio:{sector['sector_id']}")
+                _record_asset_generation(
+                    asset_imports,
+                    asset_warnings,
+                    asset_id=sector["radio_asset_id"],
+                    asset_file=sector.get("radio_asset_file"),
+                    asset_source=sector.get("radio_asset_source"),
+                    asset_metadata=sector.get("radio_asset_metadata"),
+                    object_role="radio",
+                    object_name=radio_object_name,
+                    dimensions=sector.get("radio_dimensions_m"),
+                    location=radio_location,
+                    rotation=(0.0, 0.0, 0.0),
+                    generation_strategy=radio_strategy,
+                )
 
         if sector.get("include_cable"):
             _create_cable(bpy, sector["sector_id"], (x, y, z - 0.8), (0, 0, 0.5))
@@ -499,7 +591,12 @@ def _create_power_cabinet(
     # Place cabinet a few meters away from tower base
     offset = max(3.0, base_width * 1.2)
     accessory = _accessory_asset(scene, "cabinet")
-    if accessory:
+    strategy = (
+        accessory.get("generation_strategy", "internal_project_generated")
+        if accessory
+        else "procedural_fallback"
+    )
+    if accessory and strategy in {"imported_glb_exact", "internal_project_generated"}:
         mode = _try_import_glb_asset(
             bpy=bpy,
             asset_id=accessory["asset_id"],
@@ -517,17 +614,11 @@ def _create_power_cabinet(
         )
         if mode == "imported_glb" or not accessory.get("import_fallback_allowed", True):
             return
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(offset, 0, 0.9))
-    cabinet = bpy.context.object
-    cabinet.name = "power_cabinet_dc"
-    cabinet.dimensions = (1.5, 0.8, 1.8)
-    cabinet.data.materials.append(_material(bpy, "cabinet_gray", (0.35, 0.37, 0.39, 1)))
-    # Small detail: door outline hint
-    bpy.ops.mesh.primitive_cube_add(size=1, location=(offset + 0.76, 0, 0.9))
-    door = bpy.context.object
-    door.name = "power_cabinet_door"
-    door.dimensions = (0.04, 0.72, 1.6)
-    door.data.materials.append(_material(bpy, "cabinet_door", (0.28, 0.30, 0.32, 1)))
+    parametric_builder.build_parametric_accessory_cabinet(
+        bpy=bpy,
+        name="power_cabinet_dc",
+        location=(offset, 0.0, 0.9),
+    )
     procedural_objects.append("power_cabinet")
 
 
@@ -544,7 +635,12 @@ def _create_gps_antenna(
     base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
     mount_radius = base_width / 2 + 0.1
     accessory = _accessory_asset(scene, "gps")
-    if accessory:
+    strategy = (
+        accessory.get("generation_strategy", "internal_project_generated")
+        if accessory
+        else "procedural_fallback"
+    )
+    if accessory and strategy in {"imported_glb_exact", "internal_project_generated"}:
         mode = _try_import_glb_asset(
             bpy=bpy,
             asset_id=accessory["asset_id"],
@@ -562,20 +658,11 @@ def _create_gps_antenna(
         )
         if mode == "imported_glb" or not accessory.get("import_fallback_allowed", True):
             return
-    bpy.ops.mesh.primitive_cylinder_add(
-        vertices=16, radius=0.04, depth=0.6, location=(0, mount_radius, z + 0.3)
+    parametric_builder.build_parametric_accessory_gps(
+        bpy=bpy,
+        name="gps_antenna_radome",
+        location=(0.0, mount_radius, z),
     )
-    pole = bpy.context.object
-    pole.name = "gps_mount_pole"
-    pole.data.materials.append(_material(bpy, "gps_pole", (0.5, 0.5, 0.52, 1)))
-    # Radome: flattened sphere instead of flat disc
-    bpy.ops.mesh.primitive_uv_sphere_add(
-        segments=16, ring_count=8, radius=0.12, location=(0, mount_radius, z + 0.64)
-    )
-    radome = bpy.context.object
-    radome.name = "gps_antenna_radome"
-    radome.scale = (1.0, 1.0, 0.55)
-    radome.data.materials.append(_material(bpy, "gps_white", (0.92, 0.92, 0.9, 1)))
     procedural_objects.append("gps_antenna")
 
 
@@ -779,6 +866,53 @@ def _record_asset_import_fallback(
     return mode
 
 
+def _record_asset_generation(
+    asset_imports: list[dict],
+    warnings: list[str],
+    *,
+    asset_id: str,
+    asset_file: str | None,
+    asset_source: str | None,
+    asset_metadata: dict | None,
+    object_role: str,
+    object_name: str,
+    dimensions: dict | None,
+    location: tuple[float, float, float],
+    rotation: tuple[float, float, float],
+    generation_strategy: str,
+) -> None:
+    """Record a parametric/internal-project-generated asset placement."""
+    record = _base_asset_import_record(
+        asset_id=asset_id,
+        asset_file=asset_file,
+        asset_source=asset_source,
+        asset_metadata=asset_metadata,
+        object_role=object_role,
+        object_name=object_name,
+        path=_resolve_asset_path(asset_file),
+        fallback_allowed=True,
+        dimensions=dimensions,
+        location=location,
+        rotation=rotation,
+    )
+    for source_warning in _asset_source_warnings(asset_source, asset_metadata):
+        _append_warning(record["warnings"], source_warning)
+        _append_warning(warnings, f"{source_warning}:{asset_id}")
+    resolved = Path(record["resolved_path"]) if record.get("resolved_path") else None
+    record.update(
+        {
+            "asset_file_exists": bool(resolved and resolved.exists()),
+            "asset_import_success": True,
+            "asset_dimensions_checked": False,
+            "import_mode": generation_strategy,
+            "effective_generation_mode": generation_strategy,
+            "imported_object_count": 1,
+            "imported_object_names": [object_name],
+        }
+    )
+    asset_imports.append(record)
+
+
 def _create_mounting_bracket(bpy, mount_radius: float, azimuth: float, z: float) -> None:
     steel = _material(bpy, "mount_steel", (0.42, 0.44, 0.46, 1))
     start = (
@@ -941,6 +1075,33 @@ def _write_non_blender_fallback(scene: dict, output_dir: Path) -> None:
     )
 
 
+def _compute_scene_bounding_box(bpy) -> dict:
+    """Compute world-space bounding box of all mesh objects in the scene."""
+    min_x = min_y = min_z = float("inf")
+    max_x = max_y = max_z = float("-inf")
+    found = False
+    for obj in bpy.context.scene.objects:
+        if obj.type != "MESH" or not obj.data.vertices:
+            continue
+        for vertex in obj.bound_box:
+            world_coord = obj.matrix_world @ obj.location.__class__(vertex)
+            x, y, z = world_coord.x, world_coord.y, world_coord.z
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+            min_z, max_z = min(min_z, z), max(max_z, z)
+            found = True
+    if not found:
+        return {"min_x": 0.0, "min_y": 0.0, "min_z": 0.0, "max_x": 0.0, "max_y": 0.0, "max_z": 0.0}
+    return {
+        "min_x": min_x,
+        "min_y": min_y,
+        "min_z": min_z,
+        "max_x": max_x,
+        "max_y": max_y,
+        "max_z": max_z,
+    }
+
+
 def _write_metadata(
     scene: dict,
     output_dir: Path,
@@ -949,6 +1110,7 @@ def _write_metadata(
     warnings: list[str],
     camera_metadata: dict,
     asset_imports: list[dict] | None = None,
+    bounding_box_m: dict | None = None,
 ) -> None:
     asset_imports = asset_imports or _fallback_asset_import_records(scene)
     all_warnings = _unique_strings(
@@ -961,32 +1123,32 @@ def _write_metadata(
             ],
         ]
     )
+    payload = {
+        "scene_id": scene["scene_id"],
+        "schema_version": scene.get("schema_version"),
+        "generation_mode": generation_mode,
+        "assets_used": _assets_used(scene),
+        "procedural_objects_created": procedural_objects,
+        "asset_imports": asset_imports,
+        "asset_import_summary": _asset_import_summary(asset_imports),
+        "sector_count": len(scene["sectors"]),
+        "network_type": scene["network_type"],
+        "tower_height_m": scene["tower"]["height_m"],
+        "tower_characteristics": scene["tower"].get("characteristics", {}),
+        "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
+        "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
+        "mechanical_tilts_deg": [
+            sector.get("mechanical_tilt_deg", 0.0) for sector in scene["sectors"]
+        ],
+        "visual_elements": scene.get("visual_elements", {}),
+        "accessory_assets": scene.get("accessory_assets", []),
+        "preview_camera": camera_metadata,
+        "warnings": all_warnings,
+    }
+    if bounding_box_m is not None:
+        payload["bounding_box_m"] = bounding_box_m
     (output_dir / "scene_metadata.json").write_text(
-        json.dumps(
-            {
-                "scene_id": scene["scene_id"],
-                "schema_version": scene.get("schema_version"),
-                "generation_mode": generation_mode,
-                "assets_used": _assets_used(scene),
-                "procedural_objects_created": procedural_objects,
-                "asset_imports": asset_imports,
-                "asset_import_summary": _asset_import_summary(asset_imports),
-                "sector_count": len(scene["sectors"]),
-                "network_type": scene["network_type"],
-                "tower_height_m": scene["tower"]["height_m"],
-                "tower_characteristics": scene["tower"].get("characteristics", {}),
-                "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
-                "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
-                "mechanical_tilts_deg": [
-                    sector.get("mechanical_tilt_deg", 0.0) for sector in scene["sectors"]
-                ],
-                "visual_elements": scene.get("visual_elements", {}),
-                "accessory_assets": scene.get("accessory_assets", []),
-                "preview_camera": camera_metadata,
-                "warnings": all_warnings,
-            },
-            indent=2,
-        ),
+        json.dumps(payload, indent=2),
         encoding="utf-8",
     )
 
@@ -1148,6 +1310,8 @@ def _asset_import_summary(asset_imports: list[dict]) -> dict:
         "imported_glb_count": modes.get("imported_glb", 0),
         "procedural_fallback_count": modes.get("procedural_fallback", 0),
         "missing_file_count": modes.get("missing_file", 0),
+        "parametric_generated_count": modes.get("parametric_generated", 0),
+        "internal_project_generated_count": modes.get("internal_project_generated", 0),
         "import_success_count": sum(
             1 for record in asset_imports if record.get("asset_import_success") is True
         ),
@@ -1164,6 +1328,8 @@ def _asset_source_warnings(asset_source: str | None, asset_metadata: dict | None
         warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
     if asset_source == "internal_cleaned":
         warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "internal_project_generated":
+        warnings.append("INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE")
     if asset_source == "cc_by":
         warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
     if isinstance(asset_metadata, dict) and asset_metadata.get("attribution_required"):

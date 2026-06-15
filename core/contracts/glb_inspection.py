@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field
 
 from core.contracts.common import StrictModel
+from core.contracts.parametric import BoundingBoxM
 
 InspectionMode = Literal["glb_parse", "metadata_fallback", "not_available"]
 
@@ -17,6 +18,7 @@ class GlbInspectionReport(StrictModel):
     material_count: int = Field(default=0, ge=0)
     object_names: list[str] = Field(default_factory=list)
     expected_object_prefixes_found: dict[str, bool] = Field(default_factory=dict)
+    bounding_box_m: BoundingBoxM | None = None
     checks: dict[str, bool] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     critical_errors: list[str] = Field(default_factory=list)

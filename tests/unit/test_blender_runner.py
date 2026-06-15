@@ -120,21 +120,22 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
     assert metadata["procedural_objects_created"]
     assert metadata["asset_import_summary"]["asset_count"] == 7
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 7
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["procedural_fallback_count"] == 0
+    assert metadata["asset_import_summary"]["parametric_generated_count"] == 1
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 6
     assert metadata["asset_import_summary"]["asset_file_exists_count"] == 7
-    imported_records = [
-        record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
+    parametric_records = [
+        record
+        for record in metadata["asset_imports"]
+        if record["import_mode"] in {"parametric_generated", "internal_project_generated"}
     ]
-    assert len(imported_records) == 7
-    assert all(record["asset_import_success"] is True for record in imported_records)
-    assert all(record["asset_dimensions_checked"] is True for record in imported_records)
+    assert len(parametric_records) == 7
+    assert all(record["asset_import_success"] is True for record in parametric_records)
     tower_record = next(
-        record for record in imported_records if record["asset_id"] == "TOWER_LATTICE_30M"
+        record for record in parametric_records if record["asset_id"] == "TOWER_LATTICE_30M"
     )
-    assert tower_record["asset_source"] == "cc_by"
-    assert tower_record["asset_metadata"]["attribution_required"] is True
-    assert "ATTRIBUTION_REQUIRED" in tower_record["warnings"]
+    assert tower_record["import_mode"] == "parametric_generated"
 
 
 @pytest.mark.skipif(
@@ -154,10 +155,14 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert metadata["visual_elements"]["include_power_cabinet"] is True
     assert metadata["mechanical_tilts_deg"] == [5, 5, 5]
     assert metadata["asset_import_summary"]["asset_count"] == 9
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 9
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 2
+    assert metadata["asset_import_summary"]["parametric_generated_count"] == 1
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 6
     records = {record["asset_id"]: record for record in metadata["asset_imports"]}
     assert records["GPS_ANTENNA_001"]["import_mode"] == "imported_glb"
     assert records["POWER_CABINET_001"]["import_mode"] == "imported_glb"
+    assert records["TOWER_LATTICE_30M"]["import_mode"] == "parametric_generated"
+    assert records["ANT_PANEL_5G_001"]["import_mode"] == "internal_project_generated"
     assert records["GPS_ANTENNA_001"]["asset_import_success"] is True
     assert records["POWER_CABINET_001"]["asset_import_success"] is True
 

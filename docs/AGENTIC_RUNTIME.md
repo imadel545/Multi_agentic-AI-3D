@@ -126,7 +126,9 @@ Trace steps include:
 - Blender fallback is explicit and still goes through QA.
 - Asset fallback only selects assets with `status=validated` and compatible network type.
 - Asset import fallback is separate from asset selection fallback: a selected manifest can still use
-  `procedural_fallback` when its GLB file is missing and the manifest allows fallback.
+  `procedural_fallback` when its GLB file is missing or its import fails and the manifest allows
+  fallback. All tower manifests now have real GLB files, so this path is reserved for import
+  failures.
 - Groq edit patching fallback is explicit through `edit_llm_provider` and
   `edit_llm_fallback_used` in the patch/result.
 - Scene repair is bounded by `max_repair_attempts`.

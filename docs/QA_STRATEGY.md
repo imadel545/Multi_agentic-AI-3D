@@ -1,46 +1,66 @@
 # QA Strategy
 
-QA doit dire ce qu'elle vérifie vraiment. Ne pas utiliser "advanced geometry" pour les
-checks actuels.
+QA must say what it actually checks. The current pipeline is honest about its
+limitations and never advertises checks it cannot perform.
 
-## Niveaux actuels
+## Levels
 
-- Contract QA: validation Pydantic des contrats.
-- Requirement QA: règles métier sur `RequirementSpec`.
-- Scene QA: validation `SceneSpec`, compatibilité assets, règles tower/RF.
-- Quality gates: pre-Blender et post-Blender.
-- Generation QA: cohérence metadata, artefacts, mode génération, warnings fallback.
-- GLB structural QA: `glb_parse_structural`.
-- Geometry QA: `object_name_based_geometry`.
-- Height/azimuth QA: `metadata_based_height_azimuth`.
-- Preview QA: `preview_luminance_only`.
-- Document-pack QA: preuves, conflits, champs bloquants, plausibilité, OCR/CAD limits.
+- Contract QA: Pydantic validation of all API/runtime contracts.
+- Requirement QA: business rules on `RequirementSpec` (tower height ≤ 150 m,
+  sector count ≤ 12, azimuth consistency, etc.).
+- Scene QA: `SceneSpec` validation, asset compatibility, tower/RF rules.
+- Quality gates: pre-Blender and post-Blender pass/fail thresholds.
+- Generation QA: metadata consistency, artefacts, generation mode, fallback
+  warnings, and asset import records.
+- GLB structural QA: `glb_parse_structural` — node/mesh/material counts and
+  expected object presence.
+- Mesh-level QA: `mesh_level_basic` parses GLB accessors to compute a real
+  world-space bounding box, approximate tower height, object counts, ground
+  checks, and scale realism.
+- Geometry QA: combines object-name counts, metadata proxies, and Mesh QA
+  results.
+- Height/azimuth QA: metadata-based checks plus bounding-box sanity.
+- Preview QA: PNG resolution, luminance, contrast, non-dark-pixel ratio.
+- Document-pack QA: evidence, conflicts, blocking fields, plausibility, OCR/CAD
+  limits.
 
-## Ce qui est réel
+## What is real
 
-- GLB/GLTF JSON parse vérifie nodes, meshes, materials et noms d'objets.
-- Geometry validator vérifie présence/counts, hauteurs et azimuts via metadata/proxies.
-- Preview inspector vérifie PNG, résolution, luminance, contraste, ratio non sombre.
-- Asset import QA vérifie `asset_imports`, modes, fichiers manquants et fallbacks visibles.
-- Fallback Blender est refusé par défaut via policy qualité.
+- GLB/GLTF JSON parse verifies nodes, meshes, materials and object names.
+- Mesh QA v1 reads vertex data from GLB accessors to compute a real bounding
+  box and checks tower height, ground plane, scale, and antenna count.
+- Geometry validator merges object-name counts, metadata proxies, and Mesh QA
+  results; it fails when the real bounding box is unrealistic.
+- Preview inspector checks PNG resolution, luminance, contrast, and non-dark
+  pixel ratio.
+- Asset import QA verifies `asset_imports`, generation modes (`parametric_generated`,
+  `internal_project_generated`, `imported_glb`, `procedural_fallback`,
+  `missing_file`), missing files, and fallback visibility.
+- Fallback Blender is rejected by default via quality-gate policy.
 
-## Ce qui n'est pas encore réel
+## What is not yet real
 
-- Pas de validation exacte des transforms node par node.
-- Pas de validation mesh/material vendor-grade.
-- Pas de jugement visuel sémantique de la preview.
-- Pas de validation CAD géométrique complète.
+- Mesh QA v1 does **not** verify individual antenna HBA or azimuth from vertices.
+- No collision detection between components.
+- No vendor-grade mesh/material validation.
+- No semantic visual judgement of the preview image.
+- No full CAD geometric validation.
 
 ## Fallbacks
 
-- Blender absent/erreur produit des artefacts fallback explicites, non valides comme résultat
-  produit par défaut.
-- Asset GLB manquant peut produire `procedural_fallback` si le manifest l'autorise.
-- Tout fallback doit remonter dans `status.json`, Product API, rapports et futur frontend.
+- Missing Blender or a Blender error produces explicit fallback artefacts that
+  are **not** accepted as a default result.
+- A missing asset GLB can produce `procedural_fallback` if the manifest allows
+  fallback.
+- All fallbacks are propagated to `status.json`, the Product API, reports, and
+  the frontend.
 
-## Tests attendus
+## Expected tests
 
-- Un workflow lattice avec GLB réel reste vert.
-- Un workflow sélectionnant une tour sans GLB expose fallback/degraded.
-- Les bundles viewer ne contiennent aucun chemin filesystem.
-- Les QA reports nomment les modes proxy correctement.
+- A lattice workflow with real Blender completes and passes Mesh QA.
+- A workflow selecting a tower without a matching GLB exposes fallback/degraded.
+- Invalid requirements (e.g., tower height > 150 m, sector count > 12) fail with
+  a clean `INVALID_REQUIREMENTS` validation error.
+- Viewer bundles contain no filesystem paths.
+- QA reports name proxy/real modes correctly (`mesh_level_basic`,
+  `glb_parse_structural`, etc.).

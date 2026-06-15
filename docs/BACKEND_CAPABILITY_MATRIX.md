@@ -6,7 +6,7 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 | Capability | Status | Evidence | Limite / vérité frontend |
 |---|---|---|---|
 | Backend API | IMPLEMENTED | `apps/api/telecom_studio_api/main.py` | Local-first, mono-utilisateur. |
-| Product API | IMPLEMENTED_LIMITED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary` | Doit rester honnête: warnings humains, pas de chemins filesystem, timeline issue du runtime. |
+| Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, actions disponibles, timeline lisible; SSE reste `polling_sse`. |
 | Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
 | Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py` | Synchrone, 80 Mo, extraction en mémoire. |
 | PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |
@@ -18,9 +18,9 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Local best-effort; passthrough si modèle indisponible. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Graphe présent, mais certains chemins sont impératifs. |
-| Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 9 GLB, 3 fichiers manquants, `partial_import_ready`. |
+| Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
 | Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
-| Missing asset fallback | IMPLEMENTED_LIMITED | `apps/blender_worker/generate_scene.py` | Les tours manquantes passent en procédural visible; pas vendor-ready. |
+| Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |
 | GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
 | Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py` | `object_name_based_geometry` + `metadata_based_height_azimuth`. |
 | Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | `preview_luminance_only`, pas jugement visuel sémantique. |
@@ -32,6 +32,6 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 
 ## Synthèse
 
-Le backend est riche et testable, mais le produit n'est pas prêt frontend avancé tant que la
-vérité Product API, les fallbacks assets, la timeline et les docs ne sont pas verrouillés par
-tests et smoke runtime.
+Le backend est riche et testable. Le contrat backend/frontend est prêt pour une
+revue/freeze avant construction UI; le frontend reste absent et ne doit pas être reconstruit
+avant validation explicite de ce contrat.

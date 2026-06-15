@@ -172,7 +172,7 @@ def create_design(request: CreateDesignRequest) -> dict:
 @app.get("/designs/{workflow_id}", response_model=WorkflowStatus)
 def get_design(workflow_id: str) -> dict:
     try:
-        return workflow_service.get_status(workflow_id)
+        return workflow_service.get_public_status(workflow_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workflow not found") from exc
 
@@ -274,29 +274,12 @@ def parse_requirements(request: ParseRequirementsRequest) -> dict:
 @app.post("/designs/{workflow_id}/edit", response_model=EditDesignResponse)
 def edit_design(workflow_id: str, request: EditDesignRequest) -> dict:
     result = workflow_service.edit_design(workflow_id, request.edit_prompt)
-    return {
-        "workflow_id": result.workflow_id,
-        "edit_id": result.edit_id,
-        "status": result.status,
-        "version_id": result.version_id,
-        "diff_summary": result.diff_summary,
-        "patch": result.patch.model_dump() if result.patch else None,
-        "validation_report": result.validation_report.model_dump()
-        if result.validation_report
-        else None,
-        "artifacts": result.artifacts,
-        "generation_mode": result.generation_mode,
-        "qa_score": result.qa_score,
-        "llm_provider": result.llm_provider,
-        "llm_fallback_used": result.llm_fallback_used,
-        "errors": [e.model_dump() for e in result.errors],
-        "warnings": [w.model_dump() for w in result.warnings],
-    }
+    return workflow_service.public_edit_response(result)
 
 
 @app.get("/designs/{workflow_id}/versions")
 def list_versions(workflow_id: str) -> list[dict]:
-    return workflow_service.list_versions(workflow_id)
+    return workflow_service.list_versions_public(workflow_id)
 
 
 @app.post("/designs/{workflow_id}/versions/{version_id}/rollback")
@@ -363,7 +346,40 @@ def list_document_packs() -> list[dict]:
 
 @app.get("/document-packs/capabilities")
 def get_document_pack_capabilities() -> dict:
-    return document_pack_service.capabilities().model_dump()
+    capabilities = document_pack_service.capabilities()
+    payload = capabilities.model_dump()
+    payload.update(
+        {
+            "document_pack_status": "limited",
+            "supported_upload_format": "zip",
+            "supported_extensions": [
+                ".pdf",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".tif",
+                ".tiff",
+                ".dxf",
+                ".dwg",
+                ".txt",
+                ".csv",
+                ".xlsx",
+            ],
+            "limits": {
+                "max_zip_size_mb": 80,
+                "max_member_size_mb": 15,
+                "processing_mode": "synchronous_local",
+            },
+            "truth": {
+                "advanced_ingestion": False,
+                "docling_default_enabled": False,
+                "ocr_requires_local_tesseract_languages": True,
+                "dwg_requires_local_converter": True,
+            },
+            "capabilities": payload.copy(),
+        }
+    )
+    return payload
 
 
 @app.get("/document-packs/{pack_id}")

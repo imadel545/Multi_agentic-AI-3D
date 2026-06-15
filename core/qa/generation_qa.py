@@ -151,7 +151,13 @@ def _load_metadata(path: Path) -> dict:
 
 
 def _asset_import_modes_valid(asset_imports: list) -> bool:
-    valid_modes = {"imported_glb", "procedural_fallback", "missing_file"}
+    valid_modes = {
+        "imported_glb",
+        "procedural_fallback",
+        "missing_file",
+        "parametric_generated",
+        "internal_project_generated",
+    }
     if not isinstance(asset_imports, list):
         return False
     for record in asset_imports:
@@ -183,7 +189,13 @@ def _asset_import_summary_valid(summary: object, asset_imports: list) -> bool:
     modes = summary.get("modes")
     if not isinstance(modes, dict):
         return False
-    for mode in {"imported_glb", "procedural_fallback", "missing_file"}:
+    for mode in {
+        "imported_glb",
+        "procedural_fallback",
+        "missing_file",
+        "parametric_generated",
+        "internal_project_generated",
+    }:
         expected = sum(1 for record in asset_imports if record.get("import_mode") == mode)
         if summary.get(f"{mode}_count") is not None and summary.get(f"{mode}_count") != expected:
             return False

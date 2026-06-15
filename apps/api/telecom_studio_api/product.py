@@ -93,15 +93,35 @@ class ProductService:
         events = self.workflow_service.get_events(workflow_id)
         issues = _collect_user_issues(status, events)
         runtime = _current_runtime_state(events)
+        backend_status = status.get("status", "unknown")
+        current_operation = _current_operation(status, events)
+        current_node = runtime.get("node")
+        phase = runtime.get("phase")
         return {
             "workflow_id": workflow_id,
-            "status": status.get("status", "unknown"),
-            "current_operation": _current_operation(status, events),
+            "status": backend_status,
+            "phase": phase,
+            "current_operation": current_operation,
+            "human_label": _trace_node_label(current_node) if current_node else current_operation,
+            "progress_message": current_operation,
+            "progress_label": _progress_label(status),
             "next_recommended_action": _next_recommended_action(status, issues),
             "progress_indicator": _progress_indicator(status),
-            "current_phase": runtime.get("phase"),
-            "current_node": runtime.get("node"),
+            "current_phase": phase,
+            "current_node": current_node,
             "event_source": runtime.get("source", "status"),
+            "is_running": backend_status in {"pending", "running"},
+            "is_terminal": backend_status in {"completed", "failed"},
+            "last_event_at": runtime.get("timestamp"),
+            "generation_mode": status.get("generation_mode"),
+            "generation_strategy": status.get("generation_strategy"),
+            "geometry_source": status.get("geometry_source"),
+            "mesh_qa_level": status.get("mesh_qa_level"),
+            "mesh_qa_passed": status.get("mesh_qa_passed"),
+            "qa_score": status.get("qa_score"),
+            "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
+            "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
+            "available_actions": _available_actions(status, issues),
         }
 
     def user_issues(self, workflow_id: str) -> dict:
@@ -137,17 +157,29 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("technical_report.md", "text/markdown", "technical_report")
         )
+        primary_glb = _artifact_by_name(viewer_artifacts, "design.glb")
+        preview = _artifact_by_name(viewer_artifacts, "preview.png")
+        report = _artifact_by_name(viewer_artifacts, "technical_report.md")
 
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
             "active_version": active_version,
             "generation_mode": status.get("generation_mode"),
+            "generation_strategy": status.get("generation_strategy"),
+            "geometry_source": status.get("geometry_source"),
+            "mesh_qa_level": status.get("mesh_qa_level"),
+            "mesh_qa_passed": status.get("mesh_qa_passed"),
             "qa_score": status.get("qa_score"),
             "asset_import_summary": status.get("asset_import_summary"),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
+            "primary_glb_url": primary_glb.get("url") if primary_glb else None,
+            "preview_url": preview.get("url") if preview else None,
+            "report_url": report.get("url") if report else None,
             "viewer_artifacts": viewer_artifacts,
+            "limitations": _collect_limitations(status),
+            "available_actions": _available_actions(status, issues),
         }
 
     def timeline_summary(self, workflow_id: str) -> dict:
@@ -156,6 +188,7 @@ class ProductService:
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
+            "event_source": "workflow_events_jsonl",
             "timeline_steps": _events_to_timeline(events, status),
         }
 
@@ -273,6 +306,17 @@ def _current_runtime_state(events: list[dict]) -> dict:
                 "source": "runtime_events",
                 "operation": _next_operation_after_node(node, payload),
                 "node_status": payload.get("status"),
+                "timestamp": event.get("timestamp"),
+            }
+        if event_type in {"workflow_completed", "workflow_failed"}:
+            event_data = payload if isinstance(payload, dict) else {}
+            return {
+                "node": "workflow",
+                "phase": "workflow",
+                "source": "runtime_events",
+                "operation": _event_to_human(event_type, event_data),
+                "node_status": "completed" if event_type == "workflow_completed" else "failed",
+                "timestamp": event.get("timestamp"),
             }
     return {"source": "status"}
 
@@ -314,6 +358,37 @@ def _progress_indicator(status: dict) -> str | None:
     if backend_status == "failed":
         return "failed"
     return "running"
+
+
+def _progress_label(status: dict) -> str:
+    backend_status = status.get("status", "unknown")
+    return {
+        "pending": "En attente",
+        "running": "En cours",
+        "completed": "Terminé",
+        "failed": "Échec",
+    }.get(backend_status, str(backend_status))
+
+
+def _available_actions(status: dict, issues: list[dict]) -> list[str]:
+    backend_status = status.get("status", "unknown")
+    if backend_status in {"pending", "running"}:
+        return ["view_timeline"]
+    if backend_status == "failed":
+        return ["view_issues", "view_timeline", "retry_with_changes"]
+    actions = ["open_viewer", "download_artifacts", "view_timeline", "edit_design"]
+    if status.get("active_version_id"):
+        actions.append("view_versions")
+    if issues:
+        actions.append("review_issues")
+    return actions
+
+
+def _artifact_by_name(artifacts: list[dict], name: str) -> dict | None:
+    for artifact in artifacts:
+        if artifact.get("name") == name:
+            return artifact
+    return None
 
 
 def _qa_summary(status: dict) -> str:
@@ -375,8 +450,19 @@ def _collect_limitations(status: dict) -> list[str]:
     if status.get("llm_fallback_used"):
         limitations.append("L'extraction a utilisé le fallback déterministe, pas le LLM.")
     generation_mode = status.get("generation_mode")
-    if generation_mode in {"fallback", "procedural_fallback"}:
-        limitations.append("Le mode de génération est un fallback.")
+    if generation_mode and str(generation_mode).startswith("fallback"):
+        limitations.append(f"Le mode de génération est un fallback ({generation_mode}).")
+    generation_strategy = status.get("generation_strategy")
+    if generation_strategy == "stretched_imported_glb":
+        limitations.append(
+            "Un asset GLB a été étiré pour correspondre aux dimensions demandées ; "
+            "la géométrie peut ne pas correspondre à un design d'ingénierie."
+        )
+    if generation_strategy == "procedural_fallback":
+        limitations.append("La scène contient des géométries procédurales de remplacement.")
+    mesh_qa_level = status.get("mesh_qa_level")
+    if mesh_qa_level == "metadata_only":
+        limitations.append("La QA géométrique ne vérifie que les métadonnées, pas les vertices.")
     asset_summary = status.get("asset_import_summary") or {}
     if asset_summary.get("procedural_fallback_count", 0):
         limitations.append(
@@ -622,18 +708,29 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
     for index, event in enumerate(events):
         event_type = event.get("event_type", "")
         payload = event.get("payload", {})
-        step_name = _event_step_name(event_type, payload if isinstance(payload, dict) else {})
-        human = _event_to_human(event_type, payload if isinstance(payload, dict) else {})
+        data = payload if isinstance(payload, dict) else {}
+        step_name = _event_step_name(event_type, data)
+        human = _event_to_human(event_type, data)
+        event_status = _event_status(
+            event_type,
+            status.get("status", "unknown"),
+            index=index,
+            total=len(events),
+        )
         steps.append(
             {
                 "step": step_name,
-                "status": _event_status(
-                    event_type,
-                    status.get("status", "unknown"),
-                    index=index,
-                    total=len(events),
-                ),
+                "label": human,
+                "phase": data.get("phase") or _phase_for_step(step_name),
+                "status": event_status,
                 "timestamp": event.get("timestamp"),
+                "started_at": None,
+                "completed_at": event.get("timestamp")
+                if event_status in {"completed", "failed", "skipped"}
+                else None,
+                "duration_ms": data.get("duration_ms"),
+                "warnings_count": len(data.get("warnings") or []),
+                "errors_count": len(data.get("errors") or []),
                 "human_readable": human,
             }
         )
@@ -650,8 +747,16 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
             steps.append(
                 {
                     "step": "workflow_completed",
+                    "label": "Workflow terminé",
+                    "phase": "workflow",
                     "status": "completed",
                     "timestamp": None,
+                    "started_at": None,
+                    "completed_at": None,
+                    "duration_ms": status.get("total_workflow_duration_ms")
+                    or status.get("total_duration_ms"),
+                    "warnings_count": len(status.get("warnings") or []),
+                    "errors_count": len(status.get("errors") or []),
                     "human_readable": "Le workflow s'est terminé avec succès.",
                 }
             )
@@ -659,8 +764,16 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
             steps.append(
                 {
                     "step": "workflow_failed",
+                    "label": "Workflow en échec",
+                    "phase": "workflow",
                     "status": "failed",
                     "timestamp": None,
+                    "started_at": None,
+                    "completed_at": None,
+                    "duration_ms": status.get("total_workflow_duration_ms")
+                    or status.get("total_duration_ms"),
+                    "warnings_count": len(status.get("warnings") or []),
+                    "errors_count": len(status.get("errors") or []),
                     "human_readable": "Le workflow a échoué.",
                 }
             )
@@ -745,12 +858,49 @@ def _trace_to_timeline(status: dict, *, existing_steps: set[str]) -> list[dict]:
         timeline.append(
             {
                 "step": node,
+                "label": _trace_node_to_human(node, trace),
+                "phase": trace.get("phase") or _phase_for_step(node),
                 "status": _trace_status(trace),
                 "timestamp": None,
+                "started_at": None,
+                "completed_at": None,
+                "duration_ms": trace.get("duration_ms"),
+                "warnings_count": len(trace.get("warnings") or []),
+                "errors_count": len(trace.get("errors") or []),
                 "human_readable": _trace_node_to_human(node, trace),
             }
         )
     return timeline
+
+
+def _phase_for_step(step: str) -> str | None:
+    return {
+        "design_created": "workflow",
+        "extract_requirements": "requirements",
+        "use_validated_requirements": "requirements",
+        "retrieve_rag_context": "rag",
+        "memory_recall": "memory",
+        "select_assets": "assets",
+        "asset_fallback_handler": "assets",
+        "validate_requirements": "requirements",
+        "plan_scene": "scene",
+        "validate_scene": "scene",
+        "scene_repair_handler": "scene",
+        "pre_blender_gate": "quality_gate",
+        "generate_blender": "blender",
+        "blender_failure_handler": "blender",
+        "qa_generation": "qa",
+        "post_blender_gate": "quality_gate",
+        "qa_failure_handler": "qa",
+        "memory_writeback": "memory",
+        "workflow_completed": "workflow",
+        "workflow_failed": "workflow",
+        "edit_patch_created": "edit",
+        "edit_patch_rejected": "edit",
+        "edit_patch_applied": "edit",
+        "version_created": "versioning",
+        "version_rolled_back": "versioning",
+    }.get(step)
 
 
 def _trace_status(trace: dict) -> str:

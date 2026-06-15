@@ -4,6 +4,7 @@ from pathlib import Path
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport
 from core.contracts.scene import SceneSpec
+from core.qa.mesh_qa import MeshQA
 
 HEIGHT_TOLERANCE_M = 0.5
 AZIMUTH_TOLERANCE_DEG = 5.0
@@ -15,8 +16,10 @@ class GLBGeometryValidator:
         scene: SceneSpec,
         glb_inspection: GlbInspectionReport,
         metadata_path: Path,
+        glb_path: Path | None = None,
     ) -> GeometryValidationReport:
         metadata = _load_metadata(metadata_path)
+        mesh_qa = MeshQA().validate(glb_path, scene) if glb_path and glb_path.exists() else None
         object_names = glb_inspection.object_names
         counts = _object_counts(object_names)
         expected_antennas = len(scene.sectors)
@@ -65,9 +68,30 @@ class GLBGeometryValidator:
         warnings = []
         if "bounding_box_m" not in metadata:
             warnings.append("BOUNDING_BOX_GEOMETRY_NOT_PARSED")
+        if mesh_qa is not None:
+            warnings.extend(mesh_qa.warnings)
+            if mesh_qa.bounding_box_m is not None:
+                bbox = mesh_qa.bounding_box_m
+                metadata["bounding_box_m"] = {
+                    "min_x": bbox.min_x,
+                    "min_y": bbox.min_y,
+                    "min_z": bbox.min_z,
+                    "max_x": bbox.max_x,
+                    "max_y": bbox.max_y,
+                    "max_z": bbox.max_z,
+                    "width": bbox.width,
+                    "depth": bbox.depth,
+                    "height": bbox.height,
+                }
+                # Re-evaluate bounding box with real data.
+                checks["bounding_box_reasonable"] = _bounding_box_reasonable(
+                    scene, metadata, glb_inspection
+                )
         critical_errors = [name for name, passed in checks.items() if not passed]
         return GeometryValidationReport(
             status="passed" if not critical_errors else "failed",
+            geometry_source=mesh_qa.geometry_source if mesh_qa else "unknown",
+            generation_strategy=mesh_qa.generation_strategy if mesh_qa else "unknown",
             checks=checks,
             object_counts=counts,
             missing_objects=missing_objects,
@@ -75,6 +99,9 @@ class GLBGeometryValidator:
             critical_errors=critical_errors,
             height_tolerance_m=HEIGHT_TOLERANCE_M,
             azimuth_tolerance_deg=AZIMUTH_TOLERANCE_DEG,
+            bounding_box_m=mesh_qa.bounding_box_m if mesh_qa else None,
+            mesh_qa=mesh_qa,
+            mesh_qa_level=mesh_qa.level if mesh_qa else "not_available",
         )
 
 

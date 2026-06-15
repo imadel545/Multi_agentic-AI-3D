@@ -32,13 +32,16 @@ class AssetRegistry:
             and asset.is_validated
             and network_type in asset.compatible_networks
             and tower_type in asset.compatible_tower_types
-            and (asset.height_m or 0) >= min_height_m
         ]
         if not candidates:
             raise LookupError(
                 f"no validated tower asset for {tower_type}/{network_type}/{min_height_m}m"
             )
-        return sorted(candidates, key=lambda asset: asset.height_m or 0)[0]
+        # Prefer a tower tall enough, otherwise pick the closest height.
+        tall_enough = [a for a in candidates if (a.height_m or 0) >= min_height_m]
+        if tall_enough:
+            return sorted(tall_enough, key=lambda asset: asset.height_m or 0)[0]
+        return sorted(candidates, key=lambda asset: asset.height_m or 0, reverse=True)[0]
 
     def select_tower_fallback(
         self, tower_type: str, network_type: str, min_height_m: float
@@ -49,17 +52,32 @@ class AssetRegistry:
             if asset.type == "tower"
             and asset.is_validated
             and network_type in asset.compatible_networks
-            and (asset.height_m or 0) >= min_height_m
         ]
         if not candidates:
             raise LookupError(
                 f"no fallback tower asset for {tower_type}/{network_type}/{min_height_m}m"
             )
+        # Prefer a tower tall enough with the right type, otherwise closest match.
+        tall_enough = [
+            a
+            for a in candidates
+            if (a.height_m or 0) >= min_height_m
+            and _tower_type_distance(tower_type, a.compatible_tower_types) == 0
+        ]
+        if tall_enough:
+            return sorted(
+                tall_enough,
+                key=lambda asset: (
+                    _tower_type_distance(tower_type, asset.compatible_tower_types),
+                    asset.height_m or 0,
+                    asset.asset_id,
+                ),
+            )[0]
         return sorted(
             candidates,
             key=lambda asset: (
                 _tower_type_distance(tower_type, asset.compatible_tower_types),
-                asset.height_m or 0,
+                -(asset.height_m or 0),
                 asset.asset_id,
             ),
         )[0]

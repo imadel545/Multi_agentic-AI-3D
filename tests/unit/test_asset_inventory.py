@@ -10,12 +10,12 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
     inventory = AssetInventoryService(Path.cwd(), registry).inspect()
 
     assert inventory["asset_count"] == 12
-    assert inventory["status"] == "partial_import_ready"
-    assert inventory["missing_file_count"] == 3
-    assert inventory["real_glb_asset_count"] == 9
-    assert inventory["import_ready_asset_count"] == 9
-    assert inventory["procedural_fallback_count"] == 3
-    assert inventory["procedural_generation_required"] is True
+    assert inventory["status"] == "ready_for_import"
+    assert inventory["missing_file_count"] == 0
+    assert inventory["real_glb_asset_count"] == 12
+    assert inventory["import_ready_asset_count"] == 12
+    assert inventory["procedural_fallback_count"] == 0
+    assert inventory["procedural_generation_required"] is False
     entries_by_id = {entry["asset_id"]: entry for entry in inventory["entries"]}
     assert entries_by_id["TOWER_LATTICE_30M"]["asset_file_exists"] is True
     assert entries_by_id["TOWER_LATTICE_30M"]["asset_import_mode"] == "imported_glb"
@@ -38,7 +38,13 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
         in entries_by_id["ANT_PANEL_5G_001"]["warnings"]
     )
     assert entries_by_id["RRU_SMALL_001"]["asset_file_exists"] is True
-    assert entries_by_id["TOWER_MONOPOLE_30M"]["asset_file_exists"] is False
-    assert entries_by_id["TOWER_MONOPOLE_30M"]["effective_generation_mode"] == (
-        "procedural_fallback"
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["asset_file_exists"] is True
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["asset_import_mode"] == "imported_glb"
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["effective_generation_mode"] == "imported_glb"
+    assert entries_by_id["TOWER_MONOPOLE_30M"]["source"] == "internal_project_generated"
+    assert (
+        "INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
+        in entries_by_id["TOWER_MONOPOLE_30M"]["warnings"]
     )
+    assert entries_by_id["TOWER_ROOFTOP_12M"]["asset_file_exists"] is True
+    assert entries_by_id["TOWER_SMALL_CELL_10M"]["asset_file_exists"] is True

@@ -25,6 +25,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert response["status"] == "completed"
 
         status = client.get(f"/designs/{response['workflow_id']}").json()
+        internal_status = workflow_service.get_status(response["workflow_id"])
         assert status["status"] == "completed"
         assert status["llm_provider"] == "deterministic"
         assert status["llm_fallback_used"] is True
@@ -49,7 +50,14 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
             for record in status["asset_imports"]
         )
         assert all(
-            record["import_mode"] in {"imported_glb", "procedural_fallback", "missing_file"}
+            record["import_mode"]
+            in {
+                "imported_glb",
+                "procedural_fallback",
+                "missing_file",
+                "parametric_generated",
+                "internal_project_generated",
+            }
             for record in status["asset_imports"]
         )
         assert status["total_duration_ms"] >= 0
@@ -76,27 +84,35 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         ]:
             assert key in status["metrics"]
         assert status["download_url"] == f"/designs/{response['workflow_id']}/download"
-        assert Path(status["trace_path"]).exists()
-        assert Path(status["artifacts"]["scene_spec"]).exists()
-        assert Path(status["artifacts"]["extraction_report"]).exists()
-        assert Path(status["artifacts"]["validation_report"]).exists()
-        assert Path(status["artifacts"]["quality_gates"]).exists()
-        assert Path(status["artifacts"]["qa_report"]).exists()
-        assert Path(status["artifacts"]["generation_report"]).exists()
-        assert Path(status["artifacts"]["glb_inspection"]).exists()
-        assert Path(status["artifacts"]["geometry_validation"]).exists()
-        assert Path(status["artifacts"]["preview_inspection"]).exists()
-        assert Path(status["artifacts"]["memory_recall"]).exists()
-        assert Path(status["artifacts"]["metadata"]).exists()
-        assert Path(status["artifacts"]["glb"]).exists()
-        assert Path(status["artifacts"]["preview"]).exists()
-        assert Path(status["artifacts"]["download"]).exists()
+        assert status["trace_path"] is None
+        assert status["trace_url"] == f"/designs/{response['workflow_id']}/artifacts/trace"
+        for artifact_url in status["artifacts"].values():
+            assert artifact_url.startswith(f"/designs/{response['workflow_id']}/")
+            assert "/Users/" not in artifact_url
+        assert status["asset_imports"]
+        assert all("resolved_path" not in record for record in status["asset_imports"])
+        assert "/Users/" not in str(status["asset_imports"])
+        assert Path(internal_status["trace_path"]).exists()
+        assert Path(internal_status["artifacts"]["scene_spec"]).exists()
+        assert Path(internal_status["artifacts"]["extraction_report"]).exists()
+        assert Path(internal_status["artifacts"]["validation_report"]).exists()
+        assert Path(internal_status["artifacts"]["quality_gates"]).exists()
+        assert Path(internal_status["artifacts"]["qa_report"]).exists()
+        assert Path(internal_status["artifacts"]["generation_report"]).exists()
+        assert Path(internal_status["artifacts"]["glb_inspection"]).exists()
+        assert Path(internal_status["artifacts"]["geometry_validation"]).exists()
+        assert Path(internal_status["artifacts"]["preview_inspection"]).exists()
+        assert Path(internal_status["artifacts"]["memory_recall"]).exists()
+        assert Path(internal_status["artifacts"]["metadata"]).exists()
+        assert Path(internal_status["artifacts"]["glb"]).exists()
+        assert Path(internal_status["artifacts"]["preview"]).exists()
+        assert Path(internal_status["artifacts"]["download"]).exists()
         scene_status = json.loads(
-            Path(status["artifacts"]["scene_spec"]).read_text(encoding="utf-8")
+            Path(internal_status["artifacts"]["scene_spec"]).read_text(encoding="utf-8")
         )
         assert scene_status["visual_elements"]["include_power_cabinet"] is False
         assert scene_status["visual_elements"]["include_gps_antenna"] is False
-        trace = json.loads(Path(status["trace_path"]).read_text(encoding="utf-8"))
+        trace = json.loads(Path(internal_status["trace_path"]).read_text(encoding="utf-8"))
         assert trace["workflow_id"] == response["workflow_id"]
         assert trace["metrics"]["memory_hits"] == status["memory_hits"]
         assert trace["metrics"]["memory_context_count"] == status["memory_context_count"]
@@ -174,7 +190,6 @@ def test_create_design_async_status_is_available_immediately(tmp_path: Path) -> 
 def test_geometry_validation_report_written(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
-    client = TestClient(app)
     try:
         response = workflow_service.create_design(
             requirements_text=(
@@ -186,8 +201,8 @@ def test_geometry_validation_report_written(tmp_path: Path) -> None:
             _synchronous=True,
         )
         workflow_id = response["workflow_id"]
-        status = client.get(f"/designs/{workflow_id}").json()
-        geometry_path = Path(status["artifacts"]["geometry_validation"])
+        internal_status = workflow_service.get_status(workflow_id)
+        geometry_path = Path(internal_status["artifacts"]["geometry_validation"])
 
         assert geometry_path.exists()
         payload = json.loads(geometry_path.read_text(encoding="utf-8"))
@@ -312,9 +327,9 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     payload = response.json()
     assert "asset_count" in payload
     assert "procedural_generation_required" in payload
-    assert payload["status"] == "partial_import_ready"
-    assert payload["real_glb_asset_count"] == 9
-    assert any(entry["asset_import_mode"] == "missing_file" for entry in payload["entries"])
+    assert payload["status"] == "ready_for_import"
+    assert payload["real_glb_asset_count"] == 12
+    assert all(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
     assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
 
 

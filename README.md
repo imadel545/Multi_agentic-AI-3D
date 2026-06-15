@@ -3,7 +3,7 @@
 Local-first pipeline for transforming telecom requirements into a validated `SceneSpec`, controlled 3D generation artifacts, and compliance reports.
 
 > ⚠️ **Frontend removed.**<br>
-> The old frontend has been deleted/refused. `apps/frontend` is not an operational app. A chat-first / 3D-first frontend will be rebuilt later only after backend truth fixes.<br>
+> The old frontend has been deleted/refused. `apps/frontend` is not an operational app. A chat-first / 3D-first frontend will be rebuilt later against the frozen backend/frontend contract.<br>
 > See `docs/PROJECT_SOURCE_OF_TRUTH.md` for the single source of truth, `docs/BACKEND_CAPABILITY_MATRIX.md` for backend capabilities, and `docs/KNOWN_LIMITATIONS.md` for honest limitations.
 
 ---
@@ -15,7 +15,7 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - Plans a controlled 3D scene (`SceneSpec`).
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.
-- Current geometry QA is proxy/metadata based, not exact mesh-transform QA.
+- Current mesh QA is `mesh_level_basic`: it parses GLB accessors and bounding boxes, but it is not exact per-antenna HBA/azimuth/collision QA.
 - Supports prompt edits, versioning, and rollback.
 
 ## What it does not do yet
@@ -88,7 +88,7 @@ The backend reports each capability explicitly and does not pretend extraction s
 Backend:
 
 ```bash
-pytest
+.venv/bin/python -m pytest -q
 ```
 
 ---
@@ -129,6 +129,6 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 12 manifests, 9 local GLBs, 3 missing tower GLBs, `partial_import_ready`, not vendor-grade.
-- Product API: `/studio/summary`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary` are available and must stay truthful.
+- Assets: 12 manifests, 12 local GLBs, 0 missing tower GLBs, `ready_for_import`, not vendor-grade.
+- Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - Frontend: old dashboard frontend deleted; rebuild planned as chat-first / 3D-first.

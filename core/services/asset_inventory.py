@@ -52,6 +52,8 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
     if asset.source == "internal_cleaned":
         warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset.source == "internal_project_generated":
+        warnings.append("INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE")
     if asset.attribution_required:
         warnings.append("ATTRIBUTION_REQUIRED")
     if asset.source == "cc_by":

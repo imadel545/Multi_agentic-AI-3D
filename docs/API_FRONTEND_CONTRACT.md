@@ -26,7 +26,7 @@ Ces endpoints retournent des données orientées utilisateur. Le frontend ne doi
 | `GET` | `/health` | Vérifier que le backend est en ligne. |
 | `GET` | `/designs` | Lister les designs récents. |
 | `POST` | `/designs` | Créer un design depuis un prompt. |
-| `GET` | `/designs/{id}` | Statut technique complet (fallback si besoin). |
+| `GET` | `/designs/{id}` | Statut complet public: artefacts en URLs backend, pas en chemins locaux. |
 | `GET` | `/designs/{id}/events` | Timeline des events bruts. |
 | `GET` | `/designs/{id}/events/stream` | `polling_sse` côté backend, pas vrai push. |
 | `GET` | `/designs/{id}/versions` | Historique des versions. |
@@ -55,6 +55,11 @@ Noms d'artifact utilisés par le frontend :
 - `trace` → `workflow_trace.json`
 - `download` → `artifacts.zip`
 
+Dans les réponses publiques (`/designs/{id}`, `/designs/{id}/edit`,
+`/designs/{id}/versions`, `/viewer-bundle`), ces artefacts sont exposés via
+`/designs/{id}/artifacts/{name}` ou `/designs/{id}/download`. Les chemins locaux
+restent internes au backend.
+
 ## Champs clés du statut workflow
 
 - `status` : `pending`, `running`, `completed`, `failed`.
@@ -64,6 +69,10 @@ Noms d'artifact utilisés par le frontend :
 - `warnings` / `errors` : liste d'issues techniques.
 - `active_version_id` : version active.
 - `download_url` : lien de téléchargement de l'archive.
+- `trace_url` : URL backend vers `workflow_trace.json`.
+- `trace_path` : toujours `null` dans la réponse publique.
+- `artifacts` : URLs backend, jamais `/Users/...`.
+- `active_version_artifacts` : URLs versionnées quand une version active existe.
 
 ## Limites connues du contrat
 
@@ -86,19 +95,77 @@ Noms d'artifact utilisés par le frontend :
 `/viewer-bundle` expose uniquement des URLs d'artefacts, jamais des chemins filesystem:
 
 - `generation_mode`
+- `generation_strategy`
+- `geometry_source`
+- `mesh_qa_level`
+- `mesh_qa_passed`
 - `qa_score`
 - `asset_import_summary`
 - `human_warnings_count`
 - `human_errors_count`
+- `primary_glb_url`
+- `preview_url`
+- `report_url`
 - `viewer_artifacts[]`
+- `limitations`
+- `available_actions`
+
+`/designs/{id}/edit` expose, en cas de succès:
+
+- `status=applied`
+- `edit_status`
+- `message`
+- `version_id`
+- `artifacts` en URLs versionnées
+- `viewer_bundle_url`
+- `timeline_url`
+- `user_issues_url`
+- `current_operation_url`
+- `available_actions`
+
+`/designs/{id}/versions` expose l'historique sans `artifact_dir`; les artefacts
+de chaque version sont des URLs versionnées.
 
 `/current-operation` expose:
 
 - `current_operation`
+- `phase`
 - `current_phase`
 - `current_node`
+- `human_label`
+- `progress_message`
+- `progress_label`
 - `event_source`
 - `progress_indicator`
+- `is_running`
+- `is_terminal`
+- `last_event_at`
+- `available_actions`
+
+`/timeline-summary` expose des étapes lisibles:
+
+- `step`
+- `label`
+- `phase`
+- `status`
+- `timestamp`
+- `started_at`
+- `completed_at`
+- `duration_ms`
+- `warnings_count`
+- `errors_count`
+- `human_readable`
+
+`/document-packs/capabilities` expose:
+
+- `document_pack_status=limited`
+- `supported_upload_format=zip`
+- `supported_extensions`
+- `limits.max_zip_size_mb=80`
+- `limits.max_member_size_mb=15`
+- `truth.advanced_ingestion=false`
+- `truth.docling_default_enabled=false`
+- `capabilities` avec les outils réels et leurs statuts
 
 Events runtime attendus:
 

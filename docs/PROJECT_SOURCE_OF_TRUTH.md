@@ -1,83 +1,106 @@
 # Project Source Of Truth
 
-Document actif principal. Toute autre documentation doit rester alignée avec ce fichier.
+Active master document. All other documentation must stay aligned with this
+file.
 
-## Produit
+## Product
 
-Studio local-first et mono-utilisateur pour transformer un cahier des charges telecom
-ou un pack documentaire (PDF, ZIP, DXF, images) en `SceneSpec`, artefacts Blender/GLB,
-QA, versions et rollback.
+Local-first, single-user studio to turn a telecom brief or document pack
+(PDF, ZIP, DXF, images) into a `SceneSpec`, Blender/GLB artefacts, QA, versions,
+and rollback.
 
-Le projet vise un produit final chat-first et 3D-first, mais cette UI n'existe pas
-aujourd'hui.
+The end goal is a chat-first and 3D-first product, but that UI does not exist
+yet.
 
-## Ce que le projet n'est pas
+## What the project is not
 
-- Pas un SaaS multi-utilisateur.
-- Pas un dashboard dev.
-- Pas un générateur libre de code Blender par LLM.
-- Pas une preuve marketing où un fallback est présenté comme un vrai résultat.
-- Pas encore une bibliothèque d'assets vendor-grade complète.
+- Not a multi-user SaaS.
+- Not a dev dashboard.
+- Not an LLM-free-form Blender code generator.
+- Not marketing proof where a fallback is presented as a real result.
+- Not yet a complete vendor-grade asset library.
 
-## Backend actuel
+## Current backend
 
-- FastAPI expose les workflows design, document-pack, RAG, mémoire, assets et Product API.
-- LangGraph existe, mais certains chemins (`run_requirements`, révision de scène) exécutent
-  encore la séquence de manière impérative.
-- Groq `openai/gpt-oss-120b` est utilisé quand une clé réelle existe; sinon extraction
-  déterministe explicite.
-- RAG principal: NVIDIA API `baai/bge-m3`.
-- Fallback RAG: `sentence-transformers` local, puis hash déterministe en dernier recours.
-- Reranker: `BAAI/bge-reranker-v2-m3` local best-effort; passthrough si indisponible.
-- Mémoire: SQLite local avec writeback; Qdrant optionnel pour certains résumés.
-- Document-pack: ZIP synchrone, extraction PDF/OCR/DXF limitée, consolidation,
-  conflits, corrections, QA.
-- Blender: génération réelle si Blender est trouvé; fallback Blender interdit par défaut
-  pour la qualité (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
+- FastAPI exposes design workflow, document-pack, RAG, memory, asset, and
+  Product APIs.
+- LangGraph is used, but some paths (`run_requirements`, scene revision) still
+  execute the sequence imperatively.
+- Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
+  explicit deterministic extraction.
+- Primary RAG: NVIDIA API `baai/bge-m3`.
+- RAG fallback: local `sentence-transformers`, then deterministic hash as last
+  resort.
+- Reranker: local `BAAI/bge-reranker-v2-m3` best-effort; passthrough if
+  unavailable.
+- Memory: local SQLite with writeback; optional Qdrant for some summaries.
+- Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
+  conflicts, corrections, QA.
+- Blender: real generation when Blender is found; Blender fallback is rejected
+  by default for quality (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
 
-## Frontend actuel
+## Current frontend
 
-- Aucun frontend opérationnel.
-- L'ancien dashboard React/Vite est refusé.
-- `apps/frontend` peut exister comme dossier vide local, mais il ne contient pas
-  d'application.
-- Ne pas reconstruire le frontend tant que les APIs produit, timeline, asset fallback et QA
-  ne sont pas fiables.
+- No operational frontend.
+- Old React/Vite dashboard is rejected.
+- `apps/frontend` may exist as an empty local folder, but it contains no
+  application.
+- Do not rebuild the frontend until product APIs, timeline, asset fallback, and
+  QA are reliable.
 
-## Assets actuels
+## Current assets
 
 - 12 manifests.
-- 9 fichiers GLB présents.
-- 3 tours sans GLB local: monopole, rooftop, small-cell.
-- Statut attendu de `/assets/inventory`: `partial_import_ready`.
-- Les tours manquantes utilisent un fallback procédural visible si sélectionnées et autorisées.
-- Les assets actuels sont internes/CC-BY et non vendor-grade.
+- 12 GLB files present.
+- 0 tower without a local GLB.
+- Expected `/assets/inventory` status: `ready_for_import`.
+- The three historically missing towers (monopole, rooftop, small-cell) are now
+  internal project generated assets produced with Blender.
+- Current assets are internal/CC-BY and not vendor-grade.
+- Towers are generated parametrically by default. GLB import happens only when
+  the resolver explicitly selects `imported_glb_exact` or
+  `internal_project_generated`.
 
-## 3D et QA actuelles
+## Current 3D and QA
 
-- `SceneSpec` est la source de vérité de génération.
-- Blender produit `design.glb`, `preview.png`, `scene_metadata.json` et rapports.
-- Les catégories de QA réelles sont:
+- `SceneSpec + parametric generator` is the source of truth for geometry.
+- GLB is only the exported viewer result, not the source of truth.
+- Blender produces `design.glb`, `preview.png`, `scene_metadata.json`, and
+  reports.
+- Real QA categories:
   - `glb_parse_structural`
+  - `mesh_level_basic` — real bounding box from GLB accessors
   - `object_name_based_geometry`
   - `metadata_based_height_azimuth`
   - `preview_luminance_only`
-- La QA ne valide pas encore finement les transforms, matériaux ou dimensions mesh exactes.
-- Ne pas appeler cette QA "advanced geometry".
+- Mesh QA v1 checks: GLB parse OK, tower height approximation, scene above
+  ground, scale realism, antenna count.
+- Mesh QA v1 does **not** verify individual antenna HBA/azimuth from vertices
+  and does **not** perform collision detection.
+- QA does not yet finely validate transforms, materials, or exact mesh
+  dimensions.
+- Do not call this QA "advanced geometry".
 
-## Events et runtime
+## Events and runtime
 
-- Les events sont persistés en JSONL.
-- Les nœuds d'orchestration émettent `node_completed`, `node_failed` ou `node_skipped`
-  avec `node`, `phase`, `status`, `detail`, `duration_ms`, warnings et errors.
-- `/current-operation` expose `current_phase`, `current_node` et `event_source`.
-- `/events/stream` est un `polling_sse`, pas un vrai push temps réel.
-- Le futur frontend doit afficher cette limite clairement.
+- Events are persisted in JSONL.
+- Orchestration nodes emit `node_completed`, `node_failed`, or `node_skipped`
+  with `node`, `phase`, `status`, `detail`, `duration_ms`, warnings, and errors.
+- `/current-operation` exposes `current_phase`, `current_node`, and
+  `event_source`, plus frontend labels, terminal/running flags, last event time,
+  and available actions.
+- `/timeline-summary` exposes frontend-readable timeline steps with label,
+  phase, status, duration, warning count, and error count.
+- Public workflow/edit/version responses expose artifact URLs, not local
+  filesystem paths. `asset_imports[].resolved_path` remains internal only.
+- `/events/stream` is `polling_sse`, not true real-time push.
+- The future frontend must display this limitation clearly.
 
-## Verdict actuel
+## Current verdict
 
-`BACKEND_NEEDS_TRUTH_FIXES`
+`BACKEND_CONTRACT_READY_FOR_FRONTEND_BUILD`
 
-Le backend peut générer et tester des workflows locaux, mais il n'est pas encore prêt pour un
-frontend avancé tant que les surfaces produit, warnings, asset fallback, timeline et docs ne
-sont pas toutes alignées avec le runtime réel.
+The backend can generate tested local 3D workflows and now exposes
+frontend-safe public API surfaces for status, viewer bundle, edit, versions,
+timeline, current operation, and user issues. The frontend still does not
+exist; the next step is to build it against this frozen backend contract.

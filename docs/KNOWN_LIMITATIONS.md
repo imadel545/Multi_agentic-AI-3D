@@ -1,58 +1,66 @@
 # Known Limitations
 
-Limitations actives à garder visibles dans l'API, les rapports et le futur frontend.
+Active limitations that must remain visible in the API, reports, and future
+frontend.
 
-## Bloquants avant frontend avancé
+## Blocking before advanced frontend
 
-- Product API encore à surveiller: elle doit refléter les vrais warnings, assets et events.
-- Aucun frontend opérationnel; ancien dashboard refusé.
-- `events/stream` est `polling_sse`, pas vrai streaming push.
-- Timeline runtime dépend des events de nœuds + trace fichier; pas encore de reprise/replay robuste.
-- Les 3 tours monopole/rooftop/small-cell n'ont pas de GLB local.
+- Product API public surfaces are now frontend-safe for artifact URLs, status,
+  edit, versions, timeline, and user issues; they still need a contract freeze
+  review before UI implementation.
+- No operational frontend yet; old dashboard rejected.
+- `events/stream` is `polling_sse`, not true push streaming.
+- Runtime timeline depends on node events + trace file; robust resume/replay is
+  not yet implemented.
+- LangGraph checkpointing currently emits compatibility warnings for custom
+  Pydantic/dataclass types during msgpack deserialization; this is not blocking
+  local runtime, but should be cleaned before relying on strict checkpoint mode.
 
-## Backend et agents
+## Backend and agents
 
-- Extraction déterministe fragile sur cahiers des charges complexes.
-- Groq améliore l'extraction seulement si une clé réelle est configurée.
-- Les agents sont majoritairement des fonctions déterministes ou wrappers LLM.
-- Certains chemins contournent le graphe LangGraph compilé.
-- Pas de cancellation/retry manager robuste; exécution async par thread local.
+- Deterministic extraction is fragile on complex requirements.
+- Groq improves extraction only when a real key is configured.
+- Agents are mostly deterministic functions or LLM wrappers.
+- Some paths bypass the compiled LangGraph graph.
+- No robust cancellation/retry manager; async execution uses local threads.
 
-## RAG et mémoire
+## RAG and memory
 
-- NVIDIA `baai/bge-m3` est le provider principal.
-- Fallback local `sentence-transformers`, puis hash en dernier recours; le hash n'est pas une
-  qualité production.
-- Après changement de provider/dimension, l'index Qdrant local doit être reconstruit avec
-  `POST /rag/reindex`; sinon `/rag/search` retourne `409 RAG_INDEX_DIMENSION_MISMATCH`.
-- Reranker local best-effort; passthrough si modèle indisponible.
-- Mémoire encore limitée, avec recall sémantique incomplet.
+- NVIDIA `baai/bge-m3` is the primary provider.
+- Local `sentence-transformers` fallback, then hash as last resort; hash is not
+  production quality.
+- After a provider/dimension change, the local Qdrant index must be rebuilt with
+  `POST /rag/reindex`; otherwise `/rag/search` returns `409 RAG_INDEX_DIMENSION_MISMATCH`.
+- Local reranker is best-effort; passthrough if the model is unavailable.
+- Memory is still limited, with incomplete semantic recall.
 
 ## Documents
 
-- Document-pack synchrone, 80 Mo max.
-- OCR limité et dépendant de Tesseract + langues installées.
-- Docling est import-only/non actif par défaut.
-- DXF extrait texte/couches; DWG dépend d'un convertisseur local.
+- Document-pack is synchronous, 80 MB max.
+- `/document-packs/capabilities` is honest and reports
+  `document_pack_status=limited`.
+- OCR is limited and depends on installed Tesseract + languages.
+- Docling is import-only / not active by default.
+- DXF extracts text/layers; DWG depends on a local converter.
 
-## 3D et QA
+## 3D and QA
 
-- Blender réel est requis pour un vrai GLB.
-- Fallback Blender est refusé par défaut, mais des assets manquants peuvent encore devenir
-  géométrie procédurale visible pendant une génération Blender réelle.
-- QA actuelle:
-  - `glb_parse_structural`
-  - `object_name_based_geometry`
-  - `metadata_based_height_azimuth`
-  - `preview_luminance_only`
-- Pas encore de validation exacte des transforms, matériaux ou dimensions mesh.
-- Assets internes/CC-BY non vendor-grade.
+- Real Blender is required for a real GLB.
+- Blender fallback is rejected by default, but missing assets can still become
+  visible procedural geometry during a real Blender generation.
+- Geometry source of truth is `SceneSpec + parametric generator`; GLB is only
+  the exported viewer result.
+- Mesh QA v1 (`mesh_level_basic`) computes real bounding boxes from GLB
+  accessors, but does **not** verify individual antenna HBA/azimuth from
+  vertices and does **not** perform collision detection.
+- No exact transform, material, or vendor-grade mesh dimension validation yet.
+- Internal/CC-BY assets are not vendor-grade.
 
-## Ce qui peut attendre
+## Can wait
 
 - WebSocket.
 - Queue/job manager.
-- Refonte LangGraph complète.
-- Mesh-level QA avancée.
-- Docling production.
-- Nouveau frontend.
+- Full LangGraph redesign.
+- Advanced mesh-level QA.
+- Production Docling.
+- New frontend.

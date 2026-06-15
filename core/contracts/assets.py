@@ -42,6 +42,7 @@ class AssetManifest(StrictModel):
         "royalty_free",
         "internal_cleaned",
         "internal_test_minimal",
+        "internal_project_generated",
     ] = "vendor_expected"
     license: str | None = None
     attribution_required: bool = False

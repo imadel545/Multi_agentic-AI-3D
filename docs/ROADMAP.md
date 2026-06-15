@@ -21,10 +21,10 @@
   per-version artifacts, event log, active version pointer, and rollback.
 - API fixes for `/assets/inventory`, JSON exception handling, and unknown SSE workflow handling.
 - RAG/memory planning hardening through structured hints and `error_patterns`.
-- Asset pipeline MVP: inventory detects present/missing GLBs, nine GLBs are present, the lattice
-  tower is an integrated CC Attribution asset, accessory/internal cleaned GLBs are exposed,
-  Blender imports selected available GLBs, procedural fallback is explicit, and API status exposes
-  asset import metadata.
+- Asset pipeline MVP: inventory detects present/missing GLBs, all twelve GLBs are present, the
+  lattice tower is an integrated CC Attribution asset, the three remaining towers are project-
+  generated Blender GLBs, accessory/internal cleaned GLBs are exposed, Blender imports selected
+  GLBs, procedural fallback is explicit, and API status exposes asset import metadata.
 - Document-pack intelligence: ZIP indexing, LangGraph document-pack orchestration, document
   classification, PDF text/table extraction, selected OCR, DXF parsing with layer provenance,
   bounded Groq document extraction when configured, conflict/missing detection,

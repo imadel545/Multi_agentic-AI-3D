@@ -24,6 +24,7 @@ class WorkflowStatus(BaseModel):
     version_id: str | None = None
     active_version_id: str | None = None
     artifacts: dict[str, str]
+    active_version_artifacts: dict[str, str] | None = None
     warnings: list[dict]
     errors: list[dict]
     llm_provider: str | None = None
@@ -32,6 +33,10 @@ class WorkflowStatus(BaseModel):
     memory_hits: int | None = None
     memory_context_count: int | None = None
     generation_mode: str | None = None
+    generation_strategy: str | None = None
+    geometry_source: str | None = None
+    mesh_qa_level: str | None = None
+    mesh_qa_passed: bool | None = None
     blender_available: bool | None = None
     qa_score: float | None = None
     tower_characteristics_summary: dict | None = None
@@ -48,6 +53,8 @@ class WorkflowStatus(BaseModel):
     quality_gates: list[dict] | None = None
     download_url: str | None = None
     trace_path: str | None = None
+    trace_url: str | None = None
+    available_actions: list[str] = Field(default_factory=list)
     tower_validation: dict | None = None
     rf_validation: dict | None = None
 
@@ -79,6 +86,8 @@ class EditDesignResponse(BaseModel):
     workflow_id: str
     edit_id: str
     status: str
+    edit_status: str | None = None
+    message: str | None = None
     version_id: str | None = None
     diff_summary: dict | None = None
     patch: dict | None = None
@@ -88,6 +97,11 @@ class EditDesignResponse(BaseModel):
     qa_score: float | None = None
     llm_provider: str | None = None
     llm_fallback_used: bool | None = None
+    viewer_bundle_url: str | None = None
+    timeline_url: str | None = None
+    user_issues_url: str | None = None
+    current_operation_url: str | None = None
+    available_actions: list[str] = Field(default_factory=list)
     errors: list[dict] = Field(default_factory=list)
     warnings: list[dict] = Field(default_factory=list)
 
@@ -134,6 +148,10 @@ class UserSummary(BaseModel):
     human_readable_issues: list[UserIssue]
     active_version: str | None = None
     generation_mode: str | None = None
+    generation_strategy: str | None = None
+    geometry_source: str | None = None
+    mesh_qa_level: str | None = None
+    mesh_qa_passed: bool | None = None
     asset_quality_summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
 
@@ -147,12 +165,28 @@ class UserIssuesResponse(BaseModel):
 class CurrentOperation(BaseModel):
     workflow_id: str
     status: str
+    phase: str | None = None
     current_operation: str
+    human_label: str | None = None
+    progress_message: str | None = None
+    progress_label: str | None = None
     next_recommended_action: str
     progress_indicator: str | None = None
     current_phase: str | None = None
     current_node: str | None = None
     event_source: str = "status"
+    is_running: bool = False
+    is_terminal: bool = False
+    last_event_at: str | None = None
+    generation_mode: str | None = None
+    generation_strategy: str | None = None
+    geometry_source: str | None = None
+    mesh_qa_level: str | None = None
+    mesh_qa_passed: bool | None = None
+    qa_score: float | None = None
+    human_warnings_count: int = 0
+    human_errors_count: int = 0
+    available_actions: list[str] = Field(default_factory=list)
 
 
 class ViewerArtifact(BaseModel):
@@ -167,23 +201,40 @@ class ViewerBundle(BaseModel):
     status: str
     active_version: str | None = None
     generation_mode: str | None = None
+    generation_strategy: str | None = None
+    geometry_source: str | None = None
+    mesh_qa_level: str | None = None
+    mesh_qa_passed: bool | None = None
     qa_score: float | None = None
     asset_import_summary: dict | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
+    primary_glb_url: str | None = None
+    preview_url: str | None = None
+    report_url: str | None = None
     viewer_artifacts: list[ViewerArtifact]
+    limitations: list[str] = Field(default_factory=list)
+    available_actions: list[str] = Field(default_factory=list)
 
 
 class TimelineStep(BaseModel):
     step: str
+    label: str | None = None
+    phase: str | None = None
     status: Literal["pending", "running", "completed", "failed", "skipped"]
     timestamp: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    duration_ms: int | None = None
+    warnings_count: int = 0
+    errors_count: int = 0
     human_readable: str
 
 
 class TimelineSummary(BaseModel):
     workflow_id: str
     status: str
+    event_source: str | None = None
     timeline_steps: list[TimelineStep]
 
 

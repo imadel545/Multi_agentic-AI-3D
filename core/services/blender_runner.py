@@ -440,6 +440,8 @@ def _asset_source_warnings(asset_source: str | None, asset_metadata: dict | None
         warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
     if asset_source == "internal_cleaned":
         warnings.append("INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE")
+    if asset_source == "internal_project_generated":
+        warnings.append("INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE")
     if asset_source == "cc_by":
         warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
     if isinstance(asset_metadata, dict) and asset_metadata.get("attribution_required"):

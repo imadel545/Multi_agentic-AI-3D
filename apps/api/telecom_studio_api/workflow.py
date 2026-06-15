@@ -327,6 +327,11 @@ class WorkflowService:
             raise KeyError(workflow_id)
         return json.loads(status_path.read_text(encoding="utf-8"))
 
+    def get_public_status(self, workflow_id: str) -> dict:
+        """Return a frontend-safe status payload without local filesystem paths."""
+        status = self.get_status(workflow_id)
+        return _public_status_payload(workflow_id, status)
+
     def archive_path(self, workflow_id: str) -> Path:
         self._sync_output_services()
         status = self.get_status(workflow_id)
@@ -662,6 +667,39 @@ class WorkflowService:
             warnings=[*validation_report.warnings, *result.report.warnings],
         )
 
+    def public_edit_response(self, result: SceneEditResult) -> dict:
+        artifacts = _public_artifact_urls(
+            result.workflow_id,
+            result.artifacts,
+            version_id=result.version_id,
+        )
+        response = {
+            "workflow_id": result.workflow_id,
+            "edit_id": result.edit_id,
+            "status": result.status,
+            "edit_status": result.status,
+            "message": _edit_result_message(result),
+            "version_id": result.version_id,
+            "diff_summary": result.diff_summary,
+            "patch": result.patch.model_dump() if result.patch else None,
+            "validation_report": result.validation_report.model_dump()
+            if result.validation_report
+            else None,
+            "artifacts": artifacts,
+            "generation_mode": result.generation_mode,
+            "qa_score": result.qa_score,
+            "llm_provider": result.llm_provider,
+            "llm_fallback_used": result.llm_fallback_used,
+            "errors": [e.model_dump() for e in result.errors],
+            "warnings": [w.model_dump() for w in result.warnings],
+            "viewer_bundle_url": f"/designs/{result.workflow_id}/viewer-bundle",
+            "timeline_url": f"/designs/{result.workflow_id}/timeline-summary",
+            "user_issues_url": f"/designs/{result.workflow_id}/user-issues",
+            "current_operation_url": f"/designs/{result.workflow_id}/current-operation",
+            "available_actions": _edit_available_actions(result),
+        }
+        return response
+
     def list_versions(self, workflow_id: str) -> list[dict]:
         self._sync_output_services()
         versions = self.versioning.list_versions(workflow_id)
@@ -676,6 +714,29 @@ class WorkflowService:
                 "active": v.active,
                 "artifact_dir": v.artifact_dir,
                 "artifacts": v.artifacts,
+                "qa_score": v.qa_score,
+                "generation_mode": v.generation_mode,
+            }
+            for v in versions
+        ]
+
+    def list_versions_public(self, workflow_id: str) -> list[dict]:
+        self._sync_output_services()
+        versions = self.versioning.list_versions(workflow_id)
+        return [
+            {
+                "version_id": v.version_id,
+                "parent_version_id": v.parent_version_id,
+                "created_at": v.created_at,
+                "edit_description": v.edit_description,
+                "diff_summary": v.diff_summary,
+                "status": v.status,
+                "active": v.active,
+                "artifacts": _public_artifact_urls(
+                    workflow_id,
+                    v.artifacts,
+                    version_id=v.version_id,
+                ),
                 "qa_score": v.qa_score,
                 "generation_mode": v.generation_mode,
             }
@@ -791,6 +852,18 @@ class WorkflowService:
             if result.memory_recall
             else 0,
             "generation_mode": result.generation.mode if result.generation else None,
+            "generation_strategy": result.geometry_validation.generation_strategy
+            if result.geometry_validation
+            else None,
+            "geometry_source": result.geometry_validation.geometry_source
+            if result.geometry_validation
+            else None,
+            "mesh_qa_level": result.geometry_validation.mesh_qa_level
+            if result.geometry_validation
+            else None,
+            "mesh_qa_passed": result.geometry_validation.mesh_qa.mesh_qa_passed
+            if result.geometry_validation and result.geometry_validation.mesh_qa
+            else None,
             "blender_available": result.generation.blender_available if result.generation else None,
             "qa_score": result.qa_report.score if result.qa_report else None,
             "tower_characteristics_summary": _tower_characteristics_summary(result),
@@ -1079,12 +1152,21 @@ def _tower_characteristics_text(result: OrchestratorResult) -> str:
 def _geometry_validation_summary(result: OrchestratorResult) -> dict | None:
     if result.geometry_validation is None:
         return None
+    mesh_qa = result.geometry_validation.mesh_qa
     return {
         "status": result.geometry_validation.status,
+        "geometry_source": result.geometry_validation.geometry_source,
+        "generation_strategy": result.geometry_validation.generation_strategy,
+        "mesh_qa_level": result.geometry_validation.mesh_qa_level,
+        "mesh_qa_passed": mesh_qa.mesh_qa_passed if mesh_qa else None,
+        "bounding_box_m": result.geometry_validation.bounding_box_m.model_dump()
+        if result.geometry_validation.bounding_box_m
+        else None,
         "checks": result.geometry_validation.checks,
         "object_counts": result.geometry_validation.object_counts,
         "missing_objects": result.geometry_validation.missing_objects,
         "critical_errors": result.geometry_validation.critical_errors,
+        "mesh_qa_limitations": mesh_qa.limitations if mesh_qa else [],
     }
 
 
@@ -1120,6 +1202,106 @@ def _asset_import_metadata(output_dir: Path) -> dict:
         "asset_import_summary": metadata.get("asset_import_summary"),
         "asset_imports": metadata.get("asset_imports"),
     }
+
+
+def _public_status_payload(workflow_id: str, status: dict) -> dict:
+    payload = dict(status)
+    active_version_id = payload.get("active_version_id")
+    payload["artifacts"] = _public_artifact_urls(
+        workflow_id,
+        payload.get("artifacts") or {},
+        version_id=None,
+    )
+    payload["trace_url"] = _artifact_url(workflow_id, "trace")
+    payload["trace_path"] = None
+    payload["download_url"] = f"/designs/{workflow_id}/download"
+    payload["available_actions"] = _status_available_actions(payload)
+    payload["asset_imports"] = _public_asset_imports(payload.get("asset_imports"))
+    if active_version_id:
+        payload["active_version_artifacts"] = _public_artifact_urls(
+            workflow_id,
+            status.get("artifacts") or {},
+            version_id=active_version_id,
+        )
+    return payload
+
+
+def _public_asset_imports(asset_imports: object) -> list[dict] | None:
+    if asset_imports is None:
+        return None
+    if not isinstance(asset_imports, list):
+        return []
+    public_imports = []
+    for record in asset_imports:
+        if not isinstance(record, dict):
+            continue
+        public = dict(record)
+        public.pop("resolved_path", None)
+        public.pop("local_path", None)
+        public.pop("filesystem_path", None)
+        public_imports.append(public)
+    return public_imports
+
+
+def _public_artifact_urls(
+    workflow_id: str,
+    artifacts: dict | None,
+    version_id: str | None = None,
+) -> dict[str, str]:
+    if not isinstance(artifacts, dict):
+        return {}
+    public = {}
+    for artifact_name in artifacts:
+        if artifact_name not in _ALLOWED_ARTIFACT_FILES:
+            continue
+        if artifact_name == "download" and version_id is None:
+            public[artifact_name] = f"/designs/{workflow_id}/download"
+        else:
+            public[artifact_name] = _artifact_url(workflow_id, artifact_name, version_id)
+    return public
+
+
+def _artifact_url(
+    workflow_id: str,
+    artifact_name: str,
+    version_id: str | None = None,
+) -> str:
+    url = f"/designs/{workflow_id}/artifacts/{artifact_name}"
+    if version_id:
+        return f"{url}?version_id={version_id}"
+    return url
+
+
+def _status_available_actions(status: dict) -> list[str]:
+    backend_status = status.get("status", "unknown")
+    if backend_status in {"pending", "running"}:
+        return ["view_timeline"]
+    if backend_status == "failed":
+        return ["view_issues", "view_timeline", "retry_with_changes"]
+    actions = ["open_viewer", "download_artifacts", "view_timeline", "edit_design"]
+    if status.get("active_version_id"):
+        actions.append("view_versions")
+    if status.get("warnings") or status.get("errors"):
+        actions.append("review_issues")
+    return actions
+
+
+def _edit_result_message(result: SceneEditResult) -> str:
+    if result.status == "applied":
+        return "L'édition a été appliquée et une nouvelle version est disponible."
+    if result.status == "rejected":
+        return "L'édition a été rejetée par la validation SceneSpec."
+    if result.errors:
+        return result.errors[0].message
+    return "L'édition a échoué."
+
+
+def _edit_available_actions(result: SceneEditResult) -> list[str]:
+    if result.status == "applied":
+        return ["open_viewer", "view_timeline", "view_versions", "review_issues"]
+    if result.status == "rejected":
+        return ["review_issues", "edit_prompt_again"]
+    return ["review_issues", "edit_prompt_again"]
 
 
 def _structural_qa_status(result: OrchestratorResult) -> str:

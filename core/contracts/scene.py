@@ -4,6 +4,7 @@ from pydantic import Field, field_validator, model_validator
 
 from core.contracts.assets import DimensionsM
 from core.contracts.common import AssetType, NetworkType, StrictModel
+from core.contracts.parametric import GenerationStrategy, GeometrySource
 from core.contracts.tower import TowerCharacteristics
 
 
@@ -28,6 +29,9 @@ class SceneAssetPlacement(StrictModel):
     position: list[float] = Field(min_length=3, max_length=3)
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
+    generation_strategy: GenerationStrategy = "parametric_generated"
+    geometry_source: GeometrySource = "unknown"
+    generation_reason: str = "default parametric generation target"
 
     @field_validator("scale")
     @classmethod
@@ -57,11 +61,15 @@ class SectorSpec(StrictModel):
     antenna_asset_source: str | None = None
     antenna_asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
     antenna_import_fallback_allowed: bool = True
+    antenna_generation_strategy: GenerationStrategy = "internal_project_generated"
+    antenna_geometry_source: GeometrySource = "unknown"
     radio_asset_id: str | None = None
     radio_asset_file: str | None = None
     radio_asset_source: str | None = None
     radio_asset_metadata: RuntimeAssetMetadata = Field(default_factory=RuntimeAssetMetadata)
     radio_import_fallback_allowed: bool = True
+    radio_generation_strategy: GenerationStrategy = "internal_project_generated"
+    radio_geometry_source: GeometrySource = "unknown"
     install_height_m: float = Field(gt=0)
     azimuth_deg: float = Field(ge=0, lt=360)
     mechanical_tilt_deg: float = Field(default=3.0, ge=-15, le=30)
@@ -85,6 +93,8 @@ class SceneAccessoryPlacement(StrictModel):
     position: list[float] = Field(min_length=3, max_length=3)
     rotation_deg: list[float] = Field(min_length=3, max_length=3)
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
+    generation_strategy: GenerationStrategy = "internal_project_generated"
+    geometry_source: GeometrySource = "unknown"
 
 
 class VisualElements(StrictModel):

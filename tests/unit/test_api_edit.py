@@ -35,6 +35,8 @@ def test_edit_design_creates_version(client, tmp_path):
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["status"] == "applied"
+        assert payload["edit_status"] == "applied"
+        assert payload["message"]
         assert payload["version_id"] is not None
         assert payload["artifacts"]
         assert payload["generation_mode"] in {"real_blender", "fallback_no_blender"}
@@ -42,6 +44,11 @@ def test_edit_design_creates_version(client, tmp_path):
         assert payload["patch"]["edit_llm_provider"] in {"groq", "deterministic_fallback"}
         version_id = payload["version_id"]
         version_artifacts = payload["artifacts"]
+        assert payload["viewer_bundle_url"] == f"/designs/{workflow_id}/viewer-bundle"
+        assert payload["timeline_url"] == f"/designs/{workflow_id}/timeline-summary"
+        assert payload["user_issues_url"] == f"/designs/{workflow_id}/user-issues"
+        assert payload["current_operation_url"] == f"/designs/{workflow_id}/current-operation"
+        assert "open_viewer" in payload["available_actions"]
         for key in [
             "scene_spec",
             "validation_report",
@@ -56,12 +63,22 @@ def test_edit_design_creates_version(client, tmp_path):
             "metadata",
             "download",
         ]:
-            assert Path(version_artifacts[key]).exists()
-        assert Path(version_artifacts["scene_spec"]).parent.name == f"{version_id}_artifacts"
-        assert Path(version_artifacts["scene_spec"]).parent != tmp_path / workflow_id
-        assert (Path(version_artifacts["scene_spec"]).parent / "scene_patch.json").exists()
-        assert (Path(version_artifacts["scene_spec"]).parent / "scene_diff.json").exists()
-        scene_payload = json.loads(Path(version_artifacts["scene_spec"]).read_text())
+            assert version_artifacts[key].startswith(
+                f"/designs/{workflow_id}/artifacts/{key}"
+            ) or version_artifacts[key].startswith(f"/designs/{workflow_id}/download")
+            assert "/Users/" not in version_artifacts[key]
+            if key != "download":
+                assert f"version_id={version_id}" in version_artifacts[key]
+        raw_versions = workflow_service.list_versions(workflow_id)
+        raw_edited_version = next(
+            version for version in raw_versions if version["version_id"] == version_id
+        )
+        raw_artifacts = raw_edited_version["artifacts"]
+        assert Path(raw_artifacts["scene_spec"]).parent.name == f"{version_id}_artifacts"
+        assert Path(raw_artifacts["scene_spec"]).parent != tmp_path / workflow_id
+        assert (Path(raw_artifacts["scene_spec"]).parent / "scene_patch.json").exists()
+        assert (Path(raw_artifacts["scene_spec"]).parent / "scene_diff.json").exists()
+        scene_payload = json.loads(Path(raw_artifacts["scene_spec"]).read_text())
         assert [sector["install_height_m"] for sector in scene_payload["sectors"]] == [
             26.0,
             26.0,
@@ -78,11 +95,16 @@ def test_edit_design_creates_version(client, tmp_path):
         )
         assert edited_version["active"] is True
         assert edited_version["status"] == "completed"
-        assert Path(edited_version["artifacts"]["qa_report"]).exists()
+        assert "artifact_dir" not in edited_version
+        assert edited_version["artifacts"]["qa_report"].startswith(
+            f"/designs/{workflow_id}/artifacts/qa_report?version_id={version_id}"
+        )
+        assert "/Users/" not in edited_version["artifacts"]["qa_report"]
 
         status = client.get(f"/designs/{workflow_id}").json()
         assert status["active_version_id"] == version_id
-        assert status["artifacts"]["scene_spec"] == version_artifacts["scene_spec"]
+        assert status["artifacts"]["scene_spec"] == f"/designs/{workflow_id}/artifacts/scene_spec"
+        assert status["active_version_artifacts"]["scene_spec"] == version_artifacts["scene_spec"]
 
         # Rollback
         first_version = versions[0]["version_id"]
@@ -123,5 +145,8 @@ def test_edit_design_rejected_on_bad_prompt(client, tmp_path):
         assert resp.status_code == 200
         payload = resp.json()
         assert payload["status"] == "failed"
+        assert payload["edit_status"] == "failed"
+        assert payload["message"]
+        assert "edit_prompt_again" in payload["available_actions"]
     finally:
         workflow_service.outputs_dir = original_outputs

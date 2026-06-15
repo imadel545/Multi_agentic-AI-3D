@@ -8,8 +8,8 @@ def _mount_zones_valid(scene: SceneSpec, assets_by_id: dict[str, AssetManifest])
     if tower_asset and tower_asset.mount_zones:
         for sector in scene.sectors:
             if not any(
-                zone.min_height_m <= sector.install_height_m <= zone.max_height_m
-                for zone in tower_asset.mount_zones
+                min_height <= sector.install_height_m <= max_height
+                for min_height, max_height in _scaled_tower_mount_zones(scene, tower_asset)
             ):
                 return False
     for sector in scene.sectors:
@@ -21,6 +21,28 @@ def _mount_zones_valid(scene: SceneSpec, assets_by_id: dict[str, AssetManifest])
             ):
                 return False
     return True
+
+
+def _scaled_tower_mount_zones(
+    scene: SceneSpec,
+    tower_asset: AssetManifest,
+) -> list[tuple[float, float]]:
+    """Scale tower mount zones when the tower geometry is generated parametrically.
+
+    Internal tower assets may be 10m/12m/30m exemplars while SceneSpec asks for a
+    different height. In parametric mode, the SceneSpec height is the geometry
+    truth, so mount zones scale with the requested tower height.
+    """
+    scale = 1.0
+    if (
+        scene.tower.generation_strategy == "parametric_generated"
+        and tower_asset.dimensions_m is not None
+        and tower_asset.dimensions_m.height > 0
+    ):
+        scale = scene.tower.height_m / tower_asset.dimensions_m.height
+    return [
+        (zone.min_height_m * scale, zone.max_height_m * scale) for zone in tower_asset.mount_zones
+    ]
 
 
 def _has_accessory(scene: SceneSpec, asset_type: str) -> bool:

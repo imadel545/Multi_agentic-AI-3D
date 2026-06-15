@@ -27,10 +27,10 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["total_designs"] >= 1
         assert summary["completed_designs"] >= 1
         assert "asset_inventory_status" in summary
-        assert summary["asset_inventory_status"] == "partial_import_ready"
+        assert summary["asset_inventory_status"] == "ready_for_import"
         assert summary["asset_count"] == 12
-        assert summary["real_glb_asset_count"] == 9
-        assert summary["missing_file_count"] == 3
+        assert summary["real_glb_asset_count"] == 12
+        assert summary["missing_file_count"] == 0
         assert "blender_available" in summary
         assert isinstance(summary["warnings"], list)
     finally:
@@ -89,6 +89,14 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
         assert operation["current_operation"]
         assert operation["next_recommended_action"]
         assert operation["progress_indicator"] == "done"
+        assert operation["phase"] == "workflow"
+        assert operation["human_label"] == "Workflow"
+        assert operation["progress_message"]
+        assert operation["progress_label"] == "Terminé"
+        assert operation["is_running"] is False
+        assert operation["is_terminal"] is True
+        assert operation["last_event_at"]
+        assert "open_viewer" in operation["available_actions"]
         assert operation["current_phase"] in {
             "requirements",
             "rag",
@@ -123,6 +131,12 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["workflow_id"] == workflow_id
         assert bundle["status"] == "completed"
         assert bundle["generation_mode"]
+        assert bundle["primary_glb_url"]
+        assert bundle["preview_url"]
+        assert bundle["report_url"]
+        assert bundle["primary_glb_url"].startswith(f"/designs/{workflow_id}/artifacts/glb")
+        assert "/Users/" not in bundle["primary_glb_url"]
+        assert "open_viewer" in bundle["available_actions"]
         assert isinstance(bundle["human_warnings_count"], int)
         assert isinstance(bundle["human_errors_count"], int)
         assert isinstance(bundle["viewer_artifacts"], list)
@@ -165,7 +179,14 @@ def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
         assert timeline["timeline_steps"][-1]["step"] == "workflow_completed"
         for step in timeline["timeline_steps"]:
             assert "step" in step
+            assert "label" in step
+            assert "phase" in step
             assert "status" in step
+            assert "started_at" in step
+            assert "completed_at" in step
+            assert "duration_ms" in step
+            assert "warnings_count" in step
+            assert "errors_count" in step
             assert "human_readable" in step
     finally:
         workflow_service.outputs_dir = original_outputs
@@ -226,6 +247,56 @@ def test_user_issues_endpoint_returns_issues(tmp_path: Path) -> None:
         assert isinstance(issues_payload["human_readable_issues"], list)
     finally:
         workflow_service.outputs_dir = original_outputs
+
+
+def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text="Créer un pylône 300m avec 20 secteurs",
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+        assert response["status"] == "failed"
+
+        status = client.get(f"/designs/{workflow_id}").json()
+        operation = client.get(f"/designs/{workflow_id}/current-operation").json()
+        timeline = client.get(f"/designs/{workflow_id}/timeline-summary").json()
+        issues = client.get(f"/designs/{workflow_id}/user-issues").json()
+
+        assert status["status"] == "failed"
+        assert any(error["code"] == "INVALID_REQUIREMENTS" for error in status["errors"])
+        assert operation["is_terminal"] is True
+        assert operation["progress_label"] == "Échec"
+        assert "retry_with_changes" in operation["available_actions"]
+        assert timeline["timeline_steps"][-1]["status"] == "failed"
+        assert issues["human_readable_issues"]
+        assert any(
+            issue["technical_code"] == "INVALID_REQUIREMENTS"
+            for issue in issues["human_readable_issues"]
+        )
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
+    client = TestClient(app)
+
+    payload = client.get("/document-packs/capabilities").json()
+
+    assert payload["document_pack_status"] == "limited"
+    assert payload["supported_upload_format"] == "zip"
+    assert ".pdf" in payload["supported_extensions"]
+    assert payload["limits"]["max_zip_size_mb"] == 80
+    assert payload["truth"]["advanced_ingestion"] is False
+    assert payload["truth"]["docling_default_enabled"] is False
+    assert "pdf_text_extraction" in payload["capabilities"]
+    # Backwards-compatible flat keys are still present.
+    assert "pdf_text_extraction" in payload
 
 
 def test_product_endpoints_return_404_for_unknown_workflow() -> None:
