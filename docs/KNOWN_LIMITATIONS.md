@@ -6,6 +6,8 @@ frontend.
 ## Visible during frontend build
 
 - No operational frontend yet; old dashboard rejected.
+- No `/projects` or `/runs` API is added in v1. The frontend maps its "run"
+  concept to `workflow_id` and "scene plan" to `scene_spec`.
 - `events/stream` is `push_sse` inside the local FastAPI process, with JSONL
   replay and queue live events. It is not a cross-process broker.
 - Runtime timeline depends on node events + trace file; robust cancellation,

@@ -45,3 +45,16 @@ def test_parser_adds_warnings_for_defaults() -> None:
     assert spec.tower_type == "lattice_tower"
     assert spec.sector_count == 3
     assert spec.warnings
+
+
+def test_parse_power_cabinet_and_concrete_pad_from_prompt() -> None:
+    spec = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, boîte alimentation, "
+        "dalle béton et labels."
+    )
+
+    assert spec.include_power_cabinet is True
+    assert spec.include_gps_antenna is False
+    assert spec.include_labels is True
+    assert spec.tower_characteristics.foundation_type == "concrete_pad"

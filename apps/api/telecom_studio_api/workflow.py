@@ -108,9 +108,10 @@ class WorkflowService:
                     use_llm=use_llm,
                 )
                 self._write_result_files(output_dir, requirements_text, result)
-                self._write_status(workflow_id, result.status, output_dir, result)
+                self._write_status(workflow_id, "running", output_dir, result)
                 self._make_archive(output_dir)
-                self._write_status(workflow_id, result.status, output_dir, result)
+                self._write_status(workflow_id, "running", output_dir, result)
+                version_dir: Path | None = None
                 if result.scene:
                     version = self.versioning.save_version(
                         workflow_id,
@@ -153,7 +154,6 @@ class WorkflowService:
                         generation_mode=result.generation.mode if result.generation else None,
                         active=True,
                     )
-                    self._copy_active_status_to_root(workflow_id, version_dir)
                 self._emit_result_product_events(
                     workflow_id,
                     result,
@@ -169,6 +169,11 @@ class WorkflowService:
                         "node": "workflow",
                     },
                 )
+                if version_dir is not None:
+                    self._copy_active_status_to_root(workflow_id, version_dir)
+                else:
+                    self._write_status(workflow_id, result.status, output_dir, result)
+                self._make_archive(output_dir)
             except Exception as exc:
                 self._emit_user_issue_event(
                     workflow_id,
@@ -239,9 +244,10 @@ class WorkflowService:
                     source_label=source_label,
                 )
                 self._write_result_files(output_dir, context_text, result)
-                self._write_status(workflow_id, result.status, output_dir, result)
+                self._write_status(workflow_id, "running", output_dir, result)
                 self._make_archive(output_dir)
-                self._write_status(workflow_id, result.status, output_dir, result)
+                self._write_status(workflow_id, "running", output_dir, result)
+                version_dir: Path | None = None
                 if result.scene:
                     version = self.versioning.save_version(
                         workflow_id,
@@ -284,7 +290,6 @@ class WorkflowService:
                         generation_mode=result.generation.mode if result.generation else None,
                         active=True,
                     )
-                    self._copy_active_status_to_root(workflow_id, version_dir)
                 self._emit_result_product_events(
                     workflow_id,
                     result,
@@ -300,6 +305,11 @@ class WorkflowService:
                         "node": "workflow",
                     },
                 )
+                if version_dir is not None:
+                    self._copy_active_status_to_root(workflow_id, version_dir)
+                else:
+                    self._write_status(workflow_id, result.status, output_dir, result)
+                self._make_archive(output_dir)
             except Exception as exc:
                 self._emit_user_issue_event(
                     workflow_id,

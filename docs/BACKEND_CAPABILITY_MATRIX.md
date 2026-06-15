@@ -1,12 +1,14 @@
 # Backend Capability Matrix
 
-Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
+Statuts principaux: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 `UNSUPPORTED_WITHOUT_TOOL`, `ADVISORY`, `FUTURE`, `REJECTED`.
+Readiness produit détaillée: `docs/BACKEND_PRODUCT_READINESS_REPORT.md`.
 
 | Capability | Status | Evidence | Limite / vérité frontend |
 |---|---|---|---|
 | Backend API | IMPLEMENTED | `apps/api/telecom_studio_api/main.py` | Local-first, mono-utilisateur. |
 | Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, viewer/QA bundle, actions disponibles, timeline lisible, progression `push_sse`. |
+| E2E product proof | IMPLEMENTED | `tests/e2e/test_telecom_generation_proof.py` | Basé sur `/designs` + `workflow_id`, sans `/projects` ni `/runs`. |
 | Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
 | Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py` | Synchrone, 80 Mo, extraction en mémoire. |
 | PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |
@@ -35,3 +37,7 @@ Statuts: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 Le backend est riche et testable. Le contrat produit backend/frontend est prêt
 pour lancer la construction UI chat-first / 3D-first; le frontend reste absent
 et doit consommer ces surfaces sans inventer de logique métier.
+
+Le vocabulaire backend stable reste `/designs` et `workflow_id`. Les labels
+frontend "project", "run" et "scene plan" sont des mappings UI, pas de nouvelles
+entités backend v1.

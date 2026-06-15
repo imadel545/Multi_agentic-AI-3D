@@ -1,6 +1,7 @@
 # API — Frontend Contract
 
-Contrat minimal entre le backend FastAPI et le futur frontend React.
+Contrat minimal entre le backend FastAPI et le futur frontend React. Le contrat
+stable actuel est `/designs` + `workflow_id`.
 
 > Le frontend actuel a été supprimé. Ce contrat sert de base pour la reconstruction chat-first / 3D-first.
 
@@ -9,6 +10,10 @@ Contrat minimal entre le backend FastAPI et le futur frontend React.
 ## Endpoints produit (obligatoires pour le futur frontend)
 
 Ces endpoints retournent des données orientées utilisateur. Le frontend ne doit plus parser `workflow_trace.json` ou `status.json` comme source principale.
+
+Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
+"project", c'est un contexte frontend local. Si l'UI parle de "run", c'est le
+`workflow_id`. Si l'UI parle de "scene plan", c'est l'artefact `scene_spec`.
 
 | Méthode | Endpoint | Usage frontend |
 |---|---|---|

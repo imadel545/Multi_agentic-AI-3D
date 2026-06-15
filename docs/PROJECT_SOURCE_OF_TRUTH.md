@@ -24,6 +24,9 @@ yet.
 
 - FastAPI exposes design workflow, document-pack, RAG, memory, asset, and
   Product APIs.
+- `/designs` and `workflow_id` are the stable product contract for the next
+  frontend. Do not add `/projects`, `/runs`, `job_id`, or a new state model
+  unless a later architecture decision proves it necessary.
 - LangGraph is used for prompt workflows, document-pack generated requirements,
   and scene revision generation. Edit patch creation and version bookkeeping
   remain service-level logic outside the graph.
@@ -106,6 +109,8 @@ yet.
   error count, progress message, and artifact refs when available.
 - Public workflow/edit/version responses expose artifact URLs, not local
   filesystem paths. `asset_imports[].resolved_path` remains internal only.
+- Frontend "scene plan" maps to the `scene_spec` artifact. `SceneSpec` remains
+  the geometry source of truth.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation, and
   technical report, plus a compact QA summary for drawers.
@@ -124,3 +129,5 @@ product surfaces for status, live progression, viewer bundle, edit, versions,
 timeline, current operation, document-pack capabilities, and user issues. The
 frontend still does not exist; the next step is to build it against this
 backend product contract, while keeping the documented limitations visible.
+
+Reproducible proof: `tests/e2e/test_telecom_generation_proof.py`.

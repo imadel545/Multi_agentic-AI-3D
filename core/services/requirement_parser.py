@@ -95,6 +95,38 @@ def parse_requirements_text(
         "include_cables": not _contains_negation_for(text, ["cable", "câble"]),
         "include_beams": not _contains_negation_for(text, ["faisceau", "beam"]),
         "include_labels": not _contains_negation_for(text, ["label", "étiquette", "etiquette"]),
+        "include_power_cabinet": _contains_any(
+            text,
+            [
+                "armoire énergie",
+                "armoire energie",
+                "armoire électrique",
+                "armoire electrique",
+                "boîte alimentation",
+                "boite alimentation",
+                "boîtier alimentation",
+                "boitier alimentation",
+                "power cabinet",
+                "power box",
+                "cabinet",
+            ],
+        )
+        and not _contains_negation_for(
+            text,
+            [
+                "armoire énergie",
+                "armoire energie",
+                "boîte alimentation",
+                "boite alimentation",
+                "power cabinet",
+                "cabinet",
+            ],
+        ),
+        "include_gps_antenna": _contains_any(
+            text,
+            ["gps", "antenne gps", "gps antenna"],
+        )
+        and not _contains_negation_for(text, ["gps", "antenne gps", "gps antenna"]),
         "detail_level": detail_level
         or ("high" if "élevé" in text or "eleve" in text else "medium"),
         "warnings": warnings,
