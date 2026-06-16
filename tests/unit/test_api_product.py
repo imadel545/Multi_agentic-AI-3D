@@ -376,6 +376,47 @@ def test_cors_allows_local_frontend_and_rejects_unknown_origin() -> None:
     assert "access-control-allow-origin" not in rejected.headers
 
 
+def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
+    schema = app.openapi()
+
+    assert (
+        schema["paths"]["/designs"]["get"]["responses"]["200"]["content"]["application/json"][
+            "schema"
+        ]["items"]["$ref"]
+        == "#/components/schemas/DesignListSummary"
+    )
+    assert (
+        schema["paths"]["/designs/{workflow_id}/events"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["items"]["$ref"]
+        == "#/components/schemas/WorkflowEventView"
+    )
+    assert (
+        schema["paths"]["/designs/{workflow_id}/versions"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["items"]["$ref"]
+        == "#/components/schemas/PublicVersionInfo"
+    )
+    assert (
+        schema["paths"]["/designs/{workflow_id}/versions/{version_id}/rollback"]["post"][
+            "responses"
+        ]["200"]["content"]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/RollbackVersionResponse"
+    )
+    assert (
+        schema["paths"]["/document-packs/capabilities"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/DocumentPackCapabilitiesView"
+    )
+    assert (
+        schema["paths"]["/document-packs/{pack_id}/generate-design"]["post"]["responses"]["200"][
+            "content"
+        ]["application/json"]["schema"]["$ref"]
+        == "#/components/schemas/DocumentPackGenerateDesignResponse"
+    )
+
+
 def test_frontend_does_not_need_raw_json_for_primary_ui(tmp_path: Path) -> None:
     """User-summary must expose enough structured data to render UI without status.json."""
     original_outputs = workflow_service.outputs_dir

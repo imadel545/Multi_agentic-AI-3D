@@ -10,16 +10,22 @@ from apps.api.telecom_studio_api.models import (
     CreateDesignRequest,
     CreateDesignResponse,
     CurrentOperation,
+    DesignListSummary,
+    DocumentPackCapabilitiesView,
+    DocumentPackGenerateDesignResponse,
     EditDesignRequest,
     EditDesignResponse,
     ParseRequirementsRequest,
     ParseRequirementsResponse,
+    PublicVersionInfo,
     RagSearchResponse,
+    RollbackVersionResponse,
     StudioSummary,
     TimelineSummary,
     UserIssuesResponse,
     UserSummary,
     ViewerBundle,
+    WorkflowEventView,
     WorkflowStatus,
 )
 from apps.api.telecom_studio_api.product import ProductNotFound, ProductService
@@ -244,7 +250,7 @@ def validate_scene_spec_endpoint(scene: SceneSpec) -> ValidationReport:
     return workflow_service.validate_scene(scene)
 
 
-@app.get("/designs")
+@app.get("/designs", response_model=list[DesignListSummary])
 def list_designs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -277,12 +283,15 @@ def edit_design(workflow_id: str, request: EditDesignRequest) -> dict:
     return workflow_service.public_edit_response(result)
 
 
-@app.get("/designs/{workflow_id}/versions")
+@app.get("/designs/{workflow_id}/versions", response_model=list[PublicVersionInfo])
 def list_versions(workflow_id: str) -> list[dict]:
     return workflow_service.list_versions_public(workflow_id)
 
 
-@app.post("/designs/{workflow_id}/versions/{version_id}/rollback")
+@app.post(
+    "/designs/{workflow_id}/versions/{version_id}/rollback",
+    response_model=RollbackVersionResponse,
+)
 def rollback_version(workflow_id: str, version_id: str) -> dict:
     try:
         return workflow_service.rollback_version(workflow_id, version_id)
@@ -290,7 +299,7 @@ def rollback_version(workflow_id: str, version_id: str) -> dict:
         raise HTTPException(status_code=404, detail="version not found") from exc
 
 
-@app.get("/designs/{workflow_id}/events")
+@app.get("/designs/{workflow_id}/events", response_model=list[WorkflowEventView])
 def get_events(workflow_id: str) -> list[dict]:
     return workflow_service.get_events(workflow_id)
 
@@ -345,7 +354,7 @@ def list_document_packs() -> list[dict]:
     return document_pack_service.list_packs()
 
 
-@app.get("/document-packs/capabilities")
+@app.get("/document-packs/capabilities", response_model=DocumentPackCapabilitiesView)
 def get_document_pack_capabilities() -> dict:
     capabilities = document_pack_service.capabilities()
     payload = capabilities.model_dump()
@@ -537,7 +546,10 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
         raise HTTPException(status_code=404, detail="document pack not found") from exc
 
 
-@app.post("/document-packs/{pack_id}/generate-design")
+@app.post(
+    "/document-packs/{pack_id}/generate-design",
+    response_model=DocumentPackGenerateDesignResponse,
+)
 def generate_design_from_document_pack(pack_id: str) -> dict:
     try:
         spec = document_pack_service.get_spec(pack_id)

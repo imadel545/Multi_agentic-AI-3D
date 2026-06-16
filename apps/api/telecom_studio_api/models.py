@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -126,6 +126,83 @@ class VersionInfo(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     qa_score: float | None = None
     generation_mode: str | None = None
+
+
+class PublicVersionInfo(BaseModel):
+    version_id: str
+    parent_version_id: str | None = None
+    created_at: str
+    edit_description: str | None = None
+    diff_summary: dict | None = None
+    status: str | None = None
+    active: bool = False
+    artifacts: dict[str, str] = Field(default_factory=dict)
+    qa_score: float | None = None
+    generation_mode: str | None = None
+
+
+class RollbackVersionResponse(BaseModel):
+    workflow_id: str
+    version_id: str
+    active_version_id: str
+    rolled_back: bool
+    status: str
+    message: str
+    viewer_bundle_url: str
+    timeline_url: str
+    user_issues_url: str
+    current_operation_url: str
+    available_actions: list[str] = Field(default_factory=list)
+
+
+class WorkflowEventView(BaseModel):
+    event_id: str
+    event_type: str
+    workflow_id: str
+    timestamp: str
+    event_source: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentToolCapabilityView(BaseModel):
+    name: str
+    status: str
+    purpose: str
+    module: str | None = None
+    command: str | None = None
+    fallback: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DocumentPackCapabilitiesView(BaseModel):
+    pdf_text_extraction: DocumentToolCapabilityView
+    pdf_table_extraction: DocumentToolCapabilityView
+    pdf_layout_extraction: DocumentToolCapabilityView
+    ocr: DocumentToolCapabilityView
+    dxf_parsing: DocumentToolCapabilityView
+    dwg_conversion: DocumentToolCapabilityView
+    coordinate_conversion: DocumentToolCapabilityView
+    groq_bounded_extraction: DocumentToolCapabilityView
+    document_pack_status: str
+    supported_upload_format: str
+    supported_inputs: dict[str, Any]
+    supported_extensions: list[str]
+    limits: dict[str, Any]
+    max_size: dict[str, Any]
+    available_tools: list[str]
+    disabled_tools: list[str]
+    limitations: list[str]
+    truth: dict[str, Any]
+    next_action: str
+    capabilities: dict[str, DocumentToolCapabilityView]
+
+
+class DocumentPackGenerateDesignResponse(BaseModel):
+    pack_id: str
+    status: str
+    mapping: dict[str, Any]
+    extraction_report: dict[str, Any] | None = None
+    workflow_id: str | None = None
 
 
 # Product-oriented response models
