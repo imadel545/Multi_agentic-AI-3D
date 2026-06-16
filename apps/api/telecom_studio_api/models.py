@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DesignOptions(BaseModel):
@@ -18,6 +18,34 @@ class CreateDesignResponse(BaseModel):
     status: str
 
 
+class UnsupportedAction(BaseModel):
+    action: str
+    reason: str
+    future_requirement: str
+
+
+class RuntimeCapabilities(BaseModel):
+    streaming_transport: Literal["push_sse"] = "push_sse"
+    event_source: Literal["push_sse"] = "push_sse"
+    replay_source: Literal["workflow_events_jsonl"] = "workflow_events_jsonl"
+    workflow_id_source: Literal["workflow_id"] = "workflow_id"
+    local_process_only: bool = True
+    broker: str = "jsonl_replay_plus_in_memory_queue"
+    can_stream_events: bool = True
+    can_poll_status: bool = True
+    can_download_artifacts: bool = True
+    can_view_versions: bool = True
+    can_edit_completed_design: bool = True
+    can_rollback_versions: bool = True
+    can_cancel: bool = False
+    can_pause: bool = False
+    can_resume: bool = False
+    can_retry_same_workflow: bool = False
+    can_human_in_loop: bool = False
+    websocket_runtime: bool = False
+    limitations: list[str] = Field(default_factory=list)
+
+
 class WorkflowStatus(BaseModel):
     workflow_id: str
     status: str
@@ -27,8 +55,11 @@ class WorkflowStatus(BaseModel):
     active_version_artifacts: dict[str, str] | None = None
     warnings: list[dict]
     errors: list[dict]
+    extraction_provider: str | None = None
     llm_provider: str | None = None
+    llm_available: bool | None = None
     llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
     memory_hits: int | None = None
     memory_context_count: int | None = None
@@ -54,6 +85,8 @@ class WorkflowStatus(BaseModel):
     download_url: str | None = None
     trace_path: str | None = None
     trace_url: str | None = None
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
     tower_validation: dict | None = None
     rf_validation: dict | None = None
@@ -70,7 +103,9 @@ class ParseRequirementsResponse(BaseModel):
     warnings: list[dict]
     errors: list[dict]
     provider: str | None
+    extraction_provider: str | None = None
     fallback_used: bool | None
+    llm_fallback_reason: str | None = None
 
 
 class RagSearchResponse(BaseModel):
@@ -95,12 +130,17 @@ class EditDesignResponse(BaseModel):
     artifacts: dict[str, str] | None = None
     generation_mode: str | None = None
     qa_score: float | None = None
+    extraction_provider: str | None = None
     llm_provider: str | None = None
+    llm_available: bool | None = None
     llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = None
     viewer_bundle_url: str | None = None
     timeline_url: str | None = None
     user_issues_url: str | None = None
     current_operation_url: str | None = None
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
     errors: list[dict] = Field(default_factory=list)
     warnings: list[dict] = Field(default_factory=list)
@@ -152,6 +192,8 @@ class RollbackVersionResponse(BaseModel):
     timeline_url: str
     user_issues_url: str
     current_operation_url: str
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
 
 
@@ -208,6 +250,42 @@ class DocumentPackGenerateDesignResponse(BaseModel):
 # Product-oriented response models
 
 
+class AssetInventoryEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    asset_id: str
+    type: str
+    file: str
+    file_exists: bool
+    asset_file_exists: bool
+    asset_import_mode: str
+    asset_import_success: bool | None = None
+    effective_generation_mode: str
+    import_fallback_allowed: bool
+    source: str | None = None
+    license: str | None = None
+    attribution_required: bool = False
+    status: str | None = None
+    dimensions_m: dict[str, Any] | None = None
+    asset_dimensions_checked: bool = False
+    warnings: list[str] = Field(default_factory=list)
+
+
+class AssetInventoryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    asset_count: int
+    asset_count_by_type: dict[str, int] = Field(default_factory=dict)
+    missing_file_count: int
+    real_glb_asset_count: int
+    import_ready_asset_count: int
+    procedural_fallback_count: int
+    procedural_generation_required: bool
+    entries: list[AssetInventoryEntry]
+    missing_files: list[AssetInventoryEntry] = Field(default_factory=list)
+
+
 class UserIssue(BaseModel):
     title: str
     severity: Literal["info", "warning", "error"]
@@ -229,8 +307,15 @@ class UserSummary(BaseModel):
     geometry_source: str | None = None
     mesh_qa_level: str | None = None
     mesh_qa_passed: bool | None = None
+    extraction_provider: str | None = None
+    llm_provider: str | None = None
+    llm_available: bool | None = None
+    llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = None
     asset_quality_summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
 
 
 class UserIssuesResponse(BaseModel):
@@ -261,9 +346,16 @@ class CurrentOperation(BaseModel):
     geometry_source: str | None = None
     mesh_qa_level: str | None = None
     mesh_qa_passed: bool | None = None
+    extraction_provider: str | None = None
+    llm_provider: str | None = None
+    llm_available: bool | None = None
+    llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = None
     qa_score: float | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
 
 
@@ -297,13 +389,18 @@ class ViewerBundle(BaseModel):
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None
+    extraction_provider: str | None = None
     llm_provider: str | None = None
+    llm_available: bool | None = None
     llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
     memory_context_count: int | None = None
     qa_summary: dict | None = None
     viewer_artifacts: list[ViewerArtifact]
     limitations: list[str] = Field(default_factory=list)
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
 
 
@@ -354,8 +451,17 @@ class StudioSummary(BaseModel):
     missing_file_count: int = 0
     blender_available: bool | None = None
     groq_available: bool | None = None
+    llm_available: bool | None = None
     rag_embedding_provider: str | None = None
     rag_status: str | None = None
     rag_degraded: bool = False
     rag_reindex_url: str | None = None
+    memory_status: str | None = None
+    memory_backend: str | None = None
+    workflow_memory_count: int = 0
+    design_memory_count: int = 0
+    document_pack_memory_count: int = 0
+    document_pack_issue_memory_count: int = 0
+    runtime_capabilities: RuntimeCapabilities | None = None
+    unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     warnings: list[UserIssue] = Field(default_factory=list)

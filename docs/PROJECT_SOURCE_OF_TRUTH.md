@@ -32,6 +32,10 @@ yet.
   remain service-level logic outside the graph.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
+- Public product responses expose GPT-OSS truth through `extraction_provider`,
+  `llm_provider`, `llm_available`, `llm_fallback_used`, and
+  `llm_fallback_reason`; the frontend must display fallback/degraded status
+  instead of guessing.
 - Primary RAG: NVIDIA API `baai/bge-m3`.
 - RAG fallback: local `sentence-transformers`, then deterministic hash as last
   resort.
@@ -117,6 +121,9 @@ yet.
 - Edit and rollback responses expose frontend action URLs (`viewer-bundle`,
   `timeline-summary`, `user-issues`, `current-operation`) and available actions
   so the UI does not infer post-action state.
+- Public workflow/product responses expose `runtime_capabilities` and
+  `unsupported_actions`; cancel, pause, resume, same-workflow retry,
+  human-in-loop, and WebSocket runtime are explicitly unsupported in v1.
 - Streaming is local-process only: no cross-process broker, cancellation, or
   durable resume manager yet.
 

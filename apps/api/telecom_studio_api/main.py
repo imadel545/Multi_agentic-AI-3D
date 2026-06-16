@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
+    AssetInventoryResponse,
     CreateDesignRequest,
     CreateDesignResponse,
     CurrentOperation,
@@ -324,7 +325,7 @@ def list_assets() -> list[dict]:
     return [asset.model_dump() for asset in registry.list_assets()]
 
 
-@app.get("/assets/inventory")
+@app.get("/assets/inventory", response_model=AssetInventoryResponse)
 def asset_inventory() -> dict:
     return asset_inventory_service.inspect()
 

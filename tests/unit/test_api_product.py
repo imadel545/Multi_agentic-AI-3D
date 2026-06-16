@@ -32,6 +32,7 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["real_glb_asset_count"] == 12
         assert summary["missing_file_count"] == 0
         assert "blender_available" in summary
+        assert isinstance(summary["llm_available"], bool)
         assert summary["rag_embedding_provider"]
         assert summary["rag_status"] in {
             "primary_nvidia_bge_m3",
@@ -41,6 +42,13 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         }
         assert isinstance(summary["rag_degraded"], bool)
         assert summary["rag_reindex_url"] == "/rag/reindex"
+        assert summary["memory_status"] in {"available", "disabled"} or summary[
+            "memory_status"
+        ].startswith("degraded:")
+        assert isinstance(summary["workflow_memory_count"], int)
+        assert summary["runtime_capabilities"]["streaming_transport"] == "push_sse"
+        assert summary["runtime_capabilities"]["websocket_runtime"] is False
+        assert any(action["action"] == "cancel" for action in summary["unsupported_actions"])
         assert isinstance(summary["warnings"], list)
     finally:
         workflow_service.outputs_dir = original_outputs
@@ -70,6 +78,10 @@ def test_user_summary_returns_human_readable_issues(tmp_path: Path) -> None:
         assert summary["qa_summary"]
         assert isinstance(summary["human_readable_issues"], list)
         assert isinstance(summary["limitations"], list)
+        assert summary["runtime_capabilities"]["workflow_id_source"] == "workflow_id"
+        assert any(
+            action["action"] == "websocket_runtime" for action in summary["unsupported_actions"]
+        )
         for issue in summary["human_readable_issues"]:
             assert "title" in issue
             assert "severity" in issue
@@ -120,6 +132,9 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
         assert operation["current_node"]
         assert operation["event_source"] == "push_sse"
         assert operation["state_source"] == "runtime_events"
+        assert operation["runtime_capabilities"]["streaming_transport"] == "push_sse"
+        assert operation["runtime_capabilities"]["can_cancel"] is False
+        assert any(action["action"] == "pause" for action in operation["unsupported_actions"])
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -152,7 +167,10 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["generation_report_url"]
         assert bundle["geometry_validation_url"]
         assert bundle["llm_provider"] == "deterministic"
+        assert bundle["extraction_provider"] == "deterministic"
+        assert isinstance(bundle["llm_available"], bool)
         assert bundle["llm_fallback_used"] is True
+        assert bundle["llm_fallback_reason"] == "deterministic_extraction_requested"
         assert bundle["rag_context_count"] == 0 or isinstance(bundle["rag_context_count"], int)
         assert bundle["memory_context_count"] == 0 or isinstance(
             bundle["memory_context_count"], int
@@ -162,6 +180,11 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert isinstance(bundle["qa_summary"]["checks_failed"], list)
         assert bundle["primary_glb_url"].startswith(f"/designs/{workflow_id}/artifacts/glb")
         assert "/Users/" not in bundle["primary_glb_url"]
+        assert bundle["runtime_capabilities"]["workflow_id_source"] == "workflow_id"
+        assert bundle["runtime_capabilities"]["websocket_runtime"] is False
+        assert any(action["action"] == "retry" for action in bundle["unsupported_actions"])
+        if bundle["mesh_qa_level"] == "mesh_level_basic":
+            assert any("mesh_level_basic" in item for item in bundle["limitations"])
         assert "open_viewer" in bundle["available_actions"]
         assert isinstance(bundle["human_warnings_count"], int)
         assert isinstance(bundle["human_errors_count"], int)
@@ -329,6 +352,8 @@ def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -
         assert operation["is_terminal"] is True
         assert operation["progress_label"] == "Échec"
         assert "retry_with_changes" in operation["available_actions"]
+        assert operation["runtime_capabilities"]["can_retry_same_workflow"] is False
+        assert any(action["action"] == "retry" for action in operation["unsupported_actions"])
         assert timeline["timeline_steps"][-1]["status"] == "failed"
         assert issues["human_readable_issues"]
         assert any(
@@ -419,6 +444,14 @@ def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
         ]["schema"]["$ref"]
         == "#/components/schemas/DocumentPackCapabilitiesView"
     )
+    assert (
+        schema["paths"]["/assets/inventory"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/AssetInventoryResponse"
+    )
+    assert "RuntimeCapabilities" in schema["components"]["schemas"]
+    assert "UnsupportedAction" in schema["components"]["schemas"]
     assert (
         schema["paths"]["/document-packs/{pack_id}/generate-design"]["post"]["responses"]["200"][
             "content"

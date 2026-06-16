@@ -69,6 +69,11 @@ restent internes au backend.
 
 - `status` : `pending`, `running`, `completed`, `failed`.
 - `generation_mode` : `real_blender` ou fallback.
+- `generation_strategy`, `geometry_source`, `mesh_qa_level`, `mesh_qa_passed` :
+  vérité 3D/QA affichable.
+- `extraction_provider` : `groq`, `deterministic` ou `fallback`.
+- `llm_provider`, `llm_available`, `llm_fallback_used`, `llm_fallback_reason` :
+  vérité GPT-OSS/fallback affichable.
 - `qa_score` : score entre 0 et 1.
 - `asset_import_summary` : résumé des imports GLB/fallback.
 - `warnings` / `errors` : liste d'issues techniques.
@@ -78,6 +83,9 @@ restent internes au backend.
 - `trace_path` : toujours `null` dans la réponse publique.
 - `artifacts` : URLs backend, jamais `/Users/...`.
 - `active_version_artifacts` : URLs versionnées quand une version active existe.
+- `runtime_capabilities` : capacités runtime réelles du backend v1.
+- `unsupported_actions` : actions explicitement non disponibles avec raison.
+- `available_actions` : actions que l'UI peut proposer pour cet état.
 
 ## Limites connues du contrat
 
@@ -96,7 +104,12 @@ restent internes au backend.
 - `missing_file_count`
 - `blender_available`
 - `groq_available`
+- `llm_available`
 - `warnings`
+- `rag_embedding_provider`, `rag_status`, `rag_degraded`, `rag_reindex_url`
+- `memory_status`, `memory_backend`, `workflow_memory_count`,
+  `design_memory_count`, `document_pack_memory_count`
+- `runtime_capabilities`, `unsupported_actions`
 
 `/viewer-bundle` expose uniquement des URLs d'artefacts, jamais des chemins filesystem:
 
@@ -117,9 +130,20 @@ restent internes au backend.
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
+- `requirements_spec_url`
+- `extraction_report_url`
+- `extraction_provider`
+- `llm_provider`
+- `llm_available`
+- `llm_fallback_used`
+- `llm_fallback_reason`
+- `rag_context_count`
+- `memory_context_count`
 - `qa_summary`
 - `viewer_artifacts[]`
 - `limitations`
+- `runtime_capabilities`
+- `unsupported_actions`
 - `available_actions`
 
 `/designs/{id}/edit` expose, en cas de succès:
@@ -133,6 +157,8 @@ restent internes au backend.
 - `timeline_url`
 - `user_issues_url`
 - `current_operation_url`
+- `runtime_capabilities`
+- `unsupported_actions`
 - `available_actions`
 
 `/designs/{id}/versions` expose l'historique sans `artifact_dir`; les artefacts
@@ -148,6 +174,8 @@ de chaque version sont des URLs versionnées.
 - `timeline_url`
 - `user_issues_url`
 - `current_operation_url`
+- `runtime_capabilities`
+- `unsupported_actions`
 - `available_actions`
 
 `/current-operation` expose:
@@ -165,7 +193,19 @@ de chaque version sont des URLs versionnées.
 - `is_running`
 - `is_terminal`
 - `last_event_at`
+- `runtime_capabilities`
+- `unsupported_actions`
 - `available_actions`
+
+`runtime_capabilities` expose `streaming_transport=push_sse`,
+`workflow_id_source=workflow_id`, `local_process_only=true` et les flags
+`can_cancel=false`, `can_pause=false`, `can_resume=false`,
+`can_retry_same_workflow=false`, `can_human_in_loop=false`,
+`websocket_runtime=false`.
+
+`unsupported_actions` liste au minimum `cancel`, `pause`, `resume`, `retry`,
+`human_in_loop` et `websocket_runtime`, chacun avec `reason` et
+`future_requirement`.
 
 `/timeline-summary` expose des étapes lisibles:
 

@@ -12,6 +12,9 @@ frontend.
   replay and queue live events. It is not a cross-process broker.
 - Runtime timeline depends on node events + trace file; robust cancellation,
   retry, and durable resume are not yet implemented.
+- `runtime_capabilities` and `unsupported_actions` expose these missing
+  runtime actions explicitly: cancel, pause, resume, same-workflow retry,
+  human-in-loop checkpoints, and WebSocket runtime.
 - LangGraph checkpointing currently emits compatibility warnings for custom
   Pydantic/dataclass types during msgpack deserialization; this is not blocking
   local runtime, but should be cleaned before relying on strict checkpoint mode.
@@ -20,6 +23,9 @@ frontend.
 
 - Deterministic extraction is fragile on complex requirements.
 - Groq improves extraction only when a real key is configured.
+- LLM state is visible through `extraction_provider`, `llm_provider`,
+  `llm_available`, `llm_fallback_used`, and `llm_fallback_reason`; fallback is
+  acceptable only if the frontend displays it.
 - Agents are mostly deterministic functions or LLM wrappers.
 - Prompt workflows, document-pack generated requirements, and scene revisions enter the
   compiled LangGraph graph; edit patch creation and version bookkeeping remain service-level.

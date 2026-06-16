@@ -20,6 +20,15 @@ from core.services.patch_applier import PatchApplier
 from core.services.scene_versioning import SceneVersioningService
 from core.validation import validate_scene_spec
 
+from .runtime_contract import (
+    extraction_provider_label,
+    llm_available_from_workflow_service,
+    llm_fallback_reason,
+    llm_truth,
+    runtime_capabilities,
+    unsupported_actions,
+)
+
 
 class WorkflowService:
     def __init__(
@@ -373,7 +382,11 @@ class WorkflowService:
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""
         status = self.get_status(workflow_id)
-        return _public_status_payload(workflow_id, status)
+        payload = _public_status_payload(workflow_id, status)
+        payload.update(llm_truth(payload, workflow_service=self))
+        payload["runtime_capabilities"] = runtime_capabilities()
+        payload["unsupported_actions"] = unsupported_actions()
+        return payload
 
     def archive_path(self, workflow_id: str) -> Path:
         self._sync_output_services()
@@ -472,6 +485,14 @@ class WorkflowService:
         extraction = self.orchestrator.extractor.extract(
             requirements_text, detail_level, enabled=use_llm
         )
+        llm_available = llm_available_from_workflow_service(self)
+        fallback_reason = llm_fallback_reason(
+            provider=extraction.provider,
+            fallback_used=extraction.fallback_used,
+            use_llm=use_llm,
+            error=extraction.error,
+            llm_available=llm_available,
+        )
         return {
             "requirements": (
                 extraction.requirements.model_dump() if extraction.requirements else None
@@ -483,7 +504,11 @@ class WorkflowService:
             ),
             "errors": _extraction_errors(extraction.error),
             "provider": extraction.provider,
+            "extraction_provider": extraction_provider_label(
+                extraction.provider, extraction.fallback_used, fallback_reason
+            ),
             "fallback_used": extraction.fallback_used,
+            "llm_fallback_reason": fallback_reason,
         }
 
     def validate_scene(self, scene: SceneSpec) -> ValidationReport:
@@ -716,6 +741,13 @@ class WorkflowService:
             result.artifacts,
             version_id=result.version_id,
         )
+        llm = llm_truth(
+            {
+                "llm_provider": result.llm_provider,
+                "llm_fallback_used": result.llm_fallback_used,
+            },
+            workflow_service=self,
+        )
         response = {
             "workflow_id": result.workflow_id,
             "edit_id": result.edit_id,
@@ -731,14 +763,19 @@ class WorkflowService:
             "artifacts": artifacts,
             "generation_mode": result.generation_mode,
             "qa_score": result.qa_score,
+            "extraction_provider": llm["extraction_provider"],
             "llm_provider": result.llm_provider,
+            "llm_available": llm["llm_available"],
             "llm_fallback_used": result.llm_fallback_used,
+            "llm_fallback_reason": llm["llm_fallback_reason"],
             "errors": [e.model_dump() for e in result.errors],
             "warnings": [w.model_dump() for w in result.warnings],
             "viewer_bundle_url": f"/designs/{result.workflow_id}/viewer-bundle",
             "timeline_url": f"/designs/{result.workflow_id}/timeline-summary",
             "user_issues_url": f"/designs/{result.workflow_id}/user-issues",
             "current_operation_url": f"/designs/{result.workflow_id}/current-operation",
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "available_actions": _edit_available_actions(result),
         }
         return response
@@ -816,6 +853,8 @@ class WorkflowService:
             "timeline_url": f"/designs/{workflow_id}/timeline-summary",
             "user_issues_url": f"/designs/{workflow_id}/user-issues",
             "current_operation_url": f"/designs/{workflow_id}/current-operation",
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "available_actions": _status_available_actions(status),
         }
 
@@ -955,6 +994,14 @@ class WorkflowService:
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
+        llm_available = llm_available_from_workflow_service(self)
+        llm_reason = llm_fallback_reason(
+            provider=result.llm_provider,
+            fallback_used=result.llm_fallback_used,
+            use_llm=result.metrics.get("use_llm"),
+            error=result.llm_error,
+            llm_available=llm_available,
+        )
         artifacts = {
             "requirements_spec": str(output_dir / "requirements_spec.json"),
             "extraction_report": str(output_dir / "extraction_report.json"),
@@ -980,8 +1027,13 @@ class WorkflowService:
             "version_id": version_id,
             "active_version_id": active_version_id,
             "artifacts": artifacts,
+            "extraction_provider": extraction_provider_label(
+                result.llm_provider, result.llm_fallback_used, llm_reason
+            ),
             "llm_provider": result.llm_provider,
+            "llm_available": llm_available,
             "llm_fallback_used": result.llm_fallback_used,
+            "llm_fallback_reason": llm_reason,
             "rag_context_count": len(result.rag_context),
             "memory_hits": result.memory_recall.memory_hits if result.memory_recall else 0,
             "memory_context_count": result.memory_recall.memory_context_count
@@ -1020,6 +1072,8 @@ class WorkflowService:
             "quality_gates": [gate.model_dump() for gate in result.quality_gate_reports],
             "download_url": f"/designs/{workflow_id}/download",
             "trace_path": str(output_dir / "workflow_trace.json"),
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "warnings": [warning.model_dump() for warning in report.warnings],
             "errors": [error.model_dump() for error in report.errors],
             "tower_validation": result.tower_validation.model_dump()
@@ -1049,6 +1103,8 @@ class WorkflowService:
             "artifacts": {},
             "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
             "warnings": [],
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
         }
         self._write_json(output_dir / "status.json", payload)
 
@@ -1067,8 +1123,11 @@ class WorkflowService:
             "artifacts": {},
             "warnings": [],
             "errors": [],
+            "extraction_provider": None,
             "llm_provider": None,
+            "llm_available": llm_available_from_workflow_service(self),
             "llm_fallback_used": None,
+            "llm_fallback_reason": None,
             "rag_context_count": 0,
             "memory_hits": 0,
             "memory_context_count": 0,
@@ -1078,6 +1137,8 @@ class WorkflowService:
             "quality_gates": [],
             "download_url": None,
             "trace_path": None,
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "metrics": {
                 "status": "pending",
                 "detail_level": detail_level,

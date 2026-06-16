@@ -32,10 +32,15 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         status = _wait_for_terminal_status(client, workflow_id)
         assert status["status"] in {"completed", "failed"}
         assert status["trace_path"] is None
+        assert status["extraction_provider"] == "deterministic"
         assert status["llm_provider"] == "deterministic"
+        assert isinstance(status["llm_available"], bool)
         assert status["llm_fallback_used"] is True
+        assert status["llm_fallback_reason"] == "deterministic_extraction_requested"
         assert status["rag_context_count"] is not None
         assert status["memory_context_count"] is not None
+        assert status["runtime_capabilities"]["streaming_transport"] == "push_sse"
+        assert any(action["action"] == "cancel" for action in status["unsupported_actions"])
         assert status["generation_mode"] in {
             "real_blender",
             "fallback_no_blender",
@@ -90,6 +95,15 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert bundle["geometry_validation_url"].startswith(
             f"/designs/{workflow_id}/artifacts/geometry_validation"
         )
+        assert bundle["extraction_provider"] == status["extraction_provider"]
+        assert bundle["llm_fallback_reason"] == status["llm_fallback_reason"]
+        assert bundle["runtime_capabilities"]["workflow_id_source"] == "workflow_id"
+        assert bundle["runtime_capabilities"]["websocket_runtime"] is False
+        assert any(
+            action["action"] == "websocket_runtime" for action in bundle["unsupported_actions"]
+        )
+        if bundle["mesh_qa_level"] == "mesh_level_basic":
+            assert any("mesh_level_basic" in item for item in bundle["limitations"])
         assert "/Users/" not in json.dumps(bundle, ensure_ascii=False)
 
         timeline = client.get(f"/designs/{workflow_id}/timeline-summary").json()

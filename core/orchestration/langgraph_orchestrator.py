@@ -1891,6 +1891,7 @@ def _workflow_metrics(
     artifact_size_bytes = 0
     metrics: dict[str, int | float | str | bool | None] = {
         "status": status,
+        "use_llm": state.get("use_llm"),
         "total_workflow_duration_ms": state.get("total_duration_ms", 0),
         "total_duration_ms": state.get("total_duration_ms", 0),
         "trace_steps": len(trace),

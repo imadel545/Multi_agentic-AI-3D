@@ -32,6 +32,36 @@ Readiness produit détaillée: `docs/BACKEND_PRODUCT_READINESS_REPORT.md`.
 | Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur. |
 | Frontend | FUTURE | `apps/frontend` vide ou absent | Ancien dashboard refusé; ne pas reconstruire maintenant. |
 
+## Agent / Runtime Truth Matrix
+
+Le terme "agent" reste strict: une étape est agentique seulement si elle a un
+rôle réel dans le graphe ou encapsule un provider contrôlé. Le backend ne
+prétend pas à une autonomie générale.
+
+| Step / UI phase | Runtime level | Evidence | Frontend truth |
+|---|---|---|---|
+| `design_created` | Workflow service | `WorkflowService.create_design` | Démarrage local d'un `workflow_id`, pas création de project/run. |
+| `extract_requirements` | LangGraph node + controlled LLM wrapper | `RequirementExtractor`, `GroqStructuredClient` | GPT-OSS `openai/gpt-oss-120b` si disponible; fallback déterministe visible via `extraction_provider`, `llm_fallback_used`, `llm_fallback_reason`. |
+| `retrieve_rag_context` | LangGraph node + RAG service | `RagService` | RAG sert de contexte planning; pas utilisé pour l'extraction LLM v1. |
+| `memory_recall` | LangGraph node + SQLite/RAG service | `MemoryService` | Mémoire locale limitée; compteurs exposés dans `/studio/summary`. |
+| `select_assets` / `asset_fallback_handler` | LangGraph node + asset registry | `AssetRegistry`, manifests | Asset réel/import/fallback visible; `/assets/inventory` est typé. |
+| `validate_requirements` | LangGraph node + deterministic validators | `core/validation`, tower/RF validators | Validation métier contrôlée, pas décision libre LLM. |
+| `plan_scene` | LangGraph node + deterministic planner | `core/agents/scene_planner.py` | `SceneSpec` reste la source de vérité de génération. |
+| `validate_scene` / repair | LangGraph node + deterministic repair | `scene_repair_handler` | Répare certains défauts SceneSpec; pas boucle autonome générale. |
+| `generate_blender` | LangGraph node + Blender subprocess service | `BlenderRunner`, `apps/blender_worker` | `real_blender` requis pour résultat product-grade; fallback signalé. |
+| `qa_generation` | LangGraph node + QA services | `glb_inspector`, `glb_geometry_validator`, `preview_inspector` | QA `mesh_level_basic`; jamais "advanced geometry". |
+| `artifact_ready` | Workflow service event | `WorkflowService._emit_result_product_events` | Artifacts publics par URL `/designs/{workflow_id}/artifacts/{name}`. |
+| `edit_patch_created` | Service-level LLM wrapper | `SceneEditAgent` | Edition par patch contrôlé de `SceneSpec`, pas génération libre de Blender. |
+| versioning / rollback | Service-level filesystem | `SceneVersioningService` | Local-first, mono-utilisateur; pas broker durable. |
+
+## Runtime Contract V1
+
+- Source de vérité runtime: `/designs` + `workflow_id`.
+- Streaming: `push_sse` local-process, replay `workflow_events.jsonl` puis queue mémoire live jusqu'au terminal.
+- Actions supportées: viewer, download artifacts, timeline, edit, versions, rollback selon état.
+- Actions non supportées et visibles via `unsupported_actions`: cancel, pause, resume, retry du même workflow, human-in-loop, WebSocket runtime.
+- Le frontend ne doit pas inventer ces capacités; il lit `runtime_capabilities` et `available_actions`.
+
 ## Synthèse
 
 Le backend est riche et testable. Le contrat produit backend/frontend est prêt

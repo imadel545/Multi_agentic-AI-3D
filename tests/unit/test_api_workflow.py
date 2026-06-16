@@ -27,8 +27,11 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         status = client.get(f"/designs/{response['workflow_id']}").json()
         internal_status = workflow_service.get_status(response["workflow_id"])
         assert status["status"] == "completed"
+        assert status["extraction_provider"] == "deterministic"
         assert status["llm_provider"] == "deterministic"
+        assert isinstance(status["llm_available"], bool)
         assert status["llm_fallback_used"] is True
+        assert status["llm_fallback_reason"] == "deterministic_extraction_requested"
         assert status["rag_context_count"] is not None
         assert status["memory_hits"] is not None
         assert status["memory_context_count"] is not None
@@ -86,6 +89,9 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["download_url"] == f"/designs/{response['workflow_id']}/download"
         assert status["trace_path"] is None
         assert status["trace_url"] == f"/designs/{response['workflow_id']}/artifacts/trace"
+        assert status["runtime_capabilities"]["streaming_transport"] == "push_sse"
+        assert status["runtime_capabilities"]["websocket_runtime"] is False
+        assert any(action["action"] == "human_in_loop" for action in status["unsupported_actions"])
         for artifact_url in status["artifacts"].values():
             assert artifact_url.startswith(f"/designs/{response['workflow_id']}/")
             assert "/Users/" not in artifact_url
@@ -239,7 +245,10 @@ def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) ->
 
         assert provider.calls == 1
         assert status["llm_provider"] == "groq:test-provider"
+        assert status["extraction_provider"] == "groq"
+        assert status["llm_available"] is True
         assert status["llm_fallback_used"] is False
+        assert status["llm_fallback_reason"] is None
         requirements = client.get(f"/designs/{workflow_id}/artifacts/requirements_spec").json()
         scene = client.get(f"/designs/{workflow_id}/artifacts/scene_spec").json()
         extraction_report = client.get(f"/designs/{workflow_id}/artifacts/extraction_report").json()
@@ -292,7 +301,10 @@ def test_api_design_with_use_llm_false_does_not_call_configured_provider(
 
         assert provider.calls == 0
         assert status["llm_provider"] == "deterministic"
+        assert status["extraction_provider"] == "deterministic"
+        assert status["llm_available"] is True
         assert status["llm_fallback_used"] is True
+        assert status["llm_fallback_reason"] == "deterministic_extraction_requested"
     finally:
         workflow_service.outputs_dir = original_outputs
         extractor.provider = original_provider
@@ -329,7 +341,9 @@ def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["provider"] == "deterministic"
+    assert payload["extraction_provider"] == "fallback"
     assert payload["fallback_used"] is True
+    assert payload["llm_fallback_reason"] == "RuntimeError: forced provider failure"
     assert payload["requirements"]["tower_type"] == "lattice_tower"
     assert payload["errors"][0]["code"] == "LLM_EXTRACTION_ERROR"
 

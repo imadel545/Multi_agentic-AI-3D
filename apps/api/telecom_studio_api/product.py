@@ -14,6 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from apps.api.telecom_studio_api.config import settings
+from apps.api.telecom_studio_api.runtime_contract import (
+    llm_available_from_workflow_service,
+    llm_truth,
+    memory_status,
+    runtime_capabilities,
+    unsupported_actions,
+)
 from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.services.asset_inventory import AssetInventoryService
 
@@ -33,7 +40,9 @@ class ProductService:
         inventory_status = _inventory_status(inventory)
         blender_available = _blender_available()
         groq_available = bool(settings.resolved_groq_api_key)
+        llm_available = llm_available_from_workflow_service(self.workflow_service)
         rag = _rag_summary(self.workflow_service.orchestrator.rag_service)
+        memory = memory_status(getattr(self.workflow_service.orchestrator, "memory_service", None))
 
         counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
         summaries = []
@@ -67,10 +76,14 @@ class ProductService:
             "missing_file_count": int(inventory.get("missing_file_count") or 0),
             "blender_available": blender_available,
             "groq_available": groq_available,
+            "llm_available": llm_available,
             "rag_embedding_provider": rag["embedding_provider"],
             "rag_status": rag["status"],
             "rag_degraded": rag["degraded"],
             "rag_reindex_url": "/rag/reindex",
+            **memory,
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "warnings": _studio_warnings(inventory, rag),
         }
 
@@ -80,6 +93,7 @@ class ProductService:
         issues = _collect_user_issues(status, events)
         qa_summary = _qa_summary(status)
         next_action = _next_recommended_action(status, issues)
+        llm = llm_truth(status, workflow_service=self.workflow_service)
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
@@ -93,8 +107,15 @@ class ProductService:
             "geometry_source": status.get("geometry_source"),
             "mesh_qa_level": status.get("mesh_qa_level"),
             "mesh_qa_passed": status.get("mesh_qa_passed"),
+            "extraction_provider": llm["extraction_provider"],
+            "llm_provider": status.get("llm_provider"),
+            "llm_available": llm["llm_available"],
+            "llm_fallback_used": status.get("llm_fallback_used"),
+            "llm_fallback_reason": llm["llm_fallback_reason"],
             "asset_quality_summary": _asset_quality_summary(status),
             "limitations": _collect_limitations(status),
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
         }
 
     def current_operation(self, workflow_id: str) -> dict:
@@ -106,6 +127,7 @@ class ProductService:
         current_operation = _current_operation(status, events)
         current_node = runtime.get("node")
         phase = runtime.get("phase")
+        llm = llm_truth(status, workflow_service=self.workflow_service)
         human_label = (
             runtime.get("operation")
             if current_node == "workflow" and runtime.get("operation")
@@ -135,9 +157,16 @@ class ProductService:
             "geometry_source": status.get("geometry_source"),
             "mesh_qa_level": status.get("mesh_qa_level"),
             "mesh_qa_passed": status.get("mesh_qa_passed"),
+            "extraction_provider": llm["extraction_provider"],
+            "llm_provider": status.get("llm_provider"),
+            "llm_available": llm["llm_available"],
+            "llm_fallback_used": status.get("llm_fallback_used"),
+            "llm_fallback_reason": llm["llm_fallback_reason"],
             "qa_score": status.get("qa_score"),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "available_actions": _available_actions(status, issues),
         }
 
@@ -156,6 +185,7 @@ class ProductService:
         base_url = f"/designs/{workflow_id}/artifacts"
         viewer_artifacts = []
         issues = _collect_user_issues(status, self.workflow_service.get_events(workflow_id))
+        llm = llm_truth(status, workflow_service=self.workflow_service)
 
         def _artifact(name: str, content_type: str, filename: str) -> dict:
             url = f"{base_url}/{filename}"
@@ -225,13 +255,18 @@ class ProductService:
             "geometry_validation_url": geometry_validation.get("url")
             if geometry_validation
             else None,
+            "extraction_provider": llm["extraction_provider"],
             "llm_provider": status.get("llm_provider"),
+            "llm_available": llm["llm_available"],
             "llm_fallback_used": status.get("llm_fallback_used"),
+            "llm_fallback_reason": llm["llm_fallback_reason"],
             "rag_context_count": status.get("rag_context_count"),
             "memory_context_count": status.get("memory_context_count"),
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
             "limitations": _collect_limitations(status),
+            "runtime_capabilities": runtime_capabilities(),
+            "unsupported_actions": unsupported_actions(),
             "available_actions": _available_actions(status, issues),
         }
 
@@ -597,6 +632,10 @@ def _collect_limitations(status: dict) -> list[str]:
     generation_mode = status.get("generation_mode")
     if generation_mode and str(generation_mode).startswith("fallback"):
         limitations.append(f"Le mode de génération est un fallback ({generation_mode}).")
+    if generation_mode and generation_mode != "real_blender":
+        limitations.append(
+            "Le résultat n'est pas product-grade tant que la génération n'est pas real_blender."
+        )
     generation_strategy = status.get("generation_strategy")
     if generation_strategy == "stretched_imported_glb":
         limitations.append(
@@ -608,6 +647,11 @@ def _collect_limitations(status: dict) -> list[str]:
     mesh_qa_level = status.get("mesh_qa_level")
     if mesh_qa_level == "metadata_only":
         limitations.append("La QA géométrique ne vérifie que les métadonnées, pas les vertices.")
+    if mesh_qa_level == "mesh_level_basic":
+        limitations.append(
+            "La QA géométrique est mesh_level_basic: elle vérifie structure, objets et dimensions "
+            "principales, pas une conformité RF/structurelle vendor-grade."
+        )
     asset_summary = status.get("asset_import_summary") or {}
     if asset_summary.get("procedural_fallback_count", 0):
         limitations.append(
@@ -659,15 +703,58 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
     if status.get("llm_fallback_used") and not any(
         i.get("technical_code") == "LLM_FALLBACK_USED" for i in issues
     ):
+        reason = status.get("llm_fallback_reason")
         issues.append(
             {
                 "title": "Extraction déterministe",
                 "severity": "info",
-                "impact": "Le LLM n'a pas été utilisé ; l'extraction repose sur des règles fixes.",
+                "impact": (
+                    "Le LLM n'a pas été utilisé ; l'extraction repose sur des règles fixes."
+                    + (f" Raison: {reason}." if reason else "")
+                ),
                 "recommended_action": (
                     "Configurez GROQ_API_KEY pour activer l'extraction intelligente."
                 ),
                 "technical_code": "LLM_FALLBACK_USED_INFERRED",
+            }
+        )
+    generation_mode = status.get("generation_mode")
+    if (
+        generation_mode
+        and generation_mode != "real_blender"
+        and not any(
+            i.get("technical_code") == "GENERATION_NOT_PRODUCT_GRADE_INFERRED" for i in issues
+        )
+    ):
+        issues.append(
+            {
+                "title": "Génération 3D non product-grade",
+                "severity": "warning",
+                "impact": (
+                    f"Le mode de génération est {generation_mode}; le résultat doit être "
+                    "présenté comme dégradé."
+                ),
+                "recommended_action": (
+                    "Corrigez Blender/assets puis relancez avant validation produit."
+                ),
+                "technical_code": "GENERATION_NOT_PRODUCT_GRADE_INFERRED",
+            }
+        )
+    if status.get("mesh_qa_level") == "mesh_level_basic" and not any(
+        i.get("technical_code") == "MESH_QA_BASIC_INFERRED" for i in issues
+    ):
+        issues.append(
+            {
+                "title": "QA géométrique basique",
+                "severity": "info",
+                "impact": (
+                    "La QA confirme des propriétés structurales de base, pas une validation "
+                    "ingénierie complète."
+                ),
+                "recommended_action": (
+                    "Afficher cette limite dans le drawer QA et ne pas annoncer une QA avancée."
+                ),
+                "technical_code": "MESH_QA_BASIC_INFERRED",
             }
         )
     asset_summary = status.get("asset_import_summary") or {}
