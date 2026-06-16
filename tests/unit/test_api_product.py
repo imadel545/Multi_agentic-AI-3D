@@ -36,11 +36,17 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["rag_embedding_provider"]
         assert summary["rag_status"] in {
             "primary_nvidia_bge_m3",
-            "local_sentence_transformers_fallback",
+            "local_sentence_transformers_explicit",
             "deterministic_hash_fallback",
             "custom_provider",
         }
         assert isinstance(summary["rag_degraded"], bool)
+        assert summary["rag_reranker_status"] in {
+            "passthrough_no_rerank",
+            "explicit_local_reranker",
+            "not_loaded",
+            "custom",
+        }
         assert summary["rag_reindex_url"] == "/rag/reindex"
         assert summary["memory_status"] in {"available", "disabled"} or summary[
             "memory_status"
@@ -172,6 +178,9 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["llm_fallback_used"] is True
         assert bundle["llm_fallback_reason"] == "deterministic_extraction_requested"
         assert bundle["rag_context_count"] == 0 or isinstance(bundle["rag_context_count"], int)
+        assert isinstance(bundle["rag_planning_summary"], dict)
+        assert bundle["rag_planning_summary"]["rag_used_for_extraction"] is False
+        assert "rag_planning_mode" in bundle["rag_planning_summary"]
         assert bundle["memory_context_count"] == 0 or isinstance(
             bundle["memory_context_count"], int
         )

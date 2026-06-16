@@ -73,6 +73,19 @@ GROQ_API_KEY=...
 
 The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to force deterministic extraction.
 
+### Optional: NVIDIA RAG embeddings
+
+Product RAG uses NVIDIA API `baai/bge-m3`.
+
+```bash
+NVIDIA_API_KEY=...
+# or TELECOM_STUDIO_NVIDIA_API_KEY=...
+TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
+TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
+```
+
+`TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic` is for tests/bootstrap only.
+
 ### Optional: document-intelligence tooling
 
 ```bash
@@ -101,7 +114,7 @@ Backend:
 requirements_text or document pack
 → LangGraph orchestrator
 → Groq structured RequirementSpec or deterministic fallback
-→ Qdrant RAG context (advisory)
+→ NVIDIA BGE-M3 + Qdrant RAG context (advisory structured hints)
 → SQLite memory recall
 → asset registry
 → rule engine
@@ -124,8 +137,8 @@ requirements_text or document pack
 - `docs/FRONTEND_PRODUCT_BLUEPRINT.md` — target frontend vision.
 - `docs/FRONTEND_ACCEPTANCE_CRITERIA.md` — criteria to accept a future frontend.
 - `docs/KNOWN_LIMITATIONS.md` — honest limitations.
-- `docs/API_FRONTEND_CONTRACT.md` — minimal API contract for the frontend.
-- `docs/FRONTEND_API_CONTRACT.md` — product-facing frontend contract based on `/designs`.
+- `docs/API_FRONTEND_CONTRACT.md` — product API contract for the frontend.
+- `docs/RAG_STRATEGY.md` — NVIDIA BGE-M3 RAG strategy and limitations.
 - `docs/BACKEND_PRODUCT_READINESS_REPORT.md` — capability readiness classification.
 - `docs/E2E_TELECOM_GENERATION_PROOF.md` — reproducible end-to-end proof.
 

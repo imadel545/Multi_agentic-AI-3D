@@ -44,8 +44,9 @@
 ## Available With Fallback
 
 - Groq extraction falls back to deterministic parser.
-- NVIDIA BGE-M3 embedding falls back to local `sentence-transformers`, then deterministic hash as
-  emergency/test fallback.
+- NVIDIA API BGE-M3 is the product embedding path. Deterministic hash is allowed only for
+  explicit tests/bootstrap; local `sentence-transformers` is an explicit developer override,
+  not an automatic product fallback.
 - Blender generation falls back explicitly if Blender is absent or fails; fallback is not a valid
   product result by default.
 - Missing asset files fall back to procedural geometry only when the manifest allows it, and the

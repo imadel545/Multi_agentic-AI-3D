@@ -37,10 +37,11 @@ yet.
   `llm_fallback_reason`; the frontend must display fallback/degraded status
   instead of guessing.
 - Primary RAG: NVIDIA API `baai/bge-m3`.
-- RAG fallback: local `sentence-transformers`, then deterministic hash as last
-  resort.
-- Reranker: local `BAAI/bge-reranker-v2-m3` best-effort; passthrough if
-  unavailable.
+- RAG fallback policy: no automatic local embedding model in the product path.
+  Deterministic hash is allowed only for tests/bootstrap or explicit degraded
+  mode; it is not product-quality retrieval.
+- Reranker: passthrough by default; local `BAAI/bge-reranker-v2-m3` only when
+  explicitly enabled by a developer.
 - Memory: local SQLite with writeback; optional Qdrant for some summaries.
 - Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
   conflicts, corrections, QA.
@@ -82,7 +83,9 @@ yet.
   - `metadata_based_height_azimuth`
   - `preview_luminance_only`
 - Mesh QA v1 checks: GLB parse OK, tower height approximation, scene above
-  ground, scale realism, antenna count.
+  ground, scale realism, antenna count, RRU/cable/cabinet/GPS presence,
+  concrete pad presence when requested, and real label object presence when
+  `include_labels=true`.
 - Mesh QA v1 does **not** verify individual antenna HBA/azimuth from vertices
   and does **not** perform collision detection.
 - QA does not yet finely validate transforms, materials, or exact mesh
@@ -118,6 +121,10 @@ yet.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation, and
   technical report, plus a compact QA summary for drawers.
+- Public workflow/viewer responses expose `rag_planning_summary` so the
+  frontend can distinguish retrieved context from structured hints that actually
+  influenced SceneSpec planning. RAG is not used for RequirementSpec extraction
+  in v1.
 - Edit and rollback responses expose frontend action URLs (`viewer-bundle`,
   `timeline-summary`, `user-issues`, `current-operation`) and available actions
   so the UI does not infer post-action state.
@@ -129,14 +136,17 @@ yet.
 
 ## Current verdict
 
-`FRONTEND_CAN_START_ON_CURRENT_BACKEND`
+`BACKEND_TRUTH_GATE_CONSOLIDATED`
 
-The backend can generate tested local 3D workflows and exposes frontend-safe
-product surfaces for status, live progression, viewer bundle, edit, versions,
-timeline, current operation, document-pack capabilities, and user issues. The
-frontend still does not exist; the next step is to build it against this
-backend product contract, while keeping the documented limitations visible.
-This does not mean vendor-grade QA, durable runtime orchestration, or complete
-document intelligence are finished.
+The backend contract is consolidated enough to prepare Gate 2A frontend
+integration against the existing `/designs` + `workflow_id` surface. This is
+not a claim that the product is finished or vendor-grade.
 
-Reproducible proof: `tests/e2e/test_telecom_generation_proof.py`.
+Before frontend implementation, the repo must be committed cleanly and the UI
+must be planned against the documented limitations: `mesh_level_basic` QA,
+local-process `push_sse`, limited document-pack intelligence, passthrough
+reranking, non-vendor-grade assets, and no durable broker/cancellation.
+
+Reproducible proof: `tests/e2e/test_telecom_generation_proof.py` plus the
+targeted Product API, RAG, LangGraph, Blender, and QA tests listed in the final
+gate report.

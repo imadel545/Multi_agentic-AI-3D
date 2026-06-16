@@ -31,6 +31,9 @@ memory_writeback
 - `DesignOrchestrator.run()` utilise le workflow principal depuis texte libre.
 - `run_requirements()` entre dans le graphe avec `entry_mode=validated_requirements`.
 - `run_scene_revision()` entre dans le graphe avec `entry_mode=scene_revision`.
+- `retrieve_rag_context` utilise le texte original enrichi par le
+  `RequirementSpec` structuré. Le nœud peut fournir du contexte et des
+  `payload.planning_hints`; il ne modifie pas directement la géométrie.
 - Le checkpoint saver existe, mais il n'est pas encore une vraie base de reprise/cancellation.
 - Les nœuds émettent maintenant `node_started`, puis `node_completed`,
   `node_failed` ou `node_skipped` avec phase, label humain, message de
@@ -43,6 +46,8 @@ memory_writeback
   queue live jusqu'au terminal.
 - Utiliser `/timeline-summary` pour une timeline lisible dérivée des events runtime + trace.
 - Utiliser `/current-operation` pour `current_phase`, `current_node` et action suivante.
+- Utiliser `rag_planning_summary` pour afficher si RAG a seulement fourni du
+  contexte ou s'il a fourni des hints structurés consommés par le planner.
 - Garder raw trace JSON en détail secondaire seulement.
 
 ## À corriger plus tard

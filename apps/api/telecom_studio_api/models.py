@@ -61,6 +61,7 @@ class WorkflowStatus(BaseModel):
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
+    rag_planning_summary: dict | None = None
     memory_hits: int | None = None
     memory_context_count: int | None = None
     generation_mode: str | None = None
@@ -395,6 +396,7 @@ class ViewerBundle(BaseModel):
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
+    rag_planning_summary: dict | None = None
     memory_context_count: int | None = None
     qa_summary: dict | None = None
     viewer_artifacts: list[ViewerArtifact]
@@ -455,6 +457,8 @@ class StudioSummary(BaseModel):
     rag_embedding_provider: str | None = None
     rag_status: str | None = None
     rag_degraded: bool = False
+    rag_reranker: str | None = None
+    rag_reranker_status: str | None = None
     rag_reindex_url: str | None = None
     memory_status: str | None = None
     memory_backend: str | None = None

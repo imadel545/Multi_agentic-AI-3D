@@ -43,7 +43,11 @@ def test_asset_registry_cache_hit_on_repeated_load() -> None:
 
 
 def test_rag_query_cache_hit_on_repeated_query(tmp_path: Path) -> None:
-    service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service.reindex()
 
     first = service.search("5G lattice tower 3 sectors", limit=3)
@@ -57,7 +61,11 @@ def test_rag_query_cache_hit_on_repeated_query(tmp_path: Path) -> None:
 
 
 def test_runtime_memory_collections_are_not_query_cached(tmp_path: Path) -> None:
-    service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service.upsert_runtime_document(
         collection="design_memory",
         doc_id="wf_runtime_memory",
@@ -81,7 +89,11 @@ def test_runtime_memory_collections_are_not_query_cached(tmp_path: Path) -> None
 
 
 def test_cache_does_not_bypass_quality_gate_validation(tmp_path: Path) -> None:
-    service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service.reindex()
     service.search("5G lattice tower 3 sectors", limit=3)
     service.search("5G lattice tower 3 sectors", limit=3)

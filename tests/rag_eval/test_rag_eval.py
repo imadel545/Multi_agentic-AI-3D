@@ -45,7 +45,11 @@ def test_rag_eval_small_cell_pole(tmp_path: Path) -> None:
 
 
 def _indexed_rag(tmp_path: Path) -> RagService:
-    service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service.reindex()
     return service
 

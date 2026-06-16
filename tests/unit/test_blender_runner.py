@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 
 from core.agents import ScenePlanner
+from core.qa.glb_geometry_validator import GLBGeometryValidator
+from core.qa.glb_inspector import GLBInspector
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 from core.services.requirement_parser import parse_requirements_text
@@ -119,6 +121,10 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["framing"] == "full_tower_front"
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
     assert metadata["procedural_objects_created"]
+    assert "foundation_concrete_pad" in metadata["procedural_objects_created"]
+    assert "label:S1" in metadata["procedural_objects_created"]
+    assert "label:S2" in metadata["procedural_objects_created"]
+    assert "label:S3" in metadata["procedural_objects_created"]
     assert metadata["asset_import_summary"]["asset_count"] == 7
     assert metadata["asset_import_summary"]["imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["procedural_fallback_count"] == 0
@@ -136,6 +142,24 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
         record for record in parametric_records if record["asset_id"] == "TOWER_LATTICE_30M"
     )
     assert tower_record["import_mode"] == "parametric_generated"
+    glb_report = GLBInspector().inspect(
+        Path(result.artifacts["glb"]),
+        scene,
+        Path(result.artifacts["metadata"]),
+    )
+    geometry_report = GLBGeometryValidator().validate(
+        scene,
+        glb_report,
+        Path(result.artifacts["metadata"]),
+        Path(result.artifacts["glb"]),
+    )
+    assert glb_report.checks["has_foundation"] is True
+    assert glb_report.checks["has_labels"] is True
+    assert geometry_report.checks["foundation_count_valid"] is True
+    assert geometry_report.checks["label_count_valid"] is True
+    assert geometry_report.object_counts["foundation"] >= 1
+    assert geometry_report.object_counts["label"] >= 3
+    assert not any(item.startswith("label:") for item in geometry_report.missing_objects)
 
 
 @pytest.mark.skipif(
@@ -165,6 +189,22 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert records["ANT_PANEL_5G_001"]["import_mode"] == "internal_project_generated"
     assert records["GPS_ANTENNA_001"]["asset_import_success"] is True
     assert records["POWER_CABINET_001"]["asset_import_success"] is True
+    assert "label:power_cabinet" in metadata["procedural_objects_created"]
+    assert "label:gps_antenna" in metadata["procedural_objects_created"]
+    glb_report = GLBInspector().inspect(
+        Path(result.artifacts["glb"]),
+        scene,
+        Path(result.artifacts["metadata"]),
+    )
+    geometry_report = GLBGeometryValidator().validate(
+        scene,
+        glb_report,
+        Path(result.artifacts["metadata"]),
+        Path(result.artifacts["glb"]),
+    )
+    assert glb_report.checks["has_labels"] is True
+    assert geometry_report.checks["label_count_valid"] is True
+    assert geometry_report.object_counts["label"] >= 5
 
 
 def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypatch) -> None:

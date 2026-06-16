@@ -265,6 +265,8 @@ def _assets_used(scene: SceneSpec) -> list[str]:
 
 def _procedural_objects(scene: SceneSpec) -> list[str]:
     objects = ["tower"]
+    if scene.tower.characteristics.foundation_type == "concrete_pad":
+        objects.append("foundation_concrete_pad")
     if scene.tower.characteristics.has_platform:
         objects.extend(
             f"tower_platform:{index + 1}"
@@ -290,7 +292,11 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
     if scene.visual_elements.include_gps_antenna:
         objects.append("gps_antenna")
     if scene.visual_elements.include_labels:
-        objects.append("labels_metadata")
+        objects.extend(f"label:{sector.sector_id}" for sector in scene.sectors)
+        if scene.visual_elements.include_power_cabinet:
+            objects.append("label:power_cabinet")
+        if scene.visual_elements.include_gps_antenna:
+            objects.append("label:gps_antenna")
     return objects
 
 

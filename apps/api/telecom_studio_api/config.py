@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     embedding_provider: str = "nvidia"
     embedding_model: str = "baai/bge-m3"
     nvidia_api_key: str | None = Field(default=None, repr=False)
+    reranker_provider: str = "passthrough"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
     allow_blender_fallback: bool = False
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 

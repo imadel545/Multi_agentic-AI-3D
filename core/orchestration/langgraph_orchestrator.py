@@ -658,12 +658,19 @@ class DesignOrchestrator:
                 "trace": _trace(state, "retrieve_rag_context", "skipped", started, status="skipped")
             }
         try:
-            results = self.rag_service.search(state["requirements_text"], limit=5)
+            query = _rag_query_text(state)
+            results = self.rag_service.search(query, limit=5)
             context = [result.model_dump() for result in results]
+            hint_count = _rag_hint_context_count(context)
             return {
                 "rag_context": context,
                 "cache_metrics": self._cache_metrics(),
-                "trace": _trace(state, "retrieve_rag_context", f"{len(context)} results", started),
+                "trace": _trace(
+                    state,
+                    "retrieve_rag_context",
+                    f"{len(context)} results, {hint_count} hint contexts",
+                    started,
+                ),
             }
         except Exception as exc:
             return {
@@ -1308,6 +1315,47 @@ def _requirements_context_text(requirements: RequirementSpec, source_label: str)
     )
 
 
+def _rag_query_text(state: WorkflowState) -> str:
+    requirements = state.get("requirements")
+    raw_text = state.get("requirements_text", "")
+    if not isinstance(requirements, RequirementSpec):
+        return raw_text
+    characteristics = requirements.tower_characteristics
+    lines = [
+        raw_text,
+        "",
+        "Structured RequirementSpec for retrieval:",
+        f"network_type: {requirements.network_type}",
+        f"tower_type: {requirements.tower_type}",
+        f"tower_height_m: {requirements.tower_height_m}",
+        f"tower_structure: {characteristics.structure}",
+        f"foundation_type: {characteristics.foundation_type}",
+        f"sector_count: {requirements.sector_count}",
+        f"antenna_install_height_m: {requirements.antenna_install_height_m}",
+        "azimuths_deg: " + ", ".join(str(value) for value in requirements.azimuths_deg),
+        f"beamwidth_deg: {requirements.beamwidth_deg}",
+        f"include_rru: {requirements.include_rru}",
+        f"include_cables: {requirements.include_cables}",
+        f"include_beams: {requirements.include_beams}",
+        f"include_labels: {requirements.include_labels}",
+        f"include_power_cabinet: {requirements.include_power_cabinet}",
+        f"include_gps_antenna: {requirements.include_gps_antenna}",
+    ]
+    return "\n".join(lines)
+
+
+def _rag_hint_context_count(context: list[dict]) -> int:
+    count = 0
+    for item in context:
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        hints = payload.get("planning_hints")
+        if isinstance(hints, dict) and hints:
+            count += 1
+    return count
+
+
 def _requirements_from_scene(
     scene: SceneSpec,
     tower: AssetManifest,
@@ -1896,6 +1944,7 @@ def _workflow_metrics(
         "total_duration_ms": state.get("total_duration_ms", 0),
         "trace_steps": len(trace),
         "rag_context_count": len(state.get("rag_context", [])),
+        "rag_planning_hint_context_count": _rag_hint_context_count(state.get("rag_context", [])),
         "memory_hits": memory_recall.get("memory_hits", 0),
         "memory_context_count": memory_recall.get("memory_context_count", 0),
         "rag_duration_ms": _duration_for_nodes(trace, {"retrieve_rag_context"}),

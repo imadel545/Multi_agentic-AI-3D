@@ -1035,6 +1035,7 @@ class WorkflowService:
             "llm_fallback_used": result.llm_fallback_used,
             "llm_fallback_reason": llm_reason,
             "rag_context_count": len(result.rag_context),
+            "rag_planning_summary": _rag_planning_summary(result),
             "memory_hits": result.memory_recall.memory_hits if result.memory_recall else 0,
             "memory_context_count": result.memory_recall.memory_context_count
             if result.memory_recall
@@ -1303,6 +1304,7 @@ def _extraction_report(result: OrchestratorResult) -> dict:
         "schema_name": "RequirementSpec",
         "rag_used_for_extraction": False,
         "rag_context_count": len(result.rag_context),
+        "rag_planning_summary": _rag_planning_summary(result),
         "repaired_fields": repaired_fields,
         "inferred_fields": inferred_fields,
         "confidence": round(confidence, 2),
@@ -1310,6 +1312,57 @@ def _extraction_report(result: OrchestratorResult) -> dict:
         "critical_fields": _critical_requirement_fields(result.requirements),
         "warnings": [warning.model_dump() for warning in warnings],
     }
+
+
+def _rag_planning_summary(result: OrchestratorResult) -> dict:
+    hint_contexts = []
+    hint_fields: set[str] = set()
+    top_contexts = []
+    for context in result.rag_context:
+        payload = context.get("payload") if isinstance(context, dict) else None
+        payload = payload if isinstance(payload, dict) else {}
+        hints = payload.get("planning_hints")
+        if isinstance(hints, dict) and hints:
+            hint_contexts.append(context)
+            hint_fields.update(str(key) for key in hints.keys())
+        top_contexts.append(
+            {
+                "collection": context.get("collection"),
+                "doc_id": context.get("doc_id"),
+                "score": context.get("score"),
+                "source_path": _public_rag_source_path(payload.get("source_path")),
+                "filename": payload.get("filename"),
+            }
+        )
+    return {
+        "rag_used_for_extraction": False,
+        "rag_used_for_planning": bool(hint_contexts),
+        "rag_planning_mode": "structured_planning_hints"
+        if hint_contexts
+        else "context_only_no_structured_hints",
+        "rag_context_count": len(result.rag_context),
+        "planning_hint_context_count": len(hint_contexts),
+        "candidate_hint_fields": sorted(hint_fields),
+        "top_contexts": top_contexts[:5],
+        "limitations": [
+            "RAG does not override deterministic validation.",
+            "Only structured payload.planning_hints can influence SceneSpec planning.",
+            "RAG is not used for RequirementSpec extraction in v1.",
+        ],
+    }
+
+
+def _public_rag_source_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        return value
+    parts = path.parts
+    for anchor in ("data", "docs", "assets"):
+        if anchor in parts:
+            return "/".join(parts[parts.index(anchor) :])
+    return path.name
 
 
 def _llm_model_name(provider: str | None) -> str | None:
@@ -1364,6 +1417,7 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
         "node_count": result.glb_inspection.node_count,
         "mesh_count": result.glb_inspection.mesh_count,
         "material_count": result.glb_inspection.material_count,
+        "checks": result.glb_inspection.checks,
         "structural_qa_passed": result.glb_inspection.structural_qa_passed,
         "expected_objects_present": result.glb_inspection.checks.get("expected_objects_present"),
         "critical_errors": result.glb_inspection.critical_errors,

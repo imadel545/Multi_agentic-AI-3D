@@ -1,69 +1,112 @@
 # RAG Strategy
 
-RAG est advisory: il enrichit le contexte, mais ne contourne jamais le rule engine,
-l'asset registry, le `SceneSpec` validator ou les quality gates.
+RAG improves context for planning, but it is not the source of truth. The
+generation source of truth remains `RequirementSpec -> SceneSpec -> Blender`.
 
-## Provider principal
+## Product Provider
 
-- Provider: NVIDIA API.
-- Modèle: `baai/bge-m3`.
-- Objectif: recherche sémantique multilingue, notamment cahiers des charges français.
-- Dimension attendue: 1024.
-
-Configuration publique sans secret:
+- Product embedding provider: NVIDIA API `baai/bge-m3`.
+- Configure with `NVIDIA_API_KEY` or `TELECOM_STUDIO_NVIDIA_API_KEY`.
+- Default API config:
 
 ```text
-NVIDIA_API_KEY=<your-nvidia-api-key>
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
 TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
 ```
 
-## Fallback chain
+If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` cannot reach NVIDIA or lacks a
+key, startup should fail instead of silently degrading.
 
-1. NVIDIA API `baai/bge-m3`.
-2. Local `sentence-transformers` avec `baai/bge-m3`.
-3. Hash déterministe d'urgence/test uniquement.
+## Non-Product Modes
 
-`TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY=1` refuse le fallback hash quand la qualité
-sémantique est obligatoire.
+- `TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic` is for tests/bootstrap only.
+- `TELECOM_STUDIO_EMBEDDING_PROVIDER=auto` may fall back to deterministic hash
+  for local bootstrap, but it is not acceptable as product-quality RAG.
+- `sentence-transformers` is an explicit developer override only, not an
+  automatic product fallback.
 
 ## Reranker
 
-- `core/rag/reranker.py` tente `BAAI/bge-reranker-v2-m3` en local.
-- Si le modèle ou ses dépendances ne sont pas disponibles, le reranker devient passthrough.
-- Ce mode est best-effort et doit rester visible dans les diagnostics.
+- Default reranker: `passthrough_no_rerank`.
+- Local `BAAI/bge-reranker-v2-m3` is an explicit developer override only:
 
-## Stockage
+```text
+TELECOM_STUDIO_RERANKER_PROVIDER=local
+TELECOM_STUDIO_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
+```
 
-- Qdrant local par défaut sous `data/qdrant`.
-- `TELECOM_STUDIO_QDRANT_URL` permet une instance Qdrant externe.
-- Collections statiques: règles telecom, manifests assets, templates, cas validation,
-  patterns design, guides Blender.
-- Collection runtime possible: `document_pack_memory`.
+The backend exposes `rag_reranker` and `rag_reranker_status` in
+`/studio/summary`.
 
-## Ce que RAG peut faire
+## How RAG Enters The Pipeline
 
-- Retrouver des assets, règles et exemples proches d'une demande.
-- Fournir des `payload.planning_hints` structurés au planner.
-- Améliorer les requêtes françaises et mixtes via BGE-M3.
+```text
+Requirement extraction
+-> structured RAG query from RequirementSpec + original text
+-> Qdrant search over knowledge, docs, assets, templates
+-> optional reranker
+-> ScenePlanner consumes only payload.planning_hints
+-> deterministic validation and quality gates remain mandatory
+```
 
-## Ce que RAG ne doit pas faire
+RAG is not used for `RequirementSpec` extraction in v1. GPT-OSS extraction and
+RAG retrieval are separate surfaces.
 
-- Muter silencieusement la scène par texte libre.
-- Ajouter GPS/cabinet/câbles sans signal structuré.
-- Masquer un fallback embedding.
-- Remplacer les validations déterministes.
+## Storage And Indexing
 
-## Tests attendus
+- Qdrant local default: `data/qdrant`.
+- Optional external Qdrant: `TELECOM_STUDIO_QDRANT_URL`.
+- Static collections: telecom rules, asset manifests, scene templates,
+  validation cases, design patterns, Blender generation guides.
+- Runtime collections: design memory, error memory, document-pack memory.
+- Rebuild after provider/dimension/knowledge changes with `POST /rag/reindex`.
 
-- Recherche française avec NVIDIA BGE-M3 quand la clé est présente.
-- Fallback explicite quand NVIDIA est indisponible.
-- Filtrage par `network_type`, `tower_type`, `doc_type`.
-- Rejet des hints décoratifs non structurés.
+## What Can Influence SceneSpec
 
-## Index compatibility
+Only structured `payload.planning_hints` can affect planning. Current supported
+hints:
 
-Un index Qdrant local créé avec un ancien provider ou une ancienne dimension d'embedding
-est incompatible avec NVIDIA BGE-M3 (`1024` dimensions). Dans ce cas, `/rag/search` doit
-retourner `409 RAG_INDEX_DIMENSION_MISMATCH` avec action recommandée `POST /rag/reindex`,
-pas un 500 et pas un fallback silencieux.
+- `antenna_install_height_m`
+- `beamwidth_deg`
+- `include_cables`
+- `include_sector_beams`
+- `include_labels`
+
+Free text retrieved by RAG is audit context. It must not mutate the 3D plan
+silently.
+
+## Public Truth Fields
+
+Workflow and viewer surfaces expose:
+
+- `rag_context_count`: number of retrieved contexts.
+- `rag_planning_summary.rag_used_for_extraction=false`.
+- `rag_planning_summary.rag_used_for_planning`: true only when structured hints
+  were present.
+- `rag_planning_summary.rag_planning_mode`: `structured_planning_hints` or
+  `context_only_no_structured_hints`.
+- `rag_planning_summary.candidate_hint_fields`.
+- `rag_planning_summary.top_contexts` with repo-relative source paths.
+
+The frontend must not treat `rag_context_count > 0` as proof that RAG changed
+the design.
+
+## Known Weaknesses
+
+- Knowledge files are still seed-level, not a vendor-grade telecom knowledge
+  base.
+- RAG does not yet perform claim-level citation into `SceneSpec`.
+- RAG does not yet run conflict resolution against document-pack evidence.
+- Reranker is passthrough by default unless explicitly enabled.
+- No hybrid sparse/BM25 engine beyond the current lexical boost.
+
+## Quality Bar Before Calling RAG Advanced
+
+RAG can be called advanced only after:
+
+- NVIDIA BGE-M3 retrieval is verified with French telecom queries.
+- Chunks are source-specific and not giant whole-doc blobs.
+- Retrieved contexts include citations/provenance safe for frontend display.
+- Scene changes caused by RAG are explainable through structured hints.
+- Contradictions between documents, memory, and user prompt are surfaced as
+  warnings or conflicts, not hidden.

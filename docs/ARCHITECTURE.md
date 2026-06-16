@@ -11,7 +11,7 @@ FastAPI
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
   -> Groq extraction or deterministic fallback
-  -> NVIDIA BGE-M3 RAG context (advisory)
+  -> NVIDIA API BGE-M3 RAG context (advisory, structured hints only)
   -> SQLite memory recall
   -> asset registry + inventory
   -> SceneSpec planner
@@ -31,7 +31,8 @@ FastAPI
 - `core/document_pack`: ZIP/PDF/OCR/DXF extraction and `ProjectDesignSpec`.
 - `core/orchestration`: LangGraph workflow and route logic.
 - `core/agents`: deterministic/LLM wrappers for extraction, planning, editing, RF/tower checks.
-- `core/rag`: Qdrant, NVIDIA BGE-M3 embeddings, local fallback, reranker best-effort.
+- `core/rag`: Qdrant, NVIDIA API BGE-M3 embeddings, deterministic test/bootstrap mode,
+  passthrough reranker by default with explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
 - `core/qa`: GLB structural parse, proxy geometry, preview luminance QA.
@@ -53,3 +54,6 @@ FastAPI
 - Asset import fallback can still create procedural geometry if an import fails, but the active
   inventory has 12 manifests, 12 GLB files, and 0 missing files.
 - Geometry QA is object/name/count/metadata based, not mesh-transform exact.
+- RAG is not used for extraction in v1; only structured `payload.planning_hints`
+  can influence planning, and `rag_planning_summary` exposes whether that
+  happened.

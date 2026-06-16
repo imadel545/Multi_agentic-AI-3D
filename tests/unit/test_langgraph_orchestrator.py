@@ -13,7 +13,11 @@ from core.services.blender_runner import BlenderRunner, GenerationResult
 
 def test_langgraph_orchestrator_runs_full_controlled_workflow(tmp_path: Path) -> None:
     registry = AssetRegistry(Path("assets/manifests"))
-    rag_service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     rag_service.reindex()
     orchestrator = DesignOrchestrator(
         registry=registry,

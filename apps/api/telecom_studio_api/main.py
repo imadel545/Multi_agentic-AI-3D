@@ -1,5 +1,6 @@
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -102,7 +103,10 @@ rag_embedding_provider = build_embedding_provider(
     settings.embedding_model,
     api_key=settings.nvidia_api_key,
 )
-rag_reranker = build_reranker()
+rag_reranker = build_reranker(
+    settings.reranker_model,
+    provider_name=settings.reranker_provider,
+)
 rag_service = RagService(
     project_root=settings.project_root,
     qdrant_path=settings.local_qdrant_path,
@@ -629,5 +633,27 @@ def rag_search(
         ) from exc
     return {
         "query": q,
-        "results": [result.model_dump() for result in results],
+        "results": [_public_rag_search_result(result.model_dump()) for result in results],
     }
+
+
+def _public_rag_search_result(result: dict) -> dict:
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        return result
+    result = dict(result)
+    result["payload"] = dict(payload)
+    result["payload"]["source_path"] = _public_source_path(payload.get("source_path"))
+    return result
+
+
+def _public_source_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        return value
+    try:
+        return str(path.resolve().relative_to(settings.project_root.resolve()))
+    except ValueError:
+        return path.name

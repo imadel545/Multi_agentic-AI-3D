@@ -29,6 +29,8 @@ class GLBGeometryValidator:
         expected_arrows = len(scene.sectors) if scene.visual_elements.include_azimuth_arrows else 0
         expected_cabinets = 1 if scene.visual_elements.include_power_cabinet else 0
         expected_gps = 1 if scene.visual_elements.include_gps_antenna else 0
+        expected_foundation = _expected_foundation_count(scene)
+        expected_labels = _expected_label_count(scene)
         missing_objects = _missing_sector_objects(scene, object_names)
 
         checks = {
@@ -44,6 +46,10 @@ class GLBGeometryValidator:
                 counts["power_cabinet"], expected_cabinets
             ),
             "gps_antenna_count_valid": _count_matches_option(counts["gps"], expected_gps),
+            "foundation_count_valid": _count_matches_option(
+                counts["foundation"], expected_foundation
+            ),
+            "label_count_valid": _count_matches_option(counts["label"], expected_labels),
             "sector_objects_present": not missing_objects,
             "object_names_match_scene_spec": _object_names_match_scene(
                 scene,
@@ -116,6 +122,8 @@ def _object_counts(object_names: list[str]) -> dict[str, int]:
         "azimuth_arrow": _count(normalized, ("azimuth_arrow",)),
         "power_cabinet": _count(normalized, ("power_cabinet", "cabinet")),
         "gps": _count(normalized, ("gps_antenna", "gps")),
+        "foundation": _count(normalized, ("foundation", "foundation_concrete_pad")),
+        "label": _count(normalized, ("label",)),
     }
 
 
@@ -155,6 +163,12 @@ def _missing_sector_objects(scene: SceneSpec, object_names: list[str]) -> list[s
             sector_token,
         ):
             missing.append(f"beam:{sector.sector_id}")
+        if scene.visual_elements.include_labels and not _has_sector_object(
+            normalized,
+            ("label",),
+            sector_token,
+        ):
+            missing.append(f"label:{sector.sector_id}")
     if scene.visual_elements.include_power_cabinet and not _has_object(
         normalized, ("power_cabinet", "cabinet")
     ):
@@ -163,6 +177,19 @@ def _missing_sector_objects(scene: SceneSpec, object_names: list[str]) -> list[s
         normalized, ("gps_antenna", "gps")
     ):
         missing.append("gps_antenna")
+    if _expected_foundation_count(scene) and not _has_object(
+        normalized, ("foundation", "foundation_concrete_pad")
+    ):
+        missing.append("foundation_concrete_pad")
+    if scene.visual_elements.include_labels:
+        if scene.visual_elements.include_power_cabinet and not _has_object(
+            normalized, ("label_power_cabinet",)
+        ):
+            missing.append("label:power_cabinet")
+        if scene.visual_elements.include_gps_antenna and not _has_object(
+            normalized, ("label_gps_antenna",)
+        ):
+            missing.append("label:gps_antenna")
     return missing
 
 
@@ -189,6 +216,21 @@ def _has_object(normalized_names: list[str], prefixes: tuple[str, ...]) -> bool:
 
 def _is_auxiliary_object(normalized_name: str) -> bool:
     return "_head_" in normalized_name or normalized_name.endswith("_head")
+
+
+def _expected_foundation_count(scene: SceneSpec) -> int:
+    return 1 if scene.tower.characteristics.foundation_type == "concrete_pad" else 0
+
+
+def _expected_label_count(scene: SceneSpec) -> int:
+    if not scene.visual_elements.include_labels:
+        return 0
+    count = len(scene.sectors)
+    if scene.visual_elements.include_power_cabinet:
+        count += 1
+    if scene.visual_elements.include_gps_antenna:
+        count += 1
+    return count
 
 
 def _object_names_match_scene(

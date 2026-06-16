@@ -16,8 +16,8 @@ Readiness produit détaillée: `docs/BACKEND_PRODUCT_READINESS_REPORT.md`.
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
 | DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
 | DWG | UNSUPPORTED_WITHOUT_TOOL | `dwgread`/ODA/FreeCAD detection | Conversion dépend d'outil local. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag` | NVIDIA `baai/bge-m3` principal; fallback local puis hash visible. |
-| Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Local best-effort; passthrough si modèle indisponible. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag` | NVIDIA API `baai/bge-m3` est le chemin produit; hash déterministe uniquement test/bootstrap explicite. |
+| Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Passthrough par défaut; modèle local seulement si activé explicitement. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
@@ -42,7 +42,7 @@ prétend pas à une autonomie générale.
 |---|---|---|---|
 | `design_created` | Workflow service | `WorkflowService.create_design` | Démarrage local d'un `workflow_id`, pas création de project/run. |
 | `extract_requirements` | LangGraph node + controlled LLM wrapper | `RequirementExtractor`, `GroqStructuredClient` | GPT-OSS `openai/gpt-oss-120b` si disponible; fallback déterministe visible via `extraction_provider`, `llm_fallback_used`, `llm_fallback_reason`. |
-| `retrieve_rag_context` | LangGraph node + RAG service | `RagService` | RAG sert de contexte planning; pas utilisé pour l'extraction LLM v1. |
+| `retrieve_rag_context` | LangGraph node + RAG service | `RagService` | RAG sert de contexte planning. Seuls les `payload.planning_hints` structurés peuvent influencer `SceneSpec`; pas utilisé pour l'extraction LLM v1. |
 | `memory_recall` | LangGraph node + SQLite/RAG service | `MemoryService` | Mémoire locale limitée; compteurs exposés dans `/studio/summary`. |
 | `select_assets` / `asset_fallback_handler` | LangGraph node + asset registry | `AssetRegistry`, manifests | Asset réel/import/fallback visible; `/assets/inventory` est typé. |
 | `validate_requirements` | LangGraph node + deterministic validators | `core/validation`, tower/RF validators | Validation métier contrôlée, pas décision libre LLM. |
@@ -61,12 +61,15 @@ prétend pas à une autonomie générale.
 - Actions supportées: viewer, download artifacts, timeline, edit, versions, rollback selon état.
 - Actions non supportées et visibles via `unsupported_actions`: cancel, pause, resume, retry du même workflow, human-in-loop, WebSocket runtime.
 - Le frontend ne doit pas inventer ces capacités; il lit `runtime_capabilities` et `available_actions`.
+- Le frontend doit lire `rag_planning_summary`: `rag_context_count` seul ne
+  prouve pas que le RAG a modifié le plan.
 
 ## Synthèse
 
-Le backend est riche et testable. Le contrat produit backend/frontend est prêt
-pour lancer la construction UI chat-first / 3D-first; le frontend reste absent
-et doit consommer ces surfaces sans inventer de logique métier.
+Le backend est riche et testable. Le contrat produit backend/frontend est
+consolidé pour préparer la Gate 2A frontend chat-first / 3D-first, après commit
+propre et avec les limites visibles. Le frontend reste absent et doit consommer
+ces surfaces sans inventer de logique métier.
 
 Le vocabulaire backend stable reste `/designs` et `workflow_id`. Les labels
 frontend "project", "run" et "scene plan" sont des mappings UI, pas de nouvelles

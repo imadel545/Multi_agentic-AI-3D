@@ -5,7 +5,7 @@ La mémoire est locale et mono-utilisateur.
 ## Stockage
 
 - SQLite sous `data/sqlite`.
-- Qdrant optionnel pour certains points runtime quand RAG est configuré.
+- Qdrant optionnel pour certains points runtime quand RAG NVIDIA est configuré.
 - Ces répertoires sont des artefacts runtime ignorés par Git.
 
 ## Ce qui fonctionne
@@ -18,6 +18,9 @@ La mémoire est locale et mono-utilisateur.
 ## Limites
 
 - Recall encore peu sémantique.
+- La mémoire n'injecte pas encore de citations ou de plans réutilisables dans le
+  `SceneSpec`; elle influence seulement quelques signaux contrôlés comme les
+  patterns d'erreur.
 - Pas de mémoire conversationnelle produit.
 - Pas de politique avancée de purge, scoring ou déduplication.
 - La mémoire ne doit jamais remplacer les validations SceneSpec/QA.

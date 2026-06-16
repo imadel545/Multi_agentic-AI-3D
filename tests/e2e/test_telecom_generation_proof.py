@@ -38,6 +38,12 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert status["llm_fallback_used"] is True
         assert status["llm_fallback_reason"] == "deterministic_extraction_requested"
         assert status["rag_context_count"] is not None
+        assert isinstance(status["rag_planning_summary"], dict)
+        assert status["rag_planning_summary"]["rag_used_for_extraction"] is False
+        assert status["rag_planning_summary"]["rag_planning_mode"] in {
+            "structured_planning_hints",
+            "context_only_no_structured_hints",
+        }
         assert status["memory_context_count"] is not None
         assert status["runtime_capabilities"]["streaming_transport"] == "push_sse"
         assert any(action["action"] == "cancel" for action in status["unsupported_actions"])
@@ -67,8 +73,22 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert scene_plan["network_type"] == "5G"
         assert scene_plan["tower"]["height_m"] == 30
         assert len(scene_plan["sectors"]) == 3
+        assert [sector["azimuth_deg"] for sector in scene_plan["sectors"]] == [
+            0.0,
+            120.0,
+            240.0,
+        ]
+        assert [sector["install_height_m"] for sector in scene_plan["sectors"]] == [
+            24.0,
+            24.0,
+            24.0,
+        ]
+        assert all(sector["radio_asset_id"] for sector in scene_plan["sectors"])
+        assert all(sector["include_cable"] is True for sector in scene_plan["sectors"])
+        assert scene_plan["visual_elements"]["include_labels"] is True
         assert scene_plan["visual_elements"]["include_power_cabinet"] is True
         assert scene_plan["visual_elements"]["include_gps_antenna"] is True
+        assert scene_plan["tower"]["characteristics"]["foundation_type"] == "concrete_pad"
         assert any(
             accessory["asset_type"] == "cabinet"
             for accessory in scene_plan.get("accessory_assets", [])
@@ -84,6 +104,46 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert validation_report["checks"]["antenna_height_valid"] is True
         assert validation_report["checks"]["azimuths_valid"] is True
         assert validation_report["checks"]["power_cabinet_asset_present_when_requested"] is True
+        assert validation_report["checks"]["gps_asset_present_when_requested"] is True
+
+        glb_inspection = client.get(f"/designs/{workflow_id}/artifacts/glb_inspection").json()
+        assert glb_inspection["inspection_mode"] in {"glb_parse", "metadata_fallback"}
+        assert glb_inspection["checks"]["has_tower"] is True
+        assert glb_inspection["checks"]["has_antennas"] is True
+        assert glb_inspection["checks"]["has_radios_or_rru"] is True
+        assert glb_inspection["checks"]["has_cables"] is True
+        assert glb_inspection["checks"]["has_azimuth_arrows"] is True
+        assert glb_inspection["checks"]["has_power_cabinet"] is True
+        assert glb_inspection["checks"]["has_gps_antenna"] is True
+        assert glb_inspection["checks"]["has_foundation"] is True
+        assert glb_inspection["checks"]["has_labels"] is True
+
+        geometry_validation = client.get(
+            f"/designs/{workflow_id}/artifacts/geometry_validation"
+        ).json()
+        assert geometry_validation["checks"]["antenna_count_valid"] is True
+        assert geometry_validation["checks"]["rru_count_valid"] is True
+        assert geometry_validation["checks"]["cable_count_valid"] is True
+        assert geometry_validation["checks"]["azimuth_arrow_count_valid"] is True
+        assert geometry_validation["checks"]["power_cabinet_count_valid"] is True
+        assert geometry_validation["checks"]["gps_antenna_count_valid"] is True
+        assert geometry_validation["checks"]["foundation_count_valid"] is True
+        assert geometry_validation["checks"]["label_count_valid"] is True
+        assert geometry_validation["checks"]["approx_tower_height_valid"] is True
+        assert geometry_validation["checks"]["approx_antenna_height_valid"] is True
+        assert geometry_validation["checks"]["azimuth_metadata_valid"] is True
+        assert geometry_validation["object_counts"]["antenna"] >= 3
+        assert geometry_validation["object_counts"]["rru"] >= 3
+        assert geometry_validation["object_counts"]["cable"] >= 3
+        assert geometry_validation["object_counts"]["foundation"] >= 1
+        assert geometry_validation["object_counts"]["label"] >= 5
+        assert geometry_validation["missing_objects"] == []
+
+        qa_report = client.get(f"/designs/{workflow_id}/artifacts/qa_report").json()
+        assert qa_report["checks"]["glb_structure_valid"] is True
+        assert qa_report["checks"]["expected_objects_present"] is True
+        assert qa_report["checks"]["geometry_validation_valid"] is True
+        assert qa_report["checks"]["preview_visual_quality_valid"] is True
 
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["workflow_id"] == workflow_id

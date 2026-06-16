@@ -16,7 +16,7 @@ from qdrant_client.models import (
 
 from core.performance import TTLCache, knowledge_index_hash, rag_query_hash
 from core.rag.documents import load_rag_documents
-from core.rag.embeddings import EmbeddingProvider, build_embedding_provider
+from core.rag.embeddings import DEFAULT_MODEL, EmbeddingProvider, build_embedding_provider
 from core.rag.models import RagDocument, RagIndexReport, RagSearchResult
 from core.rag.reranker import Reranker, build_reranker
 
@@ -47,8 +47,8 @@ class RagService:
         qdrant_path: Path,
         qdrant_url: str | None = None,
         embedding_provider: EmbeddingProvider | None = None,
-        embedding_provider_name: str = "deterministic",
-        embedding_model: str = "BAAI/bge-small-en-v1.5",
+        embedding_provider_name: str = "nvidia",
+        embedding_model: str = DEFAULT_MODEL,
         reranker: Reranker | None = None,
         reranker_model: str = "BAAI/bge-reranker-v2-m3",
         query_cache_ttl_s: float = 30.0,

@@ -97,7 +97,11 @@ def test_memory_recall(tmp_path: Path) -> None:
 
 
 def test_memory_does_not_store_large_artifacts(tmp_path: Path) -> None:
-    rag_service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
     requirements, scene, report, generation = _memory_inputs("wf_no_large_outputs")
     generation = generation.model_copy(

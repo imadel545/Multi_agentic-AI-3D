@@ -4,8 +4,8 @@ Re-ranking takes the initial vector/keyword retrieval results and re-orders them
 with a cross-encoder that understands query-document relevance much better than
 dense similarity alone. This is especially useful for short French telecom queries.
 
-Primary: local CrossEncoder with BAAI/bge-reranker-v2-m3.
-Fallback: passthrough (keep original ranking).
+Default: passthrough (keep original ranking).
+Explicit local override: CrossEncoder with BAAI/bge-reranker-v2-m3.
 """
 
 from __future__ import annotations
@@ -84,11 +84,24 @@ class CrossEncoderReranker:
         return [result for result, _ in scored[:top_k]]
 
 
-def build_reranker(model_name: str = DEFAULT_RERANKER_MODEL) -> Reranker:
-    """Build the best available re-ranker.
+def build_reranker(
+    model_name: str = DEFAULT_RERANKER_MODEL,
+    *,
+    provider_name: str = "passthrough",
+) -> Reranker:
+    """Build the configured re-ranker.
 
-    Tries to load the local cross-encoder; falls back to passthrough on failure.
+    The product path avoids hidden local model downloads/loads. Use
+    provider_name="local" only when the developer explicitly wants the
+    local cross-encoder.
     """
+    provider_name = provider_name.strip().lower()
+    if provider_name in {"", "none", "passthrough", "disabled"}:
+        return PassthroughReranker()
+    if provider_name != "local":
+        raise RuntimeError(
+            f"Unsupported reranker provider {provider_name!r}. Use passthrough or local."
+        )
     try:
         reranker = CrossEncoderReranker(model_name)
         logger.info("Using local cross-encoder re-ranker: %s", reranker.name)

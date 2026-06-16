@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from core.rag.models import RagDocument
@@ -11,40 +12,57 @@ KNOWLEDGE_COLLECTIONS = {
     "blender_generation_guides.md": "blender_generation_guides",
 }
 
+PLANNING_HINT_KEYS = {
+    "antenna_install_height_m",
+    "beamwidth_deg",
+    "include_cables",
+    "include_sector_beams",
+    "include_labels",
+}
+PLANNING_HINT_ALIASES = {
+    "include_beams": "include_sector_beams",
+}
+
 
 def load_rag_documents(project_root: Path) -> list[RagDocument]:
     documents: list[RagDocument] = []
-    documents.extend(_load_knowledge_documents(project_root / "data" / "knowledge"))
-    documents.extend(_load_asset_manifest_documents(project_root / "assets" / "manifests"))
-    documents.extend(_load_project_docs(project_root / "docs"))
+    documents.extend(_load_knowledge_documents(project_root, project_root / "data" / "knowledge"))
+    documents.extend(
+        _load_asset_manifest_documents(project_root, project_root / "assets" / "manifests")
+    )
+    documents.extend(_load_project_docs(project_root, project_root / "docs"))
     return documents
 
 
-def _load_knowledge_documents(knowledge_dir: Path) -> list[RagDocument]:
+def _load_knowledge_documents(project_root: Path, knowledge_dir: Path) -> list[RagDocument]:
     documents: list[RagDocument] = []
     for filename, collection in KNOWLEDGE_COLLECTIONS.items():
         path = knowledge_dir / filename
         if not path.exists():
             continue
-        documents.append(
-            RagDocument(
-                doc_id=f"knowledge:{path.stem}",
-                collection=collection,
-                text=path.read_text(encoding="utf-8"),
-                payload={
-                    "type": "knowledge_doc",
-                    "doc_type": "knowledge_doc",
-                    "source_path": str(path),
-                    "filename": filename,
-                    "network_type": _infer_network_type(path.read_text(encoding="utf-8")),
-                    "tower_type": _infer_tower_type(path.read_text(encoding="utf-8")),
-                },
+        text = path.read_text(encoding="utf-8")
+        for index, chunk in enumerate(_markdown_chunks(text), start=1):
+            documents.append(
+                RagDocument(
+                    doc_id=f"knowledge:{path.stem}:{index}",
+                    collection=collection,
+                    text=chunk,
+                    payload={
+                        "type": "knowledge_doc",
+                        "doc_type": "knowledge_doc",
+                        "source_path": _relative_source(project_root, path),
+                        "filename": filename,
+                        "chunk_index": index,
+                        "network_type": _infer_network_type(chunk),
+                        "tower_type": _infer_tower_type(chunk),
+                        "planning_hints": _extract_planning_hints(chunk),
+                    },
+                )
             )
-        )
     return documents
 
 
-def _load_asset_manifest_documents(manifests_dir: Path) -> list[RagDocument]:
+def _load_asset_manifest_documents(project_root: Path, manifests_dir: Path) -> list[RagDocument]:
     documents: list[RagDocument] = []
     for path in sorted(manifests_dir.glob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -57,7 +75,7 @@ def _load_asset_manifest_documents(manifests_dir: Path) -> list[RagDocument]:
                 payload={
                     "type": "asset_manifest",
                     "doc_type": "asset_manifest",
-                    "source_path": str(path),
+                    "source_path": _relative_source(project_root, path),
                     "asset_id": payload["asset_id"],
                     "asset_type": payload["type"],
                     "status": payload.get("status", "unknown"),
@@ -72,24 +90,27 @@ def _load_asset_manifest_documents(manifests_dir: Path) -> list[RagDocument]:
     return documents
 
 
-def _load_project_docs(docs_dir: Path) -> list[RagDocument]:
+def _load_project_docs(project_root: Path, docs_dir: Path) -> list[RagDocument]:
     documents: list[RagDocument] = []
     for path in sorted(docs_dir.glob("*.md")):
-        documents.append(
-            RagDocument(
-                doc_id=f"doc:{path.stem}",
-                collection="design_patterns",
-                text=path.read_text(encoding="utf-8"),
-                payload={
-                    "type": "project_doc",
-                    "doc_type": "project_doc",
-                    "source_path": str(path),
-                    "filename": path.name,
-                    "network_type": _infer_network_type(path.read_text(encoding="utf-8")),
-                    "tower_type": _infer_tower_type(path.read_text(encoding="utf-8")),
-                },
+        text = path.read_text(encoding="utf-8")
+        for index, chunk in enumerate(_markdown_chunks(text), start=1):
+            documents.append(
+                RagDocument(
+                    doc_id=f"doc:{path.stem}:{index}",
+                    collection="design_patterns",
+                    text=chunk,
+                    payload={
+                        "type": "project_doc",
+                        "doc_type": "project_doc",
+                        "source_path": _relative_source(project_root, path),
+                        "filename": path.name,
+                        "chunk_index": index,
+                        "network_type": _infer_network_type(chunk),
+                        "tower_type": _infer_tower_type(chunk),
+                    },
+                )
             )
-        )
     return documents
 
 
@@ -106,6 +127,58 @@ def _asset_text(payload: dict) -> str:
             f"version: {payload.get('version', 'unknown')}",
         ]
     )
+
+
+def _markdown_chunks(text: str) -> list[str]:
+    """Split markdown by headings to avoid indexing giant, noisy documents."""
+    chunks: list[str] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        if line.startswith("#") and current:
+            chunk = "\n".join(current).strip()
+            if chunk:
+                chunks.append(chunk)
+            current = [line]
+            continue
+        current.append(line)
+    chunk = "\n".join(current).strip()
+    if chunk:
+        chunks.append(chunk)
+    return chunks or [text]
+
+
+def _extract_planning_hints(text: str) -> dict:
+    hints: dict[str, object] = {}
+    for line in text.splitlines():
+        match = re.match(r"^\s*[-*]\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        key, raw_value = match.groups()
+        key = PLANNING_HINT_ALIASES.get(key, key)
+        if key not in PLANNING_HINT_KEYS:
+            continue
+        hints[key] = _parse_hint_value(raw_value)
+    return hints
+
+
+def _parse_hint_value(value: str) -> object:
+    lowered = value.strip().lower()
+    if lowered in {"true", "yes", "oui"}:
+        return True
+    if lowered in {"false", "no", "non"}:
+        return False
+    numeric = lowered.replace(",", ".")
+    try:
+        return float(numeric)
+    except ValueError:
+        return value.strip()
+
+
+def _relative_source(project_root: Path, path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(project_root.resolve()))
+    except ValueError:
+        return path.name
 
 
 def _infer_network_type(text: str) -> str | None:

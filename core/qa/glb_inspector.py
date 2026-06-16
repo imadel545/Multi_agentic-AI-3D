@@ -182,6 +182,8 @@ def _report(
         "has_azimuth_arrows": found["azimuth_arrows"],
         "has_power_cabinet": found["power_cabinet"],
         "has_gps_antenna": found["gps_antenna"],
+        "has_foundation": found["foundation"],
+        "has_labels": found["labels"],
         "has_metadata": metadata_exists,
         "expected_objects_present": expected_objects_present,
         "minimum_node_count_valid": minimum_node_count_valid,
@@ -219,6 +221,8 @@ def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int
     arrow_count = sector_count if scene.visual_elements.include_azimuth_arrows else 0
     cabinet_count = 1 if scene.visual_elements.include_power_cabinet else 0
     gps_count = 1 if scene.visual_elements.include_gps_antenna else 0
+    foundation_count = _expected_foundation_count(scene)
+    label_count = _expected_label_count(scene)
     return [
         ("tower", ("tower", "tower_"), 1),
         (
@@ -232,6 +236,8 @@ def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int
         ("azimuth_arrows", ("azimuth_arrow", "azimuth_arrow_"), arrow_count),
         ("power_cabinet", ("power_cabinet", "cabinet"), cabinet_count),
         ("gps_antenna", ("gps_antenna", "gps"), gps_count),
+        ("foundation", ("foundation", "foundation_"), foundation_count),
+        ("labels", ("label", "label_"), label_count),
     ]
 
 
@@ -247,7 +253,24 @@ def _minimum_node_count(scene: SceneSpec) -> int:
         minimum += 1
     if scene.visual_elements.include_gps_antenna:
         minimum += 1
+    minimum += _expected_foundation_count(scene)
+    minimum += _expected_label_count(scene)
     return minimum
+
+
+def _expected_foundation_count(scene: SceneSpec) -> int:
+    return 1 if scene.tower.characteristics.foundation_type == "concrete_pad" else 0
+
+
+def _expected_label_count(scene: SceneSpec) -> int:
+    if not scene.visual_elements.include_labels:
+        return 0
+    count = len(scene.sectors)
+    if scene.visual_elements.include_power_cabinet:
+        count += 1
+    if scene.visual_elements.include_gps_antenna:
+        count += 1
+    return count
 
 
 def _count_matching(object_names: list[str], prefixes: tuple[str, ...]) -> int:

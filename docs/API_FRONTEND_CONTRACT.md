@@ -106,7 +106,8 @@ restent internes au backend.
 - `groq_available`
 - `llm_available`
 - `warnings`
-- `rag_embedding_provider`, `rag_status`, `rag_degraded`, `rag_reindex_url`
+- `rag_embedding_provider`, `rag_status`, `rag_degraded`, `rag_reranker`,
+  `rag_reranker_status`, `rag_reindex_url`
 - `memory_status`, `memory_backend`, `workflow_memory_count`,
   `design_memory_count`, `document_pack_memory_count`
 - `runtime_capabilities`, `unsupported_actions`
@@ -138,6 +139,7 @@ restent internes au backend.
 - `llm_fallback_used`
 - `llm_fallback_reason`
 - `rag_context_count`
+- `rag_planning_summary`
 - `memory_context_count`
 - `qa_summary`
 - `viewer_artifacts[]`
@@ -145,6 +147,34 @@ restent internes au backend.
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+`rag_planning_summary` est obligatoire pour l'UI intelligente:
+
+- `rag_used_for_extraction=false` en v1.
+- `rag_used_for_planning=true` seulement si des `payload.planning_hints`
+  structurés ont été récupérés.
+- `rag_context_count` seul ne prouve pas que le RAG a changé le `SceneSpec`.
+- `top_contexts[].source_path` est relatif au repo, jamais `/Users/...`.
+
+## Séquence frontend recommandée
+
+1. `GET /health`.
+2. `GET /studio/summary` pour backend, Blender, Groq, RAG NVIDIA, assets et warnings.
+3. `GET /assets/inventory` pour le drawer assets.
+4. `GET /document-packs/capabilities` pour configurer l'upload.
+5. `GET /designs` pour restaurer les designs locaux.
+6. `POST /designs` quand l'utilisateur envoie un prompt.
+7. Ouvrir `/designs/{workflow_id}/events/stream`.
+8. À l'événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
+   `/user-issues` et `/versions`.
+
+Le frontend doit rendre:
+
+- chat en surface principale;
+- viewer 3D depuis `primary_glb_url`;
+- strip d'agents depuis `payload.human_label` et `payload.progress_message`;
+- drawers QA, timeline, scene plan, documents, assets, versions;
+- raw JSON seulement en détail secondaire.
 
 `/designs/{id}/edit` expose, en cas de succès:
 

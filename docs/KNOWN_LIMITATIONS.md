@@ -33,13 +33,18 @@ frontend.
 
 ## RAG and memory
 
-- NVIDIA `baai/bge-m3` is the primary provider.
-- Local `sentence-transformers` fallback, then hash as last resort; hash is not
-  production quality.
+- NVIDIA API `baai/bge-m3` is the product provider.
+- The product path does not silently load a local embedding model. Deterministic
+  hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
+  hash is not production quality.
 - After a provider/dimension change, the local Qdrant index must be rebuilt with
   `POST /rag/reindex`; otherwise `/rag/search` returns `409 RAG_INDEX_DIMENSION_MISMATCH`.
-- Local reranker is best-effort; passthrough if the model is unavailable.
+- Reranker is passthrough by default; local reranker is an explicit developer
+  override, not product default.
 - Memory is still limited, with incomplete semantic recall.
+- `rag_context_count > 0` does not mean the 3D plan changed. In v1, only
+  structured `payload.planning_hints` affect planning, and RAG is not used for
+  RequirementSpec extraction.
 
 ## Documents
 

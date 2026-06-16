@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -64,3 +65,33 @@ def test_rag_api_reports_dimension_mismatch(monkeypatch) -> None:
     detail = response.json()["detail"]
     assert detail["code"] == "RAG_INDEX_DIMENSION_MISMATCH"
     assert "POST /rag/reindex" in detail["recommended_action"]
+
+
+def test_rag_api_sanitizes_legacy_absolute_source_paths(monkeypatch) -> None:
+    absolute_source = str(api_main.settings.project_root / "docs" / "RAG_STRATEGY.md")
+
+    def _legacy_search(*args, **kwargs):
+        return [
+            SimpleNamespace(
+                model_dump=lambda: {
+                    "collection": "design_patterns",
+                    "doc_id": "legacy",
+                    "score": 1.0,
+                    "text": "legacy indexed context",
+                    "payload": {
+                        "source_path": absolute_source,
+                        "filename": "RAG_STRATEGY.md",
+                    },
+                }
+            )
+        ]
+
+    monkeypatch.setattr(api_main.rag_service, "search", _legacy_search)
+    client = TestClient(api_main.app)
+
+    response = client.get("/rag/search", params={"q": "pylône treillis 5G"})
+
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["payload"]["source_path"] == "docs/RAG_STRATEGY.md"
+    assert "/Users/" not in str(result)

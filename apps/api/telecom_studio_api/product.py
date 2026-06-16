@@ -80,6 +80,8 @@ class ProductService:
             "rag_embedding_provider": rag["embedding_provider"],
             "rag_status": rag["status"],
             "rag_degraded": rag["degraded"],
+            "rag_reranker": rag["reranker"],
+            "rag_reranker_status": rag["reranker_status"],
             "rag_reindex_url": "/rag/reindex",
             **memory,
             "runtime_capabilities": runtime_capabilities(),
@@ -261,6 +263,7 @@ class ProductService:
             "llm_fallback_used": status.get("llm_fallback_used"),
             "llm_fallback_reason": llm["llm_fallback_reason"],
             "rag_context_count": status.get("rag_context_count"),
+            "rag_planning_summary": status.get("rag_planning_summary"),
             "memory_context_count": status.get("memory_context_count"),
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
@@ -332,6 +335,8 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "embedding_provider": None,
             "status": "disabled",
             "degraded": True,
+            "reranker": None,
+            "reranker_status": "disabled",
         }
     provider = getattr(getattr(rag_service, "embedding_provider", None), "name", None)
     if not provider:
@@ -339,13 +344,15 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "embedding_provider": None,
             "status": "unknown",
             "degraded": True,
+            "reranker": _rag_reranker_name(rag_service),
+            "reranker_status": _rag_reranker_status(rag_service),
         }
     provider_name = str(provider)
     if provider_name.startswith("nvidia:"):
         status = "primary_nvidia_bge_m3"
         degraded = False
     elif provider_name.startswith("sentence-transformers:"):
-        status = "local_sentence_transformers_fallback"
+        status = "local_sentence_transformers_explicit"
         degraded = True
     elif provider_name.startswith("hashing-"):
         status = "deterministic_hash_fallback"
@@ -357,7 +364,25 @@ def _rag_summary(rag_service: Any | None) -> dict:
         "embedding_provider": provider_name,
         "status": status,
         "degraded": degraded,
+        "reranker": _rag_reranker_name(rag_service),
+        "reranker_status": _rag_reranker_status(rag_service),
     }
+
+
+def _rag_reranker_name(rag_service: Any) -> str:
+    reranker = getattr(rag_service, "_reranker", None)
+    return str(getattr(reranker, "name", "not_loaded"))
+
+
+def _rag_reranker_status(rag_service: Any) -> str:
+    name = _rag_reranker_name(rag_service)
+    if name == "passthrough":
+        return "passthrough_no_rerank"
+    if name.startswith("cross-encoder:"):
+        return "explicit_local_reranker"
+    if name == "not_loaded":
+        return "not_loaded"
+    return "custom"
 
 
 def _resolve_blender_binary(binary: str) -> Path | None:
@@ -1279,12 +1304,10 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
             {
                 "title": "RAG en mode dégradé",
                 "severity": "warning",
-                "impact": (
-                    "La recherche de contexte n'utilise pas le provider NVIDIA BGE-M3 primaire."
-                ),
+                "impact": ("La recherche de contexte n'utilise pas l'API NVIDIA BGE-M3 primaire."),
                 "recommended_action": (
-                    "Configurer NVIDIA_API_KEY puis relancer /rag/reindex si la qualité RAG "
-                    "est importante pour ce workflow."
+                    "Configurer NVIDIA_API_KEY puis relancer /rag/reindex. Utilisez le mode "
+                    "déterministe uniquement pour les tests/bootstrap."
                 ),
                 "technical_code": f"STUDIO_RAG_DEGRADED:{status}",
             }

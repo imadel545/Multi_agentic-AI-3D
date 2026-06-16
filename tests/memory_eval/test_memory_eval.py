@@ -11,7 +11,11 @@ from core.services.blender_runner import BlenderRunner
 def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_query(
     tmp_path: Path,
 ) -> None:
-    rag_service = RagService(project_root=Path.cwd(), qdrant_path=tmp_path / "qdrant")
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
     memory_service = MemoryService(tmp_path / "memory.db", rag_service=rag_service)
     orchestrator = DesignOrchestrator(
         registry=AssetRegistry(Path("assets/manifests")),

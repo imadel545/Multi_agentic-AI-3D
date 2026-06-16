@@ -57,7 +57,17 @@ def test_parametric_golden_scene(name: str, requirements_text: str, tmp_path: Pa
         assert status["mesh_qa_passed"] is True
         assert status["glb_inspection_summary"]["inspection_mode"] == "glb_parse"
         assert status["glb_inspection_summary"]["mesh_count"] > 0
+        assert status["glb_inspection_summary"]["checks"]["has_labels"] is True
         assert status["geometry_validation_summary"]["status"] == "passed"
+        assert status["geometry_validation_summary"]["checks"]["label_count_valid"] is True
+        scene_spec = client.get(f"/designs/{workflow_id}/artifacts/scene_spec").json()
+        assert status["geometry_validation_summary"]["object_counts"]["label"] >= len(
+            scene_spec["sectors"]
+        )
+        if name == "lattice_30m":
+            assert status["glb_inspection_summary"]["checks"]["has_foundation"] is True
+            assert status["geometry_validation_summary"]["checks"]["foundation_count_valid"] is True
+            assert status["geometry_validation_summary"]["object_counts"]["foundation"] >= 1
 
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["generation_strategy"] == "parametric_generated"

@@ -47,6 +47,8 @@ def main() -> int:
         _create_power_cabinet(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_gps_antenna", False):
         _create_gps_antenna(bpy, scene, procedural_objects, asset_imports, asset_warnings)
+    if scene["visual_elements"].get("include_labels", False):
+        _create_labels(bpy, scene, procedural_objects)
     camera_metadata = _create_camera_and_light(bpy, scene)
 
     glb_path = output_dir / "design.glb"
@@ -666,6 +668,71 @@ def _create_gps_antenna(
     procedural_objects.append("gps_antenna")
 
 
+def _create_labels(bpy, scene: dict, procedural_objects: list[str]) -> None:
+    characteristics = scene["tower"].get("characteristics", {})
+    base_width = float(characteristics.get("base_width_m") or 4.0)
+    mount_radius = base_width / 2 + 1.25
+    for sector in scene["sectors"]:
+        azimuth_deg = float(sector["azimuth_deg"])
+        azimuth = math.radians(azimuth_deg)
+        x = math.sin(azimuth) * mount_radius
+        y = math.cos(azimuth) * mount_radius
+        z = float(sector["install_height_m"]) + 1.05
+        label_name = f"label_sector_{sector['sector_id']}_{_azimuth_label(azimuth_deg)}"
+        label_text = (
+            f"{sector['sector_id']} {azimuth_deg:g}° HBA {float(sector['install_height_m']):g}m"
+        )
+        _create_text_label(bpy, label_name, label_text, (x, y, z))
+        procedural_objects.append(f"label:{sector['sector_id']}")
+    if scene["visual_elements"].get("include_power_cabinet", False):
+        offset = max(3.0, base_width * 1.2)
+        _create_text_label(
+            bpy,
+            "label_power_cabinet",
+            "Power cabinet",
+            (offset, -0.55, 1.75),
+            size=0.28,
+        )
+        procedural_objects.append("label:power_cabinet")
+    if scene["visual_elements"].get("include_gps_antenna", False):
+        height = float(scene["tower"]["height_m"])
+        mount_radius = base_width / 2 + 0.65
+        _create_text_label(
+            bpy,
+            "label_gps_antenna",
+            "GPS",
+            (0.0, mount_radius, height + 0.55),
+            size=0.26,
+        )
+        procedural_objects.append("label:gps_antenna")
+
+
+def _create_text_label(
+    bpy,
+    name: str,
+    text: str,
+    location: tuple[float, float, float],
+    *,
+    size: float = 0.32,
+) -> None:
+    bpy.ops.object.text_add(location=location, rotation=(math.radians(75), 0.0, 0.0))
+    label = bpy.context.object
+    label.name = name
+    label.data.name = f"{name}_text"
+    label.data.body = text
+    label.data.align_x = "CENTER"
+    label.data.align_y = "CENTER"
+    label.data.size = size
+    label.data.extrude = 0.006
+    label.data.materials.append(_material(bpy, "label_dark_engraving", (0.04, 0.05, 0.055, 1)))
+    bpy.ops.object.convert(target="MESH")
+    bpy.context.object.name = name
+
+
+def _azimuth_label(value: float) -> str:
+    return f"{int(value)}deg" if float(value).is_integer() else f"{value:g}deg".replace(".", "p")
+
+
 def _accessory_asset(scene: dict, asset_type: str) -> dict | None:
     for accessory in scene.get("accessory_assets", []):
         if accessory.get("asset_type") == asset_type:
@@ -1167,6 +1234,8 @@ def _assets_used(scene: dict) -> list[str]:
 def _procedural_objects_from_scene(scene: dict) -> list[str]:
     objects = ["tower"]
     characteristics = scene["tower"].get("characteristics", {})
+    if characteristics.get("foundation_type", "concrete_pad") == "concrete_pad":
+        objects.append("foundation_concrete_pad")
     if characteristics.get("has_platform"):
         objects.extend(
             f"tower_platform:{index + 1}"
@@ -1195,7 +1264,12 @@ def _procedural_objects_from_scene(scene: dict) -> list[str]:
     if scene["visual_elements"].get("include_gps_antenna"):
         objects.append("gps_antenna")
     if scene["visual_elements"].get("include_labels"):
-        objects.append("labels_metadata")
+        for sector in scene["sectors"]:
+            objects.append(f"label:{sector['sector_id']}")
+        if scene["visual_elements"].get("include_power_cabinet"):
+            objects.append("label:power_cabinet")
+        if scene["visual_elements"].get("include_gps_antenna"):
+            objects.append("label:gps_antenna")
     return objects
 
 
