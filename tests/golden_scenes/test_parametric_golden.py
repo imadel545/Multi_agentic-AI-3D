@@ -53,7 +53,7 @@ def test_parametric_golden_scene(name: str, requirements_text: str, tmp_path: Pa
         assert status["status"] == "completed"
         assert status["generation_mode"] == "real_blender"
         assert status["generation_strategy"] == "parametric_generated"
-        assert status["mesh_qa_level"] == "mesh_level_basic"
+        assert status["mesh_qa_level"] in {"mesh_level_basic", "mesh_level_transform_basic"}
         assert status["mesh_qa_passed"] is True
         assert status["glb_inspection_summary"]["inspection_mode"] == "glb_parse"
         assert status["glb_inspection_summary"]["mesh_count"] > 0
@@ -71,7 +71,7 @@ def test_parametric_golden_scene(name: str, requirements_text: str, tmp_path: Pa
 
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["generation_strategy"] == "parametric_generated"
-        assert bundle["mesh_qa_level"] == "mesh_level_basic"
+        assert bundle["mesh_qa_level"] in {"mesh_level_basic", "mesh_level_transform_basic"}
         assert bundle["mesh_qa_passed"] is True
         assert any(a["name"] == "design.glb" and a["available"] for a in bundle["viewer_artifacts"])
     finally:

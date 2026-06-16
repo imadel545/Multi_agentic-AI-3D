@@ -24,4 +24,9 @@ class GeometryValidationReport(StrictModel):
     azimuth_tolerance_deg: float = Field(default=5.0, gt=0)
     bounding_box_m: BoundingBoxM | None = None
     mesh_qa: MeshQAReport | None = None
-    mesh_qa_level: Literal["mesh_level_basic", "metadata_only", "not_available"] = "metadata_only"
+    mesh_qa_level: Literal[
+        "mesh_level_transform_basic",
+        "mesh_level_basic",
+        "metadata_only",
+        "not_available",
+    ] = "metadata_only"

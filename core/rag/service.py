@@ -50,7 +50,10 @@ class RagService:
         embedding_provider_name: str = "nvidia",
         embedding_model: str = DEFAULT_MODEL,
         reranker: Reranker | None = None,
-        reranker_model: str = "BAAI/bge-reranker-v2-m3",
+        reranker_provider_name: str = "nvidia",
+        reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2",
+        reranker_api_key: str | None = None,
+        reranker_base_url: str = "https://ai.api.nvidia.com/v1",
         query_cache_ttl_s: float = 30.0,
     ) -> None:
         self.project_root = project_root
@@ -60,7 +63,10 @@ class RagService:
             embedding_provider_name, embedding_model
         )
         self._reranker = reranker
+        self._reranker_provider_name = reranker_provider_name
         self._reranker_model = reranker_model
+        self._reranker_api_key = reranker_api_key
+        self._reranker_base_url = reranker_base_url
         self._client: QdrantClient | None = None
         self.query_cache: TTLCache[list[RagSearchResult]] = TTLCache(ttl_s=query_cache_ttl_s)
 
@@ -77,7 +83,12 @@ class RagService:
     @property
     def reranker(self) -> Reranker:
         if self._reranker is None:
-            self._reranker = build_reranker(self._reranker_model)
+            self._reranker = build_reranker(
+                self._reranker_model,
+                provider_name=self._reranker_provider_name,
+                api_key=self._reranker_api_key,
+                base_url=self._reranker_base_url,
+            )
         return self._reranker
 
     def reindex(self) -> RagIndexReport:

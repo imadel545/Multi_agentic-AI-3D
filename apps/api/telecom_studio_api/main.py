@@ -101,11 +101,13 @@ project_spec_mapper = ProjectDesignSpecMapper()
 rag_embedding_provider = build_embedding_provider(
     settings.embedding_provider,
     settings.embedding_model,
-    api_key=settings.nvidia_api_key,
+    api_key=settings.resolved_nvidia_api_key,
 )
 rag_reranker = build_reranker(
     settings.reranker_model,
     provider_name=settings.reranker_provider,
+    api_key=settings.resolved_nvidia_api_key,
+    base_url=settings.reranker_base_url,
 )
 rag_service = RagService(
     project_root=settings.project_root,
@@ -113,6 +115,10 @@ rag_service = RagService(
     qdrant_url=settings.qdrant_url,
     embedding_provider=rag_embedding_provider,
     reranker=rag_reranker,
+    reranker_provider_name=settings.reranker_provider,
+    reranker_model=settings.reranker_model,
+    reranker_api_key=settings.resolved_nvidia_api_key,
+    reranker_base_url=settings.reranker_base_url,
 )
 memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_service)
 groq_client = (

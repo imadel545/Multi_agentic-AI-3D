@@ -18,9 +18,24 @@ PLANNING_HINT_KEYS = {
     "include_cables",
     "include_sector_beams",
     "include_labels",
+    "include_power_cabinet",
+    "include_gps_antenna",
+    "include_rru",
+    "foundation_type",
+    "mechanical_tilt_deg",
+    "electrical_tilt_deg",
 }
 PLANNING_HINT_ALIASES = {
     "include_beams": "include_sector_beams",
+    "hba_m": "antenna_install_height_m",
+    "antenna_hba_m": "antenna_install_height_m",
+    "sector_beamwidth_deg": "beamwidth_deg",
+    "include_gps": "include_gps_antenna",
+    "include_cabinet": "include_power_cabinet",
+    "include_power_box": "include_power_cabinet",
+    "include_foundation": "foundation_type",
+    "mechanical_tilt": "mechanical_tilt_deg",
+    "electrical_tilt": "electrical_tilt_deg",
 }
 
 

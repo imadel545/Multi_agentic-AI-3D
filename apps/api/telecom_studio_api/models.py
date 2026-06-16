@@ -62,6 +62,10 @@ class WorkflowStatus(BaseModel):
     llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
+    rag_reranker_provider: str | None = None
+    rag_reranker_model: str | None = None
+    rag_reranker_status: str | None = None
+    rag_reranker_degraded_reason: str | None = None
     memory_hits: int | None = None
     memory_context_count: int | None = None
     generation_mode: str | None = None
@@ -390,6 +394,7 @@ class ViewerBundle(BaseModel):
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None
+    rag_evidence_url: str | None = None
     extraction_provider: str | None = None
     llm_provider: str | None = None
     llm_available: bool | None = None
@@ -397,6 +402,10 @@ class ViewerBundle(BaseModel):
     llm_fallback_reason: str | None = None
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
+    rag_reranker_provider: str | None = None
+    rag_reranker_model: str | None = None
+    rag_reranker_status: str | None = None
+    rag_reranker_degraded_reason: str | None = None
     memory_context_count: int | None = None
     qa_summary: dict | None = None
     viewer_artifacts: list[ViewerArtifact]
@@ -459,6 +468,9 @@ class StudioSummary(BaseModel):
     rag_degraded: bool = False
     rag_reranker: str | None = None
     rag_reranker_status: str | None = None
+    rag_reranker_provider: str | None = None
+    rag_reranker_model: str | None = None
+    rag_reranker_degraded_reason: str | None = None
     rag_reindex_url: str | None = None
     memory_status: str | None = None
     memory_backend: str | None = None

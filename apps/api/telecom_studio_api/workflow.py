@@ -994,6 +994,7 @@ class WorkflowService:
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
+        rag_runtime = _rag_runtime_summary(self.orchestrator.rag_service)
         llm_available = llm_available_from_workflow_service(self)
         llm_reason = llm_fallback_reason(
             provider=result.llm_provider,
@@ -1010,6 +1011,7 @@ class WorkflowService:
             "quality_gates": str(output_dir / "quality_gates.json"),
             "qa_report": str(output_dir / "qa_report.json"),
             "generation_report": str(output_dir / "generation_report.json"),
+            "rag_evidence": str(output_dir / "rag_evidence.json"),
             "glb_inspection": str(output_dir / "glb_inspection.json"),
             "geometry_validation": str(output_dir / "geometry_validation.json"),
             "preview_inspection": str(output_dir / "preview_inspection.json"),
@@ -1036,6 +1038,10 @@ class WorkflowService:
             "llm_fallback_reason": llm_reason,
             "rag_context_count": len(result.rag_context),
             "rag_planning_summary": _rag_planning_summary(result),
+            "rag_reranker_provider": rag_runtime["rag_reranker_provider"],
+            "rag_reranker_model": rag_runtime["rag_reranker_model"],
+            "rag_reranker_status": rag_runtime["rag_reranker_status"],
+            "rag_reranker_degraded_reason": rag_runtime["rag_reranker_degraded_reason"],
             "memory_hits": result.memory_recall.memory_hits if result.memory_recall else 0,
             "memory_context_count": result.memory_recall.memory_context_count
             if result.memory_recall
@@ -1179,6 +1185,10 @@ class WorkflowService:
             self._write_json(output_dir / "qa_report.json", result.qa_report.model_dump())
         if result.generation:
             self._write_json(output_dir / "generation_report.json", result.generation.model_dump())
+        self._write_json(
+            output_dir / "rag_evidence.json",
+            _rag_evidence(result, _rag_runtime_summary(self.orchestrator.rag_service)),
+        )
         if result.glb_inspection:
             self._write_json(output_dir / "glb_inspection.json", result.glb_inspection.model_dump())
         if result.geometry_validation:
@@ -1305,6 +1315,7 @@ def _extraction_report(result: OrchestratorResult) -> dict:
         "rag_used_for_extraction": False,
         "rag_context_count": len(result.rag_context),
         "rag_planning_summary": _rag_planning_summary(result),
+        "rag_evidence_artifact": "rag_evidence.json",
         "repaired_fields": repaired_fields,
         "inferred_fields": inferred_fields,
         "confidence": round(confidence, 2),
@@ -1343,6 +1354,7 @@ def _rag_planning_summary(result: OrchestratorResult) -> dict:
         "rag_context_count": len(result.rag_context),
         "planning_hint_context_count": len(hint_contexts),
         "candidate_hint_fields": sorted(hint_fields),
+        "controlled_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
         "top_contexts": top_contexts[:5],
         "limitations": [
             "RAG does not override deterministic validation.",
@@ -1350,6 +1362,109 @@ def _rag_planning_summary(result: OrchestratorResult) -> dict:
             "RAG is not used for RequirementSpec extraction in v1.",
         ],
     }
+
+
+def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
+    candidates = []
+    for context in result.rag_context:
+        payload = context.get("payload") if isinstance(context, dict) else None
+        payload = payload if isinstance(payload, dict) else {}
+        raw_hints = payload.get("planning_hints")
+        hints = raw_hints if isinstance(raw_hints, dict) else {}
+        controlled_hints = {
+            str(key): value
+            for key, value in hints.items()
+            if str(key) in _CONTROLLED_RAG_HINT_FIELDS
+        }
+        rejected_hints = sorted(str(key) for key in hints.keys() if key not in controlled_hints)
+        candidates.append(
+            {
+                "collection": context.get("collection"),
+                "doc_id": context.get("doc_id"),
+                "score": context.get("score"),
+                "source_path": _public_rag_source_path(payload.get("source_path")),
+                "filename": payload.get("filename"),
+                "doc_type": payload.get("doc_type"),
+                "candidate_hint_fields": sorted(controlled_hints),
+                "controlled_hints": controlled_hints,
+                "rejected_hint_fields": rejected_hints,
+                "reason": _rag_candidate_reason(controlled_hints, context),
+            }
+        )
+    summary = _rag_planning_summary(result)
+    return {
+        "schema_name": "RagEvidence",
+        "rag_used_for_extraction": False,
+        "rag_used_for_planning": summary["rag_used_for_planning"],
+        "rag_planning_mode": summary["rag_planning_mode"],
+        "rag_context_count": len(result.rag_context),
+        "planning_hint_context_count": summary["planning_hint_context_count"],
+        "candidate_hint_fields": summary["candidate_hint_fields"],
+        "controlled_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
+        "policy": {
+            "scene_spec_source_of_truth": "RequirementSpec -> SceneSpec deterministic planner",
+            "override_user_or_document_fields": False,
+            "free_text_mutates_scene": False,
+            "allowed_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
+        },
+        **rag_runtime,
+        "contexts": candidates[:20],
+        "limitations": [
+            "RAG is evidence and controlled planning context, not a free-form planner.",
+            "RAG does not participate in RequirementSpec extraction in v1.",
+            "Only whitelisted payload.planning_hints are eligible for planner influence.",
+        ],
+    }
+
+
+def _rag_runtime_summary(rag_service: object | None) -> dict:
+    if rag_service is None:
+        return {
+            "rag_reranker_provider": None,
+            "rag_reranker_model": None,
+            "rag_reranker_status": "disabled",
+            "rag_reranker_degraded_reason": None,
+        }
+    reranker = getattr(rag_service, "_reranker", None)
+    return {
+        "rag_reranker_provider": getattr(
+            reranker,
+            "provider",
+            getattr(rag_service, "_reranker_provider_name", None),
+        ),
+        "rag_reranker_model": getattr(
+            reranker,
+            "model_name",
+            getattr(rag_service, "_reranker_model", None),
+        ),
+        "rag_reranker_status": getattr(reranker, "status", "not_loaded"),
+        "rag_reranker_degraded_reason": getattr(reranker, "degraded_reason", None),
+    }
+
+
+def _rag_candidate_reason(controlled_hints: dict, context: dict) -> str:
+    if controlled_hints:
+        fields = ", ".join(sorted(controlled_hints))
+        return f"Structured planning hints available: {fields}."
+    score = context.get("score")
+    if score is not None:
+        return f"Retrieved context only; score={score}."
+    return "Retrieved context only; no structured planning hints."
+
+
+_CONTROLLED_RAG_HINT_FIELDS = {
+    "antenna_install_height_m",
+    "beamwidth_deg",
+    "include_cables",
+    "include_sector_beams",
+    "include_labels",
+    "include_power_cabinet",
+    "include_gps_antenna",
+    "include_rru",
+    "foundation_type",
+    "mechanical_tilt_deg",
+    "electrical_tilt_deg",
+}
 
 
 def _public_rag_source_path(value: object) -> str | None:
@@ -1767,6 +1882,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "quality_gates": "quality_gates.json",
     "qa_report": "qa_report.json",
     "generation_report": "generation_report.json",
+    "rag_evidence": "rag_evidence.json",
     "glb_inspection": "glb_inspection.json",
     "geometry_validation": "geometry_validation.json",
     "preview_inspection": "preview_inspection.json",

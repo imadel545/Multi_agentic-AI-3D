@@ -44,9 +44,20 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["rag_reranker_status"] in {
             "passthrough_no_rerank",
             "explicit_local_reranker",
+            "primary_nvidia_reranker",
+            "degraded_passthrough",
             "not_loaded",
             "custom",
         }
+        assert summary["rag_reranker_provider"] in {
+            "nvidia",
+            "local",
+            "passthrough",
+            "disabled",
+            None,
+        }
+        assert "rag_reranker_model" in summary
+        assert "rag_reranker_degraded_reason" in summary
         assert summary["rag_reindex_url"] == "/rag/reindex"
         assert summary["memory_status"] in {"available", "disabled"} or summary[
             "memory_status"
@@ -172,6 +183,7 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["qa_report_url"]
         assert bundle["generation_report_url"]
         assert bundle["geometry_validation_url"]
+        assert bundle["rag_evidence_url"]
         assert bundle["llm_provider"] == "deterministic"
         assert bundle["extraction_provider"] == "deterministic"
         assert isinstance(bundle["llm_available"], bool)
@@ -181,6 +193,11 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert isinstance(bundle["rag_planning_summary"], dict)
         assert bundle["rag_planning_summary"]["rag_used_for_extraction"] is False
         assert "rag_planning_mode" in bundle["rag_planning_summary"]
+        assert isinstance(bundle["rag_planning_summary"]["controlled_hint_fields"], list)
+        assert "rag_reranker_status" in bundle
+        assert "rag_reranker_provider" in bundle
+        assert "rag_reranker_model" in bundle
+        assert "rag_reranker_degraded_reason" in bundle
         assert bundle["memory_context_count"] == 0 or isinstance(
             bundle["memory_context_count"], int
         )
@@ -206,6 +223,7 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert "extraction_report.json" in names
         assert "qa_report.json" in names
         assert "geometry_validation.json" in names
+        assert "rag_evidence.json" in names
         for artifact in bundle["viewer_artifacts"]:
             assert artifact["url"].startswith(f"/designs/{workflow_id}/artifacts/")
             assert "/Users/" not in artifact["url"]

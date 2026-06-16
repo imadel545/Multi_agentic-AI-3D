@@ -44,6 +44,8 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
             "structured_planning_hints",
             "context_only_no_structured_hints",
         }
+        assert isinstance(status["rag_planning_summary"]["controlled_hint_fields"], list)
+        assert "rag_reranker_status" in status
         assert status["memory_context_count"] is not None
         assert status["runtime_capabilities"]["streaming_transport"] == "push_sse"
         assert any(action["action"] == "cancel" for action in status["unsupported_actions"])
@@ -145,12 +147,22 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert qa_report["checks"]["geometry_validation_valid"] is True
         assert qa_report["checks"]["preview_visual_quality_valid"] is True
 
+        rag_evidence = client.get(f"/designs/{workflow_id}/artifacts/rag_evidence").json()
+        assert rag_evidence["rag_used_for_extraction"] is False
+        assert rag_evidence["rag_context_count"] == status["rag_context_count"]
+        assert isinstance(rag_evidence["controlled_hint_fields"], list)
+        assert "rag_reranker_status" in rag_evidence
+        assert "/Users/" not in json.dumps(rag_evidence, ensure_ascii=False)
+
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["workflow_id"] == workflow_id
         assert bundle["scene_spec_url"].startswith(f"/designs/{workflow_id}/artifacts/scene_spec")
         assert bundle["qa_report_url"].startswith(f"/designs/{workflow_id}/artifacts/qa_report")
         assert bundle["generation_report_url"].startswith(
             f"/designs/{workflow_id}/artifacts/generation_report"
+        )
+        assert bundle["rag_evidence_url"].startswith(
+            f"/designs/{workflow_id}/artifacts/rag_evidence"
         )
         assert bundle["geometry_validation_url"].startswith(
             f"/designs/{workflow_id}/artifacts/geometry_validation"

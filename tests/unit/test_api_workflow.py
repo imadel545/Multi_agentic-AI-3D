@@ -105,6 +105,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert Path(internal_status["artifacts"]["quality_gates"]).exists()
         assert Path(internal_status["artifacts"]["qa_report"]).exists()
         assert Path(internal_status["artifacts"]["generation_report"]).exists()
+        assert Path(internal_status["artifacts"]["rag_evidence"]).exists()
         assert Path(internal_status["artifacts"]["glb_inspection"]).exists()
         assert Path(internal_status["artifacts"]["geometry_validation"]).exists()
         assert Path(internal_status["artifacts"]["preview_inspection"]).exists()
@@ -113,6 +114,12 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert Path(internal_status["artifacts"]["glb"]).exists()
         assert Path(internal_status["artifacts"]["preview"]).exists()
         assert Path(internal_status["artifacts"]["download"]).exists()
+        rag_evidence = json.loads(
+            Path(internal_status["artifacts"]["rag_evidence"]).read_text(encoding="utf-8")
+        )
+        assert rag_evidence["rag_used_for_extraction"] is False
+        assert isinstance(rag_evidence["controlled_hint_fields"], list)
+        assert "rag_reranker_status" in rag_evidence
         scene_status = json.loads(
             Path(internal_status["artifacts"]["scene_spec"]).read_text(encoding="utf-8")
         )

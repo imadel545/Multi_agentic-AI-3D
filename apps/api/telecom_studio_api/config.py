@@ -24,8 +24,9 @@ class Settings(BaseSettings):
     embedding_provider: str = "nvidia"
     embedding_model: str = "baai/bge-m3"
     nvidia_api_key: str | None = Field(default=None, repr=False)
-    reranker_provider: str = "passthrough"
-    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_provider: str = "nvidia"
+    reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2"
+    reranker_base_url: str = "https://ai.api.nvidia.com/v1"
     allow_blender_fallback: bool = False
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 
@@ -52,6 +53,18 @@ class Settings(BaseSettings):
             or os.getenv("TELECOM_STUDIO_GROQ_API_KEY")
             or os.getenv("GROQ_API_KEY")
             or _read_env_file_value(self.project_root / ".env", ["GROQ_API_KEY", "groq_api"])
+        )
+
+    @property
+    def resolved_nvidia_api_key(self) -> str | None:
+        return (
+            self.nvidia_api_key
+            or os.getenv("TELECOM_STUDIO_NVIDIA_API_KEY")
+            or os.getenv("NVIDIA_API_KEY")
+            or _read_env_file_value(
+                self.project_root / ".env",
+                ["NVIDIA_API_KEY", "TELECOM_STUDIO_NVIDIA_API_KEY", "nvidia_api"],
+            )
         )
 
     @property

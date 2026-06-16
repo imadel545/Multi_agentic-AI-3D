@@ -11,7 +11,7 @@ FastAPI
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
   -> Groq extraction or deterministic fallback
-  -> NVIDIA API BGE-M3 RAG context (advisory, structured hints only)
+  -> NVIDIA API BGE-M3 RAG context + NVIDIA reranker evidence
   -> SQLite memory recall
   -> asset registry + inventory
   -> SceneSpec planner
@@ -31,11 +31,12 @@ FastAPI
 - `core/document_pack`: ZIP/PDF/OCR/DXF extraction and `ProjectDesignSpec`.
 - `core/orchestration`: LangGraph workflow and route logic.
 - `core/agents`: deterministic/LLM wrappers for extraction, planning, editing, RF/tower checks.
-- `core/rag`: Qdrant, NVIDIA API BGE-M3 embeddings, deterministic test/bootstrap mode,
-  passthrough reranker by default with explicit local override.
+- `core/rag`: Qdrant, NVIDIA API BGE-M3 embeddings, NVIDIA reranker with visible
+  degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
-- `core/qa`: GLB structural parse, proxy geometry, preview luminance QA.
+- `core/qa`: GLB structural parse, mesh/accessor/transform basic QA, proxy
+  geometry, preview luminance QA.
 
 ## Runtime truths
 
@@ -53,7 +54,8 @@ FastAPI
   no broker, cancellation manager, or durable resume yet.
 - Asset import fallback can still create procedural geometry if an import fails, but the active
   inventory has 12 manifests, 12 GLB files, and 0 missing files.
-- Geometry QA is object/name/count/metadata based, not mesh-transform exact.
-- RAG is not used for extraction in v1; only structured `payload.planning_hints`
-  can influence planning, and `rag_planning_summary` exposes whether that
-  happened.
+- Geometry QA is mesh/accessor/role-transform basic plus object/name/count/metadata
+  checks; it is not collision/RF/vendor-grade QA.
+- RAG is not used for extraction in v1; only structured, whitelisted
+  `payload.planning_hints` can influence planning, and `rag_planning_summary`
+  plus `rag_evidence.json` expose whether that happened.

@@ -2,7 +2,8 @@
 
 Statuts principaux: `IMPLEMENTED`, `IMPLEMENTED_LIMITED`, `IMPORT_ONLY`,
 `UNSUPPORTED_WITHOUT_TOOL`, `ADVISORY`, `FUTURE`, `REJECTED`.
-Readiness produit détaillée: `docs/BACKEND_PRODUCT_READINESS_REPORT.md`.
+Cette matrice est la classification active; les anciens rapports readiness ont
+été supprimés pour réduire le bruit.
 
 | Capability | Status | Evidence | Limite / vérité frontend |
 |---|---|---|---|
@@ -16,15 +17,15 @@ Readiness produit détaillée: `docs/BACKEND_PRODUCT_READINESS_REPORT.md`.
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
 | DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
 | DWG | UNSUPPORTED_WITHOUT_TOOL | `dwgread`/ODA/FreeCAD detection | Conversion dépend d'outil local. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag` | NVIDIA API `baai/bge-m3` est le chemin produit; hash déterministe uniquement test/bootstrap explicite. |
-| Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py` | Passthrough par défaut; modèle local seulement si activé explicitement. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
+| Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py`, `/studio/summary` | NVIDIA API par défaut; passthrough seulement explicite ou dégradé visible; modèle local seulement si activé explicitement. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
 | Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
 | Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |
 | GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
-| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py` | `object_name_based_geometry` + `metadata_based_height_azimuth`. |
+| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py`, `core/qa/mesh_qa.py` | `mesh_level_transform_basic` quand transforms GLB lisibles, sinon `mesh_level_basic`; toujours pas collision/RF/vendor-grade. |
 | Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | `preview_luminance_only`, pas jugement visuel sémantique. |
 | Repair loop | IMPLEMENTED_LIMITED | `core/orchestration/langgraph_orchestrator.py` | Répare certains défauts de SceneSpec; pas boucle autonome générale. |
 | Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles: `node_started`, résultat du nœud, artefacts prêts, QA, issues; runtime local-first. |
@@ -42,7 +43,7 @@ prétend pas à une autonomie générale.
 |---|---|---|---|
 | `design_created` | Workflow service | `WorkflowService.create_design` | Démarrage local d'un `workflow_id`, pas création de project/run. |
 | `extract_requirements` | LangGraph node + controlled LLM wrapper | `RequirementExtractor`, `GroqStructuredClient` | GPT-OSS `openai/gpt-oss-120b` si disponible; fallback déterministe visible via `extraction_provider`, `llm_fallback_used`, `llm_fallback_reason`. |
-| `retrieve_rag_context` | LangGraph node + RAG service | `RagService` | RAG sert de contexte planning. Seuls les `payload.planning_hints` structurés peuvent influencer `SceneSpec`; pas utilisé pour l'extraction LLM v1. |
+| `retrieve_rag_context` | LangGraph node + RAG service | `RagService`, `rag_evidence.json` | RAG sert de contexte planning. Seuls les `payload.planning_hints` structurés et whitelistés peuvent influencer `SceneSpec`; pas utilisé pour l'extraction LLM v1. |
 | `memory_recall` | LangGraph node + SQLite/RAG service | `MemoryService` | Mémoire locale limitée; compteurs exposés dans `/studio/summary`. |
 | `select_assets` / `asset_fallback_handler` | LangGraph node + asset registry | `AssetRegistry`, manifests | Asset réel/import/fallback visible; `/assets/inventory` est typé. |
 | `validate_requirements` | LangGraph node + deterministic validators | `core/validation`, tower/RF validators | Validation métier contrôlée, pas décision libre LLM. |

@@ -173,6 +173,8 @@ def _accessory_scene():
 
 def _expected_object_names(scene) -> list[str]:
     names = ["tower_lattice"]
+    if scene.tower.characteristics.foundation_type == "concrete_pad":
+        names.append("foundation_concrete_pad")
     for sector in scene.sectors:
         names.extend(
             [
@@ -183,11 +185,17 @@ def _expected_object_names(scene) -> list[str]:
                 f"azimuth_arrow_{sector.sector_id}",
             ]
         )
+        if scene.visual_elements.include_labels:
+            names.append(f"label_sector_{sector.sector_id}_{int(sector.azimuth_deg)}deg")
     for accessory in scene.accessory_assets:
         if accessory.asset_type == "gps":
             names.append(f"gps_antenna_{accessory.asset_id}")
+            if scene.visual_elements.include_labels:
+                names.append("label_gps_antenna")
         if accessory.asset_type == "cabinet":
             names.append(f"power_cabinet_{accessory.asset_id}")
+            if scene.visual_elements.include_labels:
+                names.append("label_power_cabinet")
     return names
 
 

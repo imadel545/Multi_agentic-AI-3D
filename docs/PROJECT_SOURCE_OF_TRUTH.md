@@ -40,8 +40,11 @@ yet.
 - RAG fallback policy: no automatic local embedding model in the product path.
   Deterministic hash is allowed only for tests/bootstrap or explicit degraded
   mode; it is not product-quality retrieval.
-- Reranker: passthrough by default; local `BAAI/bge-reranker-v2-m3` only when
-  explicitly enabled by a developer.
+- Reranker: NVIDIA API by default with visible fail-open degraded passthrough.
+  Local `BAAI/bge-reranker-v2-m3` remains an explicit developer override only.
+- RAG evidence is written to `rag_evidence.json` and exposed through
+  `/viewer-bundle`; it lists retrieved sources, controlled candidate hints,
+  reranker status, and limitations.
 - Memory: local SQLite with writeback; optional Qdrant for some summaries.
 - Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
   conflicts, corrections, QA.
@@ -78,18 +81,19 @@ yet.
   reports.
 - Real QA categories:
   - `glb_parse_structural`
+  - `mesh_level_transform_basic` — GLB accessors plus readable role transforms
+    and approximate antenna HBA when transforms are available
   - `mesh_level_basic` — real bounding box from GLB accessors
   - `object_name_based_geometry`
   - `metadata_based_height_azimuth`
   - `preview_luminance_only`
 - Mesh QA v1 checks: GLB parse OK, tower height approximation, scene above
-  ground, scale realism, antenna count, RRU/cable/cabinet/GPS presence,
-  concrete pad presence when requested, and real label object presence when
-  `include_labels=true`.
-- Mesh QA v1 does **not** verify individual antenna HBA/azimuth from vertices
-  and does **not** perform collision detection.
-- QA does not yet finely validate transforms, materials, or exact mesh
-  dimensions.
+  ground, scale realism, antenna count, readable object transforms when present,
+  approximate HBA from antenna node transforms when possible, RRU/cable/cabinet/GPS
+  presence, concrete pad presence when requested, and real label object presence.
+- Mesh QA v1 does **not** verify exact antenna azimuth from vertices and does
+  **not** perform collision/RF/structural wind-load validation.
+- QA does not yet finely validate materials or vendor exact mesh dimensions.
 - Do not call this QA "advanced geometry".
 
 ## Events and runtime
@@ -121,10 +125,10 @@ yet.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation, and
   technical report, plus a compact QA summary for drawers.
-- Public workflow/viewer responses expose `rag_planning_summary` so the
-  frontend can distinguish retrieved context from structured hints that actually
-  influenced SceneSpec planning. RAG is not used for RequirementSpec extraction
-  in v1.
+- Public workflow/viewer responses expose `rag_planning_summary` and
+  `rag_evidence_url` so the frontend can distinguish retrieved context from
+  structured hints that actually influenced SceneSpec planning. RAG is not used
+  for RequirementSpec extraction in v1.
 - Edit and rollback responses expose frontend action URLs (`viewer-bundle`,
   `timeline-summary`, `user-issues`, `current-operation`) and available actions
   so the UI does not infer post-action state.
@@ -143,9 +147,10 @@ integration against the existing `/designs` + `workflow_id` surface. This is
 not a claim that the product is finished or vendor-grade.
 
 Before frontend implementation, the repo must be committed cleanly and the UI
-must be planned against the documented limitations: `mesh_level_basic` QA,
-local-process `push_sse`, limited document-pack intelligence, passthrough
-reranking, non-vendor-grade assets, and no durable broker/cancellation.
+must be planned against the documented limitations: `mesh_level_transform_basic`
+or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack
+intelligence, fail-open reranking, non-vendor-grade assets, and no durable
+broker/cancellation.
 
 Reproducible proof: `tests/e2e/test_telecom_generation_proof.py` plus the
 targeted Product API, RAG, LangGraph, Blender, and QA tests listed in the final

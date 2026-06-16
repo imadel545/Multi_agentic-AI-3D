@@ -34,6 +34,8 @@ memory_writeback
 - `retrieve_rag_context` utilise le texte original enrichi par le
   `RequirementSpec` structuré. Le nœud peut fournir du contexte et des
   `payload.planning_hints`; il ne modifie pas directement la géométrie.
+  `rag_evidence.json` expose les sources, champs candidats, scores et statut
+  reranker.
 - Le checkpoint saver existe, mais il n'est pas encore une vraie base de reprise/cancellation.
 - Les nœuds émettent maintenant `node_started`, puis `node_completed`,
   `node_failed` ou `node_skipped` avec phase, label humain, message de
@@ -48,6 +50,8 @@ memory_writeback
 - Utiliser `/current-operation` pour `current_phase`, `current_node` et action suivante.
 - Utiliser `rag_planning_summary` pour afficher si RAG a seulement fourni du
   contexte ou s'il a fourni des hints structurés consommés par le planner.
+- Utiliser `rag_evidence_url` dans le viewer/QA drawer pour montrer les sources
+  et la raison d'un mode reranker dégradé.
 - Garder raw trace JSON en détail secondaire seulement.
 
 ## À corriger plus tard

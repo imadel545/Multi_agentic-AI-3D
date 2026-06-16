@@ -228,6 +228,8 @@ def _object_prefix_counts(object_names: list[str]) -> dict[str, int]:
             "azimuth_arrow",
             "power_cabinet",
             "gps",
+            "foundation",
+            "label",
         ):
             if normalized == prefix or normalized.startswith(f"{prefix}_"):
                 counts[prefix] = counts.get(prefix, 0) + 1
@@ -320,8 +322,8 @@ class MeshQA:
                 f"got {actual_height:.2f}m"
             )
 
-        # Ground check: scene should not be mostly below z=0
-        if bounding_box.max_z < 0:
+        # Ground check: glTF is Y-up in exported coordinates.
+        if bounding_box.max_y < 0:
             critical_errors.append("MESH_SCENE_BELOW_GROUND")
             checks.append(MeshCheckResult(name="scene_above_ground", passed=False))
         else:
@@ -334,10 +336,11 @@ class MeshQA:
         else:
             checks.append(MeshCheckResult(name="scale_realistic", passed=True))
 
-        # Object count check (coarse)
-        payload = _read_glb_json(glb_path)
+        payload = _read_glb_json(glb_path) or {}
         object_names = [node.get("name", "") for node in payload.get("nodes", [])]
         prefix_counts = _object_prefix_counts(object_names)
+
+        # Object count check (coarse)
         expected_antennas = len(scene.sectors)
         antenna_count = prefix_counts.get("antenna", 0)
         checks.append(
@@ -352,22 +355,51 @@ class MeshQA:
                 f"MESH_ANTENNA_COUNT_LOW: expected {expected_antennas}, found {antenna_count}"
             )
 
-        # Azimuth/height check is intentionally basic: we cannot robustly derive HBA
-        # from raw vertices without object-role mapping, so we document the limitation.
+        transform_checks = _transform_checks(payload, scene)
+        checks.extend(transform_checks["checks"])
+        warnings.extend(transform_checks["warnings"])
+        mesh_level = (
+            "mesh_level_transform_basic"
+            if transform_checks["transform_checks_available"]
+            else "mesh_level_basic"
+        )
+
         limitations = [
-            "Mesh-level QA v1 does not verify individual antenna HBA or azimuth from vertices.",
-            "Collision detection is not implemented in v1.",
+            "Mesh-level QA v1 does not perform collision detection.",
+            "Mesh-level QA v1 does not validate RF propagation or structural wind/load.",
         ]
+        if transform_checks["transform_checks_available"]:
+            limitations.append(
+                "mesh_level_transform_basic verifies object-role node transforms and approximate "
+                "antenna height, not exact per-vertex antenna orientation."
+            )
+        else:
+            limitations.append(
+                "Mesh-level QA could not read role-specific transforms; individual antenna HBA "
+                "and azimuth remain metadata/object-name based."
+            )
+        limitations.extend(
+            [
+                "Azimuth arrows are verified by object names/metadata, not vector orientation.",
+                "Materials are not vendor-grade validated.",
+            ]
+        )
+
+        required_check_names = {
+            "tower_height_approx",
+            "antenna_count",
+            "scene_above_ground",
+            "scale_realistic",
+            "antenna_sector_transforms_present",
+            "antenna_hba_transform_approx",
+        }
 
         mesh_qa_passed = not critical_errors and not any(
-            c.name
-            in {"tower_height_approx", "antenna_count", "scene_above_ground", "scale_realistic"}
-            and not c.passed
-            for c in checks
+            c.name in required_check_names and not c.passed for c in checks
         )
 
         return MeshQAReport(
-            level="mesh_level_basic",
+            level=mesh_level,
             geometry_source=geometry_source,
             generation_strategy=generation_strategy,
             glb_parse_ok=True,
@@ -378,3 +410,141 @@ class MeshQA:
             mesh_qa_passed=mesh_qa_passed,
             limitations=limitations,
         )
+
+
+def _transform_checks(payload: dict[str, Any] | None, scene: SceneSpec) -> dict[str, Any]:
+    checks: list[MeshCheckResult] = []
+    warnings: list[str] = []
+    if not payload:
+        return {"checks": checks, "warnings": warnings, "transform_checks_available": False}
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, list):
+        return {"checks": checks, "warnings": warnings, "transform_checks_available": False}
+    named_nodes = [node for node in nodes if isinstance(node, dict) and node.get("name")]
+    transform_nodes = [node for node in named_nodes if "translation" in node or "matrix" in node]
+    if not transform_nodes:
+        checks.append(
+            MeshCheckResult(
+                name="object_transforms_readable",
+                passed=False,
+                detail="no named GLB nodes expose translation/matrix transforms",
+            )
+        )
+        return {"checks": checks, "warnings": warnings, "transform_checks_available": False}
+
+    checks.append(
+        MeshCheckResult(
+            name="object_transforms_readable",
+            passed=True,
+            detail=f"{len(transform_nodes)} named node transforms readable",
+        )
+    )
+    antenna_positions = _role_positions(transform_nodes, "antenna")
+    expected_sector_ids = {sector.sector_id for sector in scene.sectors}
+    sectors_with_antenna = {
+        sector_id
+        for sector_id in expected_sector_ids
+        if any(_normalize_object_name(sector_id) in name for name, _ in antenna_positions)
+    }
+    sector_transforms_present = sectors_with_antenna == expected_sector_ids
+    checks.append(
+        MeshCheckResult(
+            name="antenna_sector_transforms_present",
+            passed=sector_transforms_present,
+            detail=f"expected {sorted(expected_sector_ids)}, found {sorted(sectors_with_antenna)}",
+        )
+    )
+    if not sector_transforms_present:
+        warnings.append("MESH_ANTENNA_SECTOR_TRANSFORMS_MISSING")
+
+    expected_heights = [sector.install_height_m for sector in scene.sectors]
+    hba_check = _antenna_hba_transform_check(antenna_positions, expected_heights)
+    checks.append(
+        MeshCheckResult(
+            name="antenna_hba_transform_approx",
+            passed=hba_check["passed"],
+            detail=hba_check["detail"],
+        )
+    )
+    if not hba_check["passed"]:
+        warnings.append("MESH_ANTENNA_HBA_TRANSFORM_APPROX_FAILED")
+
+    if scene.visual_elements.include_labels:
+        label_positions = _role_positions(transform_nodes, "label")
+        checks.append(
+            MeshCheckResult(
+                name="label_transforms_present",
+                passed=len(label_positions) >= len(scene.sectors),
+                detail=f"expected >= {len(scene.sectors)}, found {len(label_positions)}",
+            )
+        )
+    if scene.tower.characteristics.foundation_type == "concrete_pad":
+        foundation_positions = _role_positions(transform_nodes, "foundation")
+        checks.append(
+            MeshCheckResult(
+                name="foundation_transform_present",
+                passed=bool(foundation_positions),
+                detail=f"found {len(foundation_positions)} foundation transform(s)",
+            )
+        )
+    if scene.visual_elements.include_power_cabinet:
+        cabinet_positions = _role_positions(transform_nodes, "power_cabinet")
+        checks.append(
+            MeshCheckResult(
+                name="power_cabinet_transform_present",
+                passed=bool(cabinet_positions),
+                detail=f"found {len(cabinet_positions)} cabinet transform(s)",
+            )
+        )
+    if scene.visual_elements.include_gps_antenna:
+        gps_positions = _role_positions(transform_nodes, "gps")
+        checks.append(
+            MeshCheckResult(
+                name="gps_transform_present",
+                passed=bool(gps_positions),
+                detail=f"found {len(gps_positions)} gps transform(s)",
+            )
+        )
+    return {"checks": checks, "warnings": warnings, "transform_checks_available": True}
+
+
+def _role_positions(
+    nodes: list[dict[str, Any]],
+    role_prefix: str,
+) -> list[tuple[str, tuple[float, float, float]]]:
+    positions = []
+    for node in nodes:
+        name = _normalize_object_name(str(node.get("name") or ""))
+        if not (name == role_prefix or name.startswith(f"{role_prefix}_")):
+            continue
+        matrix = _node_transform(node)
+        positions.append((name, (matrix[0][3], matrix[1][3], matrix[2][3])))
+    return positions
+
+
+def _antenna_hba_transform_check(
+    antenna_positions: list[tuple[str, tuple[float, float, float]]],
+    expected_heights: list[float],
+) -> dict[str, Any]:
+    if not antenna_positions:
+        return {"passed": False, "detail": "no antenna transforms found"}
+    expected = sum(expected_heights) / len(expected_heights)
+    axes = {
+        "y": [position[1] for _, position in antenna_positions],
+        "z": [position[2] for _, position in antenna_positions],
+    }
+    axis, values = min(
+        axes.items(),
+        key=lambda item: sum(abs(value - expected) for value in item[1]) / max(len(item[1]), 1),
+    )
+    tolerance = max(2.0, expected * 0.15)
+    near = [value for value in values if abs(value - expected) <= tolerance]
+    passed = len(near) >= len(expected_heights)
+    actual = sum(values) / len(values)
+    return {
+        "passed": passed,
+        "detail": (
+            f"axis={axis}, expected≈{expected:.2f}m, mean={actual:.2f}m, "
+            f"within_tolerance={len(near)}/{len(expected_heights)}"
+        ),
+    }

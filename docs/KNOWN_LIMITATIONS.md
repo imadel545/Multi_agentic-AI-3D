@@ -39,12 +39,14 @@ frontend.
   hash is not production quality.
 - After a provider/dimension change, the local Qdrant index must be rebuilt with
   `POST /rag/reindex`; otherwise `/rag/search` returns `409 RAG_INDEX_DIMENSION_MISMATCH`.
-- Reranker is passthrough by default; local reranker is an explicit developer
-  override, not product default.
+- Reranker product path is NVIDIA API, but it is fail-open. If unavailable,
+  vector order is used and `rag_reranker_degraded_reason` must be displayed.
+  Local reranker is an explicit developer override, not product default.
 - Memory is still limited, with incomplete semantic recall.
 - `rag_context_count > 0` does not mean the 3D plan changed. In v1, only
-  structured `payload.planning_hints` affect planning, and RAG is not used for
-  RequirementSpec extraction.
+  structured, whitelisted `payload.planning_hints` can affect planning; RAG is
+  not used for RequirementSpec extraction. Use `rag_evidence.json` for sources
+  and candidate hint proof.
 
 ## Documents
 
@@ -62,10 +64,12 @@ frontend.
   visible procedural geometry during a real Blender generation.
 - Geometry source of truth is `SceneSpec + parametric generator`; GLB is only
   the exported viewer result.
-- Mesh QA v1 (`mesh_level_basic`) computes real bounding boxes from GLB
-  accessors, but does **not** verify individual antenna HBA/azimuth from
-  vertices and does **not** perform collision detection.
-- No exact transform, material, or vendor-grade mesh dimension validation yet.
+- Mesh QA v1 is `mesh_level_transform_basic` when transforms are readable,
+  otherwise `mesh_level_basic`. It computes real bounding boxes from GLB
+  accessors and approximate HBA from node transforms when possible, but does
+  **not** verify exact antenna azimuth from vertices and does **not** perform
+  collision detection.
+- No material, RF, structural wind-load, or vendor-grade mesh dimension validation yet.
 - Internal/CC-BY assets are not vendor-grade.
 
 ## Can wait

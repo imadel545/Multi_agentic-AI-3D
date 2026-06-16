@@ -36,13 +36,17 @@ Il est court, strict et non négociable.
 Les documents actifs du projet sont :
 
 - `AGENTS.md`
+- `README.md`
 - `docs/PROJECT_SOURCE_OF_TRUTH.md`
 - `docs/BACKEND_CAPABILITY_MATRIX.md`
-- `docs/FRONTEND_PRODUCT_BLUEPRINT.md`
-- `docs/FRONTEND_ACCEPTANCE_CRITERIA.md`
-- `docs/CODEX_WORKING_METHOD.md`
 - `docs/API_FRONTEND_CONTRACT.md`
 - `docs/KNOWN_LIMITATIONS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/RAG_STRATEGY.md`
+- `docs/QA_STRATEGY.md`
+- `docs/LANGGRAPH_WORKFLOW.md`
+- `docs/FRONTEND_PRODUCT_BLUEPRINT.md`
+- `docs/FRONTEND_ACCEPTANCE_CRITERIA.md`
 
 `docs/archive/` est historique uniquement et ne doit pas être utilisé comme source de vérité active sauf demande explicite.
 

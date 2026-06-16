@@ -14,9 +14,11 @@ limitations and never advertises checks it cannot perform.
   warnings, and asset import records.
 - GLB structural QA: `glb_parse_structural` — node/mesh/material counts and
   expected object presence.
-- Mesh-level QA: `mesh_level_basic` parses GLB accessors to compute a real
-  world-space bounding box, approximate tower height, object counts, ground
-  checks, and scale realism.
+- Mesh-level QA: `mesh_level_transform_basic` when GLB role-node transforms are
+  readable; otherwise `mesh_level_basic`. It parses GLB accessors to compute a
+  real world-space bounding box, approximate tower height, object counts,
+  ground checks, scale realism, and approximate antenna HBA from transforms
+  when possible.
 - Geometry QA: combines object-name counts, metadata proxies, and Mesh QA
   results.
 - Height/azimuth QA: metadata-based checks plus bounding-box sanity.
@@ -28,7 +30,8 @@ limitations and never advertises checks it cannot perform.
 
 - GLB/GLTF JSON parse verifies nodes, meshes, materials and object names.
 - Mesh QA v1 reads vertex data from GLB accessors to compute a real bounding
-  box and checks tower height, ground plane, scale, and antenna count.
+  box and checks tower height, ground plane, scale, antenna count, role-node
+  transforms, and approximate antenna HBA when transforms are readable.
 - Geometry validator merges object-name counts, metadata proxies, and Mesh QA
   results; it fails when the real bounding box is unrealistic.
 - Preview inspector checks PNG resolution, luminance, contrast, and non-dark
@@ -40,7 +43,8 @@ limitations and never advertises checks it cannot perform.
 
 ## What is not yet real
 
-- Mesh QA v1 does **not** verify individual antenna HBA or azimuth from vertices.
+- Mesh QA v1 does **not** verify exact antenna azimuth or RF orientation from
+  vertices.
 - No collision detection between components.
 - No vendor-grade mesh/material validation.
 - No semantic visual judgement of the preview image.
@@ -62,5 +66,5 @@ limitations and never advertises checks it cannot perform.
 - Invalid requirements (e.g., tower height > 150 m, sector count > 12) fail with
   a clean `INVALID_REQUIREMENTS` validation error.
 - Viewer bundles contain no filesystem paths.
-- QA reports name proxy/real modes correctly (`mesh_level_basic`,
-  `glb_parse_structural`, etc.).
+- QA reports name proxy/real modes correctly (`mesh_level_transform_basic`,
+  `mesh_level_basic`, `glb_parse_structural`, etc.).

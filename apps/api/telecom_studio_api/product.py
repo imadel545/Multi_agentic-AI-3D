@@ -82,6 +82,9 @@ class ProductService:
             "rag_degraded": rag["degraded"],
             "rag_reranker": rag["reranker"],
             "rag_reranker_status": rag["reranker_status"],
+            "rag_reranker_provider": rag["reranker_provider"],
+            "rag_reranker_model": rag["reranker_model"],
+            "rag_reranker_degraded_reason": rag["reranker_degraded_reason"],
             "rag_reindex_url": "/rag/reindex",
             **memory,
             "runtime_capabilities": runtime_capabilities(),
@@ -215,6 +218,7 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("generation_report.json", "application/json", "generation_report")
         )
+        viewer_artifacts.append(_artifact("rag_evidence.json", "application/json", "rag_evidence"))
         viewer_artifacts.append(
             _artifact("geometry_validation.json", "application/json", "geometry_validation")
         )
@@ -229,6 +233,7 @@ class ProductService:
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
+        rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
         geometry_validation = _artifact_by_name(viewer_artifacts, "geometry_validation.json")
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
 
@@ -254,6 +259,7 @@ class ProductService:
             "scene_spec_url": scene_spec.get("url") if scene_spec else None,
             "qa_report_url": qa_report.get("url") if qa_report else None,
             "generation_report_url": generation_report.get("url") if generation_report else None,
+            "rag_evidence_url": rag_evidence.get("url") if rag_evidence else None,
             "geometry_validation_url": geometry_validation.get("url")
             if geometry_validation
             else None,
@@ -264,6 +270,10 @@ class ProductService:
             "llm_fallback_reason": llm["llm_fallback_reason"],
             "rag_context_count": status.get("rag_context_count"),
             "rag_planning_summary": status.get("rag_planning_summary"),
+            "rag_reranker_provider": status.get("rag_reranker_provider"),
+            "rag_reranker_model": status.get("rag_reranker_model"),
+            "rag_reranker_status": status.get("rag_reranker_status"),
+            "rag_reranker_degraded_reason": status.get("rag_reranker_degraded_reason"),
             "memory_context_count": status.get("memory_context_count"),
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
@@ -337,6 +347,9 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "degraded": True,
             "reranker": None,
             "reranker_status": "disabled",
+            "reranker_provider": None,
+            "reranker_model": None,
+            "reranker_degraded_reason": None,
         }
     provider = getattr(getattr(rag_service, "embedding_provider", None), "name", None)
     if not provider:
@@ -346,6 +359,9 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "degraded": True,
             "reranker": _rag_reranker_name(rag_service),
             "reranker_status": _rag_reranker_status(rag_service),
+            "reranker_provider": _rag_reranker_provider(rag_service),
+            "reranker_model": _rag_reranker_model(rag_service),
+            "reranker_degraded_reason": _rag_reranker_degraded_reason(rag_service),
         }
     provider_name = str(provider)
     if provider_name.startswith("nvidia:"):
@@ -366,6 +382,9 @@ def _rag_summary(rag_service: Any | None) -> dict:
         "degraded": degraded,
         "reranker": _rag_reranker_name(rag_service),
         "reranker_status": _rag_reranker_status(rag_service),
+        "reranker_provider": _rag_reranker_provider(rag_service),
+        "reranker_model": _rag_reranker_model(rag_service),
+        "reranker_degraded_reason": _rag_reranker_degraded_reason(rag_service),
     }
 
 
@@ -375,14 +394,44 @@ def _rag_reranker_name(rag_service: Any) -> str:
 
 
 def _rag_reranker_status(rag_service: Any) -> str:
+    reranker = getattr(rag_service, "_reranker", None)
+    status = getattr(reranker, "status", None)
+    if isinstance(status, str) and status:
+        return status
     name = _rag_reranker_name(rag_service)
     if name == "passthrough":
         return "passthrough_no_rerank"
+    if name.startswith("nvidia:"):
+        return "primary_nvidia_reranker"
     if name.startswith("cross-encoder:"):
         return "explicit_local_reranker"
     if name == "not_loaded":
         return "not_loaded"
     return "custom"
+
+
+def _rag_reranker_provider(rag_service: Any) -> str | None:
+    reranker = getattr(rag_service, "_reranker", None)
+    value = getattr(reranker, "provider", None)
+    if value:
+        return str(value)
+    value = getattr(rag_service, "_reranker_provider_name", None)
+    return str(value) if value else None
+
+
+def _rag_reranker_model(rag_service: Any) -> str | None:
+    reranker = getattr(rag_service, "_reranker", None)
+    value = getattr(reranker, "model_name", None)
+    if value:
+        return str(value)
+    value = getattr(rag_service, "_reranker_model", None)
+    return str(value) if value else None
+
+
+def _rag_reranker_degraded_reason(rag_service: Any) -> str | None:
+    reranker = getattr(rag_service, "_reranker", None)
+    value = getattr(reranker, "degraded_reason", None)
+    return str(value) if value else None
 
 
 def _resolve_blender_binary(binary: str) -> Path | None:
@@ -677,6 +726,11 @@ def _collect_limitations(status: dict) -> list[str]:
             "La QA géométrique est mesh_level_basic: elle vérifie structure, objets et dimensions "
             "principales, pas une conformité RF/structurelle vendor-grade."
         )
+    if mesh_qa_level == "mesh_level_transform_basic":
+        limitations.append(
+            "La QA géométrique est mesh_level_transform_basic: elle lit des transforms GLB de base "
+            "et une hauteur HBA approximative, sans collision/RF/vendor-grade."
+        )
     asset_summary = status.get("asset_import_summary") or {}
     if asset_summary.get("procedural_fallback_count", 0):
         limitations.append(
@@ -765,16 +819,21 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
                 "technical_code": "GENERATION_NOT_PRODUCT_GRADE_INFERRED",
             }
         )
-    if status.get("mesh_qa_level") == "mesh_level_basic" and not any(
+    is_basic_mesh_qa = status.get("mesh_qa_level") in {
+        "mesh_level_basic",
+        "mesh_level_transform_basic",
+    }
+    if is_basic_mesh_qa and not any(
         i.get("technical_code") == "MESH_QA_BASIC_INFERRED" for i in issues
     ):
+        mesh_level = status.get("mesh_qa_level")
         issues.append(
             {
                 "title": "QA géométrique basique",
                 "severity": "info",
                 "impact": (
-                    "La QA confirme des propriétés structurales de base, pas une validation "
-                    "ingénierie complète."
+                    f"La QA {mesh_level} confirme des propriétés structurales de base, "
+                    "pas une validation ingénierie complète."
                 ),
                 "recommended_action": (
                     "Afficher cette limite dans le drawer QA et ne pas annoncer une QA avancée."
@@ -1310,6 +1369,22 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
                     "déterministe uniquement pour les tests/bootstrap."
                 ),
                 "technical_code": f"STUDIO_RAG_DEGRADED:{status}",
+            }
+        )
+    if rag and rag.get("reranker_degraded_reason"):
+        warnings.append(
+            {
+                "title": "Reranker RAG dégradé",
+                "severity": "warning",
+                "impact": (
+                    "Les résultats RAG sont disponibles, mais le reranking NVIDIA n'a pas été "
+                    "appliqué."
+                ),
+                "recommended_action": (
+                    "Vérifier la clé NVIDIA et le modèle reranker; le backend expose la raison "
+                    "dans rag_reranker_degraded_reason."
+                ),
+                "technical_code": f"STUDIO_RAG_RERANKER_DEGRADED:{rag['reranker_degraded_reason']}",
             }
         )
     return warnings

@@ -207,6 +207,8 @@ def _accessory_scene():
 
 def _object_names(scene) -> list[str]:
     names = ["tower_leg", f"tower_{scene.tower.asset_id}"]
+    if scene.tower.characteristics.foundation_type == "concrete_pad":
+        names.append("foundation_concrete_pad")
     for sector in scene.sectors:
         names.append(f"antenna_{sector.sector_id}_{sector.antenna_asset_id}")
         if sector.radio_asset_id:
@@ -217,11 +219,17 @@ def _object_names(scene) -> list[str]:
             names.append(f"sector_beam_{sector.sector_id}")
         if scene.visual_elements.include_azimuth_arrows:
             names.append(f"azimuth_arrow_{sector.sector_id}")
+        if scene.visual_elements.include_labels:
+            names.append(f"label_sector_{sector.sector_id}_{int(sector.azimuth_deg)}deg")
     for accessory in scene.accessory_assets:
         if accessory.asset_type == "gps":
             names.append(f"gps_antenna_{accessory.asset_id}")
+            if scene.visual_elements.include_labels:
+                names.append("label_gps_antenna")
         if accessory.asset_type == "cabinet":
             names.append(f"power_cabinet_{accessory.asset_id}")
+            if scene.visual_elements.include_labels:
+                names.append("label_power_cabinet")
     return names
 
 

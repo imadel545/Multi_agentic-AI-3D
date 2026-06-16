@@ -24,7 +24,12 @@ GeometrySource = Literal[
     "unknown",
 ]
 
-MeshQALevel = Literal["mesh_level_basic", "metadata_only", "not_available"]
+MeshQALevel = Literal[
+    "mesh_level_transform_basic",
+    "mesh_level_basic",
+    "metadata_only",
+    "not_available",
+]
 
 
 class BoundingBoxM(StrictModel):

@@ -27,16 +27,28 @@ key, startup should fail instead of silently degrading.
 
 ## Reranker
 
-- Default reranker: `passthrough_no_rerank`.
-- Local `BAAI/bge-reranker-v2-m3` is an explicit developer override only:
+- Product reranker provider: NVIDIA API.
+- Default API config:
+
+```text
+TELECOM_STUDIO_RERANKER_PROVIDER=nvidia
+TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
+```
+
+If the NVIDIA reranker is unavailable, retrieval falls back to vector order and
+the API exposes `degraded_passthrough` plus `rag_reranker_degraded_reason`.
+This is a visible degraded state, not a silent success.
+
+Local `BAAI/bge-reranker-v2-m3` is an explicit developer override only:
 
 ```text
 TELECOM_STUDIO_RERANKER_PROVIDER=local
 TELECOM_STUDIO_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
-The backend exposes `rag_reranker` and `rag_reranker_status` in
-`/studio/summary`.
+The backend exposes `rag_reranker_provider`, `rag_reranker_model`,
+`rag_reranker_status`, and `rag_reranker_degraded_reason` in `/studio/summary`
+and `/viewer-bundle`.
 
 ## How RAG Enters The Pipeline
 
@@ -71,9 +83,18 @@ hints:
 - `include_cables`
 - `include_sector_beams`
 - `include_labels`
+- `include_power_cabinet`
+- `include_gps_antenna`
+- `include_rru`
+- `foundation_type`
+- `mechanical_tilt_deg`
+- `electrical_tilt_deg`
 
 Free text retrieved by RAG is audit context. It must not mutate the 3D plan
 silently.
+
+RAG must not overwrite an explicit user/document value. If later code lets a
+hint fill a default, that change must be visible in `rag_evidence.json`.
 
 ## Public Truth Fields
 
@@ -86,7 +107,11 @@ Workflow and viewer surfaces expose:
 - `rag_planning_summary.rag_planning_mode`: `structured_planning_hints` or
   `context_only_no_structured_hints`.
 - `rag_planning_summary.candidate_hint_fields`.
+- `rag_planning_summary.controlled_hint_fields`.
 - `rag_planning_summary.top_contexts` with repo-relative source paths.
+- `rag_evidence_url` from `/viewer-bundle`.
+- `rag_evidence.json` with retrieved sources, controlled hints, rejected hints,
+  reranker status, policy, and limitations.
 
 The frontend must not treat `rag_context_count > 0` as proof that RAG changed
 the design.
@@ -97,7 +122,8 @@ the design.
   base.
 - RAG does not yet perform claim-level citation into `SceneSpec`.
 - RAG does not yet run conflict resolution against document-pack evidence.
-- Reranker is passthrough by default unless explicitly enabled.
+- Reranker is fail-open: if NVIDIA reranking fails, retrieval still returns
+  vector-ranked results and the degraded status is visible.
 - No hybrid sparse/BM25 engine beyond the current lexical boost.
 
 ## Quality Bar Before Calling RAG Advanced

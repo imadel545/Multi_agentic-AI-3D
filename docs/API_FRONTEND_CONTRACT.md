@@ -56,6 +56,7 @@ Noms d'artifact utilisés par le frontend :
 - `scene_spec` → `scene_spec.json`
 - `qa_report` → `qa_report.json`
 - `geometry_validation` → `geometry_validation.json`
+- `rag_evidence` → `rag_evidence.json`
 - `quality_gates` → `quality_gates.json`
 - `trace` → `workflow_trace.json`
 - `download` → `artifacts.zip`
@@ -75,6 +76,8 @@ restent internes au backend.
 - `llm_provider`, `llm_available`, `llm_fallback_used`, `llm_fallback_reason` :
   vérité GPT-OSS/fallback affichable.
 - `qa_score` : score entre 0 et 1.
+- `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`,
+  `rag_reranker_degraded_reason` : vérité reranker NVIDIA/passthrough.
 - `asset_import_summary` : résumé des imports GLB/fallback.
 - `warnings` / `errors` : liste d'issues techniques.
 - `active_version_id` : version active.
@@ -107,7 +110,8 @@ restent internes au backend.
 - `llm_available`
 - `warnings`
 - `rag_embedding_provider`, `rag_status`, `rag_degraded`, `rag_reranker`,
-  `rag_reranker_status`, `rag_reindex_url`
+  `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`,
+  `rag_reranker_degraded_reason`, `rag_reindex_url`
 - `memory_status`, `memory_backend`, `workflow_memory_count`,
   `design_memory_count`, `document_pack_memory_count`
 - `runtime_capabilities`, `unsupported_actions`
@@ -131,6 +135,7 @@ restent internes au backend.
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
+- `rag_evidence_url`
 - `requirements_spec_url`
 - `extraction_report_url`
 - `extraction_provider`
@@ -140,6 +145,10 @@ restent internes au backend.
 - `llm_fallback_reason`
 - `rag_context_count`
 - `rag_planning_summary`
+- `rag_reranker_provider`
+- `rag_reranker_model`
+- `rag_reranker_status`
+- `rag_reranker_degraded_reason`
 - `memory_context_count`
 - `qa_summary`
 - `viewer_artifacts[]`
@@ -154,7 +163,11 @@ restent internes au backend.
 - `rag_used_for_planning=true` seulement si des `payload.planning_hints`
   structurés ont été récupérés.
 - `rag_context_count` seul ne prouve pas que le RAG a changé le `SceneSpec`.
+- `candidate_hint_fields` et `controlled_hint_fields` expliquent les champs
+  candidats et les champs autorisés.
 - `top_contexts[].source_path` est relatif au repo, jamais `/Users/...`.
+- `rag_evidence_url` ouvre `rag_evidence.json`: sources RAG, hints contrôlés,
+  hints rejetés, politique et statut reranker.
 
 ## Séquence frontend recommandée
 

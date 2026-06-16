@@ -5,7 +5,8 @@ import pytest
 from core.rag import RagService
 from core.rag.documents import load_rag_documents
 from core.rag.embeddings import HashEmbeddingProvider, build_embedding_provider
-from core.rag.reranker import PassthroughReranker, build_reranker
+from core.rag.models import RagSearchResult
+from core.rag.reranker import NvidiaReranker, PassthroughReranker, build_reranker
 
 
 def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
@@ -91,3 +92,39 @@ def test_auto_embedding_provider_can_bootstrap_with_hash(monkeypatch) -> None:
 
 def test_reranker_defaults_to_passthrough() -> None:
     assert isinstance(build_reranker(), PassthroughReranker)
+
+
+def test_nvidia_reranker_uses_remote_scores_without_real_network(monkeypatch) -> None:
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"rankings": [{"index": 1, "score": 0.91}, {"index": 0, "score": 0.12}]}
+
+    def fake_post(*args, **kwargs):
+        assert kwargs["headers"]["Authorization"] == "Bearer nvidia-test-token"
+        assert "passages" in kwargs["json"]
+        return FakeResponse()
+
+    monkeypatch.setattr("core.rag.reranker.httpx.post", fake_post)
+    reranker = NvidiaReranker(api_key="nvidia-test-token")
+    results = [
+        RagSearchResult(collection="c", doc_id="a", score=0.1, text="A", payload={}),
+        RagSearchResult(collection="c", doc_id="b", score=0.2, text="B", payload={}),
+    ]
+
+    reranked = reranker.rerank("query", results, top_k=2)
+
+    assert [result.doc_id for result in reranked] == ["b", "a"]
+    assert reranker.status == "primary_nvidia_reranker"
+    assert reranker.degraded_reason is None
+
+
+def test_nvidia_reranker_missing_key_is_visible_passthrough() -> None:
+    reranker = build_reranker(provider_name="nvidia", api_key=None)
+    results = [RagSearchResult(collection="c", doc_id="a", score=0.1, text="A", payload={})]
+
+    assert reranker.rerank("query", results, top_k=1) == results
+    assert reranker.status == "degraded_passthrough"
+    assert reranker.degraded_reason == "missing_nvidia_api_key"

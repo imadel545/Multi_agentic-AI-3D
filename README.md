@@ -15,7 +15,7 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - Plans a controlled 3D scene (`SceneSpec`).
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.
-- Current mesh QA is `mesh_level_basic`: it parses GLB accessors and bounding boxes, but it is not exact per-antenna HBA/azimuth/collision QA.
+- Current mesh QA is `mesh_level_transform_basic` when GLB node transforms are readable, otherwise `mesh_level_basic`. It parses GLB accessors/bounding boxes and basic role transforms, but it is not exact per-antenna RF/azimuth/collision QA.
 - Supports prompt edits, versioning, and rollback.
 - The frontend product vocabulary maps to existing backend concepts: a "run" is
   a `workflow_id`, and a "scene plan" is the `scene_spec` artifact.
@@ -75,13 +75,18 @@ The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to fo
 
 ### Optional: NVIDIA RAG embeddings
 
-Product RAG uses NVIDIA API `baai/bge-m3`.
+Product RAG uses NVIDIA API `baai/bge-m3`. Product reranking uses the NVIDIA
+reranker configured by `TELECOM_STUDIO_RERANKER_MODEL`; if the reranker is not
+available, the API exposes a degraded passthrough status instead of pretending
+reranking happened.
 
 ```bash
 NVIDIA_API_KEY=...
 # or TELECOM_STUDIO_NVIDIA_API_KEY=...
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
 TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
+TELECOM_STUDIO_RERANKER_PROVIDER=nvidia
+TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
 ```
 
 `TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic` is for tests/bootstrap only.
@@ -139,8 +144,9 @@ requirements_text or document pack
 - `docs/KNOWN_LIMITATIONS.md` — honest limitations.
 - `docs/API_FRONTEND_CONTRACT.md` — product API contract for the frontend.
 - `docs/RAG_STRATEGY.md` — NVIDIA BGE-M3 RAG strategy and limitations.
-- `docs/BACKEND_PRODUCT_READINESS_REPORT.md` — capability readiness classification.
-- `docs/E2E_TELECOM_GENERATION_PROOF.md` — reproducible end-to-end proof.
+- `docs/ARCHITECTURE.md` — backend flow and module boundaries.
+- `docs/QA_STRATEGY.md` — honest QA levels and limits.
+- `docs/LANGGRAPH_WORKFLOW.md` — orchestration/runtime truth.
 
 ---
 
@@ -150,4 +156,5 @@ requirements_text or document pack
 - Assets: 12 manifests, 12 local GLBs, 0 missing tower GLBs, `ready_for_import`, not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
+- Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
 - Frontend: old dashboard frontend deleted; rebuild planned as chat-first / 3D-first.
