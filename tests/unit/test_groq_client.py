@@ -16,7 +16,10 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
 
     client = GroqStructuredClient(api_key="test-key")
     spec = client.extract_requirements(
-        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°.",
+        (
+            "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+            "Azimuts : 0°, 120°, 240°. Ajouter boîte alimentation et GPS."
+        ),
         "high",
     )
 
@@ -30,7 +33,13 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
     assert payload["response_format"]["json_schema"]["strict"] is True
     schema = payload["response_format"]["json_schema"]["schema"]
     assert "tower_characteristics" in schema["required"]
+    assert "include_power_cabinet" in schema["required"]
+    assert "include_gps_antenna" in schema["required"]
     assert schema["properties"]["tower_characteristics"]["additionalProperties"] is False
+    assert schema["properties"]["include_power_cabinet"]["type"] == "boolean"
+    assert schema["properties"]["include_gps_antenna"]["type"] == "boolean"
+    assert spec.include_power_cabinet is True
+    assert spec.include_gps_antenna is True
 
 
 def test_groq_client_retries_json_object_mode_after_schema_400(monkeypatch) -> None:
@@ -52,6 +61,32 @@ def test_groq_client_retries_json_object_mode_after_schema_400(monkeypatch) -> N
 
     assert spec.sector_count == 3
     assert response_formats == ["json_schema", "json_object"]
+
+
+def test_groq_client_restores_missing_visual_flags_from_baseline(monkeypatch) -> None:
+    def post(url, headers, json, timeout):
+        payload = json_module.loads(_requirements_content())
+        payload.pop("include_power_cabinet")
+        payload.pop("include_gps_antenna")
+        return _response(url, json_module.dumps(payload))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    client = GroqStructuredClient(api_key="test-key")
+    spec = client.extract_requirements(
+        (
+            "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+            "Azimuts : 0°, 120°, 240°. Ajouter boîte alimentation et GPS."
+        ),
+        "high",
+    )
+
+    assert spec.include_power_cabinet is True
+    assert spec.include_gps_antenna is True
+    repair_warnings = [warning for warning in spec.warnings if warning.code == "LLM_FIELD_REPAIRED"]
+    assert repair_warnings
+    assert "include_power_cabinet" in repair_warnings[0].message
+    assert "include_gps_antenna" in repair_warnings[0].message
 
 
 def _response(url: str, content: str) -> httpx.Response:
@@ -93,6 +128,8 @@ def _requirements_content() -> str:
             "include_cables": True,
             "include_beams": True,
             "include_labels": True,
+            "include_power_cabinet": True,
+            "include_gps_antenna": True,
             "detail_level": "high",
             "warnings": [],
         }

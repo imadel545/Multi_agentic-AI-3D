@@ -74,6 +74,8 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "include_cables": {"type": "boolean"},
         "include_beams": {"type": "boolean"},
         "include_labels": {"type": "boolean"},
+        "include_power_cabinet": {"type": "boolean"},
+        "include_gps_antenna": {"type": "boolean"},
         "detail_level": {"type": "string", "enum": ["low", "medium", "high"]},
         "warnings": {
             "type": "array",
@@ -105,6 +107,8 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "include_cables",
         "include_beams",
         "include_labels",
+        "include_power_cabinet",
+        "include_gps_antenna",
         "detail_level",
         "warnings",
     ],
@@ -139,6 +143,9 @@ class GroqStructuredClient:
                     "Extract tower_characteristics from explicit pylon details such as "
                     "leg count, base/top width, foundation, platforms, ladder, lightning rod, "
                     "aviation light, and material. "
+                    "Extract supported visual equipment flags such as include_power_cabinet "
+                    "and include_gps_antenna when the user asks for power boxes, energy "
+                    "cabinets, GPS, or GNSS. "
                     "Preserve the deterministic baseline values unless the user text "
                     "explicitly contradicts them. "
                     "Do not include explanatory text outside JSON."
@@ -194,10 +201,21 @@ class GroqStructuredClient:
         self, payload: dict[str, Any], baseline: RequirementSpec
     ) -> RequirementSpec:
         raw = self._post_raw(payload)
+        raw, repaired_fields = _restore_missing_baseline_fields(raw, baseline)
         try:
-            return RequirementSpec.model_validate(raw)
+            requirements = RequirementSpec.model_validate(raw)
         except ValidationError:
-            return _repair_and_validate(raw, baseline)
+            return _repair_and_validate(raw, baseline, initial_repaired_fields=repaired_fields)
+        if repaired_fields:
+            return requirements.model_copy(
+                update={
+                    "warnings": [
+                        *requirements.warnings,
+                        _repaired_warning(repaired_fields),
+                    ]
+                }
+            )
+        return requirements
 
     def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
@@ -217,10 +235,27 @@ class GroqStructuredClient:
         return json.loads(content)
 
 
-def _repair_and_validate(raw: dict[str, Any], baseline: RequirementSpec) -> RequirementSpec:
+def _restore_missing_baseline_fields(
+    raw: dict[str, Any],
+    baseline: RequirementSpec,
+) -> tuple[dict[str, Any], list[str]]:
+    candidate = dict(raw)
+    repaired_fields = []
+    for field in ("include_power_cabinet", "include_gps_antenna"):
+        if field not in candidate:
+            candidate[field] = getattr(baseline, field)
+            repaired_fields.append(field)
+    return candidate, repaired_fields
+
+
+def _repair_and_validate(
+    raw: dict[str, Any],
+    baseline: RequirementSpec,
+    initial_repaired_fields: list[str] | None = None,
+) -> RequirementSpec:
     candidate = baseline.model_dump()
     candidate.update(raw)
-    repaired_fields: list[str] = []
+    repaired_fields: list[str] = list(initial_repaired_fields or [])
     if not _is_number_list(candidate.get("azimuths_deg")):
         candidate["azimuths_deg"] = baseline.azimuths_deg
         repaired_fields.append("azimuths_deg")
@@ -253,17 +288,19 @@ def _repair_and_validate(raw: dict[str, Any], baseline: RequirementSpec) -> Requ
         if isinstance(warning, dict)
     ]
     if repaired_fields:
-        warnings.append(
-            WarningItem(
-                code="LLM_FIELD_REPAIRED",
-                message=(
-                    "Invalid LLM fields repaired from deterministic baseline: "
-                    f"{sorted(set(repaired_fields))}."
-                ),
-            ).model_dump()
-        )
+        warnings.append(_repaired_warning(repaired_fields).model_dump())
     candidate["warnings"] = warnings
     return RequirementSpec.model_validate(candidate)
+
+
+def _repaired_warning(repaired_fields: list[str]) -> WarningItem:
+    return WarningItem(
+        code="LLM_FIELD_REPAIRED",
+        message=(
+            "Invalid or missing LLM fields repaired from deterministic baseline: "
+            f"{sorted(set(repaired_fields))}."
+        ),
+    )
 
 
 def _is_number_list(value: Any) -> bool:

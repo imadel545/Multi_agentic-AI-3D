@@ -172,6 +172,12 @@ class ProductService:
         viewer_artifacts.append(_artifact("design.glb", "model/gltf-binary", "glb"))
         viewer_artifacts.append(_artifact("preview.png", "image/png", "preview"))
         viewer_artifacts.append(_artifact("scene_metadata.json", "application/json", "metadata"))
+        viewer_artifacts.append(
+            _artifact("requirements_spec.json", "application/json", "requirements_spec")
+        )
+        viewer_artifacts.append(
+            _artifact("extraction_report.json", "application/json", "extraction_report")
+        )
         viewer_artifacts.append(_artifact("scene_spec.json", "application/json", "scene_spec"))
         viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
         viewer_artifacts.append(
@@ -186,6 +192,8 @@ class ProductService:
         primary_glb = _artifact_by_name(viewer_artifacts, "design.glb")
         preview = _artifact_by_name(viewer_artifacts, "preview.png")
         metadata = _artifact_by_name(viewer_artifacts, "scene_metadata.json")
+        requirements_spec = _artifact_by_name(viewer_artifacts, "requirements_spec.json")
+        extraction_report = _artifact_by_name(viewer_artifacts, "extraction_report.json")
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
@@ -209,12 +217,18 @@ class ProductService:
             "preview_url": preview.get("url") if preview else None,
             "report_url": report.get("url") if report else None,
             "metadata_url": metadata.get("url") if metadata else None,
+            "requirements_spec_url": requirements_spec.get("url") if requirements_spec else None,
+            "extraction_report_url": extraction_report.get("url") if extraction_report else None,
             "scene_spec_url": scene_spec.get("url") if scene_spec else None,
             "qa_report_url": qa_report.get("url") if qa_report else None,
             "generation_report_url": generation_report.get("url") if generation_report else None,
             "geometry_validation_url": geometry_validation.get("url")
             if geometry_validation
             else None,
+            "llm_provider": status.get("llm_provider"),
+            "llm_fallback_used": status.get("llm_fallback_used"),
+            "rag_context_count": status.get("rag_context_count"),
+            "memory_context_count": status.get("memory_context_count"),
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
             "limitations": _collect_limitations(status),

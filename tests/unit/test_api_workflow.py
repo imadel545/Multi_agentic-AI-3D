@@ -228,7 +228,7 @@ def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) ->
         response = workflow_service.create_design(
             requirements_text=(
                 "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                "Azimuts : 0°, 120°, 240°."
+                "Azimuts : 0°, 120°, 240°. Ajouter boîte alimentation et GPS."
             ),
             detail_level="high",
             use_llm=True,
@@ -240,6 +240,22 @@ def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) ->
         assert provider.calls == 1
         assert status["llm_provider"] == "groq:test-provider"
         assert status["llm_fallback_used"] is False
+        requirements = client.get(f"/designs/{workflow_id}/artifacts/requirements_spec").json()
+        scene = client.get(f"/designs/{workflow_id}/artifacts/scene_spec").json()
+        extraction_report = client.get(f"/designs/{workflow_id}/artifacts/extraction_report").json()
+        assert requirements["include_power_cabinet"] is True
+        assert requirements["include_gps_antenna"] is True
+        assert scene["visual_elements"]["include_power_cabinet"] is True
+        assert scene["visual_elements"]["include_gps_antenna"] is True
+        assert extraction_report["mode"] == "structured_llm"
+        assert extraction_report["provider"] == "groq:test-provider"
+        assert extraction_report["model_name"] == "test-provider"
+        assert extraction_report["validated_schema"] is True
+        assert extraction_report["schema_name"] == "RequirementSpec"
+        assert extraction_report["rag_used_for_extraction"] is False
+        assert extraction_report["rag_context_count"] == status["rag_context_count"]
+        assert extraction_report["critical_fields"]["include_power_cabinet"] is True
+        assert extraction_report["critical_fields"]["include_gps_antenna"] is True
     finally:
         workflow_service.outputs_dir = original_outputs
         extractor.provider = original_provider
@@ -472,6 +488,8 @@ class RecordingRequirementProvider:
             include_cables=True,
             include_beams=True,
             include_labels=True,
+            include_power_cabinet=True,
+            include_gps_antenna=True,
             detail_level=detail_level,
             warnings=[],
         )

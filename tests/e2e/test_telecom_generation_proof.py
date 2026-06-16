@@ -9,7 +9,7 @@ from apps.api.telecom_studio_api.main import app, workflow_service
 E2E_PROMPT = (
     "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
     "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, boîte alimentation, "
-    "dalle béton, labels, couleurs professionnelles et export GLB."
+    "dalle béton, GPS, labels, couleurs professionnelles et export GLB."
 )
 
 
@@ -55,6 +55,7 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert requirements["include_cables"] is True
         assert requirements["include_labels"] is True
         assert requirements["include_power_cabinet"] is True
+        assert requirements["include_gps_antenna"] is True
         assert requirements["tower_characteristics"]["foundation_type"] == "concrete_pad"
 
         scene_plan = client.get(f"/designs/{workflow_id}/artifacts/scene_spec").json()
@@ -62,9 +63,13 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert scene_plan["tower"]["height_m"] == 30
         assert len(scene_plan["sectors"]) == 3
         assert scene_plan["visual_elements"]["include_power_cabinet"] is True
+        assert scene_plan["visual_elements"]["include_gps_antenna"] is True
         assert any(
             accessory["asset_type"] == "cabinet"
             for accessory in scene_plan.get("accessory_assets", [])
+        )
+        assert any(
+            accessory["asset_type"] == "gps" for accessory in scene_plan.get("accessory_assets", [])
         )
 
         validation_report = client.get(f"/designs/{workflow_id}/artifacts/validation_report").json()

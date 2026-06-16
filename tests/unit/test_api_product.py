@@ -145,10 +145,18 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["preview_url"]
         assert bundle["report_url"]
         assert bundle["metadata_url"]
+        assert bundle["requirements_spec_url"]
+        assert bundle["extraction_report_url"]
         assert bundle["scene_spec_url"]
         assert bundle["qa_report_url"]
         assert bundle["generation_report_url"]
         assert bundle["geometry_validation_url"]
+        assert bundle["llm_provider"] == "deterministic"
+        assert bundle["llm_fallback_used"] is True
+        assert bundle["rag_context_count"] == 0 or isinstance(bundle["rag_context_count"], int)
+        assert bundle["memory_context_count"] == 0 or isinstance(
+            bundle["memory_context_count"], int
+        )
         assert bundle["qa_summary"]["mesh_qa_level"]
         assert isinstance(bundle["qa_summary"]["checks_passed"], list)
         assert isinstance(bundle["qa_summary"]["checks_failed"], list)
@@ -162,6 +170,8 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert "design.glb" in names
         assert "preview.png" in names
         assert "scene_metadata.json" in names
+        assert "requirements_spec.json" in names
+        assert "extraction_report.json" in names
         assert "qa_report.json" in names
         assert "geometry_validation.json" in names
         for artifact in bundle["viewer_artifacts"]:

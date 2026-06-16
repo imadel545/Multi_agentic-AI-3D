@@ -1224,15 +1224,55 @@ def _extraction_report(result: OrchestratorResult) -> dict:
     if result.llm_fallback_used:
         confidence = 0.65
     confidence = max(0.1, confidence - (0.05 * len(warnings)))
+    provider = result.llm_provider
+    if provider and provider.startswith("groq:") and not result.llm_fallback_used:
+        mode = "structured_llm"
+    elif result.llm_fallback_used or provider in {None, "deterministic"}:
+        mode = "deterministic_fallback"
+    else:
+        mode = "validated_requirements"
     return {
-        "provider": result.llm_provider,
+        "mode": mode,
+        "provider": provider,
+        "model_name": _llm_model_name(provider),
         "fallback_used": result.llm_fallback_used,
         "error": result.llm_error,
-        "source": result.llm_provider,
+        "source": provider,
+        "validated_schema": True,
+        "schema_name": "RequirementSpec",
+        "rag_used_for_extraction": False,
+        "rag_context_count": len(result.rag_context),
         "repaired_fields": repaired_fields,
         "inferred_fields": inferred_fields,
         "confidence": round(confidence, 2),
+        "confidence_method": "heuristic_from_provider_fallback_and_warning_count",
+        "critical_fields": _critical_requirement_fields(result.requirements),
         "warnings": [warning.model_dump() for warning in warnings],
+    }
+
+
+def _llm_model_name(provider: str | None) -> str | None:
+    if provider and provider.startswith("groq:"):
+        return provider.split(":", 1)[1]
+    if provider == "deterministic":
+        return None
+    return provider
+
+
+def _critical_requirement_fields(requirements: RequirementSpec | None) -> dict:
+    if requirements is None:
+        return {}
+    return {
+        "network_type": requirements.network_type,
+        "tower_type": requirements.tower_type,
+        "tower_height_m": requirements.tower_height_m,
+        "sector_count": requirements.sector_count,
+        "antenna_install_height_m": requirements.antenna_install_height_m,
+        "azimuths_deg": requirements.azimuths_deg,
+        "include_rru": requirements.include_rru,
+        "include_cables": requirements.include_cables,
+        "include_power_cabinet": requirements.include_power_cabinet,
+        "include_gps_antenna": requirements.include_gps_antenna,
     }
 
 

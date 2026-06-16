@@ -291,10 +291,16 @@ class ViewerBundle(BaseModel):
     preview_url: str | None = None
     report_url: str | None = None
     metadata_url: str | None = None
+    requirements_spec_url: str | None = None
+    extraction_report_url: str | None = None
     scene_spec_url: str | None = None
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None
+    llm_provider: str | None = None
+    llm_fallback_used: bool | None = None
+    rag_context_count: int | None = None
+    memory_context_count: int | None = None
     qa_summary: dict | None = None
     viewer_artifacts: list[ViewerArtifact]
     limitations: list[str] = Field(default_factory=list)
