@@ -271,4 +271,8 @@ class StudioSummary(BaseModel):
     missing_file_count: int = 0
     blender_available: bool | None = None
     groq_available: bool | None = None
+    rag_embedding_provider: str | None = None
+    rag_status: str | None = None
+    rag_degraded: bool = False
+    rag_reindex_url: str | None = None
     warnings: list[UserIssue] = Field(default_factory=list)

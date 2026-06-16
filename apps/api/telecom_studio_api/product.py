@@ -33,6 +33,7 @@ class ProductService:
         inventory_status = _inventory_status(inventory)
         blender_available = _blender_available()
         groq_available = bool(settings.resolved_groq_api_key)
+        rag = _rag_summary(self.workflow_service.orchestrator.rag_service)
 
         counts = {"pending": 0, "running": 0, "completed": 0, "failed": 0}
         summaries = []
@@ -66,7 +67,11 @@ class ProductService:
             "missing_file_count": int(inventory.get("missing_file_count") or 0),
             "blender_available": blender_available,
             "groq_available": groq_available,
-            "warnings": _studio_warnings(inventory),
+            "rag_embedding_provider": rag["embedding_provider"],
+            "rag_status": rag["status"],
+            "rag_degraded": rag["degraded"],
+            "rag_reindex_url": "/rag/reindex",
+            "warnings": _studio_warnings(inventory, rag),
         }
 
     def user_summary(self, workflow_id: str) -> dict:
@@ -101,12 +106,19 @@ class ProductService:
         current_operation = _current_operation(status, events)
         current_node = runtime.get("node")
         phase = runtime.get("phase")
+        human_label = (
+            runtime.get("operation")
+            if current_node == "workflow" and runtime.get("operation")
+            else _trace_node_label(current_node)
+            if current_node
+            else current_operation
+        )
         return {
             "workflow_id": workflow_id,
             "status": backend_status,
             "phase": phase,
             "current_operation": current_operation,
-            "human_label": _trace_node_label(current_node) if current_node else current_operation,
+            "human_label": human_label,
             "progress_message": current_operation,
             "progress_label": _progress_label(status),
             "next_recommended_action": _next_recommended_action(status, issues),
@@ -263,6 +275,40 @@ def _inventory_status(inventory: dict) -> str:
 
 def _blender_available() -> bool:
     return _resolve_blender_binary(settings.resolved_blender_binary) is not None
+
+
+def _rag_summary(rag_service: Any | None) -> dict:
+    if rag_service is None:
+        return {
+            "embedding_provider": None,
+            "status": "disabled",
+            "degraded": True,
+        }
+    provider = getattr(getattr(rag_service, "embedding_provider", None), "name", None)
+    if not provider:
+        return {
+            "embedding_provider": None,
+            "status": "unknown",
+            "degraded": True,
+        }
+    provider_name = str(provider)
+    if provider_name.startswith("nvidia:"):
+        status = "primary_nvidia_bge_m3"
+        degraded = False
+    elif provider_name.startswith("sentence-transformers:"):
+        status = "local_sentence_transformers_fallback"
+        degraded = True
+    elif provider_name.startswith("hashing-"):
+        status = "deterministic_hash_fallback"
+        degraded = True
+    else:
+        status = "custom_provider"
+        degraded = True
+    return {
+        "embedding_provider": provider_name,
+        "status": status,
+        "degraded": degraded,
+    }
 
 
 def _resolve_blender_binary(binary: str) -> Path | None:
@@ -1086,7 +1132,7 @@ def _trace_node_label(node: str) -> str:
     return mapping.get(node, node.replace("_", " ").capitalize())
 
 
-def _studio_warnings(inventory: dict) -> list[dict]:
+def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
     warnings: list[dict] = []
     if not _blender_available():
         warnings.append(
@@ -1124,6 +1170,22 @@ def _studio_warnings(inventory: dict) -> list[dict]:
                 ),
                 "recommended_action": "Ajouter les GLB manquants ou rendre leur fallback visible.",
                 "technical_code": "STUDIO_PARTIAL_ASSET_INVENTORY",
+            }
+        )
+    if rag and rag.get("degraded"):
+        status = str(rag.get("status") or "unknown")
+        warnings.append(
+            {
+                "title": "RAG en mode dégradé",
+                "severity": "warning",
+                "impact": (
+                    "La recherche de contexte n'utilise pas le provider NVIDIA BGE-M3 primaire."
+                ),
+                "recommended_action": (
+                    "Configurer NVIDIA_API_KEY puis relancer /rag/reindex si la qualité RAG "
+                    "est importante pour ce workflow."
+                ),
+                "technical_code": f"STUDIO_RAG_DEGRADED:{status}",
             }
         )
     return warnings

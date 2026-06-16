@@ -1,3 +1,4 @@
+import json
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -5,6 +6,39 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, document_pack_service, workflow_service
+
+
+def test_document_pack_events_normalize_legacy_payload(tmp_path: Path) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    document_pack_service.outputs_dir = tmp_path
+    pack_dir = tmp_path / "document_packs" / "pack_legacy"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "events.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pack_id": "pack_legacy",
+                    "event_type": "document_pack_indexed",
+                    "node": "index",
+                    "status": "passed",
+                    "duration_ms": 3,
+                    "payload": {"member_count": 1},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    try:
+        events = document_pack_service.get_events("pack_legacy")
+
+        assert events[0]["event_id"] == "evt_pack_legacy_0000"
+        assert events[0]["timestamp"] == "1970-01-01T00:00:00Z"
+        assert events[0]["event_source"] == "document_pack_json"
+        assert events[0]["payload"]["phase"] == "documents"
+        assert events[0]["payload"]["human_label"] == "Inventaire du pack documentaire"
+        assert events[0]["payload"]["progress_message"]
+    finally:
+        document_pack_service.outputs_dir = original_outputs
 
 
 def test_document_pack_api_endpoints_and_generate_design_mapping(
@@ -82,6 +116,21 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
             "groq_extract",
         ]
         assert any(event["event_type"] == "document_pack_qa_completed" for event in events)
+        assert all(event["event_id"] for event in events)
+        assert all(event["timestamp"] for event in events)
+        assert all(event["event_source"] == "document_pack_json" for event in events)
+        required_payload_fields = {
+            "phase",
+            "node",
+            "human_label",
+            "progress_message",
+            "status",
+            "duration_ms",
+            "warnings",
+            "errors",
+            "artifact_refs",
+        }
+        assert all(required_payload_fields.issubset(event["payload"]) for event in events)
 
         generation = client.post(f"/document-packs/{pack_id}/generate-design").json()
         assert generation["status"] == "pending"
@@ -90,6 +139,14 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         assert generation["extraction_report"]["prompt_text_reparse"] is False
         assert "mapping_loss_report" in generation["mapping"]
         assert generation["extraction_report"]["mapping_loss_report"]["counts"]["mapped"] >= 4
+        post_generation_events = client.get(f"/document-packs/{pack_id}/events").json()
+        generation_event = next(
+            event
+            for event in post_generation_events
+            if event["event_type"] == "document_pack_design_generation_started"
+        )
+        assert generation_event["payload"]["workflow_id"] == "wf_from_pack"
+        assert generation_event["payload"]["human_label"] == "Lancement de la génération 3D"
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled
@@ -132,6 +189,13 @@ def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
         assert correction.status_code == 200
         assert correction.json()["can_generate_design"] is True
         assert correction.json()["correction_count"] == 1
+        events = client.get(f"/document-packs/{pack_id}/events").json()
+        correction_event = next(
+            event for event in events if event["event_type"] == "document_pack_corrected"
+        )
+        assert correction_event["payload"]["field"] == "radio.hba_m"
+        assert correction_event["payload"]["can_generate_design"] is True
+        assert correction_event["payload"]["human_label"] == "Correction utilisateur"
 
         spec = client.get(f"/document-packs/{pack_id}/consolidated-spec").json()
         assert spec["radio_sectors"][0]["hba_m"]["sources"][0]["document_id"] == ("user_correction")

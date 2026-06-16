@@ -40,7 +40,8 @@ or "run" labels, they are UI labels mapped to existing backend concepts.
    - Show backend online/offline in the top bar.
 2. Call `GET /studio/summary`.
    - Show global readiness: `blender_available`, `groq_available`,
-     `asset_inventory_status`, `missing_file_count`, and warnings.
+     `asset_inventory_status`, `missing_file_count`, `rag_status`,
+     `rag_degraded`, and warnings.
 3. Call `GET /assets/inventory`.
    - Keep asset quality visible in an Assets drawer, not as a main dashboard.
 4. Call `GET /document-packs/capabilities`.
@@ -205,6 +206,7 @@ paths such as `/Users/...`.
    - `GET /document-packs/{pack_id}/conflicts`
    - `GET /document-packs/{pack_id}/missing-fields`
    - `GET /document-packs/{pack_id}/provenance`
+   - `GET /document-packs/{pack_id}/events`
 4. If corrections are needed, call
    `POST /document-packs/{pack_id}/corrections`.
 5. When ready, call `POST /document-packs/{pack_id}/generate-design`.
@@ -212,6 +214,9 @@ paths such as `/Users/...`.
 
 Document-pack UI must show limitations: synchronous local processing, limited
 OCR/DXF/DWG truth, Docling import-only by default.
+Document-pack events expose `event_id`, `timestamp`, `event_source`,
+`payload.phase`, `payload.human_label`, and `payload.progress_message` for a
+readable document timeline.
 
 ## Edit / Version / Rollback Flow
 

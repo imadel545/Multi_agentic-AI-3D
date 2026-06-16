@@ -428,13 +428,32 @@ class DocumentPackService:
             _processing_report(spec, self.capabilities(), memory_writeback=memory_writeback),
         )
         _write_json(pack_dir / "memory_summary.json", _memory_summary(spec, summary))
+        _append_document_pack_event(
+            pack_dir,
+            pack_id=pack_id,
+            event_type="document_pack_corrected",
+            node="correction",
+            detail=correction.field,
+            payload={
+                "field": correction.field,
+                "correction_count": len(corrections),
+                "can_generate_design": summary.can_generate_design,
+            },
+        )
         return summary
 
     def get_trace(self, pack_id: str) -> list[dict]:
         return _read_json(self._pack_dir(pack_id) / "trace.json")
 
     def get_events(self, pack_id: str) -> list[dict]:
-        return _read_json(self._pack_dir(pack_id) / "events.json")
+        events = _read_json(self._pack_dir(pack_id) / "events.json")
+        if not isinstance(events, list):
+            return []
+        return [
+            _public_document_pack_event(pack_id, event, index)
+            for index, event in enumerate(events)
+            if isinstance(event, dict)
+        ]
 
     def mark_generated_workflow(self, pack_id: str, workflow_id: str) -> dict:
         pack_dir = self._pack_dir(pack_id)
@@ -456,6 +475,14 @@ class DocumentPackService:
         _write_json(
             pack_dir / "qa_report.json",
             qa_report.model_copy(update={"memory_writeback": memory_writeback}).model_dump(),
+        )
+        _append_document_pack_event(
+            pack_dir,
+            pack_id=pack_id,
+            event_type="document_pack_design_generation_started",
+            node="generate_design",
+            detail=workflow_id,
+            payload={"workflow_id": workflow_id},
         )
         return memory_writeback
 
@@ -632,6 +659,13 @@ def _node_update(
     event_payload: dict,
 ) -> dict:
     duration_ms = round((time.perf_counter() - started) * 1000)
+    event_payload = _normalized_document_pack_event_payload(
+        node=node,
+        status=status,
+        detail=detail,
+        duration_ms=duration_ms,
+        payload=event_payload,
+    )
     trace = state.get("trace", []) + [
         {
             "node": node,
@@ -642,8 +676,11 @@ def _node_update(
     ]
     events = state.get("events", []) + [
         {
+            "event_id": f"evt_pack_{uuid.uuid4().hex[:12]}",
             "pack_id": state["pack_id"],
             "event_type": event_type,
+            "event_source": "document_pack_json",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "node": node,
             "status": status,
             "duration_ms": duration_ms,
@@ -651,6 +688,131 @@ def _node_update(
         }
     ]
     return {"trace": trace, "events": events}
+
+
+def _append_document_pack_event(
+    pack_dir: Path,
+    *,
+    pack_id: str,
+    event_type: str,
+    node: str,
+    detail: str,
+    payload: dict,
+    status: str = "passed",
+) -> None:
+    events_path = pack_dir / "events.json"
+    try:
+        events = _read_json(events_path)
+        if not isinstance(events, list):
+            events = []
+    except (OSError, json.JSONDecodeError):
+        events = []
+    event_payload = _normalized_document_pack_event_payload(
+        node=node,
+        status=status,
+        detail=detail,
+        duration_ms=0,
+        payload=payload,
+    )
+    events.append(
+        {
+            "event_id": f"evt_pack_{uuid.uuid4().hex[:12]}",
+            "pack_id": pack_id,
+            "event_type": event_type,
+            "event_source": "document_pack_json",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "node": node,
+            "status": status,
+            "duration_ms": 0,
+            "payload": event_payload,
+        }
+    )
+    _write_json(events_path, events)
+
+
+def _public_document_pack_event(pack_id: str, event: dict, index: int) -> dict:
+    raw_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    node = str(event.get("node") or raw_payload.get("node") or "documents")
+    status = str(event.get("status") or raw_payload.get("status") or "passed")
+    detail = str(raw_payload.get("detail") or event.get("detail") or node)
+    duration_ms = int(event.get("duration_ms") or raw_payload.get("duration_ms") or 0)
+    payload = _normalized_document_pack_event_payload(
+        node=node,
+        status=status,
+        detail=detail,
+        duration_ms=duration_ms,
+        payload=raw_payload,
+    )
+    return {
+        **event,
+        "event_id": event.get("event_id") or f"evt_pack_legacy_{index:04d}",
+        "pack_id": event.get("pack_id") or pack_id,
+        "event_source": event.get("event_source") or "document_pack_json",
+        "timestamp": event.get("timestamp") or "1970-01-01T00:00:00Z",
+        "node": node,
+        "status": status,
+        "duration_ms": duration_ms,
+        "payload": payload,
+    }
+
+
+def _normalized_document_pack_event_payload(
+    *,
+    node: str,
+    status: str,
+    detail: str,
+    duration_ms: int,
+    payload: dict,
+) -> dict:
+    normalized = dict(payload)
+    normalized.setdefault("node", node)
+    normalized.setdefault("phase", _document_pack_phase(node))
+    normalized.setdefault("status", status)
+    normalized.setdefault("detail", detail)
+    normalized.setdefault("duration_ms", duration_ms)
+    normalized.setdefault("warnings", [])
+    normalized.setdefault("errors", [])
+    normalized.setdefault("artifact_refs", [])
+    normalized.setdefault("human_label", _document_pack_human_label(node))
+    normalized.setdefault(
+        "progress_message",
+        _document_pack_progress_message(node, status, detail),
+    )
+    return normalized
+
+
+def _document_pack_phase(node: str) -> str:
+    return {
+        "index": "documents",
+        "extract_pdf_ocr_cad": "extraction",
+        "groq_extract": "extraction",
+        "consolidate": "consolidation",
+        "qa": "qa",
+        "write_artifacts": "artifacts",
+        "memory_writeback": "memory",
+        "correction": "correction",
+        "generate_design": "generation",
+    }.get(node, "documents")
+
+
+def _document_pack_human_label(node: str) -> str:
+    return {
+        "index": "Inventaire du pack documentaire",
+        "extract_pdf_ocr_cad": "Extraction PDF/OCR/CAD",
+        "groq_extract": "Extraction structurée Groq",
+        "consolidate": "Consolidation des exigences",
+        "qa": "Validation du pack documentaire",
+        "write_artifacts": "Écriture des artefacts documentaires",
+        "memory_writeback": "Écriture mémoire documentaire",
+        "correction": "Correction utilisateur",
+        "generate_design": "Lancement de la génération 3D",
+    }.get(node, node.replace("_", " ").capitalize())
+
+
+def _document_pack_progress_message(node: str, status: str, detail: str) -> str:
+    if status == "failed":
+        return f"Échec pendant : {_document_pack_human_label(node)}."
+    return f"{_document_pack_human_label(node)} : {detail}."
 
 
 def _processing_report(

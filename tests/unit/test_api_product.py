@@ -32,6 +32,15 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["real_glb_asset_count"] == 12
         assert summary["missing_file_count"] == 0
         assert "blender_available" in summary
+        assert summary["rag_embedding_provider"]
+        assert summary["rag_status"] in {
+            "primary_nvidia_bge_m3",
+            "local_sentence_transformers_fallback",
+            "deterministic_hash_fallback",
+            "custom_provider",
+        }
+        assert isinstance(summary["rag_degraded"], bool)
+        assert summary["rag_reindex_url"] == "/rag/reindex"
         assert isinstance(summary["warnings"], list)
     finally:
         workflow_service.outputs_dir = original_outputs
@@ -90,7 +99,7 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
         assert operation["next_recommended_action"]
         assert operation["progress_indicator"] == "done"
         assert operation["phase"] == "workflow"
-        assert operation["human_label"] == "Workflow"
+        assert operation["human_label"] == "Workflow terminé"
         assert operation["progress_message"]
         assert operation["progress_label"] == "Terminé"
         assert operation["is_running"] is False
