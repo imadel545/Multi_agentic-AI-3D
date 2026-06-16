@@ -122,12 +122,14 @@ yet.
 
 ## Current verdict
 
-`BACKEND_PRODUCT_READY_FOR_FRONTEND_BUILD`
+`FRONTEND_CAN_START_ON_CURRENT_BACKEND`
 
 The backend can generate tested local 3D workflows and exposes frontend-safe
 product surfaces for status, live progression, viewer bundle, edit, versions,
 timeline, current operation, document-pack capabilities, and user issues. The
 frontend still does not exist; the next step is to build it against this
 backend product contract, while keeping the documented limitations visible.
+This does not mean vendor-grade QA, durable runtime orchestration, or complete
+document intelligence are finished.
 
 Reproducible proof: `tests/e2e/test_telecom_generation_proof.py`.
