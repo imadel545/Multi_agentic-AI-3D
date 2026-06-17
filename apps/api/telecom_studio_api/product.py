@@ -993,6 +993,45 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
         "impact": "La hauteur d'installation des antennes n'a pas été précisée.",
         "recommended_action": "Précisez la hauteur d'antenne dans le brief.",
     },
+    "LLM_FIELD_REPAIRED": {
+        "title": "Champ IA réparé par le backend",
+        "impact": (
+            "GPT-OSS a omis ou fragilisé un champ 3D supporté; le backend a restauré "
+            "la valeur déterministe avant de générer la scène."
+        ),
+        "recommended_action": (
+            "Afficher cette réparation comme signal de prudence et vérifier le SceneSpec."
+        ),
+    },
+    "RF_BEAMWIDTH_NARROW": {
+        "title": "Beamwidth à vérifier",
+        "impact": (
+            "Le beamwidth extrait ou déduit peut être trop étroit pour couvrir trois secteurs."
+        ),
+        "recommended_action": (
+            "Vérifier la valeur RF dans le cahier de charge ou demander une correction."
+        ),
+    },
+    "TOWER_PLATFORM_RECOMMENDED": {
+        "title": "Plateforme pylône recommandée",
+        "impact": (
+            "Le site contient plusieurs équipements en hauteur; une plateforme ou un support "
+            "technique peut être nécessaire pour rendre l'installation réaliste."
+        ),
+        "recommended_action": (
+            "Ajouter une plateforme/support si le cahier de charge le confirme."
+        ),
+    },
+    "TOWER_AVIATION_LIGHT_RECOMMENDED": {
+        "title": "Balisage aviation recommandé",
+        "impact": (
+            "La hauteur du pylône peut nécessiter un feu aviation ou une vérification "
+            "réglementaire avant usage réel."
+        ),
+        "recommended_action": (
+            "Afficher ce point comme exigence de revue et confirmer la règle locale applicable."
+        ),
+    },
 }
 
 

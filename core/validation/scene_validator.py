@@ -27,22 +27,28 @@ def _scaled_tower_mount_zones(
     scene: SceneSpec,
     tower_asset: AssetManifest,
 ) -> list[tuple[float, float]]:
-    """Scale tower mount zones when the tower geometry is generated parametrically.
+    """Resolve tower mount zones for the geometry source being validated.
 
     Internal tower assets may be 10m/12m/30m exemplars while SceneSpec asks for a
     different height. In parametric mode, the SceneSpec height is the geometry
-    truth, so mount zones scale with the requested tower height.
+    truth, so the asset's exemplar-only upper zone must not make a valid lower
+    HBA fail before Blender. Keep a conservative practical mounting envelope
+    and also include the scaled exemplar zones for continuity.
     """
-    scale = 1.0
-    if (
-        scene.tower.generation_strategy == "parametric_generated"
-        and tower_asset.dimensions_m is not None
-        and tower_asset.dimensions_m.height > 0
-    ):
+    if scene.tower.generation_strategy != "parametric_generated":
+        return [(zone.min_height_m, zone.max_height_m) for zone in tower_asset.mount_zones]
+
+    practical_min = max(3.0, scene.tower.height_m * 0.2)
+    practical_max = max(practical_min, scene.tower.height_m * 0.98)
+    zones = [(practical_min, practical_max)]
+
+    if tower_asset.dimensions_m is not None and tower_asset.dimensions_m.height > 0:
         scale = scene.tower.height_m / tower_asset.dimensions_m.height
-    return [
-        (zone.min_height_m * scale, zone.max_height_m * scale) for zone in tower_asset.mount_zones
-    ]
+        zones.extend(
+            (zone.min_height_m * scale, zone.max_height_m * scale)
+            for zone in tower_asset.mount_zones
+        )
+    return zones
 
 
 def _has_accessory(scene: SceneSpec, asset_type: str) -> bool:

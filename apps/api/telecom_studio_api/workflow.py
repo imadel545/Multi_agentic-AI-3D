@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.scene_edit_agent import SceneEditAgent
@@ -451,11 +452,12 @@ class WorkflowService:
             if status_path.exists():
                 try:
                     payload = json.loads(status_path.read_text(encoding="utf-8"))
+                    created_at = _status_created_at(payload, workflow_dir)
                     designs.append(
                         {
                             "workflow_id": payload.get("workflow_id"),
                             "status": payload.get("status"),
-                            "created_at": payload.get("metrics", {}).get("started_at"),
+                            "created_at": created_at,
                             "qa_score": payload.get("qa_score"),
                             "generation_mode": payload.get("generation_mode"),
                         }
@@ -995,11 +997,15 @@ class WorkflowService:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
         rag_runtime = _rag_runtime_summary(self.orchestrator.rag_service)
+        previous_status = _read_status_payload(output_dir)
+        created_at = _status_created_at(previous_status, output_dir)
+        metrics = dict(result.metrics)
+        metrics.setdefault("started_at", created_at)
         llm_available = llm_available_from_workflow_service(self)
         llm_reason = llm_fallback_reason(
             provider=result.llm_provider,
             fallback_used=result.llm_fallback_used,
-            use_llm=result.metrics.get("use_llm"),
+            use_llm=metrics.get("use_llm"),
             error=result.llm_error,
             llm_available=llm_available,
         )
@@ -1026,6 +1032,7 @@ class WorkflowService:
         payload = {
             "workflow_id": workflow_id,
             "status": status,
+            "created_at": created_at,
             "version_id": version_id,
             "active_version_id": active_version_id,
             "artifacts": artifacts,
@@ -1074,8 +1081,8 @@ class WorkflowService:
             if result.glb_inspection
             else None,
             "total_duration_ms": result.total_duration_ms,
-            "total_workflow_duration_ms": result.metrics["total_workflow_duration_ms"],
-            "metrics": result.metrics,
+            "total_workflow_duration_ms": metrics.get("total_workflow_duration_ms"),
+            "metrics": metrics,
             "quality_gates": [gate.model_dump() for gate in result.quality_gate_reports],
             "download_url": f"/designs/{workflow_id}/download",
             "trace_path": str(output_dir / "workflow_trace.json"),
@@ -1100,18 +1107,23 @@ class WorkflowService:
             return
         payload["status"] = "running"
         metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
-        payload["metrics"] = metrics | {"status": "running"}
+        payload["created_at"] = _status_created_at(payload, output_dir)
+        payload["metrics"] = metrics | {"status": "running", "started_at": payload["created_at"]}
         self._write_json(status_path, payload)
 
     def _write_failed_status(self, workflow_id: str, output_dir: Path, error: str) -> None:
+        previous_status = _read_status_payload(output_dir)
+        created_at = _status_created_at(previous_status, output_dir)
         payload = {
             "workflow_id": workflow_id,
             "status": "failed",
+            "created_at": created_at,
             "artifacts": {},
             "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
             "warnings": [],
             "runtime_capabilities": runtime_capabilities(),
             "unsupported_actions": unsupported_actions(),
+            "metrics": {"status": "failed", "started_at": created_at},
         }
         self._write_json(output_dir / "status.json", payload)
 
@@ -1122,9 +1134,11 @@ class WorkflowService:
         detail_level: str,
         use_llm: bool | None,
     ) -> None:
+        created_at = _utc_now_iso()
         payload = {
             "workflow_id": workflow_id,
             "status": "pending",
+            "created_at": created_at,
             "version_id": None,
             "active_version_id": None,
             "artifacts": {},
@@ -1150,6 +1164,7 @@ class WorkflowService:
                 "status": "pending",
                 "detail_level": detail_level,
                 "use_llm": use_llm,
+                "started_at": created_at,
             },
         }
         self._write_json(output_dir / "status.json", payload)
@@ -1689,6 +1704,43 @@ def _artifact_url(
     if version_id:
         return f"{url}?version_id={version_id}"
     return url
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _path_mtime_iso(path: Path) -> str:
+    return (
+        datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _read_status_payload(output_dir: Path) -> dict:
+    status_path = output_dir / "status.json"
+    if not status_path.exists():
+        return {}
+    try:
+        payload = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _status_created_at(payload: dict | None, workflow_dir: Path) -> str:
+    if isinstance(payload, dict):
+        created_at = payload.get("created_at")
+        if isinstance(created_at, str) and created_at:
+            return created_at
+        metrics = payload.get("metrics")
+        if isinstance(metrics, dict):
+            started_at = metrics.get("started_at")
+            if isinstance(started_at, str) and started_at:
+                return started_at
+    return _path_mtime_iso(workflow_dir)
 
 
 def _status_available_actions(status: dict) -> list[str]:

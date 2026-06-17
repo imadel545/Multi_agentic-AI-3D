@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -34,6 +35,8 @@ RUNTIME_MEMORY_COLLECTIONS = [
     "error_memory",
     "document_pack_memory",
 ]
+
+STATIC_INDEX_STATE_FILENAME = "qdrant_static_index_state.json"
 
 
 class RagIndexCompatibilityError(RuntimeError):
@@ -106,6 +109,8 @@ class RagService:
                 )
             indexed_counts[collection] = len(collection_docs)
 
+        self.query_cache.clear()
+        self._write_static_index_state(indexed_counts)
         return RagIndexReport(
             status="indexed",
             collections=indexed_counts,
@@ -120,6 +125,8 @@ class RagService:
         collection: str | None = None,
         filters: dict[str, str | int | float | bool | None] | None = None,
     ) -> list[RagSearchResult]:
+        if collection not in RUNTIME_MEMORY_COLLECTIONS:
+            self._ensure_static_index_current()
         collections = [collection] if collection else RAG_COLLECTIONS
         cacheable = collection not in RUNTIME_MEMORY_COLLECTIONS
         query_hash = ""
@@ -236,6 +243,52 @@ class RagService:
             payload=payload,
         )
 
+    def _ensure_static_index_current(self) -> None:
+        expected = self._static_index_identity()
+        current = self._read_static_index_state()
+        if _static_index_matches(current, expected) and self._static_collections_exist(current):
+            return
+        self.reindex()
+
+    def _static_index_identity(self) -> dict:
+        return {
+            "knowledge_index_hash": knowledge_index_hash(self.project_root),
+            "embedding_provider": self.embedding_provider.name,
+            "embedding_dimensions": self.embedding_provider.dimensions,
+            "collections": RAG_COLLECTIONS,
+        }
+
+    def _static_index_state_path(self) -> Path:
+        return self.qdrant_path / STATIC_INDEX_STATE_FILENAME
+
+    def _read_static_index_state(self) -> dict | None:
+        path = self._static_index_state_path()
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _write_static_index_state(self, indexed_counts: dict[str, int]) -> None:
+        path = self._static_index_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self._static_index_identity() | {"indexed_counts": indexed_counts}
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _static_collections_exist(self, state: dict | None) -> bool:
+        if not state:
+            return False
+        counts = state.get("indexed_counts")
+        if not isinstance(counts, dict):
+            return False
+        return all(
+            count == 0 or self.client.collection_exists(collection)
+            for collection, count in counts.items()
+            if collection in RAG_COLLECTIONS
+        )
+
 
 def _group_documents(documents: list[RagDocument]) -> dict[str, list[RagDocument]]:
     grouped: dict[str, list[RagDocument]] = defaultdict(list)
@@ -247,6 +300,12 @@ def _group_documents(documents: list[RagDocument]) -> dict[str, list[RagDocument
 def _stable_point_id(doc_id: str) -> int:
     digest = hashlib.blake2b(doc_id.encode("utf-8"), digest_size=8).digest()
     return int.from_bytes(digest, "big") & ((1 << 63) - 1)
+
+
+def _static_index_matches(current: dict | None, expected: dict) -> bool:
+    if not current:
+        return False
+    return all(current.get(key) == value for key, value in expected.items())
 
 
 def _tokenize(text: str) -> set[str]:

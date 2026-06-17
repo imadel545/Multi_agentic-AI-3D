@@ -323,10 +323,12 @@ def _bounding_box_reasonable(
         depth = _number(bbox.get("depth"))
         if height is None or width is None or depth is None:
             return False
+        max_horizontal_span = max(50.0, scene.tower.height_m * 0.8)
+        max_height = scene.tower.height_m + max(10.0, scene.tower.height_m * 0.05)
         return (
-            scene.tower.height_m - HEIGHT_TOLERANCE_M <= height <= scene.tower.height_m + 10
-            and 0 < width <= 50
-            and 0 < depth <= 50
+            scene.tower.height_m - HEIGHT_TOLERANCE_M <= height <= max_height
+            and 0 < width <= max_horizontal_span
+            and 0 < depth <= max_horizontal_span
         )
     return (
         glb_inspection.file_exists

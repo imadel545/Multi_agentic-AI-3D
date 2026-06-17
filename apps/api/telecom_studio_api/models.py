@@ -49,6 +49,7 @@ class RuntimeCapabilities(BaseModel):
 class WorkflowStatus(BaseModel):
     workflow_id: str
     status: str
+    created_at: str | None = None
     version_id: str | None = None
     active_version_id: str | None = None
     artifacts: dict[str, str]

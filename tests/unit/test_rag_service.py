@@ -31,6 +31,34 @@ def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
     )
 
 
+def test_rag_search_reindexes_when_docs_change(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    (project_root / "docs").mkdir(parents=True)
+    (project_root / "data" / "knowledge").mkdir(parents=True)
+    (project_root / "assets" / "manifests").mkdir(parents=True)
+    old_doc = project_root / "docs" / "OLD_CONTEXT.md"
+    old_doc.write_text("# Old\n\nobsolete deleted context for lattice demo", encoding="utf-8")
+    service = RagService(
+        project_root=project_root,
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+        reranker=PassthroughReranker(),
+    )
+    service.reindex()
+
+    old_doc.unlink()
+    (project_root / "docs" / "CURRENT_CONTEXT.md").write_text(
+        "# Current\n\nfresh active context for rooftop planning",
+        encoding="utf-8",
+    )
+
+    results = service.search("fresh active rooftop planning", limit=5)
+
+    assert results
+    assert all(result.payload.get("source_path") != "docs/OLD_CONTEXT.md" for result in results)
+    assert any(result.payload.get("source_path") == "docs/CURRENT_CONTEXT.md" for result in results)
+
+
 def test_rag_filtered_search_by_network_and_tower(tmp_path: Path) -> None:
     service = RagService(
         project_root=Path.cwd(),

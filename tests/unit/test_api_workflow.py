@@ -27,6 +27,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         status = client.get(f"/designs/{response['workflow_id']}").json()
         internal_status = workflow_service.get_status(response["workflow_id"])
         assert status["status"] == "completed"
+        assert status["created_at"].endswith("Z")
         assert status["extraction_provider"] == "deterministic"
         assert status["llm_provider"] == "deterministic"
         assert isinstance(status["llm_available"], bool)
@@ -92,6 +93,9 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["runtime_capabilities"]["streaming_transport"] == "push_sse"
         assert status["runtime_capabilities"]["websocket_runtime"] is False
         assert any(action["action"] == "human_in_loop" for action in status["unsupported_actions"])
+        designs = client.get("/designs").json()
+        assert designs[0]["workflow_id"] == response["workflow_id"]
+        assert designs[0]["created_at"].endswith("Z")
         for artifact_url in status["artifacts"].values():
             assert artifact_url.startswith(f"/designs/{response['workflow_id']}/")
             assert "/Users/" not in artifact_url

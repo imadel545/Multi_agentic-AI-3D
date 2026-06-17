@@ -543,6 +543,44 @@ def test_product_issues_humanize_real_asset_warning_codes() -> None:
     assert "Fallback procédural d'asset" in titles
 
 
+def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:
+    status = {
+        "status": "completed",
+        "warnings": [
+            {
+                "code": "LLM_FIELD_REPAIRED",
+                "message": "include_gps_antenna restored from deterministic baseline.",
+                "severity": "warning",
+            },
+            {
+                "code": "RF_BEAMWIDTH_NARROW",
+                "message": "Beamwidth 65.0° may be too narrow for 3 sectors.",
+                "severity": "warning",
+            },
+            {
+                "code": "TOWER_PLATFORM_RECOMMENDED",
+                "message": "Tower platform recommended for equipment access.",
+                "severity": "warning",
+            },
+            {
+                "code": "TOWER_AVIATION_LIGHT_RECOMMENDED",
+                "message": "Aviation light required for towers >= 45m per ICAO.",
+                "severity": "warning",
+            },
+        ],
+        "errors": [],
+    }
+
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    issues = _collect_user_issues(status)
+    titles = {issue["title"] for issue in issues}
+    assert "Champ IA réparé par le backend" in titles
+    assert "Beamwidth à vérifier" in titles
+    assert "Plateforme pylône recommandée" in titles
+    assert "Balisage aviation recommandé" in titles
+
+
 def test_product_issues_include_failed_runtime_nodes() -> None:
     from apps.api.telecom_studio_api.product import _collect_user_issues
 

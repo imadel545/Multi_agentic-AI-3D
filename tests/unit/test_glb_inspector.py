@@ -122,6 +122,22 @@ def test_preview_inspector_rejects_dark_flat_png(tmp_path: Path) -> None:
     assert "PREVIEW_VISUAL_QUALITY_INVALID" in report.critical_errors
 
 
+def test_preview_inspector_accepts_light_low_contrast_non_flat_tall_tower_preview(
+    tmp_path: Path,
+) -> None:
+    scene = _scene(
+        "Créer un site 5G sur pylône treillis 90m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°."
+    )
+    preview_path = tmp_path / "preview.png"
+    preview_path.write_bytes(_subtle_light_png_bytes(1920, 1080))
+
+    report = PreviewInspector().inspect(preview_path, scene)
+
+    assert report.visual_quality_valid is True
+    assert report.checks["preview_visual_quality_valid"] is True
+    assert report.preview_qa_passed is True
+
+
 def test_preview_inspector_missing_png(tmp_path: Path) -> None:
     report = PreviewInspector().inspect(tmp_path / "missing.png", _scene())
 
@@ -131,9 +147,13 @@ def test_preview_inspector_missing_png(tmp_path: Path) -> None:
     assert "PREVIEW_FILE_MISSING" in report.critical_errors
 
 
-def _scene():
+def _scene(prompt: str | None = None):
     requirements = parse_requirements_text(
-        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°."
+        prompt
+        or (
+            "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+            "Azimuts : 0°, 120°, 240°."
+        )
     )
     registry = AssetRegistry(Path("assets/manifests"))
     tower = registry.select_tower(
@@ -236,6 +256,27 @@ def _png_bytes(
                 row.extend((gradient, gradient, min(255, gradient + 8)))
             else:
                 row.extend(color)
+        rows.append(bytes(row))
+    image = zlib.compress(b"".join(rows), level=9)
+    return (
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
+    )
+
+
+def _subtle_light_png_bytes(width: int, height: int) -> bytes:
+    def chunk(chunk_type: bytes, payload: bytes) -> bytes:
+        checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
+        return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
+
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            # Mimics a tall, thin tower preview on a light studio background:
+            # low contrast, but not a flat placeholder.
+            value = 210 + int(18 * y / max(height - 1, 1)) + int(4 * x / max(width - 1, 1))
+            row.extend((value, value, min(255, value + 5)))
         rows.append(bytes(row))
     image = zlib.compress(b"".join(rows), level=9)
     return (

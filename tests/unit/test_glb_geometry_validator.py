@@ -137,6 +137,33 @@ def test_geometry_validation_requires_requested_accessories(tmp_path: Path) -> N
     assert "power_cabinet" in missing.missing_objects
 
 
+def test_geometry_validation_scales_bounding_box_sanity_for_tall_parametric_tower(
+    tmp_path: Path,
+) -> None:
+    scene = _scene(
+        "Créer un site 5G sur pylône treillis 90m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, boîte alimentation, "
+        "dalle béton, GPS et labels."
+    )
+    metadata_path = _metadata_path(tmp_path, scene)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["bounding_box_m"] = {
+        "width": 54.0,
+        "depth": 54.0,
+        "height": 90.9,
+    }
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(_object_names(scene)),
+        metadata_path,
+    )
+
+    assert scene.tower.height_m == 90.0
+    assert report.checks["bounding_box_reasonable"] is True
+
+
 def test_mesh_qa_prefix_counts_do_not_treat_gps_as_sector_antenna() -> None:
     counts = _object_prefix_counts(
         [

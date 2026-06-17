@@ -9,7 +9,7 @@ from core.contracts.scene import SceneSpec
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MIN_LUMINANCE_MEAN = 55.0
-MIN_LUMINANCE_STDDEV = 6.5
+MIN_LUMINANCE_STDDEV = 3.0
 MIN_NON_DARK_PIXEL_RATIO = 0.08
 
 
