@@ -53,12 +53,24 @@ yet.
 
 ## Current frontend
 
-- No operational frontend.
-- Old React/Vite dashboard is rejected.
-- `apps/frontend` may exist as an empty local folder, but it contains no
-  application.
-- Do not rebuild the frontend until product APIs, timeline, asset fallback, and
-  QA are reliable.
+- `apps/frontend` is a Vite + React + TypeScript work-in-progress connected to
+  the real FastAPI backend with Zod contract validation.
+- The first technical kernel was rejected as too dashboard-like. It must not be
+  treated as an accepted product gate.
+- The current frontend direction is a product studio rework: conversation-first
+  command, dominant 3D viewer, contextual drawers, narrative agent progress,
+  document-pack intake, visible QA/RAG/issues, and no raw JSON as the primary
+  surface.
+- It consumes `/designs` + `workflow_id`, not `/projects`, `/runs`, `job_id`, or
+  a new state model.
+- The command field starts empty; example prompts are user-selected helpers, not
+  hidden demo state.
+- The viewer loads only backend artifact URLs and must show either a visible GLB
+  or an explicit backend preview/error fallback during smoke.
+- This frontend is not accepted as final until a real smoke proves: prompt or
+  document pack -> backend workflow -> streamed progress -> visible GLB or honest
+  fallback -> QA/RAG/issues/artifacts in user language.
+- Old dashboard patterns remain rejected.
 
 ## Current assets
 
@@ -140,18 +152,18 @@ yet.
 
 ## Current verdict
 
-`BACKEND_TRUTH_GATE_CONSOLIDATED`
+`FRONTEND_PRODUCT_REWORK_IN_PROGRESS`
 
-The backend contract is consolidated enough to prepare Gate 2A frontend
-integration against the existing `/designs` + `workflow_id` surface. This is
-not a claim that the product is finished or vendor-grade.
+The backend contract is consolidated around `/designs` + `workflow_id`. The
+frontend now has reusable real-backend pieces, but the previous dashboard-like
+kernel is not accepted as product UX. The active frontend work must prove a
+studio experience, not only a connected technical shell.
 
-Before frontend implementation, the repo must be committed cleanly and the UI
-must be planned against the documented limitations: `mesh_level_transform_basic`
+The frontend must keep these limitations visible: `mesh_level_transform_basic`
 or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack
 intelligence, fail-open reranking, non-vendor-grade assets, and no durable
 broker/cancellation.
 
-Reproducible proof: `tests/e2e/test_telecom_generation_proof.py` plus the
-targeted Product API, RAG, LangGraph, Blender, and QA tests listed in the final
-gate report.
+Backend proof remains `tests/e2e/test_telecom_generation_proof.py` plus targeted
+Product API, RAG, LangGraph, Blender, and QA tests. Frontend acceptance requires
+the checks and smoke described in `apps/frontend/FRONTEND_KERNEL_README.md`.

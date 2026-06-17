@@ -157,4 +157,6 @@ requirements_text or document pack
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
-- Frontend: old dashboard frontend deleted; rebuild planned as chat-first / 3D-first.
+- Frontend: `apps/frontend` contains a real-backend product rework in progress.
+  The previous dashboard-like kernel is rejected; acceptance requires a
+  chat-first / 3D-first smoke with visible GLB or explicit fallback.

@@ -5,7 +5,11 @@ frontend.
 
 ## Visible during frontend build
 
-- No operational frontend yet; old dashboard rejected.
+- `apps/frontend` is a real-backend product rework in progress, not an accepted
+  frontend gate.
+- The first technical kernel was rejected as too dashboard-like; fixed topbar
+  badges, permanent tab grids, and raw JSON surfaces must not come back.
+- Old dashboard patterns remain rejected.
 - No `/projects` or `/runs` API is added in v1. The frontend maps its "run"
   concept to `workflow_id` and "scene plan" to `scene_spec`.
 - `events/stream` is `push_sse` inside the local FastAPI process, with JSONL
@@ -37,8 +41,10 @@ frontend.
 - The product path does not silently load a local embedding model. Deterministic
   hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
   hash is not production quality.
-- After a provider/dimension change, the local Qdrant index must be rebuilt with
-  `POST /rag/reindex`; otherwise `/rag/search` returns `409 RAG_INDEX_DIMENSION_MISMATCH`.
+- Static RAG docs/manifests are checked against a persisted index identity and
+  reindexed automatically when they change. Runtime memory collections remain
+  local-first and can still require operational cleanup if Qdrant storage is
+  corrupted or locked by another process.
 - Reranker product path is NVIDIA API, but it is fail-open. If unavailable,
   vector order is used and `rag_reranker_degraded_reason` must be displayed.
   Local reranker is an explicit developer override, not product default.
@@ -79,4 +85,4 @@ frontend.
 - Full LangGraph redesign.
 - Advanced mesh-level QA.
 - Production Docling.
-- New frontend.
+- Final polished frontend beyond the current product rework.

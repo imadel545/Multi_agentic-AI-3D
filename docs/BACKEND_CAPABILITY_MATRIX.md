@@ -17,7 +17,7 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
 | DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
 | DWG | UNSUPPORTED_WITHOUT_TOOL | `dwgread`/ODA/FreeCAD detection | Conversion dépend d'outil local. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; l'index statique se resynchronise quand les docs/manifests changent; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py`, `/studio/summary` | NVIDIA API par défaut; passthrough seulement explicite ou dégradé visible; modèle local seulement si activé explicitement. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
@@ -31,7 +31,7 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles: `node_started`, résultat du nœud, artefacts prêts, QA, issues; runtime local-first. |
 | SSE | IMPLEMENTED | `/events/stream` | `push_sse` local-process: replay JSONL puis queue live jusqu'au terminal; pas encore broker durable/cancellation. |
 | Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur. |
-| Frontend | FUTURE | `apps/frontend` vide ou absent | Ancien dashboard refusé; ne pas reconstruire maintenant. |
+| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`, `npm run typecheck`, `npm run test`, `npm run build`, visual smoke required | Real-backend React/Three/Zod pieces exist, but the first dashboard-like kernel was rejected. Acceptance requires a chat-first, 3D-first studio smoke with visible GLB or honest preview fallback. |
 
 ## Agent / Runtime Truth Matrix
 
@@ -68,9 +68,9 @@ prétend pas à une autonomie générale.
 ## Synthèse
 
 Le backend est riche et testable. Le contrat produit backend/frontend est
-consolidé pour préparer la Gate 2A frontend chat-first / 3D-first, après commit
-propre et avec les limites visibles. Le frontend reste absent et doit consommer
-ces surfaces sans inventer de logique métier.
+consolidé. Le frontend sous `apps/frontend` est une base technique en rework
+produit, pas une Gate acceptée: il doit prouver une expérience chat-first et
+3D-first sans masquer les limites.
 
 Le vocabulaire backend stable reste `/designs` et `workflow_id`. Les labels
 frontend "project", "run" et "scene plan" sont des mappings UI, pas de nouvelles
