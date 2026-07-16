@@ -26,7 +26,7 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |
 | GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
 | Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py`, `core/qa/mesh_qa.py` | `mesh_level_transform_basic` quand transforms GLB lisibles, sinon `mesh_level_basic`; toujours pas collision/RF/vendor-grade. |
-| Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | `preview_luminance_only`, pas jugement visuel sémantique. |
+| Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | Pixel/framing basic: présence, occupation, centrage, clipping, contraste; pas jugement visuel sémantique. |
 | Repair loop | IMPLEMENTED_LIMITED | `core/orchestration/langgraph_orchestrator.py` | Répare certains défauts de SceneSpec; pas boucle autonome générale. |
 | Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles: `node_started`, résultat du nœud, artefacts prêts, QA, issues; runtime local-first. |
 | SSE | IMPLEMENTED | `/events/stream` | `push_sse` local-process: replay JSONL puis queue live jusqu'au terminal; pas encore broker durable/cancellation. |
@@ -43,14 +43,15 @@ prétend pas à une autonomie générale.
 |---|---|---|---|
 | `design_created` | Workflow service | `WorkflowService.create_design` | Démarrage local d'un `workflow_id`, pas création de project/run. |
 | `extract_requirements` | LangGraph node + controlled LLM wrapper | `RequirementExtractor`, `GroqStructuredClient` | GPT-OSS `openai/gpt-oss-120b` si disponible; fallback déterministe visible via `extraction_provider`, `llm_fallback_used`, `llm_fallback_reason`. |
-| `retrieve_rag_context` | LangGraph node + RAG service | `RagService`, `rag_evidence.json` | RAG sert de contexte planning. Seuls les `payload.planning_hints` structurés et whitelistés peuvent influencer `SceneSpec`; pas utilisé pour l'extraction LLM v1. |
+| `retrieve_rag_context` | LangGraph node + RAG service | `RagService`, `rag_evidence.json` | NVIDIA query/passage retrieval sur corpus contrôlé; pas utilisé pour l'extraction LLM v1. |
+| `decide_planning_context` | LangGraph node + bounded GPT-OSS decision | `PlanningDecisionClient`, `planning_decision.json` | GPT-OSS arbitre seulement les candidats RAG typés; validators et SceneSpec restent l'autorité. |
 | `memory_recall` | LangGraph node + SQLite/RAG service | `MemoryService` | Mémoire locale limitée; compteurs exposés dans `/studio/summary`. |
 | `select_assets` / `asset_fallback_handler` | LangGraph node + asset registry | `AssetRegistry`, manifests | Asset réel/import/fallback visible; `/assets/inventory` est typé. |
 | `validate_requirements` | LangGraph node + deterministic validators | `core/validation`, tower/RF validators | Validation métier contrôlée, pas décision libre LLM. |
 | `plan_scene` | LangGraph node + deterministic planner | `core/agents/scene_planner.py` | `SceneSpec` reste la source de vérité de génération. |
 | `validate_scene` / repair | LangGraph node + deterministic repair | `scene_repair_handler` | Répare certains défauts SceneSpec; pas boucle autonome générale. |
 | `generate_blender` | LangGraph node + Blender subprocess service | `BlenderRunner`, `apps/blender_worker` | `real_blender` requis pour résultat product-grade; fallback signalé. |
-| `qa_generation` | LangGraph node + QA services | `glb_inspector`, `glb_geometry_validator`, `preview_inspector` | QA `mesh_level_basic`; jamais "advanced geometry". |
+| `qa_generation` | LangGraph node + QA services | `glb_inspector`, `glb_geometry_validator`, `preview_inspector` | QA `mesh_level_transform_basic` ou `mesh_level_basic`; jamais "advanced geometry". |
 | `artifact_ready` | Workflow service event | `WorkflowService._emit_result_product_events` | Artifacts publics par URL `/designs/{workflow_id}/artifacts/{name}`. |
 | `edit_patch_created` | Service-level LLM wrapper | `SceneEditAgent` | Edition par patch contrôlé de `SceneSpec`, pas génération libre de Blender. |
 | versioning / rollback | Service-level filesystem | `SceneVersioningService` | Local-first, mono-utilisateur; pas broker durable. |

@@ -55,9 +55,11 @@ and `/viewer-bundle`.
 ```text
 Requirement extraction
 -> structured RAG query from RequirementSpec + original text
--> Qdrant search over knowledge, docs, assets, templates
--> optional reranker
--> ScenePlanner consumes only payload.planning_hints
+-> NVIDIA BGE-M3 query embedding against passage-embedded controlled corpus
+-> Qdrant search over knowledge files and asset manifests
+-> NVIDIA reranker
+-> bounded GPT-OSS decision over validated candidate hints
+-> ScenePlanner consumes only accepted payload.planning_hints
 -> deterministic validation and quality gates remain mandatory
 ```
 
@@ -68,27 +70,23 @@ RAG retrieval are separate surfaces.
 
 - Qdrant local default: `data/qdrant`.
 - Optional external Qdrant: `TELECOM_STUDIO_QDRANT_URL`.
-- Static collections: telecom rules, asset manifests, scene templates,
-  validation cases, design patterns, Blender generation guides.
+- Static collections: the five controlled `data/knowledge` files and asset
+  manifests. Developer documentation is deliberately excluded from retrieval.
+- NVIDIA indexing uses `input_type=passage`; retrieval queries use
+  `input_type=query`. The embedding profile is part of index identity so an old
+  index is rebuilt instead of mixed silently.
 - Runtime collections: design memory, error memory, document-pack memory.
 - Rebuild after provider/dimension/knowledge changes with `POST /rag/reindex`.
 
 ## What Can Influence SceneSpec
 
-Only structured `payload.planning_hints` can affect planning. Current supported
-hints:
+Only structured `payload.planning_hints` can affect planning. Current applied
+hints are:
 
 - `antenna_install_height_m`
 - `beamwidth_deg`
 - `include_cables`
 - `include_sector_beams`
-- `include_labels`
-- `include_power_cabinet`
-- `include_gps_antenna`
-- `include_rru`
-- `foundation_type`
-- `mechanical_tilt_deg`
-- `electrical_tilt_deg`
 
 Free text retrieved by RAG is audit context. It must not mutate the 3D plan
 silently.
@@ -102,8 +100,8 @@ Workflow and viewer surfaces expose:
 
 - `rag_context_count`: number of retrieved contexts.
 - `rag_planning_summary.rag_used_for_extraction=false`.
-- `rag_planning_summary.rag_used_for_planning`: true only when structured hints
-  were present.
+- `rag_planning_summary.rag_used_for_planning`: true only when a validated hint
+  was actually applied, not merely retrieved.
 - `rag_planning_summary.rag_planning_mode`: `structured_planning_hints` or
   `context_only_no_structured_hints`.
 - `rag_planning_summary.candidate_hint_fields`.

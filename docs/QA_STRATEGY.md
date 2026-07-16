@@ -22,7 +22,8 @@ limitations and never advertises checks it cannot perform.
 - Geometry QA: combines object-name counts, metadata proxies, and Mesh QA
   results.
 - Height/azimuth QA: metadata-based checks plus bounding-box sanity.
-- Preview QA: PNG resolution, luminance, contrast, non-dark-pixel ratio.
+- Preview QA: PNG resolution, luminance, contrast, subject occupancy, bounding
+  box framing, clipping, horizontal centering, and edge margins.
 - Document-pack QA: evidence, conflicts, blocking fields, plausibility, OCR/CAD
   limits.
 
@@ -34,8 +35,9 @@ limitations and never advertises checks it cannot perform.
   transforms, and approximate antenna HBA when transforms are readable.
 - Geometry validator merges object-name counts, metadata proxies, and Mesh QA
   results; it fails when the real bounding box is unrealistic.
-- Preview inspector checks PNG resolution, luminance, contrast, and non-dark
-  pixel ratio.
+- Preview inspector parses PNG pixels and checks resolution, luminance,
+  contrast, foreground occupancy, subject framing, clipping, centering, and
+  margins.
 - Asset import QA verifies `asset_imports`, generation modes (`parametric_generated`,
   `internal_project_generated`, `imported_glb`, `procedural_fallback`,
   `missing_file`), missing files, and fallback visibility.

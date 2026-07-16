@@ -10,6 +10,7 @@ restent des responsabilités `WorkflowService` hors graphe.
 ```text
 extract_requirements
 retrieve_rag_context
+decide_planning_context
 memory_recall
 select_assets
 asset_fallback_handler
@@ -36,7 +37,18 @@ memory_writeback
   `payload.planning_hints`; il ne modifie pas directement la géométrie.
   `rag_evidence.json` expose les sources, champs candidats, scores et statut
   reranker.
-- Le checkpoint saver existe, mais il n'est pas encore une vraie base de reprise/cancellation.
+- `decide_planning_context` demande à GPT-OSS d'arbitrer uniquement des
+  candidats RAG typés et validés; le modèle ne peut ni écrire de géométrie
+  libre ni contourner les règles déterministes.
+- Le checkpoint saver persiste des snapshots locaux sérialisables; il ne
+  constitue pas encore un gestionnaire de cancellation/reprise durable.
+- Une révision persiste son opération active dans le statut existant, reprend
+  le stream après le dernier event durable, normalise les dépendances d'assets,
+  puis entre dans `run_scene_revision()`.
+- Après un redémarrage, une révision interrompue ne détruit pas le dernier
+  design valide : sa version candidate devient `failed`, la version active
+  `completed` est restaurée et le stream se termine par
+  `edit_patch_rejected`. Une création initiale interrompue reste `failed`.
 - Les nœuds émettent maintenant `node_started`, puis `node_completed`,
   `node_failed` ou `node_skipped` avec phase, label humain, message de
   progression, détail, durée, warnings et errors.

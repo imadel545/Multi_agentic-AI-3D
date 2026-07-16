@@ -11,7 +11,8 @@ FastAPI
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
   -> Groq extraction or deterministic fallback
-  -> NVIDIA API BGE-M3 RAG context + NVIDIA reranker evidence
+  -> NVIDIA API BGE-M3 query/passage retrieval + NVIDIA reranker evidence
+  -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
   -> asset registry + inventory
   -> SceneSpec planner
@@ -36,20 +37,25 @@ FastAPI
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
 - `core/qa`: GLB structural parse, mesh/accessor/transform basic QA, proxy
-  geometry, preview luminance QA.
+  geometry, preview pixel/framing QA.
 
 ## Runtime truths
 
 - `outputs/temp` contains ignored workflow artifacts.
 - `data/sqlite` and `data/qdrant` are local ignored runtime stores.
+- Workflow mutations check free local storage before persistence. Startup
+  recovery restores the last valid active version after an interrupted edit,
+  while an interrupted initial generation remains failed.
 - `.env` contains real secrets and must never be committed.
 - `.env.example` contains placeholders only.
-- `apps/frontend` is not an operational app.
+- `apps/frontend` is a real-backend product rework, not an accepted final gate.
 
 ## Known weak points
 
 - Edit patch creation, artifact copying, and version bookkeeping are service-level concerns
   outside the graph; generation paths enter the compiled LangGraph graph.
+- Revision preparation rebinds tower/equipment assets and recalculates derived
+  GPS/cabinet placements before validation and Blender generation.
 - Events are frontend-readable and `/events/stream` is `push_sse` local-process, but there is
   no broker, cancellation manager, or durable resume yet.
 - Asset import fallback can still create procedural geometry if an import fails, but the active

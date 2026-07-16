@@ -9,8 +9,8 @@ Local-first, single-user studio to turn a telecom brief or document pack
 (PDF, ZIP, DXF, images) into a `SceneSpec`, Blender/GLB artefacts, QA, versions,
 and rollback.
 
-The end goal is a chat-first and 3D-first product, but that UI does not exist
-yet.
+The end goal is a chat-first and 3D-first product. A real-backend frontend
+rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## What the project is not
 
@@ -32,6 +32,11 @@ yet.
   remain service-level logic outside the graph.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
+- GPT-OSS is the bounded decision layer for ambiguous extraction, controlled
+  RAG candidate arbitration, and edit-patch interpretation. It may revise a
+  typed proposal, but it cannot bypass `RequirementSpec`, `SceneSpec`, telecom
+  rules, Blender's parametric generator, or QA. Governance constrains scope,
+  records evidence, and preserves rollback; it does not invent geometry.
 - Public product responses expose GPT-OSS truth through `extraction_provider`,
   `llm_provider`, `llm_available`, `llm_fallback_used`, and
   `llm_fallback_reason`; the frontend must display fallback/degraded status
@@ -98,13 +103,15 @@ yet.
   - `mesh_level_basic` — real bounding box from GLB accessors
   - `object_name_based_geometry`
   - `metadata_based_height_azimuth`
-  - `preview_luminance_only`
+  - `preview_pixel_framing_basic`
 - Mesh QA v1 checks: GLB parse OK, tower height approximation, scene above
   ground, scale realism, antenna count, readable object transforms when present,
   approximate HBA from antenna node transforms when possible, RRU/cable/cabinet/GPS
   presence, concrete pad presence when requested, and real label object presence.
 - Mesh QA v1 does **not** verify exact antenna azimuth from vertices and does
   **not** perform collision/RF/structural wind-load validation.
+- Preview QA parses PNG pixels and checks subject occupancy, framing, clipping,
+  centering, contrast, and resolution. It is still not semantic visual review.
 - QA does not yet finely validate materials or vendor exact mesh dimensions.
 - Do not call this QA "advanced geometry".
 
@@ -127,6 +134,18 @@ yet.
 - `/current-operation` exposes `current_phase`, `current_node`, and
   `event_source`, plus frontend labels, terminal/running flags, last event time,
   and available actions.
+- During an edit, the existing root `status.json` persists an
+  `active_operation`; a reconnect therefore sees `running` instead of the old
+  terminal design status. Failed/rejected edits restore the previous active
+  version and status.
+- Startup recovery distinguishes an interrupted initial generation from an
+  interrupted revision. Initial generation fails without a valid product
+  version; an interrupted revision marks only its candidate version failed,
+  restores the last completed active version, clears `active_operation`, and
+  emits `edit_patch_rejected`.
+- Mutating generation endpoints enforce configurable free-space admission via
+  `TELECOM_STUDIO_MIN_FREE_DISK_MB` (256 MB by default) and return HTTP 507
+  before creating orphan state when local persistence is unsafe.
 - `/timeline-summary` exposes frontend-readable timeline steps with label,
   phase, node, status, started/completed timestamps, duration, warning count,
   error count, progress message, and artifact refs when available.

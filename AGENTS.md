@@ -16,7 +16,7 @@ Il est court, strict et non négociable.
 ## 2. Ce qui est interdit
 
 - **Pas de fake** : pas de données mockées, pas de GLB placeholder présenté comme un vrai design, pas de statut `completed` sans vérification réelle.
-- **Pas de dashboard dev** : le frontend actuel est refusé. Ne pas reconstruire de layout dashboard. La prochaine UI sera chat-first et 3D-first.
+- **Pas de dashboard dev** : le kernel précédent est refusé. La rework actuelle doit rester chat-first et 3D-first.
 - **Pas de logs/codes techniques comme UI principale** : l'utilisateur final ne doit pas lire `workflow_trace.json` ou des codes d'erreur bruts.
 - **Pas de "ready" sans preuve** : tout "terminé" doit être accompagné de tests, de smoke runtime et, si UI, de preuve visuelle.
 - **Pas de `git add -A`** : chaque fichier commité est choisi explicitement.
@@ -59,8 +59,8 @@ Les documents actifs du projet sont :
 
 ## 6. Frontend
 
-- Le frontend actuel sous `apps/frontend` est **refusé**.
-- Le prochain frontend sera :
+- Le kernel dashboard précédent est **refusé**; `apps/frontend` est une rework non encore acceptée.
+- Le frontend produit doit être :
   - **chat-first** : la zone de commande principale est une conversation.
   - **3D-first** : le viewer 3D occupe la majorité de l'écran.
   - **drawers contextuels** : QA, documents, versions, assets ouverts en drawers, jamais en panneaux fixes vides.

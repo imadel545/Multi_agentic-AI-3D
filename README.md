@@ -2,8 +2,8 @@
 
 Local-first pipeline for transforming telecom requirements into a validated `SceneSpec`, controlled 3D generation artifacts, and compliance reports.
 
-> ⚠️ **Frontend removed.**<br>
-> The old frontend has been deleted/refused. `apps/frontend` is not an operational app. A chat-first / 3D-first frontend will be rebuilt later against the frozen `/designs` + `workflow_id` backend/frontend contract.<br>
+> **Frontend product rework in progress.**<br>
+> `apps/frontend` is connected to the real `/designs` + `workflow_id` contract, but it is not an accepted product gate yet. The rejected dashboard-like kernel must not be treated as final UI.<br>
 > See `docs/PROJECT_SOURCE_OF_TRUTH.md` for the single source of truth, `docs/BACKEND_CAPABILITY_MATRIX.md` for backend capabilities, and `docs/KNOWN_LIMITATIONS.md` for honest limitations.
 
 ---
@@ -64,7 +64,7 @@ TELECOM_STUDIO_QDRANT_URL=http://127.0.0.1:6333 uvicorn apps.api.telecom_studio_
 
 Without `TELECOM_STUDIO_QDRANT_URL`, the API uses Qdrant local mode under `data/qdrant`.
 
-### Optional: Groq
+### Product intelligence: Groq
 
 ```bash
 GROQ_API_KEY=...
@@ -73,7 +73,7 @@ GROQ_API_KEY=...
 
 The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to force deterministic extraction.
 
-### Optional: NVIDIA RAG embeddings
+### Product intelligence: NVIDIA RAG embeddings
 
 Product RAG uses NVIDIA API `baai/bge-m3`. Product reranking uses the NVIDIA
 reranker configured by `TELECOM_STUDIO_RERANKER_MODEL`; if the reranker is not
@@ -119,7 +119,8 @@ Backend:
 requirements_text or document pack
 → LangGraph orchestrator
 → Groq structured RequirementSpec or deterministic fallback
-→ NVIDIA BGE-M3 + Qdrant RAG context (advisory structured hints)
+→ NVIDIA BGE-M3 query/passage embeddings + Qdrant retrieval
+→ NVIDIA reranking + bounded GPT-OSS planning decision
 → SQLite memory recall
 → asset registry
 → rule engine

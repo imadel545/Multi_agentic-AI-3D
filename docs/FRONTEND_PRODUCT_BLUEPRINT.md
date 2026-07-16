@@ -1,7 +1,7 @@
 # Frontend Product Blueprint
 
-Vision du frontend cible.  
-L'ancien frontend sous `apps/frontend` a été supprimé. Le blueprint ci-dessous guide la reconstruction.
+Vision du frontend cible. `apps/frontend` est une rework connectée au backend
+réel, encore non acceptée comme produit. Ce blueprint reste son contrat UX.
 
 ---
 
@@ -61,8 +61,10 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 
 ## Statut
 
-- L'ancien frontend a été supprimé.
+- Le kernel dashboard précédent est rejeté; les briques API/Zod/SSE/Three
+  réutilisables restent en rework.
 - Les endpoints produit backend sont prêts pour une construction frontend:
   `push_sse`, current operation, timeline lisible, viewer bundle, user issues,
   edit/version/rollback, document-pack capabilities.
-- Le frontend chat-first / 3D-first n'est pas encore implémenté.
+- Le frontend chat-first / 3D-first est en cours et doit encore passer le smoke
+  produit complet avant acceptation.

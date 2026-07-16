@@ -24,7 +24,8 @@ Si un critère échoue, le frontend n'est pas accepté.
 
 ## 4. Document dropzone
 
-- [ ] Une dropzone claire accepte ZIP/PDF/PNG/DXF.
+- [ ] Une dropzone claire accepte le ZIP produit; elle explique que PDF, PNG et
+  DXF doivent être contenus dans ce pack avec les limites backend affichées.
 - [ ] L'état du document pack (conflits, champs manquants) est visible sans JSON brut.
 
 ## 5. Pas de panneaux vides

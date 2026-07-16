@@ -19,9 +19,13 @@ frontend.
 - `runtime_capabilities` and `unsupported_actions` expose these missing
   runtime actions explicitly: cancel, pause, resume, same-workflow retry,
   human-in-loop checkpoints, and WebSocket runtime.
-- LangGraph checkpointing currently emits compatibility warnings for custom
-  Pydantic/dataclass types during msgpack deserialization; this is not blocking
-  local runtime, but should be cleaned before relying on strict checkpoint mode.
+- The local thread executor has bounded admission but is not a durable job
+  broker. Process shutdown and test harnesses must close the service lifespan;
+  there is no cross-process ownership or recovery.
+- Local storage admission requires at least 256 MB free by default
+  (`TELECOM_STUDIO_MIN_FREE_DISK_MB`). Ignored workflow artifacts still need
+  periodic cleanup; the guard prevents a new mutation but is not a retention
+  scheduler.
 
 ## Backend and agents
 
@@ -62,6 +66,9 @@ frontend.
 - OCR is limited and depends on installed Tesseract + languages.
 - Docling is import-only / not active by default.
 - DXF extracts text/layers; DWG depends on a local converter.
+- Missing foundation evidence remains `unknown`; no concrete pad is invented.
+- Missing antenna model evidence selects a generic network family with a visible
+  warning, never a vendor-exact claim.
 
 ## 3D and QA
 

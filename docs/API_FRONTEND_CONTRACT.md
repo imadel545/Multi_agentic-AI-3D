@@ -3,7 +3,8 @@
 Contrat minimal entre le backend FastAPI et le futur frontend React. Le contrat
 stable actuel est `/designs` + `workflow_id`.
 
-> Le frontend actuel a été supprimé. Ce contrat sert de base pour la reconstruction chat-first / 3D-first.
+> `apps/frontend` est une rework connectée au backend réel, non encore acceptée
+> comme produit. Ce contrat reste la frontière stable `/designs` + `workflow_id`.
 
 ---
 
@@ -116,6 +117,10 @@ restent internes au backend.
   `design_memory_count`, `document_pack_memory_count`
 - `runtime_capabilities`, `unsupported_actions`
 
+Mutating generation routes can return HTTP `507` when local storage is below
+the configured safe threshold. The frontend must keep the current valid design
+visible and ask the user to clean temporary artifacts before retrying.
+
 `/viewer-bundle` expose uniquement des URLs d'artefacts, jamais des chemins filesystem:
 
 - `generation_mode`
@@ -160,8 +165,8 @@ restent internes au backend.
 `rag_planning_summary` est obligatoire pour l'UI intelligente:
 
 - `rag_used_for_extraction=false` en v1.
-- `rag_used_for_planning=true` seulement si des `payload.planning_hints`
-  structurés ont été récupérés.
+- `rag_used_for_planning=true` seulement si un `payload.planning_hints`
+  structuré, validé et autorisé a réellement été appliqué.
 - `rag_context_count` seul ne prouve pas que le RAG a changé le `SceneSpec`.
 - `candidate_hint_fields` et `controlled_hint_fields` expliquent les champs
   candidats et les champs autorisés.
