@@ -1,8 +1,6 @@
 import {
   Box3,
   Color,
-  DoubleSide,
-  Material,
   Mesh,
   Object3D,
   PerspectiveCamera,
@@ -22,23 +20,37 @@ export type CameraFit = {
 
 export type RenderSample = [number, number, number, number];
 
-const ViewerBackground = new Color("#182329");
-const IgnoredViewerObjectTokens = ["technical_ground_plane", "foundation_concrete_pad"];
+export type ModelObjectSummary = {
+  totalNamedObjects: number;
+  semanticEntityCount: number;
+  evidenceMode: "semantic_extras" | "legacy_name_fallback";
+  roles: Record<string, number>;
+};
 
-export function computeTelecomCameraFit(box: Box3, fovDeg = 38): CameraFit {
+const ViewerBackground = new Color("#182329");
+const HiddenTechnicalObjectTokens = ["technical_ground_plane"];
+const CameraFitExcludedRoles = new Set([
+  "azimuth_arrow",
+  "beam",
+  "height_marker",
+  "label"
+]);
+const CameraFitExcludedNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
+
+export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): CameraFit {
   const center = box.getCenter(new Vector3());
   const size = box.getSize(new Vector3());
   const height = Math.max(size.y, 2);
   const horizontal = Math.max(size.x, size.z, 2);
-  const fovRad = (fovDeg * Math.PI) / 180;
+  const verticalFovRad = (fovDeg * Math.PI) / 180;
+  const horizontalFovRad = 2 * Math.atan(Math.tan(verticalFovRad * 0.5) * Math.max(aspect, 0.25));
   const fitDistance = Math.max(
-    (height * 0.5) / Math.tan(fovRad * 0.5),
-    (horizontal * 0.5) / Math.tan(fovRad * 0.5),
+    (height * 0.5) / Math.tan(verticalFovRad * 0.5),
+    (horizontal * 0.5) / Math.tan(horizontalFovRad * 0.5),
     10
   );
   const radius = Math.max(height, horizontal);
-  const distanceMultiplier = height > 50 ? 0.88 : 1.15;
-  const distance = fitDistance * distanceMultiplier;
+  const distance = fitDistance * 1.18;
   const direction = new Vector3(0.72, 0.42, 0.88).normalize();
   const target = new Vector3(center.x, box.min.y + height * 0.52, center.z);
   const position = target.clone().add(direction.multiplyScalar(distance));
@@ -65,7 +77,7 @@ export function fitCameraToObject(
   if (box.isEmpty()) {
     return null;
   }
-  const fit = computeTelecomCameraFit(box, camera.fov);
+  const fit = computeTelecomCameraFit(box, camera.fov, camera.aspect);
   camera.position.copy(fit.position);
   camera.near = fit.near;
   camera.far = fit.far;
@@ -78,54 +90,20 @@ export function fitCameraToObject(
   return fit;
 }
 
-export function enhanceViewerMaterials(scene: Object3D) {
+export function prepareViewerScene(scene: Object3D) {
   scene.traverse((object) => {
-    if (shouldIgnoreForViewer(object)) {
+    if (shouldHideTechnicalObject(object)) {
       object.visible = false;
-      return;
-    }
-    if (!(object instanceof Mesh)) {
-      return;
-    }
-    const sourceMaterials = Array.isArray(object.material) ? object.material : [object.material];
-    const materials = sourceMaterials.map(cloneMaterialForViewer);
-    object.material = Array.isArray(object.material) ? materials : materials[0];
-    const roleColor = viewerRoleColor(object.name);
-    for (const material of materials) {
-      const editable = material as {
-        color?: Color;
-        metalness?: number;
-        needsUpdate?: boolean;
-        opacity?: number;
-        roughness?: number;
-        side?: number;
-        transparent?: boolean;
-      };
-      if (!(editable.color instanceof Color)) {
-        continue;
-      }
-      editable.side = DoubleSide;
-      if (typeof editable.roughness === "number") {
-        editable.roughness = Math.max(editable.roughness, 0.68);
-      }
-      if (typeof editable.metalness === "number") {
-        editable.metalness = Math.min(editable.metalness, 0.18);
-      }
-      if (typeof editable.opacity === "number") {
-        editable.opacity = Math.max(editable.opacity, 0.92);
-        editable.transparent = editable.opacity < 1;
-      }
-      if (roleColor) {
-        editable.color.copy(roleColor);
-      } else {
-        const luminance = editable.color.r * 0.2126 + editable.color.g * 0.7152 + editable.color.b * 0.0722;
-        if (luminance > 0.82) {
-          editable.color.lerp(new Color("#26333a"), 0.58);
-        }
-      }
-      editable.needsUpdate = true;
     }
   });
+}
+
+export function probeRenderVisibility(sample: () => RenderSample[]): boolean {
+  try {
+    return isRenderVisiblyDifferent(sample());
+  } catch {
+    return false;
+  }
 }
 
 export function isRenderVisiblyDifferent(samples: RenderSample[], tolerance = 18): boolean {
@@ -183,23 +161,51 @@ export function isRenderVisiblyDifferent(samples: RenderSample[], tolerance = 18
   return true;
 }
 
-export function summarizeObjects(scene: Object3D) {
+export function summarizeObjects(scene: Object3D): ModelObjectSummary {
   const roles: Record<string, number> = {
     antenna: 0,
+    azimuth_arrow: 0,
+    beam: 0,
     cable: 0,
     cabinet: 0,
     foundation: 0,
     gps: 0,
     label: 0,
+    mount_bracket: 0,
     rru: 0,
     tower: 0
   };
   let totalNamedObjects = 0;
+  const semanticEntities = new Set<string>();
   scene.traverse((object) => {
-    if (!object.name || shouldIgnoreForViewer(object)) {
+    if (!object.name || shouldHideTechnicalObject(object)) {
       return;
     }
     totalNamedObjects += 1;
+    const role = canonicalSemanticRole(object.userData.role ?? object.userData.object_role);
+    const identity = object.userData.semantic_id ?? object.userData.semantic_root;
+    if (role && identity) {
+      semanticEntities.add(`${role}:${String(identity)}`);
+    }
+  });
+
+  if (semanticEntities.size) {
+    for (const entity of semanticEntities) {
+      const role = entity.slice(0, entity.indexOf(":"));
+      roles[role] = (roles[role] ?? 0) + 1;
+    }
+    return {
+      roles,
+      totalNamedObjects,
+      semanticEntityCount: semanticEntities.size,
+      evidenceMode: "semantic_extras"
+    };
+  }
+
+  scene.traverse((object) => {
+    if (!object.name || shouldHideTechnicalObject(object)) {
+      return;
+    }
     const name = object.name.toLowerCase();
     if (name.includes("antenna") || name.includes("panel")) roles.antenna += 1;
     if (name.includes("cable")) roles.cable += 1;
@@ -210,7 +216,25 @@ export function summarizeObjects(scene: Object3D) {
     if (name.includes("rru") || name.includes("radio")) roles.rru += 1;
     if (name.includes("tower") || name.includes("lattice") || name.includes("monopole")) roles.tower += 1;
   });
-  return { roles, totalNamedObjects };
+  return {
+    roles,
+    totalNamedObjects,
+    semanticEntityCount: Object.values(roles).reduce((sum, count) => sum + count, 0),
+    evidenceMode: "legacy_name_fallback"
+  };
+}
+
+function canonicalSemanticRole(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  return {
+    antenna_panel: "antenna",
+    power_cabinet: "cabinet",
+    radio: "rru",
+    rru: "rru"
+  }[normalized] ?? normalized;
 }
 
 function inspectableObjectBox(scene: Object3D): Box3 | null {
@@ -218,7 +242,12 @@ function inspectableObjectBox(scene: Object3D): Box3 | null {
   const box = new Box3();
   let hasInspectableMesh = false;
   scene.traverse((object) => {
-    if (shouldIgnoreForViewer(object) || !(object instanceof Mesh) || !object.visible) {
+    if (
+      shouldHideTechnicalObject(object) ||
+      shouldExcludeFromCameraFit(object) ||
+      !(object instanceof Mesh) ||
+      !object.visible
+    ) {
       return;
     }
     const meshBox = new Box3().setFromObject(object);
@@ -230,40 +259,23 @@ function inspectableObjectBox(scene: Object3D): Box3 | null {
   return hasInspectableMesh ? box : null;
 }
 
-function shouldIgnoreForViewer(object: Object3D): boolean {
+function shouldExcludeFromCameraFit(object: Object3D): boolean {
+  let current: Object3D | null = object;
+  while (current) {
+    const role = canonicalSemanticRole(current.userData.role ?? current.userData.object_role);
+    if (role && CameraFitExcludedRoles.has(role)) {
+      return true;
+    }
+    const name = current.name.toLowerCase();
+    if (CameraFitExcludedNameTokens.some((token) => name.includes(token))) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function shouldHideTechnicalObject(object: Object3D): boolean {
   const name = object.name.toLowerCase();
-  return IgnoredViewerObjectTokens.some((token) => name.includes(token));
-}
-
-function cloneMaterialForViewer(material: Material): Material {
-  return typeof material.clone === "function" ? material.clone() : material;
-}
-
-function viewerRoleColor(name: string): Color | null {
-  const normalized = name.toLowerCase();
-  if (normalized.includes("antenna") || normalized.includes("panel")) {
-    return new Color("#22d3ee");
-  }
-  if (normalized.includes("rru") || normalized.includes("radio")) {
-    return new Color("#f59e0b");
-  }
-  if (normalized.includes("cable")) {
-    return new Color("#f8fafc");
-  }
-  if (normalized.includes("cabinet") || normalized.includes("power")) {
-    return new Color("#94a3b8");
-  }
-  if (normalized.includes("gps")) {
-    return new Color("#facc15");
-  }
-  if (normalized.includes("label")) {
-    return new Color("#c084fc");
-  }
-  if (normalized.includes("beam")) {
-    return new Color("#22c55e");
-  }
-  if (normalized.includes("tower") || normalized.includes("lattice") || normalized.includes("monopole")) {
-    return new Color("#d1d5db");
-  }
-  return null;
+  return HiddenTechnicalObjectTokens.some((token) => name.includes(token));
 }

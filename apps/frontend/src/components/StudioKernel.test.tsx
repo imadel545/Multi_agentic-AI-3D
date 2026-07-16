@@ -4,12 +4,15 @@ import type { ViewerBundle } from "../api/schemas";
 import {
   AgentStageRail,
   AgentTimeline,
+  ArtifactsPanel,
   ChatCommandPanel,
   InspectorDock,
   IssuesPanel,
   RagEvidencePanel,
   RuntimeCapabilitiesPanel,
   SummaryPanel,
+  VersionSummary,
+  humanRequirementWarning,
   summarizeTimelineRows,
   summarizeUserIssues
 } from "./StudioKernel";
@@ -56,42 +59,149 @@ const bundle: ViewerBundle = {
 };
 
 const commandDefaults = {
+  analysis: null,
+  analysisBusy: false,
+  analysisError: null,
+  analysisSubmitted: false,
   canEdit: false,
+  correctionBusy: false,
   documentCapabilities: null,
   documentPackBusy: false,
   documentPackMessage: null,
+  documentPackReview: null,
   documentPackSummary: null,
   editMessage: null,
   error: null,
+  onAnalyze: vi.fn(),
+  onConfirm: vi.fn(),
+  onDocumentPackCorrection: vi.fn(),
   onDocumentPackGenerate: vi.fn(),
   onDocumentPackUpload: vi.fn(),
   onPromptChange: vi.fn(),
   onRevisionPromptChange: vi.fn(),
   onRevisionSubmit: vi.fn(),
-  onSubmit: vi.fn(),
   phase: "idle" as const,
   prompt: "",
+  submissionPending: false,
+  revisionBusy: false,
   revisionPrompt: ""
+};
+
+const parsedRequirements = {
+  requirements: {
+    network_type: "5G",
+    site_type: "telecom_site",
+    tower_type: "lattice_tower",
+    tower_height_m: 30,
+    tower_characteristics: {
+      structure: "lattice",
+      leg_count: 4,
+      base_width_m: 4,
+      top_width_m: 1,
+      foundation_type: "concrete_pad",
+      material: "galvanized_steel"
+    },
+    sector_count: 3,
+    antenna_type: "panel_5g",
+    antenna_install_height_m: 24,
+    azimuths_deg: [0, 120, 240],
+    mechanical_tilt_deg: 3,
+    electrical_tilt_deg: 0,
+    beamwidth_deg: 65,
+    include_rru: true,
+    include_cables: true,
+    include_beams: true,
+    include_labels: true,
+    include_power_cabinet: true,
+    include_gps_antenna: true,
+    detail_level: "high",
+    warnings: [],
+    repair_events: []
+  },
+  requirements_hash: "a".repeat(64),
+  warnings: [],
+  errors: [],
+  provider: "groq:openai/gpt-oss-120b",
+  extraction_provider: "llm",
+  fallback_used: false,
+  llm_fallback_reason: null
 };
 
 afterEach(() => cleanup());
 
 describe("studio kernel components", () => {
-  it("submits the real prompt command from the chat panel", async () => {
-    const onSubmit = vi.fn();
+  it("requires real backend analysis before confirming the design", async () => {
+    const onAnalyze = vi.fn();
+    const onConfirm = vi.fn();
     const onPromptChange = vi.fn();
     render(
       <ChatCommandPanel
         {...commandDefaults}
+        analysis={parsedRequirements}
+        onAnalyze={onAnalyze}
+        onConfirm={onConfirm}
         onPromptChange={onPromptChange}
-        onSubmit={onSubmit}
         prompt="site 5G"
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Générer le design" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmer et générer" }));
 
-    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onConfirm).toHaveBeenCalledOnce();
+    expect(screen.getByText(/groq:openai\/gpt-oss-120b/)).toBeInTheDocument();
+    expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
+  });
+
+  it("does not offer a duplicate generation after the analysis launched a design", () => {
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={parsedRequirements}
+        analysisSubmitted
+        phase="completed"
+        prompt="site 5G"
+      />
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("déjà lancé le design affiché");
+    expect(screen.queryByRole("button", { name: "Confirmer et générer" })).not.toBeInTheDocument();
+  });
+
+  it("translates extraction safeguards into product language", () => {
+    expect(
+      humanRequirementWarning({
+        code: "LLM_SOURCE_FIELD_PROTECTED",
+        message: "LLM values conflicting with explicit source requirements were ignored: ['azimuths_deg']."
+      })
+    ).toBe(
+      "Une proposition du LLM contredisait une valeur explicite. Le cahier de charge utilisateur a été conservé."
+    );
+    expect(
+      humanRequirementWarning({
+        code: "DEFAULT_BEAMWIDTH_USED",
+        message: "Beamwidth inferred as 65 degrees."
+      })
+    ).toBe("Ouverture d’antenne proposée: 65°.");
+  });
+
+  it("keeps a valid deterministic fallback confirmable and visibly explains it", () => {
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={{
+          ...parsedRequirements,
+          provider: "deterministic",
+          extraction_provider: "fallback",
+          fallback_used: true,
+          llm_fallback_reason: "Groq timeout",
+          errors: [{ code: "LLM_EXTRACTION_ERROR", message: "Groq timeout" }]
+        }}
+        prompt="site 5G"
+      />
+    );
+
+    expect(screen.getByText(/Fallback utilisé: Groq timeout/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Confirmer et générer" })).toBeEnabled();
   });
 
   it("keeps the command field real and only injects an example when requested", () => {
@@ -125,6 +235,198 @@ describe("studio kernel components", () => {
 
     expect(onRevisionSubmit).toHaveBeenCalledOnce();
     expect(screen.getByText("Édition appliquée")).toBeInTheDocument();
+  });
+
+  it("restricts cahier-de-charge upload to ZIP and exposes corrective review", () => {
+    const onDocumentPackCorrection = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        documentPackReview={{
+          summary: {
+            pack_id: "pack_1",
+            status: "processed",
+            document_count: 2,
+            high_priority_count: 1,
+            missing_blocking_count: 1,
+            conflict_count: 0,
+            can_generate_design: false,
+            qa_score: 0.7,
+            processing_warning_count: 0,
+            tool_status: {}
+          },
+          conflicts: [],
+          missingFields: [
+            {
+              field: "radio.hba_m",
+              value: null,
+              status: "missing",
+              confidence: 0,
+              sources: [],
+              values: [],
+              severity: "blocking",
+              resolution: null,
+              reason: "HBA absente"
+            }
+          ],
+          qa: {
+            pack_id: "pack_1",
+            status: "warning",
+            score: 0.7,
+            checks: [
+              { name: "no_blocking_missing_fields", passed: false, reason: "La HBA doit être confirmée." }
+            ],
+            warnings: [],
+            blocking_issues: ["radio.hba_m"],
+            ready_to_generate: false,
+            ready_confidence: 0.49,
+            recommended_user_actions: ["Confirmer la HBA"],
+            tool_failures: [],
+            memory_writeback: {}
+          },
+          documents: [
+            {
+              document_id: "doc_1",
+              path: "plans/elevation.pdf",
+              filename: "elevation.pdf",
+              extension: ".pdf",
+              size_bytes: 1200,
+              category: "elevation_plan",
+              relevance_score: 0.98,
+              confidence: 0.95,
+              reason: "Contient les hauteurs radio",
+              priority: "high",
+              purpose: "needed_for_design",
+              used_for_design: true,
+              why_used_or_ignored: "Source principale HBA",
+              extraction_status: "extracted",
+              processing_tools: ["pdf_text"],
+              processing_warnings: [],
+              duplicate_of: null
+            },
+            {
+              document_id: "doc_2",
+              path: "admin/bail.pdf",
+              filename: "bail.pdf",
+              extension: ".pdf",
+              size_bytes: 800,
+              category: "administrative",
+              relevance_score: 0.05,
+              confidence: 0.9,
+              reason: "Document administratif",
+              priority: "ignore",
+              purpose: "administrative_reference",
+              used_for_design: false,
+              why_used_or_ignored: "Sans données de conception telecom",
+              extraction_status: "extracted",
+              processing_tools: ["pdf_text"],
+              processing_warnings: [],
+              duplicate_of: null
+            }
+          ],
+          extractions: [],
+          provenance: {
+            "radio.hba_m": [
+              {
+                document_id: "doc_1",
+                file: "elevation.pdf",
+                source_type: "text",
+                page: 3,
+                sheet: null,
+                layer: null,
+                confidence: 0.95,
+                evidence: "HBA antennes: 24 m"
+              }
+            ]
+          },
+          processing: {
+            pack_id: "pack_1",
+            documents: [],
+            warnings: [],
+            tool_status: {},
+            groq_rejected_fields: []
+          },
+          consolidatedSpec: {
+            pack_id: "pack_1",
+            source_mode: "mixed",
+            llm_provider: "groq",
+            llm_fallback_used: false,
+            confidence_summary: { overall: 0.7 },
+            processing_warnings: [],
+            document_references: [],
+            provenance_map: {}
+          }
+        }}
+        documentPackSummary={{
+          pack_id: "pack_1",
+          status: "processed",
+          document_count: 2,
+          high_priority_count: 1,
+          missing_blocking_count: 1,
+          conflict_count: 0,
+          can_generate_design: false,
+          qa_score: 0.7,
+          processing_warning_count: 0,
+          tool_status: {}
+        }}
+        onDocumentPackCorrection={onDocumentPackCorrection}
+      />
+    );
+
+    expect(screen.getByLabelText("Cahier de charge")).toHaveAttribute(
+      "accept",
+      ".zip,application/zip,application/x-zip-compressed"
+    );
+    expect(screen.getByText("Hauteur des antennes (HBA): HBA absente")).toBeInTheDocument();
+    expect(screen.getByText("HBA antennes: 24 m")).toBeInTheDocument();
+    expect(screen.getByLabelText("Tri documentaire")).toHaveTextContent("1 utile(s)");
+    expect(screen.getByLabelText("Tri documentaire")).toHaveTextContent("1 écarté(s)");
+    fireEvent.change(screen.getByLabelText("Valeur documentaire confirmée"), {
+      target: { value: "24,24,24" }
+    });
+    fireEvent.change(screen.getByLabelText("Justification de correction"), {
+      target: { value: "Plan d’élévation vérifié" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Enregistrer la correction" }));
+
+    expect(onDocumentPackCorrection).toHaveBeenCalledWith(
+      "radio.hba_m",
+      "24,24,24",
+      "Plan d’élévation vérifié"
+    );
+  });
+
+  it("bounds version history and confirms a real rollback action", () => {
+    const onRollback = vi.fn();
+    render(
+      <VersionSummary
+        busyVersionId={null}
+        canRollback
+        message={null}
+        onRollback={onRollback}
+        versions={[
+          {
+            version_id: "v2",
+            created_at: "2026-07-15T11:00:00Z",
+            active: true,
+            artifacts: {},
+            status: "completed"
+          },
+          {
+            version_id: "v1",
+            created_at: "2026-07-15T10:00:00Z",
+            active: false,
+            artifacts: {},
+            status: "completed"
+          }
+        ]}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Restaurer" }));
+    expect(onRollback).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirmer" }));
+    expect(onRollback).toHaveBeenCalledWith("v1");
   });
 
   it("renders human labels instead of Python node names as the main timeline copy", () => {
@@ -277,6 +579,40 @@ describe("studio kernel components", () => {
     expect(screen.getAllByText("terminé").length).toBeGreaterThan(0);
   });
 
+  it("keeps historical revision failures visible as alerts on a restored design", () => {
+    render(
+      <AgentStageRail
+        events={[]}
+        phase="completed"
+        timeline={{
+          workflow_id: "wf_restored",
+          status: "completed",
+          event_source: "timeline_summary",
+          timeline_steps: [
+            {
+              step: "generate_blender",
+              label: "Blender",
+              human_label: "Génération Blender",
+              progress_message: "Révision interrompue.",
+              phase: "blender",
+              node: "generate_blender",
+              status: "failed",
+              timestamp: null,
+              duration_ms: null,
+              warnings_count: 0,
+              errors_count: 1,
+              artifact_refs: [],
+              human_readable: "La version active reste disponible."
+            }
+          ]
+        }}
+      />
+    );
+
+    expect(screen.getByText("terminé avec alerte")).toBeVisible();
+    expect(screen.queryByText("échec")).not.toBeInTheDocument();
+  });
+
   it("maps real backend nodes to product stages", () => {
     render(
       <AgentStageRail
@@ -383,10 +719,36 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("Hints contrôlés autorisés")).toBeInTheDocument();
+    expect(screen.getByText("Hints candidats récupérés")).toBeInTheDocument();
+    expect(screen.getByText("Aucun hint n’est prouvé comme appliqué au SceneSpec.")).toBeInTheDocument();
     expect(screen.getByText("include_labels")).toBeInTheDocument();
     expect(screen.getByText("scene_templates.md")).toBeInTheDocument();
     expect(screen.getByText("Données RAG techniques")).toBeInTheDocument();
+  });
+
+  it("does not create a link for an unavailable artifact", () => {
+    const toAbsoluteUrl = vi.fn((url: string | null | undefined) => url ?? null);
+    render(
+      <ArtifactsPanel
+        bundle={{
+          ...bundle,
+          viewer_artifacts: [
+            {
+              name: "design.glb",
+              url: "/designs/wf_1/artifacts/design.glb",
+              content_type: "model/gltf-binary",
+              available: false
+            }
+          ]
+        }}
+        toAbsoluteUrl={toAbsoluteUrl}
+      />
+    );
+
+    const artifact = screen.getByText("Modèle 3D GLB").closest(".artifact-link");
+    expect(artifact).toHaveAttribute("aria-disabled", "true");
+    expect(artifact?.tagName).toBe("DIV");
+    expect(toAbsoluteUrl).not.toHaveBeenCalled();
   });
 
   it("does not render unsupported actions as buttons", () => {
@@ -407,8 +769,31 @@ describe("studio kernel components", () => {
     render(
       <InspectorDock
         bundle={bundle}
+        canRollback={false}
         documentCapabilities={null}
-        events={[]}
+        events={[
+          {
+            event_id: "evt_1",
+            event_type: "node_started",
+            workflow_id: "wf_1",
+            timestamp: "2026-06-16T10:00:00Z",
+            phase: "planning",
+            status: "running",
+            node: "plan_scene",
+            human_label: "Construction du plan",
+            progress_message: "Planification en cours.",
+            warnings: [],
+            errors: [],
+            artifact_refs: [],
+            raw: {
+              event_id: "evt_1",
+              event_type: "node_started",
+              workflow_id: "wf_1",
+              timestamp: "2026-06-16T10:00:00Z",
+              payload: { artifact_refs: [], errors: [], warnings: [] }
+            }
+          }
+        ]}
         evidence={{
           candidate_hint_fields: ["include_labels"],
           contexts: [],
@@ -421,6 +806,9 @@ describe("studio kernel components", () => {
         summary={null}
         timeline={null}
         toAbsoluteUrl={(url) => url ?? null}
+        onRollbackVersion={vi.fn()}
+        rollbackBusyVersionId={null}
+        versionMessage={null}
         versions={[]}
       />
     );
@@ -428,9 +816,9 @@ describe("studio kernel components", () => {
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Résumé" }));
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Progression/ }));
     expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Narration du workflow");
-    fireEvent.click(screen.getByRole("button", { name: /RAG/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Contexte IA/ }));
     expect(screen.getByLabelText("RAG evidence")).toHaveTextContent("include_labels");
   });
 });

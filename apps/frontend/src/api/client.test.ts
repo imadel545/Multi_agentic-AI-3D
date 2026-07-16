@@ -25,6 +25,103 @@ describe("TelecomStudioApi", () => {
     });
   });
 
+  it("uses the real requirements parser before design creation", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        requirements: {
+          network_type: "5G",
+          site_type: "telecom_site",
+          tower_type: "lattice_tower",
+          tower_height_m: 30,
+          tower_characteristics: { structure: "lattice" },
+          sector_count: 3,
+          antenna_type: "panel_5g",
+          antenna_install_height_m: 24,
+          azimuths_deg: [0, 120, 240],
+          mechanical_tilt_deg: 3,
+          electrical_tilt_deg: 0,
+          beamwidth_deg: 65,
+          include_rru: true,
+          include_cables: true,
+          include_beams: true,
+          include_labels: true,
+          include_power_cabinet: true,
+          include_gps_antenna: true,
+          detail_level: "high",
+          warnings: [],
+          repair_events: []
+        },
+        requirements_hash: "a".repeat(64),
+        warnings: [],
+        errors: [],
+        provider: "groq:openai/gpt-oss-120b",
+        extraction_provider: "llm",
+        fallback_used: false,
+        llm_fallback_reason: null
+      })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const result = await client.parseRequirements({ requirements_text: "site 5G" });
+
+    expect(result.requirements?.azimuths_deg).toEqual([0, 120, 240]);
+    expect(result.requirements_hash).toBe("a".repeat(64));
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/requirements/parse", "http://127.0.0.1:8000"),
+      {
+        body: JSON.stringify({ requirements_text: "site 5G" }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      }
+    );
+  });
+
+  it("posts the exact confirmed RequirementSpec and its backend hash", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({ workflow_id: "wf_2", status: "pending" }));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const confirmedRequirements = {
+      network_type: "5G",
+      site_type: "telecom_site",
+      tower_type: "lattice_tower",
+      tower_height_m: 30,
+      tower_characteristics: { structure: "lattice" },
+      sector_count: 3,
+      antenna_type: "panel_5g",
+      antenna_install_height_m: 24,
+      azimuths_deg: [0, 120, 240],
+      mechanical_tilt_deg: 3,
+      electrical_tilt_deg: 0,
+      beamwidth_deg: 65,
+      include_rru: true,
+      include_cables: true,
+      include_beams: true,
+      include_labels: true,
+      include_power_cabinet: true,
+      include_gps_antenna: true,
+      detail_level: "high",
+      warnings: [],
+      repair_events: []
+    };
+
+    await client.createDesign({
+      requirements_text: "site 5G confirmé",
+      confirmed_requirements: confirmedRequirements,
+      confirmed_requirements_hash: "b".repeat(64),
+      options: { detail_level: "high" }
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(new URL("/designs", "http://127.0.0.1:8000"), {
+      body: JSON.stringify({
+        requirements_text: "site 5G confirmé",
+        confirmed_requirements: confirmedRequirements,
+        confirmed_requirements_hash: "b".repeat(64),
+        options: { detail_level: "high" }
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
+  });
+
   it("turns HTTP errors into readable client errors", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ detail: "Backend unavailable" }, { status: 503 }));
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
@@ -134,6 +231,180 @@ describe("TelecomStudioApi", () => {
     });
   });
 
+  it("rejects raw PDF/image/DXF inputs before any document-pack network call", async () => {
+    const fetcher = vi.fn();
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    await expect(
+      client.createDocumentPack(new File(["pdf"], "cahier.pdf", { type: "application/pdf" }))
+    ).rejects.toMatchObject({
+      endpoint: "/document-packs",
+      message: expect.stringContaining("uniquement une archive ZIP")
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("loads the real document-pack review and submits a bounded correction", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pack_id: "pack_1",
+          status: "processed",
+          document_count: 2,
+          missing_blocking_count: 1,
+          conflict_count: 0,
+          can_generate_design: false,
+          qa_score: 0.6
+        })
+      )
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            field: "radio.hba_m",
+            value: null,
+            status: "missing",
+            confidence: 0,
+            severity: "blocking"
+          }
+        ])
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pack_id: "pack_1",
+          status: "warning",
+          score: 0.6,
+          checks: [],
+          blocking_issues: ["radio.hba_m"],
+          ready_to_generate: false,
+          ready_confidence: 0.49
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            document_id: "doc_1",
+            path: "plans/elevation.pdf",
+            filename: "elevation.pdf",
+            extension: ".pdf",
+            size_bytes: 1200,
+            sha256: "a".repeat(64),
+            category: "elevation_plan",
+            relevance_score: 0.98,
+            confidence: 0.95,
+            reason: "Contient les hauteurs radio",
+            extractability: "text",
+            priority: "high",
+            purpose: "needed_for_design",
+            used_for_design: true,
+            why_used_or_ignored: "Source principale HBA",
+            cad_status: "not_cad",
+            extraction_status: "extracted",
+            processing_tools: ["pdf_text"],
+            processing_warnings: [],
+            duplicate_of: null
+          }
+        ])
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            field: "radio.hba_m",
+            value: 24,
+            confidence: 0.95,
+            source: {
+              document_id: "doc_1",
+              file: "elevation.pdf",
+              source_type: "text",
+              page: 3,
+              evidence: "HBA antennes: 24 m"
+            }
+          }
+        ])
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          "radio.hba_m": [
+            {
+              document_id: "doc_1",
+              file: "elevation.pdf",
+              source_type: "text",
+              page: 3,
+              evidence: "HBA antennes: 24 m"
+            }
+          ]
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pack_id: "pack_1",
+          documents: [
+            {
+              document_id: "doc_1",
+              path: "plans/elevation.pdf",
+              extension: ".pdf",
+              category: "elevation_plan",
+              extractability: "text",
+              extraction_status: "extracted",
+              cad_status: "not_cad",
+              processing_tools: ["pdf_text"],
+              processing_warnings: []
+            }
+          ],
+          warnings: [],
+          tool_status: { pdf: "available" },
+          groq_rejected_fields: []
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pack_id: "pack_1",
+          source_mode: "mixed",
+          llm_provider: "groq",
+          llm_fallback_used: false,
+          confidence_summary: { overall: 0.8 },
+          processing_warnings: [],
+          document_references: [],
+          provenance_map: {}
+        })
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          pack_id: "pack_1",
+          status: "processed",
+          document_count: 2,
+          missing_blocking_count: 0,
+          conflict_count: 0,
+          can_generate_design: true,
+          qa_score: 1
+        })
+      );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const review = await client.documentPackReview("pack_1");
+    expect(review.missingFields[0]?.field).toBe("radio.hba_m");
+    await client.applyDocumentPackCorrection("pack_1", {
+      field: "radio.hba_m",
+      value: [24, 24, 24],
+      reason: "Plan d’élévation vérifié"
+    });
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      10,
+      new URL("/document-packs/pack_1/corrections", "http://127.0.0.1:8000"),
+      {
+        body: JSON.stringify({
+          field: "radio.hba_m",
+          value: [24, 24, 24],
+          reason: "Plan d’élévation vérifié"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      }
+    );
+  });
+
   it("starts document-pack generation through the existing workflow_id contract", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -154,6 +425,14 @@ describe("TelecomStudioApi", () => {
         headers: { "content-type": "application/json" },
         method: "POST"
       }
+    );
+  });
+
+  it("adds an encoded after_event_id cursor to the existing SSE route", () => {
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetch);
+
+    expect(client.streamUrl("wf_1", "evt/terminal 1")).toBe(
+      "http://127.0.0.1:8000/designs/wf_1/events/stream?after_event_id=evt%2Fterminal+1"
     );
   });
 });

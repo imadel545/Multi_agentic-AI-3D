@@ -6,6 +6,7 @@ import {
 
 export type NormalizedWorkflowEvent = {
   event_id: string;
+  sequence?: number | null;
   event_type: string;
   workflow_id: string;
   timestamp: string;
@@ -26,9 +27,16 @@ export type StreamCallbacks = {
   onEvent: (event: NormalizedWorkflowEvent) => void;
   onTerminal: (event: NormalizedWorkflowEvent) => void;
   onError: (error: Error) => void;
+  onRecovered?: () => void;
 };
 
-const TerminalEventTypes = new Set(["workflow_completed", "workflow_failed"]);
+const TerminalEventTypes = new Set([
+  "workflow_completed",
+  "workflow_failed",
+  "edit_patch_applied",
+  "edit_patch_rejected",
+  "version_rolled_back"
+]);
 
 const BackendEventTypes = [
   "design_created",
@@ -40,6 +48,15 @@ const BackendEventTypes = [
   "qa_completed",
   "qa_failed",
   "user_issue_created",
+  "validated_requirements_received",
+  "edit_patch_created",
+  "edit_patch_interpreted",
+  "edit_patch_applied",
+  "edit_patch_rejected",
+  "version_created",
+  "version_rolled_back",
+  "blender_completed",
+  "blender_failed",
   "workflow_completed",
   "workflow_failed"
 ];
@@ -56,6 +73,7 @@ export function normalizeWorkflowEvent(event: WorkflowEvent): NormalizedWorkflow
       : humanLabel;
   return {
     event_id: event.event_id,
+    sequence: event.sequence ?? null,
     event_type: event.event_type,
     workflow_id: event.workflow_id,
     timestamp: event.timestamp,
@@ -78,6 +96,8 @@ export function openWorkflowEventStream(
 ) {
   const source = new EventSourceImpl(url);
   let closed = false;
+  let consecutiveErrors = 0;
+  let lastSequence: number | null = null;
 
   const handleMessage = (message: MessageEvent) => {
     if (!message.data) {
@@ -87,6 +107,20 @@ export function openWorkflowEventStream(
       const payload = JSON.parse(String(message.data));
       const parsed = parseContract("WorkflowEvent", WorkflowEventSchema, payload);
       const normalized = normalizeWorkflowEvent(parsed);
+      if (
+        normalized.sequence != null &&
+        lastSequence != null &&
+        normalized.sequence > lastSequence + 1
+      ) {
+        callbacks.onError(
+          new Error(
+            `SSE event gap detected (${lastSequence} -> ${normalized.sequence}); polling reconciliation is active.`
+          )
+        );
+      }
+      if (normalized.sequence != null) {
+        lastSequence = Math.max(lastSequence ?? 0, normalized.sequence);
+      }
       callbacks.onEvent(normalized);
       if (TerminalEventTypes.has(normalized.event_type)) {
         callbacks.onTerminal(normalized);
@@ -99,6 +133,11 @@ export function openWorkflowEventStream(
   };
 
   source.onmessage = handleMessage;
+  source.onopen = () => {
+    const recovered = consecutiveErrors > 0;
+    consecutiveErrors = 0;
+    if (recovered) callbacks.onRecovered?.();
+  };
   for (const eventType of BackendEventTypes) {
     source.addEventListener(eventType, handleMessage as EventListener);
   }
@@ -106,9 +145,12 @@ export function openWorkflowEventStream(
     if (closed) {
       return;
     }
+    consecutiveErrors += 1;
     callbacks.onError(new Error("SSE stream failed; polling fallback is active."));
-    closed = true;
-    source.close();
+    if (consecutiveErrors >= 3) {
+      closed = true;
+      source.close();
+    }
   };
 
   return {

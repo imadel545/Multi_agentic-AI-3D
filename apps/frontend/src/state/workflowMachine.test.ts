@@ -58,7 +58,7 @@ describe("workflow reducer", () => {
     expect(initialWorkflowState.prompt).toBe("");
   });
 
-  it("clears the previous design surface when drafting a new prompt", () => {
+  it("keeps workflow tracking intact while the user drafts the next prompt", () => {
     const state = workflowReducer(
       {
         ...initialWorkflowState,
@@ -81,12 +81,13 @@ describe("workflow reducer", () => {
       { type: "PROMPT_CHANGED", prompt: "nouveau cahier de charge" }
     );
 
-    expect(state.phase).toBe("drafting");
-    expect(state.workflowId).toBeNull();
-    expect(state.viewerBundle).toBeNull();
-    expect(state.status).toBeNull();
-    expect(state.userIssues).toBeNull();
-    expect(state.timeline).toBeNull();
+    expect(state.phase).toBe("completed");
+    expect(state.prompt).toBe("nouveau cahier de charge");
+    expect(state.workflowId).toBe("wf_old");
+    expect(state.viewerBundle).toBe(baseBundle);
+    expect(state.status?.status).toBe("completed");
+    expect(state.userIssues?.workflow_id).toBe("wf_old");
+    expect(state.timeline?.workflow_id).toBe("wf_old");
   });
 
   it("moves through submit, stream and completed states", () => {
@@ -130,19 +131,54 @@ describe("workflow reducer", () => {
     expect(state.phase).toBe("completed");
   });
 
+  it("keeps the active design until a new workflow is accepted", () => {
+    const active = {
+      ...initialWorkflowState,
+      phase: "completed" as const,
+      workflowId: "wf_active",
+      viewerBundle: baseBundle,
+      status: { ...runningStatus, status: "completed" }
+    };
+
+    const submitting = workflowReducer(active, { type: "SUBMIT_STARTED" });
+
+    expect(submitting.pendingSubmission).toBe(true);
+    expect(submitting.workflowId).toBe("wf_active");
+    expect(submitting.viewerBundle).toBe(baseBundle);
+    expect(submitting.phase).toBe("completed");
+
+    const accepted = workflowReducer(submitting, {
+      type: "DESIGN_CREATED",
+      workflowId: "wf_new"
+    });
+    expect(accepted.pendingSubmission).toBe(false);
+    expect(accepted.workflowId).toBe("wf_new");
+    expect(accepted.viewerBundle).toBeNull();
+  });
+
   it("restores an existing workflow without opening a new SSE submission", () => {
     const state = workflowReducer(initialWorkflowState, {
       type: "WORKFLOW_RESTORED",
-      workflowId: "wf_existing"
+      status: { ...runningStatus, workflow_id: "wf_existing" }
     });
 
     expect(state.workflowId).toBe("wf_existing");
     expect(state.phase).toBe("running");
-    expect(state.runtimeMode).toBe("polling");
+    expect(state.runtimeMode).toBe("sse");
     expect(state.events).toEqual([]);
   });
 
-  it("marks terminal output degraded when product truth signals degrade", () => {
+  it("restores a completed workflow without reopening a live transport", () => {
+    const state = workflowReducer(initialWorkflowState, {
+      type: "WORKFLOW_RESTORED",
+      status: { ...runningStatus, workflow_id: "wf_completed", status: "completed" }
+    });
+
+    expect(state.phase).toBe("completed");
+    expect(state.runtimeMode).toBe("idle");
+  });
+
+  it("keeps provider degradation separate from 3D design quality", () => {
     const state = workflowReducer(
       {
         ...initialWorkflowState,
@@ -158,7 +194,9 @@ describe("workflow reducer", () => {
       }
     );
 
-    expect(state.phase).toBe("degraded");
+    expect(state.phase).toBe("completed");
+    expect(state.designQuality).toBe("valid");
+    expect(state.providerHealth).toBe("degraded");
   });
 
   it("activates polling mode when SSE fails", () => {
@@ -169,15 +207,57 @@ describe("workflow reducer", () => {
 
     expect(state.runtimeMode).toBe("polling");
     expect(state.phase).toBe("running");
+    expect(state.transportError).toBe("stream failed");
+  });
+
+  it("keeps secondary resource failures separate from workflow truth", () => {
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "completed",
+        status: { ...runningStatus, status: "completed" },
+        workflowId: "wf_1"
+      },
+      { type: "RESOURCE_FAILED", resource: "rag_evidence", message: "404" }
+    );
+
+    expect(state.phase).toBe("completed");
+    expect(state.error).toBeNull();
+    expect(state.resourceErrors.rag_evidence).toBe("404");
+  });
+
+  it("does not turn a completed workflow into failed when a command request fails", () => {
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "completed",
+        status: { ...runningStatus, status: "completed" },
+        workflowId: "wf_1"
+      },
+      { type: "REQUEST_FAILED", message: "revision refused" }
+    );
+
+    expect(state.phase).toBe("completed");
+    expect(state.error).toBe("revision refused");
   });
 
   it("keeps the active workflow while a revision is generated", () => {
     const state = workflowReducer(
       { ...initialWorkflowState, phase: "completed", workflowId: "wf_1" },
-      { type: "REVISION_STARTED" }
+      { type: "REVISION_STARTED", runtimeMode: "sse" }
     );
 
     expect(state.workflowId).toBe("wf_1");
+    expect(state.phase).toBe("running");
+    expect(state.runtimeMode).toBe("sse");
+  });
+
+  it("starts a revision in explicit polling mode when no durable SSE cursor is available", () => {
+    const state = workflowReducer(
+      { ...initialWorkflowState, phase: "completed", workflowId: "wf_1" },
+      { type: "REVISION_STARTED", runtimeMode: "polling" }
+    );
+
     expect(state.phase).toBe("running");
     expect(state.runtimeMode).toBe("polling");
   });

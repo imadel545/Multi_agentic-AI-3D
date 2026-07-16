@@ -2,11 +2,14 @@ import { z } from "zod";
 
 const ForbiddenPublicFields = new Set([
   "artifact_dir",
+  "absolute_path",
   "filesystem_path",
   "local_path",
-  "resolved_path"
+  "resolved_path",
+  "stacktrace",
+  "traceback"
 ]);
-const ForbiddenStringMarkers = ["/Users/"];
+const ForbiddenStringMarkers = ["/Users/", "/home/", "/private/var/", "/var/folders/", "file://"];
 
 const UnknownRecord = z.object({}).catchall(z.unknown());
 
@@ -30,6 +33,13 @@ function forbidInternalPaths(value: unknown, ctx: z.RefinementCtx, path: string[
           path
         });
       }
+    }
+    if (/^[A-Za-z]:[\\/]/.test(value)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "absolute Windows filesystem paths are not allowed",
+        path
+      });
     }
     return;
   }
@@ -64,8 +74,73 @@ const RuntimeCapabilitiesSchema = UnknownRecord.extend({
   can_pause: z.boolean().optional(),
   can_resume: z.boolean().optional(),
   can_retry_same_workflow: z.boolean().optional(),
-  can_human_in_loop: z.boolean().optional()
+  can_human_in_loop: z.boolean().optional(),
+  can_view_versions: z.boolean().optional(),
+  can_edit_completed_design: z.boolean().optional(),
+  can_rollback_versions: z.boolean().optional()
 });
+
+const RequirementWarningSchema = publicSchema(
+  UnknownRecord.extend({
+    code: z.string(),
+    message: z.string()
+  })
+);
+
+const RequirementErrorSchema = publicSchema(
+  UnknownRecord.extend({
+    code: z.string(),
+    message: z.string()
+  })
+);
+
+const TowerCharacteristicsSchema = UnknownRecord.extend({
+  structure: z.string().nullish(),
+  leg_count: z.number().nullish(),
+  base_width_m: z.number().nullish(),
+  top_width_m: z.number().nullish(),
+  foundation_type: z.string().nullish(),
+  material: z.string().nullish()
+});
+
+export const RequirementSpecSchema = publicSchema(
+  UnknownRecord.extend({
+    network_type: z.string(),
+    site_type: z.string(),
+    tower_type: z.string(),
+    tower_height_m: z.number(),
+    tower_characteristics: TowerCharacteristicsSchema,
+    sector_count: z.number().int(),
+    antenna_type: z.string(),
+    antenna_install_height_m: z.number(),
+    azimuths_deg: z.array(z.number()),
+    mechanical_tilt_deg: z.number(),
+    electrical_tilt_deg: z.number(),
+    beamwidth_deg: z.number(),
+    include_rru: z.boolean(),
+    include_cables: z.boolean(),
+    include_beams: z.boolean(),
+    include_labels: z.boolean(),
+    include_power_cabinet: z.boolean(),
+    include_gps_antenna: z.boolean(),
+    detail_level: z.string(),
+    warnings: z.array(RequirementWarningSchema).default([]),
+    repair_events: z.array(UnknownRecord).default([])
+  })
+);
+
+export const ParseRequirementsResponseSchema = publicSchema(
+  UnknownRecord.extend({
+    requirements: RequirementSpecSchema.nullable(),
+    requirements_hash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+    warnings: z.array(RequirementWarningSchema).default([]),
+    errors: z.array(RequirementErrorSchema).default([]),
+    provider: z.string().nullish(),
+    extraction_provider: z.string().nullish(),
+    fallback_used: z.boolean().nullish(),
+    llm_fallback_reason: z.string().nullish()
+  })
+);
 
 export const UnsupportedActionSchema = UnknownRecord.extend({
   action: z.string(),
@@ -167,6 +242,7 @@ const EventPayloadSchema = UnknownRecord.extend({
 export const WorkflowEventSchema = publicSchema(
   UnknownRecord.extend({
     event_id: z.string().min(1),
+    sequence: z.number().int().positive().nullish(),
     event_type: z.string().min(1),
     workflow_id: z.string().min(1),
     timestamp: z.string().min(1),
@@ -302,6 +378,14 @@ export const DocumentPackCapabilitiesSchema = publicSchema(
     supported_upload_format: z.string(),
     supported_extensions: z.array(z.string()).default([]),
     limitations: z.array(z.string()).default([]),
+    limits: UnknownRecord.extend({
+      max_zip_size_mb: z.number().positive().optional(),
+      max_member_size_mb: z.number().positive().optional(),
+      max_member_count: z.number().int().positive().optional(),
+      max_uncompressed_size_mb: z.number().positive().optional(),
+      processing_mode: z.string().optional(),
+      execution: z.string().optional()
+    }).optional(),
     truth: UnknownRecord.default({}),
     capabilities: z.record(z.string(), UnknownRecord).default({})
   })
@@ -322,6 +406,129 @@ export const DocumentPackSummarySchema = publicSchema(
   })
 );
 
+export const DocumentPackFieldSchema = publicSchema(
+  UnknownRecord.extend({
+    field: z.string(),
+    value: z.unknown().nullish(),
+    status: z.string(),
+    confidence: z.number(),
+    sources: z.array(UnknownRecord).default([]),
+    values: z.array(z.unknown()).default([]),
+    severity: z.string().nullish(),
+    resolution: z.string().nullish(),
+    reason: z.string().nullish()
+  })
+);
+
+export const DocumentSourceEvidenceSchema = publicSchema(
+  UnknownRecord.extend({
+    document_id: z.string(),
+    file: z.string(),
+    source_type: z.string(),
+    page: z.number().int().positive().nullish(),
+    sheet: z.string().nullish(),
+    layer: z.string().nullish(),
+    confidence: z.number().nullish(),
+    evidence: z.string()
+  })
+);
+
+export const DocumentReferenceSchema = publicSchema(
+  UnknownRecord.extend({
+    document_id: z.string(),
+    path: z.string(),
+    filename: z.string(),
+    extension: z.string(),
+    size_bytes: z.number().nonnegative(),
+    category: z.string(),
+    relevance_score: z.number(),
+    confidence: z.number(),
+    reason: z.string(),
+    priority: z.string(),
+    purpose: z.string(),
+    used_for_design: z.boolean(),
+    why_used_or_ignored: z.string(),
+    extraction_status: z.string(),
+    processing_tools: z.array(z.string()).default([]),
+    processing_warnings: z.array(z.string()).default([]),
+    duplicate_of: z.string().nullish()
+  })
+);
+
+export const DocumentExtractionSchema = publicSchema(
+  UnknownRecord.extend({
+    field: z.string(),
+    value: z.unknown(),
+    confidence: z.number(),
+    source: DocumentSourceEvidenceSchema
+  })
+);
+
+const DocumentProcessingReferenceSchema = publicSchema(
+  UnknownRecord.extend({
+    document_id: z.string(),
+    path: z.string(),
+    extension: z.string(),
+    category: z.string(),
+    extractability: z.string(),
+    extraction_status: z.string(),
+    cad_status: z.string(),
+    processing_tools: z.array(z.string()).default([]),
+    processing_warnings: z.array(z.string()).default([])
+  })
+);
+
+export const DocumentPackProcessingSchema = publicSchema(
+  UnknownRecord.extend({
+    pack_id: z.string(),
+    documents: z.array(DocumentProcessingReferenceSchema).default([]),
+    warnings: z.array(z.string()).default([]),
+    tool_status: z.record(z.string(), z.string()).default({}),
+    groq_rejected_fields: z.array(UnknownRecord).default([])
+  })
+);
+
+export const DocumentPackProvenanceSchema = publicSchema(
+  z.record(z.string(), z.array(DocumentSourceEvidenceSchema))
+);
+
+export const DocumentPackConsolidatedSpecSchema = publicSchema(
+  UnknownRecord.extend({
+    pack_id: z.string(),
+    source_mode: z.string(),
+    llm_provider: z.string().nullish(),
+    llm_fallback_used: z.boolean().nullish(),
+    confidence_summary: z.record(z.string(), z.number()),
+    processing_warnings: z.array(z.string()).default([]),
+    document_references: z.array(DocumentReferenceSchema).default([]),
+    provenance_map: z.record(z.string(), z.array(DocumentSourceEvidenceSchema)).default({})
+  })
+);
+
+const DocumentPackQACheckSchema = publicSchema(
+  UnknownRecord.extend({
+    name: z.string(),
+    passed: z.boolean(),
+    reason: z.string()
+  })
+);
+
+export const DocumentPackQASchema = publicSchema(
+  UnknownRecord.extend({
+    pack_id: z.string(),
+    status: z.string(),
+    score: z.number(),
+    checks: z.array(DocumentPackQACheckSchema).default([]),
+    warnings: z.array(z.string()).default([]),
+    blocking_issues: z.array(z.string()).default([]),
+    ready_to_generate: z.boolean(),
+    ready_confidence: z.number(),
+    recommended_user_actions: z.array(z.string()).default([]),
+    tool_failures: z.array(z.string()).default([]),
+    memory_writeback: UnknownRecord.default({})
+  })
+);
+
 export const DocumentPackGenerateDesignResponseSchema = publicSchema(
   UnknownRecord.extend({
     pack_id: z.string(),
@@ -335,11 +542,15 @@ export const DocumentPackGenerateDesignResponseSchema = publicSchema(
 export const PublicVersionInfoSchema = publicSchema(
   UnknownRecord.extend({
     version_id: z.string(),
+    parent_version_id: z.string().nullish(),
     created_at: z.string(),
     active: z.boolean().default(false),
     artifacts: z.record(z.string(), z.string()).default({}),
     qa_score: z.number().nullish(),
-    generation_mode: z.string().nullish()
+    generation_mode: z.string().nullish(),
+    edit_description: z.string().nullish(),
+    diff_summary: UnknownRecord.nullish(),
+    status: z.string().nullish()
   })
 );
 
@@ -379,6 +590,15 @@ export const RollbackVersionResponseSchema = publicSchema(
     workflow_id: z.string(),
     version_id: z.string(),
     active_version_id: z.string(),
+    active_operation: z
+      .object({
+        kind: z.string(),
+        operation_id: z.string(),
+        status: z.string(),
+        human_label: z.string(),
+        started_at: z.string()
+      })
+      .optional(),
     rolled_back: z.boolean(),
     status: z.string(),
     message: z.string(),
@@ -396,6 +616,8 @@ export const VersionsSchema = z.array(PublicVersionInfoSchema);
 
 export type Health = z.infer<typeof HealthSchema>;
 export type StudioSummary = z.infer<typeof StudioSummarySchema>;
+export type RequirementSpec = z.infer<typeof RequirementSpecSchema>;
+export type ParseRequirementsResponse = z.infer<typeof ParseRequirementsResponseSchema>;
 export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
@@ -408,6 +630,25 @@ export type UserIssue = z.infer<typeof UserIssueSchema>;
 export type AssetInventory = z.infer<typeof AssetInventorySchema>;
 export type DocumentPackCapabilities = z.infer<typeof DocumentPackCapabilitiesSchema>;
 export type DocumentPackSummary = z.infer<typeof DocumentPackSummarySchema>;
+export type DocumentPackField = z.infer<typeof DocumentPackFieldSchema>;
+export type DocumentPackQA = z.infer<typeof DocumentPackQASchema>;
+export type DocumentReference = z.infer<typeof DocumentReferenceSchema>;
+export type DocumentExtraction = z.infer<typeof DocumentExtractionSchema>;
+export type DocumentSourceEvidence = z.infer<typeof DocumentSourceEvidenceSchema>;
+export type DocumentPackProcessing = z.infer<typeof DocumentPackProcessingSchema>;
+export type DocumentPackProvenance = z.infer<typeof DocumentPackProvenanceSchema>;
+export type DocumentPackConsolidatedSpec = z.infer<typeof DocumentPackConsolidatedSpecSchema>;
+export type DocumentPackReview = {
+  summary: DocumentPackSummary;
+  conflicts: DocumentPackField[];
+  missingFields: DocumentPackField[];
+  qa: DocumentPackQA;
+  documents: DocumentReference[];
+  extractions: DocumentExtraction[];
+  provenance: DocumentPackProvenance;
+  processing: DocumentPackProcessing;
+  consolidatedSpec: DocumentPackConsolidatedSpec;
+};
 export type DocumentPackGenerateDesignResponse = z.infer<typeof DocumentPackGenerateDesignResponseSchema>;
 export type PublicVersionInfo = z.infer<typeof PublicVersionInfoSchema>;
 export type EditDesignResponse = z.infer<typeof EditDesignResponseSchema>;

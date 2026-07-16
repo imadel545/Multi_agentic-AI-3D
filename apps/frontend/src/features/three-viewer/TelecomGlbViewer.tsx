@@ -1,9 +1,9 @@
-import { Grid, OrbitControls, useGLTF } from "@react-three/drei";
+import { Grid, Html, OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AlertTriangle, Box, Image as ImageIcon, Layers3, Loader2, RotateCcw } from "lucide-react";
-import { Component, Suspense, useEffect, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { Color } from "three";
-import type { PerspectiveCamera, WebGLRenderer } from "three";
+import { Component, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { ACESFilmicToneMapping, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
+import type { Camera, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { ViewerBundle } from "../../api/schemas";
 import {
@@ -12,10 +12,11 @@ import {
   viewerBadges
 } from "./viewerRules";
 import {
-  enhanceViewerMaterials,
   fitCameraToObject,
-  isRenderVisiblyDifferent,
+  prepareViewerScene,
+  probeRenderVisibility,
   summarizeObjects,
+  type ModelObjectSummary,
   type RenderSample
 } from "./viewerMath";
 
@@ -41,9 +42,8 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
   const [viewerHealth, setViewerHealth] = useState<ViewerHealth>("idle");
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
-  const sourceIdentity = source.kind === "glb" ? source.url : source.kind;
-  const blankPreviewUrl =
-    source.kind === "glb" && viewerHealth === "render_blank" ? source.previewUrl : null;
+  const sourceIdentity = "url" in source ? `${source.kind}:${source.url}` : source.kind;
+  const renderIsBlank = source.kind === "glb" && viewerHealth === "render_blank";
 
   useEffect(() => {
     setObjectSummary(null);
@@ -64,6 +64,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             className="icon-action"
             disabled={source.kind !== "glb"}
             onClick={() => setResetKey((value) => value + 1)}
+            aria-label="Recentrer la caméra 3D"
             title="Recentrer la caméra"
             type="button"
           >
@@ -85,9 +86,6 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
         <ViewerError message={source.message} previewUrl={source.previewUrl} />
       ) : (
         <div className="canvas-frame">
-          {source.previewUrl && objectSummary && webglSupported !== false && !blankPreviewUrl ? (
-            <BackendPreviewCompanion url={source.previewUrl} />
-          ) : null}
           {webglSupported === false ? (
             source.previewUrl ? (
               <PreviewVisibilityFallback
@@ -100,45 +98,61 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
                 previewUrl={null}
               />
             )
-          ) : blankPreviewUrl ? (
-            <PreviewVisibilityFallback
-              message="GLB chargé mais rendu viewer non visible. Preview backend affichée."
-              url={blankPreviewUrl}
-            />
+          ) : renderIsBlank ? (
+            source.previewUrl ? (
+              <PreviewVisibilityFallback
+                message="GLB chargé mais rendu viewer non visible. Preview backend affichée."
+                url={source.previewUrl}
+              />
+            ) : (
+              <ViewerError
+                message="GLB chargé mais rendu viewer non visible, sans preview disponible."
+                previewUrl={null}
+              />
+            )
           ) : (
             <GlbObjectSummary health={viewerHealth} summary={objectSummary} />
           )}
           {webglSupported === false ? null : (
-            <GlbErrorBoundary key={`${source.url}-${resetKey}`} previewUrl={source.previewUrl}>
-              <Suspense fallback={<ViewerLoading />}>
-                <Canvas
-                  dpr={[1, 2]}
-                  gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
-                  key={resetKey}
-                  camera={{ fov: 38, position: [42, 20, 46] }}
-                  style={{ background: "#16242a" }}
-                  onCreated={({ gl, scene }) => {
-                    const background = new Color("#182329");
-                    gl.setClearColor(background, 0);
-                    scene.background = null;
-                  }}
-                >
-                  <fog attach="fog" args={["#182329", 85, 190]} />
-                  <ambientLight intensity={1.7} />
-                  <hemisphereLight args={["#f5f9ff", "#4c5f64", 1.3]} />
-                  <directionalLight position={[22, 42, 26]} intensity={2.4} />
+            <GlbErrorBoundary
+              key={`${source.url}-${resetKey}`}
+              onError={() => setViewerHealth("glb_error")}
+              previewUrl={source.previewUrl}
+            >
+              <Canvas
+                dpr={[1, 1.5]}
+                gl={{ alpha: false, antialias: true }}
+                key={resetKey}
+                camera={{ fov: 38, position: [42, 20, 46] }}
+                style={{ background: "#16242a" }}
+                onCreated={({ gl, scene }) => {
+                  const background = new Color("#182329");
+                  gl.setClearColor(background, 1);
+                  gl.outputColorSpace = SRGBColorSpace;
+                  gl.toneMapping = ACESFilmicToneMapping;
+                  gl.toneMappingExposure = 1.08;
+                  scene.background = background;
+                }}
+              >
+                <fog attach="fog" args={["#182329", 85, 190]} />
+                <ambientLight intensity={1.7} />
+                <hemisphereLight args={["#f5f9ff", "#4c5f64", 1.3]} />
+                <directionalLight position={[22, 42, 26]} intensity={2.4} />
+                <Suspense fallback={<ViewerLoading />}>
                   <ModelScene
                     controlsRef={controlsRef}
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
                     url={source.url}
                   />
-                  <RenderHealthProbe
-                    enabled={viewerHealth === "camera_fitted"}
-                    onResult={(visible) =>
-                      setViewerHealth(visible ? "render_visible" : "render_blank")
-                    }
-                  />
+                </Suspense>
+                <RenderHealthProbe
+                  enabled={viewerHealth === "camera_fitted"}
+                  onResult={(visible) =>
+                    setViewerHealth(visible ? "render_visible" : "render_blank")
+                  }
+                />
+                {viewerHealth === "render_visible" ? (
                   <Grid
                     args={[42, 42]}
                     cellColor="#52656d"
@@ -147,15 +161,15 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
                     fadeStrength={1.4}
                     position={[0, -0.04, 0]}
                   />
-                  <OrbitControls
-                    ref={controlsRef}
-                    makeDefault
-                    enableDamping
-                    maxDistance={160}
-                    minDistance={5}
-                  />
-                </Canvas>
-              </Suspense>
+                ) : null}
+                <OrbitControls
+                  ref={controlsRef}
+                  makeDefault
+                  enableDamping
+                  maxDistance={500}
+                  minDistance={2}
+                />
+              </Canvas>
             </GlbErrorBoundary>
           )}
         </div>
@@ -164,15 +178,10 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
   );
 }
 
-export type ModelObjectSummary = {
-  totalNamedObjects: number;
-  roles: Record<string, number>;
-};
-
 export function PreviewFallback({ url, message }: { url: string; message: string }) {
   return (
     <div className="preview-fallback">
-      <img src={url} alt="Backend generated preview" />
+      <BackendPreviewImage src={url} />
       <p>
         <ImageIcon size={16} aria-hidden="true" /> {message}
       </p>
@@ -192,14 +201,24 @@ function ModelScene({
   onLoaded: (summary: ModelObjectSummary) => void;
 }) {
   const gltf = useGLTF(url);
-  const { camera } = useThree();
+  const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
+  const { camera, size } = useThree();
+  const fitted = useRef(false);
   useEffect(() => {
-    enhanceViewerMaterials(gltf.scene);
-    onLoaded(summarizeObjects(gltf.scene));
-    const fit = fitCameraToObject(camera as PerspectiveCamera, gltf.scene, controlsRef.current);
-    onHealth(fit ? "camera_fitted" : "model_loaded");
-  }, [camera, controlsRef, gltf.scene, onHealth, onLoaded]);
-  return <primitive object={gltf.scene} />;
+    prepareViewerScene(scene);
+    onLoaded(summarizeObjects(scene));
+    fitted.current = false;
+    onHealth("model_loaded");
+  }, [onHealth, onLoaded, scene, size.height, size.width]);
+  useFrame(() => {
+    if (fitted.current || !controlsRef.current) {
+      return;
+    }
+    fitted.current = true;
+    const fit = fitCameraToObject(camera as PerspectiveCamera, scene, controlsRef.current);
+    onHealth(fit ? "camera_fitted" : "glb_error");
+  });
+  return <primitive object={scene} />;
 }
 
 function ViewerEmpty({ message }: { message: string }) {
@@ -216,37 +235,30 @@ function ViewerError({ message, previewUrl }: { message: string; previewUrl: str
     <div className="viewer-empty viewer-error">
       <AlertTriangle size={32} aria-hidden="true" />
       <p>{message}</p>
-      {previewUrl ? <img src={previewUrl} alt="Backend preview fallback" /> : null}
+      {previewUrl ? <BackendPreviewImage src={previewUrl} /> : null}
     </div>
   );
 }
 
 function ViewerLoading() {
   return (
-    <div className="viewer-loading">
-      <Loader2 size={22} aria-hidden="true" />
-      <span>Chargement du GLB backend...</span>
-    </div>
+    <Html center>
+      <div className="viewer-loading viewer-loading-overlay">
+        <Loader2 size={22} aria-hidden="true" />
+        <span>Chargement du GLB backend...</span>
+      </div>
+    </Html>
   );
 }
 
 function PreviewVisibilityFallback({ message, url }: { message: string; url: string }) {
   return (
     <div className="viewer-preview-overlay">
-      <img src={url} alt="Backend preview because the GLB render is not visible" />
+      <BackendPreviewImage src={url} />
       <p>
         <AlertTriangle size={16} aria-hidden="true" />
         {message}
       </p>
-    </div>
-  );
-}
-
-function BackendPreviewCompanion({ url }: { url: string }) {
-  return (
-    <div className="viewer-preview-companion">
-      <img src={url} alt="Backend verified preview of the generated telecom design" />
-      <span>Preview backend vérifiée · GLB interactif chargé</span>
     </div>
   );
 }
@@ -268,7 +280,9 @@ function GlbObjectSummary({
         <Layers3 size={14} aria-hidden="true" /> Scène GLB réelle
       </strong>
       <small>
-        {summary.totalNamedObjects} objets nommés · {viewerHealthLabel(health)}
+        {summary.evidenceMode === "semantic_extras"
+          ? `${summary.semanticEntityCount} équipements vérifiables dans ${summary.totalNamedObjects} nœuds GLB`
+          : `${summary.totalNamedObjects} nœuds GLB · comptage hérité par nom`} · {viewerHealthLabel(health)}
       </small>
       <div>
         {rows.map(([role, count]) => (
@@ -304,7 +318,7 @@ function RenderHealthProbe({
   enabled: boolean;
   onResult: (visible: boolean) => void;
 }) {
-  const { gl } = useThree();
+  const { camera, gl, scene } = useThree();
   const frames = useRef(0);
   const sampled = useRef(false);
   useEffect(() => {
@@ -322,50 +336,61 @@ function RenderHealthProbe({
       return;
     }
     sampled.current = true;
-    onResult(isRendererVisible(gl));
+    onResult(isRendererVisible(gl, scene, camera));
   });
   return null;
 }
 
-function isRendererVisible(renderer: WebGLRenderer): boolean {
-  try {
-    return isRenderVisiblyDifferent(sampleRenderer(renderer));
-  } catch {
-    return true;
-  }
+function isRendererVisible(renderer: WebGLRenderer, scene: Scene, camera: Camera): boolean {
+  return probeRenderVisibility(() => sampleRenderer(renderer, scene, camera));
 }
 
-function sampleRenderer(renderer: WebGLRenderer): RenderSample[] {
-  const context = renderer.getContext();
-  const width = renderer.domElement.width;
-  const height = renderer.domElement.height;
+function sampleRenderer(renderer: WebGLRenderer, scene: Scene, camera: Camera): RenderSample[] {
+  const width = 96;
+  const height = 96;
+  const target = new WebGLRenderTarget(width, height, { depthBuffer: true });
+  const previousTarget = renderer.getRenderTarget();
+  const previousClearColor = renderer.getClearColor(new Color()).clone();
+  const previousClearAlpha = renderer.getClearAlpha();
+  const pixels = new Uint8Array(width * height * 4);
   const samples: RenderSample[] = [];
-  const pixel = new Uint8Array(4);
-  for (const xRatio of [0.18, 0.3, 0.42, 0.5, 0.58, 0.7, 0.82]) {
-    for (const yRatio of [0.14, 0.26, 0.38, 0.5, 0.62, 0.74, 0.86]) {
-      context.readPixels(
-        Math.floor(width * xRatio),
-        Math.floor(height * yRatio),
-        1,
-        1,
-        context.RGBA,
-        context.UNSIGNED_BYTE,
-        pixel
-      );
-      samples.push([pixel[0], pixel[1], pixel[2], pixel[3]]);
+  try {
+    renderer.setRenderTarget(target);
+    renderer.setClearColor(new Color("#182329"), 1);
+    renderer.clear(true, true, true);
+    renderer.render(scene, camera);
+    renderer.readRenderTargetPixels(target, 0, 0, width, height, pixels);
+    for (let y = 2; y < height; y += 4) {
+      for (let x = 2; x < width; x += 4) {
+        const offset = (y * width + x) * 4;
+        samples.push([
+          pixels[offset],
+          pixels[offset + 1],
+          pixels[offset + 2],
+          pixels[offset + 3]
+        ]);
+      }
     }
+  } finally {
+    renderer.setRenderTarget(previousTarget);
+    renderer.setClearColor(previousClearColor, previousClearAlpha);
+    target.dispose();
   }
   return samples;
 }
 
 class GlbErrorBoundary extends Component<
-  { children: ReactNode; previewUrl: string | null },
+  { children: ReactNode; previewUrl: string | null; onError: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
   }
 
   render() {
@@ -379,4 +404,23 @@ class GlbErrorBoundary extends Component<
     }
     return this.props.children;
   }
+}
+
+function BackendPreviewImage({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="preview-image-error" role="status">
+        <AlertTriangle size={20} aria-hidden="true" />
+        <span>La preview backend n’a pas pu être chargée.</span>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt="Preview du design générée par le backend"
+      onError={() => setFailed(true)}
+    />
+  );
 }

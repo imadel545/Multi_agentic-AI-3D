@@ -5,6 +5,7 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
   closed = false;
   listeners = new Map<string, EventListener>();
 
@@ -41,6 +42,7 @@ describe("SSE adapter", () => {
     const source = FakeEventSource.instances.at(-1)!;
     source.emit("workflow_completed", {
       event_id: "evt_terminal",
+      sequence: 9,
       event_type: "workflow_completed",
       workflow_id: "wf_1",
       timestamp: "2026-06-16T10:00:00Z",
@@ -55,6 +57,7 @@ describe("SSE adapter", () => {
     expect(onEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: "workflow_completed",
+        sequence: 9,
         human_label: "Design prêt",
         progress_message: "Le GLB et les rapports sont disponibles."
       })
@@ -76,6 +79,31 @@ describe("SSE adapter", () => {
     source.onerror?.();
 
     expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("polling") }));
+    expect(source.closed).toBe(false);
+    source.onerror?.();
+    source.onerror?.();
+    expect(source.closed).toBe(true);
+  });
+
+  it("treats an applied edit as a terminal revision event", () => {
+    const onTerminal = vi.fn();
+    openWorkflowEventStream(
+      "http://127.0.0.1:8000/designs/wf_1/events/stream",
+      { onError: vi.fn(), onEvent: vi.fn(), onTerminal },
+      FakeEventSource as unknown as new (url: string) => EventSource
+    );
+    const source = FakeEventSource.instances.at(-1)!;
+
+    source.emit("edit_patch_applied", {
+      event_id: "evt_edit",
+      sequence: 12,
+      event_type: "edit_patch_applied",
+      workflow_id: "wf_1",
+      timestamp: "2026-07-15T10:00:00Z",
+      payload: { status: "completed", version_id: "v2" }
+    });
+
+    expect(onTerminal).toHaveBeenCalledOnce();
     expect(source.closed).toBe(true);
   });
 });

@@ -3,10 +3,18 @@ import {
   CreateDesignResponseSchema,
   CurrentOperationSchema,
   DocumentPackCapabilitiesSchema,
+  DocumentExtractionSchema,
+  DocumentPackConsolidatedSpecSchema,
+  DocumentPackFieldSchema,
   DocumentPackGenerateDesignResponseSchema,
+  DocumentPackProvenanceSchema,
+  DocumentPackProcessingSchema,
+  DocumentPackQASchema,
   DocumentPackSummarySchema,
+  DocumentReferenceSchema,
   EditDesignResponseSchema,
   HealthSchema,
+  ParseRequirementsResponseSchema,
   RollbackVersionResponseSchema,
   StudioSummarySchema,
   TimelineSummarySchema,
@@ -20,11 +28,14 @@ import {
   type CreateDesignResponse,
   type CurrentOperation,
   type DocumentPackCapabilities,
+  type DocumentPackReview,
   type DocumentPackGenerateDesignResponse,
   type DocumentPackSummary,
   type EditDesignResponse,
   type Health,
+  type ParseRequirementsResponse,
   type PublicVersionInfo,
+  type RequirementSpec,
   type RollbackVersionResponse,
   type StudioSummary,
   type TimelineSummary,
@@ -47,6 +58,8 @@ export class ApiClientError extends Error {
 
 export type CreateDesignPayload = {
   requirements_text: string;
+  confirmed_requirements?: RequirementSpec;
+  confirmed_requirements_hash?: string;
   options?: {
     detail_level?: "low" | "medium" | "high";
     use_llm?: boolean | null;
@@ -55,6 +68,20 @@ export type CreateDesignPayload = {
 
 export type EditDesignPayload = {
   edit_prompt: string;
+};
+
+export type ParseRequirementsPayload = {
+  requirements_text: string;
+  detail_level?: "low" | "medium" | "high";
+  use_llm?: boolean | null;
+};
+
+export type DocumentPackCorrectionPayload = {
+  field: string;
+  value: string | number | boolean | number[] | string[];
+  reason: string;
+  confidence?: number;
+  corrected_by?: string;
 };
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -86,7 +113,16 @@ export class TelecomStudioApi {
     );
   }
 
+  async parseRequirements(payload: ParseRequirementsPayload): Promise<ParseRequirementsResponse> {
+    return parseContract(
+      "ParseRequirementsResponse",
+      ParseRequirementsResponseSchema,
+      await this.postJson("/requirements/parse", payload)
+    );
+  }
+
   async createDocumentPack(file: File): Promise<DocumentPackSummary> {
+    assertZipDocumentPack(file);
     return parseContract(
       "DocumentPackSummary",
       DocumentPackSummarySchema,
@@ -94,6 +130,68 @@ export class TelecomStudioApi {
         "content-type": "application/zip",
         "x-filename": file.name
       })
+    );
+  }
+
+  async documentPackReview(packId: string): Promise<DocumentPackReview> {
+    const [
+      summary,
+      conflicts,
+      missingFields,
+      qa,
+      documents,
+      extractions,
+      provenance,
+      processing,
+      consolidatedSpec
+    ] = await Promise.all([
+      this.getJson(`/document-packs/${packId}`),
+      this.getJson(`/document-packs/${packId}/conflicts`),
+      this.getJson(`/document-packs/${packId}/missing-fields`),
+      this.getJson(`/document-packs/${packId}/qa`),
+      this.getJson(`/document-packs/${packId}/documents`),
+      this.getJson(`/document-packs/${packId}/extractions`),
+      this.getJson(`/document-packs/${packId}/provenance`),
+      this.getJson(`/document-packs/${packId}/processing`),
+      this.getJson(`/document-packs/${packId}/consolidated-spec`)
+    ]);
+    return {
+      summary: parseContract("DocumentPackSummary", DocumentPackSummarySchema, summary),
+      conflicts: parseContract(
+        "DocumentPackConflicts",
+        DocumentPackFieldSchema.array(),
+        conflicts
+      ),
+      missingFields: parseContract(
+        "DocumentPackMissingFields",
+        DocumentPackFieldSchema.array(),
+        missingFields
+      ),
+      qa: parseContract("DocumentPackQA", DocumentPackQASchema, qa),
+      documents: parseContract("DocumentPackDocuments", DocumentReferenceSchema.array(), documents),
+      extractions: parseContract("DocumentPackExtractions", DocumentExtractionSchema.array(), extractions),
+      provenance: parseContract(
+        "DocumentPackProvenance",
+        DocumentPackProvenanceSchema,
+        provenance
+      ),
+      processing: parseContract("DocumentPackProcessing", DocumentPackProcessingSchema, processing),
+      consolidatedSpec: parseContract(
+        "DocumentPackConsolidatedSpec",
+        DocumentPackConsolidatedSpecSchema,
+        consolidatedSpec
+      )
+    };
+  }
+
+  async applyDocumentPackCorrection(
+    packId: string,
+    correction: DocumentPackCorrectionPayload
+  ): Promise<DocumentPackSummary> {
+    return parseContract(
+      "DocumentPackSummary",
+      DocumentPackSummarySchema,
+      await this.postJson(`/document-packs/${packId}/corrections`, correction)
     );
   }
 
@@ -208,8 +306,12 @@ export class TelecomStudioApi {
     return this.responseJson(response, relativeUrl);
   }
 
-  streamUrl(workflowId: string): string {
-    return new URL(`/designs/${workflowId}/events/stream`, this.baseUrl).toString();
+  streamUrl(workflowId: string, afterEventId?: string | null): string {
+    const url = new URL(`/designs/${workflowId}/events/stream`, this.baseUrl);
+    if (afterEventId) {
+      url.searchParams.set("after_event_id", afterEventId);
+    }
+    return url.toString();
   }
 
   private async getJson(endpoint: string): Promise<unknown> {
@@ -255,3 +357,22 @@ export class TelecomStudioApi {
 }
 
 export const api = new TelecomStudioApi();
+
+const ZipMimeTypes = new Set([
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/octet-stream"
+]);
+
+export function assertZipDocumentPack(file: File): void {
+  const hasZipName = file.name.toLowerCase().endsWith(".zip");
+  const hasSupportedMime = !file.type || ZipMimeTypes.has(file.type.toLowerCase());
+  if (hasZipName && hasSupportedMime) {
+    return;
+  }
+  throw new ApiClientError(
+    0,
+    "/document-packs",
+    "Le backend accepte uniquement une archive ZIP. Regroupez les PDF, images, DXF ou autres fichiers dans un ZIP avant l’envoi."
+  );
+}

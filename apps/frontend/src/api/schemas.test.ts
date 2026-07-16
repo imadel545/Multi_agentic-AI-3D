@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   ContractValidationError,
+  DocumentPackFieldSchema,
+  DocumentPackQASchema,
+  ParseRequirementsResponseSchema,
   ViewerBundleSchema,
   WorkflowEventSchema,
   parseContract
@@ -62,6 +65,23 @@ describe("frontend contract schemas", () => {
     ).toThrow(ContractValidationError);
   });
 
+  it("rejects cross-platform local paths and raw stack traces", () => {
+    for (const forbidden of ["file:///tmp/design.glb", "/home/user/design.glb", "C:\\temp\\design.glb"]) {
+      expect(() =>
+        parseContract("ViewerBundle", ViewerBundleSchema, {
+          ...viewerBundlePayload,
+          primary_glb_url: forbidden
+        })
+      ).toThrow(ContractValidationError);
+    }
+    expect(() =>
+      parseContract("ViewerBundle", ViewerBundleSchema, {
+        ...viewerBundlePayload,
+        traceback: "Traceback (most recent call last)"
+      })
+    ).toThrow(ContractValidationError);
+  });
+
   it("accepts normalized event fields from the backend", () => {
     const parsed = parseContract("WorkflowEvent", WorkflowEventSchema, {
       event_id: "evt_1",
@@ -82,5 +102,71 @@ describe("frontend contract schemas", () => {
     });
 
     expect(parsed.payload.human_label).toBe("Construction SceneSpec");
+  });
+
+  it("validates the backend RequirementSpec understanding contract", () => {
+    const parsed = parseContract("ParseRequirements", ParseRequirementsResponseSchema, {
+      requirements: {
+        network_type: "5G",
+        site_type: "telecom_site",
+        tower_type: "lattice_tower",
+        tower_height_m: 30,
+        tower_characteristics: {
+          structure: "lattice",
+          foundation_type: "concrete_pad"
+        },
+        sector_count: 3,
+        antenna_type: "panel_5g",
+        antenna_install_height_m: 24,
+        azimuths_deg: [0, 120, 240],
+        mechanical_tilt_deg: 3,
+        electrical_tilt_deg: 0,
+        beamwidth_deg: 65,
+        include_rru: true,
+        include_cables: true,
+        include_beams: true,
+        include_labels: true,
+        include_power_cabinet: true,
+        include_gps_antenna: true,
+        detail_level: "high",
+        warnings: [{ code: "DEFAULT_BEAMWIDTH_USED", message: "Beamwidth assumed." }]
+      },
+      requirements_hash: "a".repeat(64),
+      warnings: [],
+      errors: [],
+      provider: "groq:openai/gpt-oss-120b",
+      extraction_provider: "llm",
+      fallback_used: false
+    });
+
+    expect(parsed.requirements?.include_gps_antenna).toBe(true);
+    expect(parsed.requirements_hash).toBe("a".repeat(64));
+    expect(parsed.requirements?.warnings[0]?.code).toBe("DEFAULT_BEAMWIDTH_USED");
+  });
+
+  it("validates document-pack review fields and QA without requiring raw specs", () => {
+    const field = parseContract("DocumentPackField", DocumentPackFieldSchema, {
+      field: "radio.hba_m",
+      value: null,
+      status: "missing",
+      confidence: 0,
+      severity: "blocking"
+    });
+    const qa = parseContract("DocumentPackQA", DocumentPackQASchema, {
+      pack_id: "pack_1",
+      status: "warning",
+      score: 0.75,
+      checks: [
+        { name: "no_blocking_missing_fields", passed: false, reason: "HBA is required." }
+      ],
+      blocking_issues: ["radio.hba_m"],
+      ready_to_generate: false,
+      ready_confidence: 0.49,
+      recommended_user_actions: ["Confirm HBA"]
+    });
+
+    expect(field.severity).toBe("blocking");
+    expect(qa.ready_to_generate).toBe(false);
+    expect(qa.checks[0]?.passed).toBe(false);
   });
 });
