@@ -1,9 +1,14 @@
 import json
+import os
 import queue
 import shutil
 import tempfile
 import threading
 import uuid
+import zipfile
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,6 +18,8 @@ from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
 from core.contracts.validation import ValidationReport
 from core.orchestration import DesignOrchestrator, OrchestratorResult
+from core.performance import requirements_hash
+from core.rag.planning import SUPPORTED_PLANNING_HINT_FIELDS
 from core.services.asset_registry import AssetRegistry
 from core.services.cleanup_service import CleanupService
 from core.services.diff_engine import DiffEngine
@@ -31,13 +38,26 @@ from .runtime_contract import (
 )
 
 
+class WorkflowBusyError(RuntimeError):
+    """Raised when a mutating operation conflicts with an active workflow."""
+
+
+class WorkflowStorageError(RuntimeError):
+    """Raised before mutation when durable local storage is too low."""
+
+
 class WorkflowService:
+    _SUBSCRIBER_QUEUE_MAX_SIZE = 1024
+
     def __init__(
         self,
         registry: AssetRegistry,
         outputs_dir: Path,
         orchestrator: DesignOrchestrator,
         scene_edit_agent: SceneEditAgent,
+        max_concurrent_workflows: int = 2,
+        max_pending_workflows: int = 4,
+        min_free_disk_mb: int = 256,
     ) -> None:
         self.registry = registry
         self.outputs_dir = outputs_dir
@@ -49,8 +69,21 @@ class WorkflowService:
         self.cleanup_service = CleanupService(outputs_dir)
         self.diff_engine = DiffEngine()
         self._lock = threading.Lock()
-        self._event_queues: dict[str, queue.Queue] = {}
-        self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+        self._active_workflows: dict[str, int] = {}
+        self._event_subscribers: dict[str, dict[str, queue.Queue]] = {}
+        self._operation_locks: dict[str, threading.RLock] = {}
+        self._operation_lock_users: dict[str, int] = {}
+        self._admission = threading.BoundedSemaphore(
+            max_concurrent_workflows + max_pending_workflows
+        )
+        self._generation_slots = threading.BoundedSemaphore(max_concurrent_workflows)
+        self._executor = ThreadPoolExecutor(
+            max_workers=max_concurrent_workflows,
+            thread_name_prefix="telecom-workflow",
+        )
+        self._futures: set[Future[None]] = set()
+        self._closed = False
+        self._min_free_disk_bytes = min_free_disk_mb * 1024 * 1024
 
     def _sync_output_services(self) -> None:
         if self.versioning.outputs_dir == self.outputs_dir:
@@ -58,7 +91,20 @@ class WorkflowService:
         self.versioning = SceneVersioningService(self.outputs_dir)
         self.event_log = EventLogService(self.outputs_dir)
         self.cleanup_service = CleanupService(self.outputs_dir)
-        self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+
+    def _ensure_storage_capacity(self) -> None:
+        target = self.outputs_dir
+        while not target.exists() and target != target.parent:
+            target = target.parent
+        free_bytes = shutil.disk_usage(target).free
+        if free_bytes < self._min_free_disk_bytes:
+            required_mb = self._min_free_disk_bytes // (1024 * 1024)
+            available_mb = free_bytes // (1024 * 1024)
+            raise WorkflowStorageError(
+                "Espace disque local insuffisant pour une génération fiable "
+                f"({available_mb} Mo disponibles; {required_mb} Mo requis). "
+                "Nettoyez les anciens artefacts temporaires puis réessayez."
+            )
 
     def _event_sink_for(self, workflow_id: str):
         def _sink(workflow_id_: str, event_type: str, payload: dict) -> None:
@@ -70,23 +116,247 @@ class WorkflowService:
         payload = _normalized_event_payload(event_type, payload)
         event = self.event_log.emit(workflow_id, event_type, payload)
         event_payload = event.model_dump()
-        q = self._event_queues.get(workflow_id)
-        if q is not None:
+        with self._lock:
+            subscribers = tuple(self._event_subscribers.get(workflow_id, {}).values())
+        for subscriber_queue in subscribers:
             try:
-                q.put_nowait(event_payload)
+                subscriber_queue.put_nowait(event_payload)
             except queue.Full:
-                pass
+                # JSONL is the durable replay source. Keep live queues bounded and
+                # discard only their oldest item when a slow browser falls behind.
+                try:
+                    subscriber_queue.get_nowait()
+                except queue.Empty:
+                    pass
+                subscriber_queue.put_nowait(event_payload)
         return event_payload
 
-    def _register_workflow_queue(self, workflow_id: str) -> queue.Queue:
+    def _mark_workflow_active(self, workflow_id: str) -> None:
         with self._lock:
-            q = queue.Queue(maxsize=1000)
-            self._event_queues[workflow_id] = q
-            return q
+            self._active_workflows[workflow_id] = self._active_workflows.get(workflow_id, 0) + 1
 
-    def _unregister_workflow_queue(self, workflow_id: str) -> None:
+    def _mark_workflow_inactive(self, workflow_id: str) -> None:
         with self._lock:
-            self._event_queues.pop(workflow_id, None)
+            active_count = self._active_workflows.get(workflow_id, 0)
+            if active_count <= 1:
+                self._active_workflows.pop(workflow_id, None)
+            else:
+                self._active_workflows[workflow_id] = active_count - 1
+
+    def _is_workflow_active(self, workflow_id: str) -> bool:
+        with self._lock:
+            return self._active_workflows.get(workflow_id, 0) > 0
+
+    @contextmanager
+    def _workflow_operation(self, workflow_id: str) -> Iterator[None]:
+        with self._lock:
+            operation_lock = self._operation_locks.setdefault(workflow_id, threading.RLock())
+            self._operation_lock_users[workflow_id] = (
+                self._operation_lock_users.get(workflow_id, 0) + 1
+            )
+        try:
+            with operation_lock:
+                yield
+        finally:
+            with self._lock:
+                users = self._operation_lock_users.get(workflow_id, 1) - 1
+                if users <= 0:
+                    self._operation_lock_users.pop(workflow_id, None)
+                    self._operation_locks.pop(workflow_id, None)
+                else:
+                    self._operation_lock_users[workflow_id] = users
+
+    def _submit_background(self, operation) -> None:
+        if not self._admission.acquire(blocking=False):
+            raise WorkflowBusyError(
+                "La capacité locale de génération est atteinte. Réessayez dans quelques secondes."
+            )
+        try:
+
+            def _guarded_operation() -> None:
+                with self._generation_operation(blocking=True):
+                    operation()
+
+            with self._lock:
+                if self._closed:
+                    raise RuntimeError("workflow service is shutting down")
+                future = self._executor.submit(_guarded_operation)
+                self._futures.add(future)
+        except Exception:
+            self._admission.release()
+            raise
+
+        def _release(completed: Future[None]) -> None:
+            with self._lock:
+                self._futures.discard(completed)
+            self._admission.release()
+
+        future.add_done_callback(_release)
+
+    @contextmanager
+    def _generation_operation(self, *, blocking: bool) -> Iterator[None]:
+        acquired = self._generation_slots.acquire(blocking=blocking)
+        if not acquired:
+            raise WorkflowBusyError(
+                "La capacité Blender locale est occupée. Réessayez dans quelques secondes."
+            )
+        try:
+            yield
+        finally:
+            self._generation_slots.release()
+
+    def shutdown(self, *, wait: bool = True) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._executor.shutdown(wait=wait, cancel_futures=False)
+
+    def reconcile_interrupted_workflows(self) -> list[str]:
+        """Terminate durable workflows that cannot still be running after a restart."""
+        self._sync_output_services()
+        reconciled: list[str] = []
+        if not self.outputs_dir.exists():
+            return reconciled
+        for workflow_dir in sorted(self.outputs_dir.glob("wf_*")):
+            if not workflow_dir.is_dir():
+                continue
+            status_path = workflow_dir / "status.json"
+            try:
+                status = self._read_json(status_path)
+            except (FileNotFoundError, OSError, json.JSONDecodeError):
+                continue
+            if status.get("status") not in {"pending", "running"}:
+                continue
+            workflow_id = str(status.get("workflow_id") or workflow_dir.name)
+            if self._restore_interrupted_edit(workflow_id, status, status_path):
+                reconciled.append(workflow_id)
+                continue
+            message = (
+                "Le processus local s'est arrêté avant la fin du design. "
+                "Relancez la génération à partir du cahier des charges confirmé."
+            )
+            issue = {
+                "code": "WORKFLOW_INTERRUPTED",
+                "message": message,
+                "severity": "error",
+            }
+            status["workflow_id"] = workflow_id
+            status["status"] = "failed"
+            status["errors"] = [
+                *[item for item in status.get("errors", []) if isinstance(item, dict)],
+                issue,
+            ]
+            status["interrupted_at"] = _utc_now_iso()
+            metrics = status.get("metrics") if isinstance(status.get("metrics"), dict) else {}
+            status["metrics"] = metrics | {
+                "status": "failed",
+                "terminal_reason": "process_interrupted",
+            }
+            self._write_json(status_path, status)
+            self._emit_user_issue_event(workflow_id, issue)
+            self._emit_workflow_event(
+                workflow_id,
+                "workflow_failed",
+                {
+                    "phase": "runtime",
+                    "node": "workflow_recovery",
+                    "status": "failed",
+                    "error": "WORKFLOW_INTERRUPTED",
+                    "human_label": "Génération interrompue",
+                    "progress_message": message,
+                },
+            )
+            reconciled.append(workflow_id)
+        return reconciled
+
+    def _restore_interrupted_edit(self, workflow_id: str, status: dict, status_path: Path) -> bool:
+        operation = status.get("active_operation")
+        if not isinstance(operation, dict) or operation.get("kind") != "edit":
+            return False
+        active_version_id = status.get("active_version_id") or self.versioning.active_version_id(
+            workflow_id
+        )
+        if not isinstance(active_version_id, str):
+            return False
+        active_version = self.versioning.get_version(workflow_id, active_version_id)
+        if (
+            active_version is None
+            or active_version.status != "completed"
+            or not active_version.artifact_dir
+        ):
+            return False
+        active_status_path = Path(active_version.artifact_dir) / "status.json"
+        if not active_status_path.exists():
+            return False
+
+        for version in self.versioning.list_versions(workflow_id):
+            if version.version_id == active_version_id or version.active:
+                continue
+            if version.status in {"pending", "generating", "running"}:
+                self.versioning.update_version(
+                    workflow_id,
+                    version.version_id,
+                    status="failed",
+                    active=False,
+                )
+
+        restored = self._read_json(active_status_path)
+        message = (
+            "La révision locale a été interrompue. La dernière version validée a été restaurée; "
+            "vous pouvez relancer la modification."
+        )
+        issue = {
+            "code": "EDIT_INTERRUPTED_ACTIVE_VERSION_RESTORED",
+            "message": message,
+            "severity": "warning",
+        }
+        restored["workflow_id"] = workflow_id
+        restored["status"] = "completed"
+        restored["active_version_id"] = active_version_id
+        restored["version_id"] = active_version_id
+        restored["active_operation"] = None
+        restored["interrupted_at"] = _utc_now_iso()
+        restored["warnings"] = [
+            *[item for item in restored.get("warnings", []) if isinstance(item, dict)],
+            issue,
+        ]
+        _atomic_write_text(
+            status_path,
+            json.dumps(restored, indent=2, ensure_ascii=False),
+        )
+        self._emit_user_issue_event(workflow_id, issue)
+        self._emit_workflow_event(
+            workflow_id,
+            "edit_patch_rejected",
+            {
+                "edit_id": operation.get("operation_id"),
+                "version_id": active_version_id,
+                "phase": "revision",
+                "node": "workflow_recovery",
+                "status": "rejected",
+                "error": "EDIT_INTERRUPTED_ACTIVE_VERSION_RESTORED",
+                "human_label": "Révision interrompue",
+                "progress_message": message,
+            },
+        )
+        return True
+
+    def _register_event_subscriber(self, workflow_id: str) -> tuple[str, queue.Queue]:
+        subscriber_id = uuid.uuid4().hex
+        subscriber_queue: queue.Queue = queue.Queue(maxsize=self._SUBSCRIBER_QUEUE_MAX_SIZE)
+        with self._lock:
+            self._event_subscribers.setdefault(workflow_id, {})[subscriber_id] = subscriber_queue
+        return subscriber_id, subscriber_queue
+
+    def _unregister_event_subscriber(self, workflow_id: str, subscriber_id: str) -> None:
+        with self._lock:
+            subscribers = self._event_subscribers.get(workflow_id)
+            if subscribers is None:
+                return
+            subscribers.pop(subscriber_id, None)
+            if not subscribers:
+                self._event_subscribers.pop(workflow_id, None)
 
     def create_design(
         self,
@@ -96,18 +366,18 @@ class WorkflowService:
         _synchronous: bool = False,
     ) -> dict:
         self._sync_output_services()
+        self._ensure_storage_capacity()
         workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
 
         self._write_pending_status(workflow_id, output_dir, detail_level, use_llm)
-        self._register_workflow_queue(workflow_id)
+        self._mark_workflow_active(workflow_id)
         self._emit_workflow_event(
             workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
         )
 
         def _run() -> None:
-            self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
                 self._write_running_status(workflow_id, output_dir)
                 result = self.orchestrator.run(
@@ -116,58 +386,14 @@ class WorkflowService:
                     detail_level=detail_level,
                     output_dir=output_dir,
                     use_llm=use_llm,
+                    runtime_event_sink=self._event_sink_for(workflow_id),
                 )
-                self._write_result_files(output_dir, requirements_text, result)
-                self._write_status(workflow_id, "running", output_dir, result)
-                self._make_archive(output_dir)
-                self._write_status(workflow_id, "running", output_dir, result)
-                version_dir: Path | None = None
-                if result.scene:
-                    version = self.versioning.save_version(
-                        workflow_id,
-                        result.scene,
-                        edit_description="initial",
-                        status=result.status,
-                        qa_score=result.qa_report.score if result.qa_report else None,
-                        generation_mode=result.generation.mode if result.generation else None,
-                        activate=True,
-                    )
-                    version_dir = self.versioning.version_artifacts_dir(
-                        workflow_id, version.version_id
-                    )
-                    self._copy_artifact_files(output_dir, version_dir)
-                    self._write_status(
-                        workflow_id,
-                        result.status,
-                        version_dir,
-                        result,
-                        version_id=version.version_id,
-                        active_version_id=version.version_id,
-                    )
-                    self._make_archive(version_dir)
-                    self._write_status(
-                        workflow_id,
-                        result.status,
-                        version_dir,
-                        result,
-                        version_id=version.version_id,
-                        active_version_id=version.version_id,
-                    )
-                    version_status = self._read_json(version_dir / "status.json")
-                    self.versioning.update_version(
-                        workflow_id,
-                        version.version_id,
-                        status=result.status,
-                        artifact_dir=str(version_dir),
-                        artifacts=version_status.get("artifacts", {}),
-                        qa_score=result.qa_report.score if result.qa_report else None,
-                        generation_mode=result.generation.mode if result.generation else None,
-                        active=True,
-                    )
-                self._emit_result_product_events(
-                    workflow_id,
-                    result,
-                    version_id=self.versioning.active_version_id(workflow_id),
+                version_id, active_version_id = self._persist_initial_result(
+                    workflow_id=workflow_id,
+                    output_dir=output_dir,
+                    requirements_text=requirements_text,
+                    result=result,
+                    edit_description="initial",
                 )
                 self._emit_workflow_event(
                     workflow_id,
@@ -175,15 +401,10 @@ class WorkflowService:
                     {
                         "status": result.status,
                         "duration_ms": result.total_duration_ms,
-                        "version_id": self.versioning.active_version_id(workflow_id),
+                        "version_id": active_version_id,
                         "node": "workflow",
                     },
                 )
-                if version_dir is not None:
-                    self._copy_active_status_to_root(workflow_id, version_dir)
-                else:
-                    self._write_status(workflow_id, result.status, output_dir, result)
-                self._make_archive(output_dir)
             except Exception as exc:
                 self._emit_user_issue_event(
                     workflow_id,
@@ -193,27 +414,36 @@ class WorkflowService:
                         "severity": "error",
                     },
                 )
+                self._write_failed_status(workflow_id, output_dir, str(exc))
                 self._emit_workflow_event(
                     workflow_id,
                     "workflow_failed",
                     {"error": str(exc), "error_type": type(exc).__name__},
                 )
-                # Write a minimal failed status
-                self._write_failed_status(workflow_id, output_dir, str(exc))
             finally:
-                self._unregister_workflow_queue(workflow_id)
-                self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+                self._release_workflow_checkpoint(workflow_id)
+                self._mark_workflow_inactive(workflow_id)
 
         if _synchronous:
-            _run()
+            try:
+                with self._generation_operation(blocking=False):
+                    _run()
+            except WorkflowBusyError:
+                self._mark_workflow_inactive(workflow_id)
+                shutil.rmtree(output_dir, ignore_errors=True)
+                raise
             try:
                 status = self.get_status(workflow_id)
                 return {"workflow_id": workflow_id, "status": status["status"]}
             except KeyError:
                 return {"workflow_id": workflow_id, "status": "failed"}
 
-        thread = threading.Thread(target=_run, name=f"workflow-{workflow_id}")
-        thread.start()
+        try:
+            self._submit_background(_run)
+        except Exception:
+            self._mark_workflow_inactive(workflow_id)
+            shutil.rmtree(output_dir, ignore_errors=True)
+            raise
         return {"workflow_id": workflow_id, "status": "pending"}
 
     def create_design_from_requirements(
@@ -222,15 +452,18 @@ class WorkflowService:
         *,
         detail_level: str,
         source_label: str = "project_design_spec",
+        source_text: str | None = None,
         _synchronous: bool = False,
     ) -> dict:
+        self._sync_output_services()
+        self._ensure_storage_capacity()
         self._sync_output_services()
         workflow_id = f"wf_{uuid.uuid4().hex[:12]}"
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
-        context_text = _requirements_context_text(requirements, source_label)
+        context_text = source_text or _requirements_context_text(requirements, source_label)
         self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
-        self._register_workflow_queue(workflow_id)
+        self._mark_workflow_active(workflow_id)
         self._emit_workflow_event(
             workflow_id,
             "design_created",
@@ -238,7 +471,6 @@ class WorkflowService:
         )
 
         def _run() -> None:
-            self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
             try:
                 self._write_running_status(workflow_id, output_dir)
                 self._emit_workflow_event(
@@ -252,58 +484,14 @@ class WorkflowService:
                     detail_level=detail_level,
                     output_dir=output_dir,
                     source_label=source_label,
+                    runtime_event_sink=self._event_sink_for(workflow_id),
                 )
-                self._write_result_files(output_dir, context_text, result)
-                self._write_status(workflow_id, "running", output_dir, result)
-                self._make_archive(output_dir)
-                self._write_status(workflow_id, "running", output_dir, result)
-                version_dir: Path | None = None
-                if result.scene:
-                    version = self.versioning.save_version(
-                        workflow_id,
-                        result.scene,
-                        edit_description=f"initial from {source_label}",
-                        status=result.status,
-                        qa_score=result.qa_report.score if result.qa_report else None,
-                        generation_mode=result.generation.mode if result.generation else None,
-                        activate=True,
-                    )
-                    version_dir = self.versioning.version_artifacts_dir(
-                        workflow_id, version.version_id
-                    )
-                    self._copy_artifact_files(output_dir, version_dir)
-                    self._write_status(
-                        workflow_id,
-                        result.status,
-                        version_dir,
-                        result,
-                        version_id=version.version_id,
-                        active_version_id=version.version_id,
-                    )
-                    self._make_archive(version_dir)
-                    self._write_status(
-                        workflow_id,
-                        result.status,
-                        version_dir,
-                        result,
-                        version_id=version.version_id,
-                        active_version_id=version.version_id,
-                    )
-                    version_status = self._read_json(version_dir / "status.json")
-                    self.versioning.update_version(
-                        workflow_id,
-                        version.version_id,
-                        status=result.status,
-                        artifact_dir=str(version_dir),
-                        artifacts=version_status.get("artifacts", {}),
-                        qa_score=result.qa_report.score if result.qa_report else None,
-                        generation_mode=result.generation.mode if result.generation else None,
-                        active=True,
-                    )
-                self._emit_result_product_events(
-                    workflow_id,
-                    result,
-                    version_id=self.versioning.active_version_id(workflow_id),
+                version_id, active_version_id = self._persist_initial_result(
+                    workflow_id=workflow_id,
+                    output_dir=output_dir,
+                    requirements_text=context_text,
+                    result=result,
+                    edit_description=f"initial from {source_label}",
                 )
                 self._emit_workflow_event(
                     workflow_id,
@@ -311,15 +499,10 @@ class WorkflowService:
                     {
                         "status": result.status,
                         "duration_ms": result.total_duration_ms,
-                        "version_id": self.versioning.active_version_id(workflow_id),
+                        "version_id": active_version_id,
                         "node": "workflow",
                     },
                 )
-                if version_dir is not None:
-                    self._copy_active_status_to_root(workflow_id, version_dir)
-                else:
-                    self._write_status(workflow_id, result.status, output_dir, result)
-                self._make_archive(output_dir)
             except Exception as exc:
                 self._emit_user_issue_event(
                     workflow_id,
@@ -329,26 +512,36 @@ class WorkflowService:
                         "severity": "error",
                     },
                 )
+                self._write_failed_status(workflow_id, output_dir, str(exc))
                 self._emit_workflow_event(
                     workflow_id,
                     "workflow_failed",
                     {"error": str(exc), "error_type": type(exc).__name__},
                 )
-                self._write_failed_status(workflow_id, output_dir, str(exc))
             finally:
-                self._unregister_workflow_queue(workflow_id)
-                self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+                self._release_workflow_checkpoint(workflow_id)
+                self._mark_workflow_inactive(workflow_id)
 
         if _synchronous:
-            _run()
+            try:
+                with self._generation_operation(blocking=False):
+                    _run()
+            except WorkflowBusyError:
+                self._mark_workflow_inactive(workflow_id)
+                shutil.rmtree(output_dir, ignore_errors=True)
+                raise
             try:
                 status = self.get_status(workflow_id)
                 return {"workflow_id": workflow_id, "status": status["status"]}
             except KeyError:
                 return {"workflow_id": workflow_id, "status": "failed"}
 
-        thread = threading.Thread(target=_run, name=f"workflow-{workflow_id}")
-        thread.start()
+        try:
+            self._submit_background(_run)
+        except Exception:
+            self._mark_workflow_inactive(workflow_id)
+            shutil.rmtree(output_dir, ignore_errors=True)
+            raise
         return {"workflow_id": workflow_id, "status": "pending"}
 
     def _run_scene_revision_with_sink(
@@ -359,8 +552,7 @@ class WorkflowService:
         detail_level: str,
         revision_id: str,
     ) -> OrchestratorResult:
-        self._register_workflow_queue(workflow_id)
-        self.orchestrator.set_runtime_event_sink(self._event_sink_for(workflow_id))
+        self._mark_workflow_active(workflow_id)
         try:
             return self.orchestrator.run_scene_revision(
                 workflow_id=workflow_id,
@@ -368,10 +560,128 @@ class WorkflowService:
                 output_dir=output_dir,
                 detail_level=detail_level,
                 revision_id=revision_id,
+                runtime_event_sink=self._event_sink_for(workflow_id),
             )
         finally:
-            self._unregister_workflow_queue(workflow_id)
-            self.orchestrator.set_runtime_event_sink(self.event_log.emit)
+            self._mark_workflow_inactive(workflow_id)
+
+    def _release_workflow_checkpoint(self, workflow_id: str) -> None:
+        checkpoint_saver = getattr(self.orchestrator, "checkpoint_saver", None)
+        delete_thread = getattr(checkpoint_saver, "delete_thread", None)
+        if not callable(delete_thread):
+            return
+        try:
+            delete_thread(workflow_id)
+        except Exception:
+            # Checkpoint cleanup is maintenance after durable product artifacts
+            # were written. It must never rewrite the terminal workflow result.
+            return
+
+    def _persist_initial_result(
+        self,
+        *,
+        workflow_id: str,
+        output_dir: Path,
+        requirements_text: str,
+        result: OrchestratorResult,
+        edit_description: str,
+    ) -> tuple[str | None, str | None]:
+        self._write_result_files(output_dir, requirements_text, result)
+        self._write_status(workflow_id, "running", output_dir, result)
+
+        version_id: str | None = None
+        active_version_id = self.versioning.active_version_id(workflow_id)
+        version_dir: Path | None = None
+        if result.scene is not None:
+            activate = result.status != "failed"
+            version = self.versioning.save_version(
+                workflow_id,
+                result.scene,
+                edit_description=edit_description,
+                status=result.status,
+                qa_score=result.qa_report.score if result.qa_report else None,
+                generation_mode=result.generation.mode if result.generation else None,
+                activate=False,
+            )
+            version_id = version.version_id
+            if activate:
+                active_version_id = version.version_id
+            version_dir = self.versioning.version_artifacts_dir(workflow_id, version.version_id)
+            self._copy_artifact_files(output_dir, version_dir)
+            self._write_status(
+                workflow_id,
+                result.status,
+                version_dir,
+                result,
+                version_id=version.version_id,
+                active_version_id=active_version_id,
+            )
+            self._make_archive(version_dir)
+            self._write_status(
+                workflow_id,
+                result.status,
+                version_dir,
+                result,
+                version_id=version.version_id,
+                active_version_id=active_version_id,
+            )
+            version_status = self._read_json(version_dir / "status.json")
+            self.versioning.update_version(
+                workflow_id,
+                version.version_id,
+                status=result.status,
+                artifact_dir=str(version_dir),
+                artifacts=version_status.get("artifacts", {}),
+                qa_score=result.qa_report.score if result.qa_report else None,
+                generation_mode=result.generation.mode if result.generation else None,
+                active=False,
+            )
+            if activate:
+                activated_version = self.versioning.rollback(workflow_id, version.version_id)
+                if activated_version is None:
+                    raise RuntimeError("unable to activate persisted scene version")
+                self.versioning.update_version(
+                    workflow_id,
+                    version.version_id,
+                    active=True,
+                )
+
+        self._make_archive(output_dir)
+        self._emit_result_product_events(
+            workflow_id,
+            result,
+            version_id=version_id,
+        )
+        self._publish_terminal_status(
+            workflow_id=workflow_id,
+            output_dir=output_dir,
+            result=result,
+            version_id=version_id,
+            active_version_id=active_version_id,
+        )
+        return version_id, active_version_id
+
+    def _publish_terminal_status(
+        self,
+        *,
+        workflow_id: str,
+        output_dir: Path,
+        result: OrchestratorResult,
+        version_id: str | None,
+        active_version_id: str | None,
+    ) -> None:
+        """Expose terminal status only after product and terminal events are durable."""
+        if version_id is not None:
+            version_dir = self.versioning.version_artifacts_dir(workflow_id, version_id)
+            self._copy_active_status_to_root(workflow_id, version_dir)
+            return
+        self._write_status(
+            workflow_id,
+            result.status,
+            output_dir,
+            result,
+            active_version_id=active_version_id,
+        )
 
     def get_status(self, workflow_id: str) -> dict:
         self._sync_output_services()
@@ -467,16 +777,19 @@ class WorkflowService:
         return designs
 
     def delete_design(self, workflow_id: str) -> None:
-        self._sync_output_services()
-        output_dir = self.outputs_dir / workflow_id
-        if not output_dir.exists():
-            raise KeyError(workflow_id)
-        try:
-            deleted = self.cleanup_service.delete_workflow(workflow_id)
-        except ValueError as exc:
-            raise KeyError(workflow_id) from exc
-        if not deleted:
-            raise KeyError(workflow_id)
+        with self._workflow_operation(workflow_id):
+            if self._is_workflow_active(workflow_id):
+                raise WorkflowBusyError("cannot delete an active workflow")
+            self._sync_output_services()
+            output_dir = self.outputs_dir / workflow_id
+            if not output_dir.exists():
+                raise KeyError(workflow_id)
+            try:
+                deleted = self.cleanup_service.delete_workflow(workflow_id)
+            except ValueError as exc:
+                raise KeyError(workflow_id) from exc
+            if not deleted:
+                raise KeyError(workflow_id)
 
     def parse_requirements(
         self,
@@ -499,6 +812,11 @@ class WorkflowService:
             "requirements": (
                 extraction.requirements.model_dump() if extraction.requirements else None
             ),
+            "requirements_hash": (
+                requirements_hash(extraction.requirements)
+                if extraction.requirements is not None
+                else None
+            ),
             "warnings": (
                 [w.model_dump() for w in extraction.requirements.warnings]
                 if extraction.requirements
@@ -517,6 +835,38 @@ class WorkflowService:
         return validate_scene_spec(scene, self.registry.list_assets())
 
     def edit_design(self, workflow_id: str, edit_prompt: str) -> SceneEditResult:
+        with self._workflow_operation(workflow_id):
+            if self._is_workflow_active(workflow_id):
+                raise WorkflowBusyError("another operation is already active for this workflow")
+            self._ensure_storage_capacity()
+            with self._generation_operation(blocking=False):
+                edit_id = f"edit_{uuid.uuid4().hex[:8]}"
+                previous_status = self._begin_active_operation(
+                    workflow_id,
+                    operation_id=edit_id,
+                    kind="edit",
+                    human_label="Révision du design",
+                )
+                self._mark_workflow_active(workflow_id)
+                try:
+                    result = self._edit_design(workflow_id, edit_prompt, edit_id=edit_id)
+                    if result.status != "applied":
+                        self._restore_status_after_operation(
+                            workflow_id, previous_status, operation_id=edit_id
+                        )
+                    return result
+                except Exception:
+                    self._restore_status_after_operation(
+                        workflow_id, previous_status, operation_id=edit_id
+                    )
+                    raise
+                finally:
+                    self._release_workflow_checkpoint(workflow_id)
+                    self._mark_workflow_inactive(workflow_id)
+
+    def _edit_design(
+        self, workflow_id: str, edit_prompt: str, *, edit_id: str | None = None
+    ) -> SceneEditResult:
         self._sync_output_services()
         active_version = self.versioning.get_active_version(workflow_id)
         if active_version is None:
@@ -533,7 +883,7 @@ class WorkflowService:
                 ],
             )
         original_scene = active_version.scene
-        edit_id = f"edit_{uuid.uuid4().hex[:8]}"
+        edit_id = edit_id or f"edit_{uuid.uuid4().hex[:8]}"
 
         self._emit_workflow_event(
             workflow_id,
@@ -568,6 +918,26 @@ class WorkflowService:
                 ],
             )
 
+        self._emit_workflow_event(
+            workflow_id,
+            "edit_patch_interpreted",
+            {
+                "edit_id": edit_id,
+                "node": "interpret_scene_edit",
+                "status": "completed",
+                "llm_provider": patch.edit_llm_provider,
+                "llm_fallback_used": patch.edit_llm_fallback_used,
+                "llm_fallback_reason": patch.edit_llm_fallback_reason,
+                "operation_count": len(patch.operations),
+                "human_label": "Modification comprise",
+                "progress_message": (
+                    "La modification a été comprise par le repli déterministe contrôlé."
+                    if patch.edit_llm_fallback_used
+                    else "GPT-OSS a structuré une modification validable de la scène."
+                ),
+            },
+        )
+
         patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
 
         if validation_report.status == "failed":
@@ -587,6 +957,9 @@ class WorkflowService:
                 original_scene=original_scene,
                 patch=patch,
                 validation_report=validation_report,
+                llm_provider=patch.edit_llm_provider,
+                llm_fallback_used=patch.edit_llm_fallback_used,
+                llm_fallback_reason=patch.edit_llm_fallback_reason,
                 errors=validation_report.errors,
             )
 
@@ -652,7 +1025,11 @@ class WorkflowService:
         self._emit_workflow_event(
             workflow_id,
             "blender_completed"
-            if result.generation and result.generation.status in {"generated", "fallback"}
+            if (
+                result.generation
+                and result.generation.status == "generated"
+                and result.generation.mode == "real_blender"
+            )
             else "blender_failed",
             {
                 "mode": result.generation.mode if result.generation else None,
@@ -698,6 +1075,7 @@ class WorkflowService:
                 qa_score=result.qa_report.score if result.qa_report else None,
                 llm_provider=patch.edit_llm_provider,
                 llm_fallback_used=patch.edit_llm_fallback_used,
+                llm_fallback_reason=patch.edit_llm_fallback_reason,
                 errors=result.report.errors,
                 warnings=[*validation_report.warnings, *result.report.warnings],
             )
@@ -716,7 +1094,14 @@ class WorkflowService:
         self._emit_workflow_event(
             workflow_id,
             "edit_patch_applied",
-            {"edit_id": edit_id, "version_id": version.version_id, "status": result.status},
+            {
+                "edit_id": edit_id,
+                "version_id": version.version_id,
+                "status": result.status,
+                "llm_provider": patch.edit_llm_provider,
+                "llm_fallback_used": patch.edit_llm_fallback_used,
+                "llm_fallback_reason": patch.edit_llm_fallback_reason,
+            },
         )
 
         return SceneEditResult(
@@ -734,7 +1119,52 @@ class WorkflowService:
             qa_score=result.qa_report.score if result.qa_report else None,
             llm_provider=patch.edit_llm_provider,
             llm_fallback_used=patch.edit_llm_fallback_used,
+            llm_fallback_reason=patch.edit_llm_fallback_reason,
             warnings=[*validation_report.warnings, *result.report.warnings],
+        )
+
+    def _begin_active_operation(
+        self,
+        workflow_id: str,
+        *,
+        operation_id: str,
+        kind: str,
+        human_label: str,
+    ) -> dict:
+        status_path = self.outputs_dir / workflow_id / "status.json"
+        if not status_path.exists():
+            raise KeyError(workflow_id)
+        previous_status = self._read_json(status_path)
+        active_status = dict(previous_status)
+        active_status["status"] = "running"
+        active_status["active_operation"] = {
+            "kind": kind,
+            "operation_id": operation_id,
+            "status": "running",
+            "human_label": human_label,
+            "started_at": datetime.now(UTC).isoformat(),
+        }
+        _atomic_write_text(
+            status_path,
+            json.dumps(active_status, indent=2, ensure_ascii=False),
+        )
+        return previous_status
+
+    def _restore_status_after_operation(
+        self, workflow_id: str, previous_status: dict, *, operation_id: str
+    ) -> None:
+        status_path = self.outputs_dir / workflow_id / "status.json"
+        if not status_path.exists():
+            return
+        current = self._read_json(status_path)
+        active_operation = current.get("active_operation")
+        if not isinstance(active_operation, dict):
+            return
+        if active_operation.get("operation_id") != operation_id:
+            return
+        _atomic_write_text(
+            status_path,
+            json.dumps(previous_status, indent=2, ensure_ascii=False),
         )
 
     def public_edit_response(self, result: SceneEditResult) -> dict:
@@ -747,6 +1177,7 @@ class WorkflowService:
             {
                 "llm_provider": result.llm_provider,
                 "llm_fallback_used": result.llm_fallback_used,
+                "llm_fallback_reason": result.llm_fallback_reason,
             },
             workflow_service=self,
         )
@@ -826,39 +1257,43 @@ class WorkflowService:
         ]
 
     def rollback_version(self, workflow_id: str, version_id: str) -> dict:
-        self._sync_output_services()
-        version = self.versioning.rollback(workflow_id, version_id)
-        if version is None:
-            raise KeyError(version_id)
-        if not version.artifact_dir:
-            raise KeyError(version_id)
-        self._copy_active_status_to_root(workflow_id, Path(version.artifact_dir))
-        self._emit_workflow_event(
-            workflow_id,
-            "version_rolled_back",
-            {
+        with self._workflow_operation(workflow_id):
+            if self._is_workflow_active(workflow_id):
+                raise WorkflowBusyError("cannot rollback while another operation is active")
+            self._sync_output_services()
+            candidate = self.versioning.get_version(workflow_id, version_id)
+            if candidate is None or candidate.status != "completed" or not candidate.artifact_dir:
+                raise KeyError(version_id)
+            version = self.versioning.rollback(workflow_id, version_id)
+            if version is None:
+                raise KeyError(version_id)
+            self._copy_active_status_to_root(workflow_id, Path(version.artifact_dir))
+            self._emit_workflow_event(
+                workflow_id,
+                "version_rolled_back",
+                {
+                    "version_id": version_id,
+                    "status": "completed",
+                    "human_label": "Version restaurée",
+                    "progress_message": "La version active a été restaurée.",
+                },
+            )
+            status = self.get_status(workflow_id)
+            return {
+                "workflow_id": workflow_id,
                 "version_id": version_id,
-                "status": "completed",
-                "human_label": "Version restaurée",
-                "progress_message": "La version active a été restaurée.",
-            },
-        )
-        status = self.get_status(workflow_id)
-        return {
-            "workflow_id": workflow_id,
-            "version_id": version_id,
-            "active_version_id": version_id,
-            "rolled_back": True,
-            "status": "rolled_back",
-            "message": "La version active a été restaurée.",
-            "viewer_bundle_url": f"/designs/{workflow_id}/viewer-bundle",
-            "timeline_url": f"/designs/{workflow_id}/timeline-summary",
-            "user_issues_url": f"/designs/{workflow_id}/user-issues",
-            "current_operation_url": f"/designs/{workflow_id}/current-operation",
-            "runtime_capabilities": runtime_capabilities(),
-            "unsupported_actions": unsupported_actions(),
-            "available_actions": _status_available_actions(status),
-        }
+                "active_version_id": version_id,
+                "rolled_back": True,
+                "status": "rolled_back",
+                "message": "La version active a été restaurée.",
+                "viewer_bundle_url": f"/designs/{workflow_id}/viewer-bundle",
+                "timeline_url": f"/designs/{workflow_id}/timeline-summary",
+                "user_issues_url": f"/designs/{workflow_id}/user-issues",
+                "current_operation_url": f"/designs/{workflow_id}/current-operation",
+                "runtime_capabilities": runtime_capabilities(),
+                "unsupported_actions": unsupported_actions(),
+                "available_actions": _status_available_actions(status),
+            }
 
     def get_events(self, workflow_id: str) -> list[dict]:
         self._sync_output_services()
@@ -867,41 +1302,46 @@ class WorkflowService:
             for e in self.event_log.list_events(workflow_id)
         ]
 
-    def stream_events(self, workflow_id: str):
+    def stream_events(self, workflow_id: str, after_event_id: str | None = None):
         """Yield events for a workflow in near real-time.
 
-        First yields all persisted events, then listens to the in-memory queue
-        for new events until the workflow emits a terminal event.
+        A subscriber is registered before replay so events emitted during replay
+        are also captured. Every subscriber owns a queue; concurrent SSE clients
+        therefore receive the same live events instead of competing for them.
         """
         self._sync_output_services()
         seen_event_ids: set[str] = set()
-        q = self._event_queues.get(workflow_id)
-        terminal = {"workflow_completed", "workflow_failed"}
-
-        for event in self.get_events(workflow_id):
-            seen_event_ids.add(_event_identity(event))
-            yield event | {"event_source": "push_sse"}
-            if event.get("event_type") in terminal:
+        terminal = {
+            "workflow_completed",
+            "workflow_failed",
+            "edit_patch_applied",
+            "edit_patch_rejected",
+        }
+        subscriber_id, subscriber_queue = self._register_event_subscriber(workflow_id)
+        try:
+            persisted_events = self.get_events(workflow_id)
+            replay_events = _events_after(persisted_events, after_event_id)
+            for event in replay_events:
+                identity = _event_identity(event)
+                seen_event_ids.add(identity)
+                yield event | {"event_source": "push_sse"}
+            if replay_events and replay_events[-1].get("event_type") in terminal:
                 return
 
-        if q is None:
-            return
-
-        while True:
-            if self._event_queues.get(workflow_id) is not q and q.empty():
-                for event in self.get_events(workflow_id):
-                    identity = _event_identity(event)
-                    if identity in seen_event_ids:
+            while True:
+                try:
+                    event = subscriber_queue.get(timeout=0.5)
+                except queue.Empty:
+                    if self._is_workflow_active(workflow_id):
                         continue
-                    seen_event_ids.add(identity)
-                    yield event | {"event_source": "push_sse"}
-                return
+                    for persisted_event in self.get_events(workflow_id):
+                        identity = _event_identity(persisted_event)
+                        if identity in seen_event_ids:
+                            continue
+                        seen_event_ids.add(identity)
+                        yield persisted_event | {"event_source": "push_sse"}
+                    return
 
-            try:
-                event = q.get(timeout=1.0)
-            except queue.Empty:
-                continue
-            if event is not None:
                 identity = _event_identity(event)
                 if identity in seen_event_ids:
                     continue
@@ -909,6 +1349,8 @@ class WorkflowService:
                 yield event | {"event_source": "push_sse"}
                 if event.get("event_type") in terminal:
                     return
+        finally:
+            self._unregister_event_subscriber(workflow_id, subscriber_id)
 
     def workflow_exists(self, workflow_id: str) -> bool:
         self._sync_output_services()
@@ -921,7 +1363,12 @@ class WorkflowService:
         *,
         version_id: str | None,
     ) -> None:
-        if result.generation is not None and result.generation.artifacts:
+        if (
+            result.generation is not None
+            and result.generation.status == "generated"
+            and result.generation.mode == "real_blender"
+            and Path(result.generation.artifacts.get("glb", "")).is_file()
+        ):
             artifacts = _public_artifact_urls(
                 workflow_id,
                 result.generation.artifacts,
@@ -1018,6 +1465,7 @@ class WorkflowService:
             "qa_report": str(output_dir / "qa_report.json"),
             "generation_report": str(output_dir / "generation_report.json"),
             "rag_evidence": str(output_dir / "rag_evidence.json"),
+            "planning_decision": str(output_dir / "planning_decision.json"),
             "glb_inspection": str(output_dir / "glb_inspection.json"),
             "geometry_validation": str(output_dir / "geometry_validation.json"),
             "preview_inspection": str(output_dir / "preview_inspection.json"),
@@ -1204,6 +1652,8 @@ class WorkflowService:
             output_dir / "rag_evidence.json",
             _rag_evidence(result, _rag_runtime_summary(self.orchestrator.rag_service)),
         )
+        if result.planning_decision:
+            self._write_json(output_dir / "planning_decision.json", result.planning_decision)
         if result.glb_inspection:
             self._write_json(output_dir / "glb_inspection.json", result.glb_inspection.model_dump())
         if result.geometry_validation:
@@ -1225,7 +1675,7 @@ class WorkflowService:
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
     @staticmethod
     def _read_json(path: Path) -> dict:
@@ -1244,7 +1694,7 @@ class WorkflowService:
         version_status = version_dir / "status.json"
         if not version_status.exists():
             raise KeyError(workflow_id)
-        root_status.write_text(version_status.read_text(encoding="utf-8"), encoding="utf-8")
+        _atomic_write_text(root_status, version_status.read_text(encoding="utf-8"))
 
     @staticmethod
     def _write_technical_report(
@@ -1290,16 +1740,28 @@ class WorkflowService:
     @staticmethod
     def _make_archive(output_dir: Path) -> None:
         target = output_dir / "artifacts.zip"
-        if target.exists():
-            target.unlink()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            archive_base = Path(temp_dir) / "artifacts"
-            archive_path = shutil.make_archive(str(archive_base), "zip", output_dir)
-            Path(archive_path).replace(target)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=output_dir,
+            prefix=".artifacts-",
+            suffix=".zip",
+            delete=False,
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+        try:
+            with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for path in sorted(output_dir.iterdir()):
+                    if not path.is_file() or path in {target, temp_path}:
+                        continue
+                    archive.write(path, arcname=path.name)
+            temp_path.replace(target)
+        finally:
+            temp_path.unlink(missing_ok=True)
 
 
 def _extraction_report(result: OrchestratorResult) -> dict:
     warnings = result.requirements.warnings if result.requirements else []
+    warning_codes = {warning.code for warning in warnings}
     repaired_fields = []
     inferred_fields = []
     for warning in warnings:
@@ -1312,7 +1774,9 @@ def _extraction_report(result: OrchestratorResult) -> dict:
         confidence = 0.65
     confidence = max(0.1, confidence - (0.05 * len(warnings)))
     provider = result.llm_provider
-    if provider and provider.startswith("groq:") and not result.llm_fallback_used:
+    if "LLM_JSON_OBJECT_FALLBACK" in warning_codes:
+        mode = "structured_llm_json_object_validated"
+    elif provider and provider.startswith("groq:") and not result.llm_fallback_used:
         mode = "structured_llm"
     elif result.llm_fallback_used or provider in {None, "deterministic"}:
         mode = "deterministic_fallback"
@@ -1341,16 +1805,35 @@ def _extraction_report(result: OrchestratorResult) -> dict:
 
 
 def _rag_planning_summary(result: OrchestratorResult) -> dict:
-    hint_contexts = []
-    hint_fields: set[str] = set()
+    candidate_contexts = []
+    candidate_fields: set[str] = set()
+    applied_fields: set[str] = set()
+    rejected_fields: set[str] = set()
+    no_op_fields: set[str] = set()
     top_contexts = []
     for context in result.rag_context:
         payload = context.get("payload") if isinstance(context, dict) else None
         payload = payload if isinstance(payload, dict) else {}
-        hints = payload.get("planning_hints")
-        if isinstance(hints, dict) and hints:
-            hint_contexts.append(context)
-            hint_fields.update(str(key) for key in hints.keys())
+        candidates = payload.get("planning_hint_candidates")
+        candidates = candidates if isinstance(candidates, dict) else {}
+        decisions = payload.get("planning_decisions")
+        decisions = decisions if isinstance(decisions, list) else []
+        if candidates:
+            candidate_contexts.append(context)
+            candidate_fields.update(str(key) for key in candidates)
+        for decision in decisions:
+            if not isinstance(decision, dict):
+                continue
+            field = str(decision.get("field") or "")
+            status = decision.get("status")
+            if not field:
+                continue
+            if status == "applied":
+                applied_fields.add(field)
+            elif status == "rejected":
+                rejected_fields.add(field)
+            elif status == "no_op":
+                no_op_fields.add(field)
         top_contexts.append(
             {
                 "collection": context.get("collection"),
@@ -1360,20 +1843,41 @@ def _rag_planning_summary(result: OrchestratorResult) -> dict:
                 "filename": payload.get("filename"),
             }
         )
+    planning_decision = result.planning_decision or {}
     return {
         "rag_used_for_extraction": False,
-        "rag_used_for_planning": bool(hint_contexts),
-        "rag_planning_mode": "structured_planning_hints"
-        if hint_contexts
-        else "context_only_no_structured_hints",
+        "rag_used_for_planning": bool(applied_fields),
+        "rag_planning_mode": (
+            "structured_hints_applied"
+            if applied_fields
+            else "candidates_rejected_or_no_op"
+            if candidate_fields
+            else "context_only_no_structured_hints"
+        ),
         "rag_context_count": len(result.rag_context),
-        "planning_hint_context_count": len(hint_contexts),
-        "candidate_hint_fields": sorted(hint_fields),
+        "planning_hint_context_count": len(candidate_contexts),
+        "candidate_hint_fields": sorted(candidate_fields),
+        "applied_hint_fields": sorted(applied_fields),
+        "rejected_hint_fields": sorted(rejected_fields),
+        "no_op_hint_fields": sorted(no_op_fields),
         "controlled_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
+        "decision_authority": planning_decision.get("authority"),
+        "decision_status": planning_decision.get("status"),
+        "decision_provider": planning_decision.get("provider"),
+        "decision_model": planning_decision.get("model_name"),
+        "decision_fallback_used": planning_decision.get("fallback_used", False),
+        "decision_fallback_reason": planning_decision.get("reason"),
+        "decision_memory_risk_count": planning_decision.get("memory_risk_count", 0),
+        "memory_used_for_planning": bool(planning_decision.get("memory_risk_count", 0)),
+        "memory_influence_mode": (
+            "prior_issue_risk_advisory"
+            if planning_decision.get("memory_risk_count", 0)
+            else "not_used"
+        ),
         "top_contexts": top_contexts[:5],
         "limitations": [
             "RAG does not override deterministic validation.",
-            "Only structured payload.planning_hints can influence SceneSpec planning.",
+            "Only validated, source-safe planning candidates can influence SceneSpec planning.",
             "RAG is not used for RequirementSpec extraction in v1.",
         ],
     }
@@ -1384,14 +1888,27 @@ def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
     for context in result.rag_context:
         payload = context.get("payload") if isinstance(context, dict) else None
         payload = payload if isinstance(payload, dict) else {}
-        raw_hints = payload.get("planning_hints")
-        hints = raw_hints if isinstance(raw_hints, dict) else {}
-        controlled_hints = {
+        raw_candidates = payload.get("planning_hint_candidates")
+        candidates_for_context = raw_candidates if isinstance(raw_candidates, dict) else {}
+        controlled_candidates = {
             str(key): value
-            for key, value in hints.items()
+            for key, value in candidates_for_context.items()
             if str(key) in _CONTROLLED_RAG_HINT_FIELDS
         }
-        rejected_hints = sorted(str(key) for key in hints.keys() if key not in controlled_hints)
+        unsupported_hints = sorted(
+            str(key) for key in candidates_for_context if str(key) not in controlled_candidates
+        )
+        decisions = payload.get("planning_decisions")
+        decisions = (
+            [item for item in decisions if isinstance(item, dict)]
+            if isinstance(decisions, list)
+            else []
+        )
+        applied_hints = {
+            str(item["field"]): item.get("candidate_value")
+            for item in decisions
+            if item.get("status") == "applied" and item.get("field")
+        }
         candidates.append(
             {
                 "collection": context.get("collection"),
@@ -1400,10 +1917,13 @@ def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
                 "source_path": _public_rag_source_path(payload.get("source_path")),
                 "filename": payload.get("filename"),
                 "doc_type": payload.get("doc_type"),
-                "candidate_hint_fields": sorted(controlled_hints),
-                "controlled_hints": controlled_hints,
-                "rejected_hint_fields": rejected_hints,
-                "reason": _rag_candidate_reason(controlled_hints, context),
+                "candidate_hint_fields": sorted(controlled_candidates),
+                "candidate_hints": controlled_candidates,
+                "applied_hint_fields": sorted(applied_hints),
+                "applied_hints": applied_hints,
+                "unsupported_hint_fields": unsupported_hints,
+                "planning_decisions": decisions,
+                "reason": _rag_candidate_reason(decisions, context),
             }
         )
     summary = _rag_planning_summary(result)
@@ -1415,6 +1935,9 @@ def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
         "rag_context_count": len(result.rag_context),
         "planning_hint_context_count": summary["planning_hint_context_count"],
         "candidate_hint_fields": summary["candidate_hint_fields"],
+        "applied_hint_fields": summary["applied_hint_fields"],
+        "rejected_hint_fields": summary["rejected_hint_fields"],
+        "no_op_hint_fields": summary["no_op_hint_fields"],
         "controlled_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
         "policy": {
             "scene_spec_source_of_truth": "RequirementSpec -> SceneSpec deterministic planner",
@@ -1422,6 +1945,7 @@ def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
             "free_text_mutates_scene": False,
             "allowed_hint_fields": sorted(_CONTROLLED_RAG_HINT_FIELDS),
         },
+        "planning_decision": result.planning_decision,
         **rag_runtime,
         "contexts": candidates[:20],
         "limitations": [
@@ -1457,29 +1981,19 @@ def _rag_runtime_summary(rag_service: object | None) -> dict:
     }
 
 
-def _rag_candidate_reason(controlled_hints: dict, context: dict) -> str:
-    if controlled_hints:
-        fields = ", ".join(sorted(controlled_hints))
-        return f"Structured planning hints available: {fields}."
+def _rag_candidate_reason(decisions: list[dict], context: dict) -> str:
+    applied = sorted(str(item["field"]) for item in decisions if item.get("status") == "applied")
+    if applied:
+        return f"Applied to SceneSpec planning: {', '.join(applied)}."
+    if decisions:
+        return "Planning candidates were rejected or already satisfied by source requirements."
     score = context.get("score")
     if score is not None:
         return f"Retrieved context only; score={score}."
     return "Retrieved context only; no structured planning hints."
 
 
-_CONTROLLED_RAG_HINT_FIELDS = {
-    "antenna_install_height_m",
-    "beamwidth_deg",
-    "include_cables",
-    "include_sector_beams",
-    "include_labels",
-    "include_power_cabinet",
-    "include_gps_antenna",
-    "include_rru",
-    "foundation_type",
-    "mechanical_tilt_deg",
-    "electrical_tilt_deg",
-}
+_CONTROLLED_RAG_HINT_FIELDS = set(SUPPORTED_PLANNING_HINT_FIELDS)
 
 
 def _public_rag_source_path(value: object) -> str | None:
@@ -1546,6 +2060,8 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
         "format_valid": result.glb_inspection.format_valid,
         "node_count": result.glb_inspection.node_count,
         "mesh_count": result.glb_inspection.mesh_count,
+        "primitive_count": result.glb_inspection.primitive_count,
+        "position_accessor_count": result.glb_inspection.position_accessor_count,
         "material_count": result.glb_inspection.material_count,
         "checks": result.glb_inspection.checks,
         "structural_qa_passed": result.glb_inspection.structural_qa_passed,
@@ -1619,6 +2135,14 @@ def _preview_inspection_summary(result: OrchestratorResult) -> dict | None:
         "luminance_mean": result.preview_inspection.luminance_mean,
         "luminance_stddev": result.preview_inspection.luminance_stddev,
         "non_dark_pixel_ratio": result.preview_inspection.non_dark_pixel_ratio,
+        "subject_pixel_ratio": result.preview_inspection.subject_pixel_ratio,
+        "subject_bbox_width_ratio": result.preview_inspection.subject_bbox_width_ratio,
+        "subject_bbox_height_ratio": result.preview_inspection.subject_bbox_height_ratio,
+        "subject_contrast_mean": result.preview_inspection.subject_contrast_mean,
+        "subject_center_x_ratio": result.preview_inspection.subject_center_x_ratio,
+        "subject_min_edge_margin_ratio": result.preview_inspection.subject_min_edge_margin_ratio,
+        "subject_touches_frame": result.preview_inspection.subject_touches_frame,
+        "subject_framing_valid": result.preview_inspection.subject_framing_valid,
         "preview_qa_passed": result.preview_inspection.preview_qa_passed,
         "critical_errors": result.preview_inspection.critical_errors,
     }
@@ -1685,8 +2209,12 @@ def _public_artifact_urls(
     if not isinstance(artifacts, dict):
         return {}
     public = {}
-    for artifact_name in artifacts:
+    for artifact_name, artifact_path in artifacts.items():
         if artifact_name not in _ALLOWED_ARTIFACT_FILES:
+            continue
+        if not isinstance(artifact_path, str) or not artifact_path:
+            continue
+        if not Path(artifact_path).is_file():
             continue
         if artifact_name == "download" and version_id is None:
             public[artifact_name] = f"/designs/{workflow_id}/download"
@@ -1791,6 +2319,38 @@ def _event_identity(event: dict) -> str:
     )
 
 
+def _events_after(events: list[dict], after_event_id: str | None) -> list[dict]:
+    if not after_event_id:
+        return events
+    for index, event in enumerate(events):
+        if _event_identity(event) == after_event_id:
+            return events[index + 1 :]
+    # A stale/unknown cursor must not silently hide the durable event history.
+    return events
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temporary_path = Path(handle.name)
+        temporary_path.replace(path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+
+
 def _normalized_event_payload(event_type: str, payload: dict) -> dict:
     normalized = dict(payload)
     node = str(normalized.get("node") or _event_default_node(event_type))
@@ -1865,6 +2425,7 @@ def _event_human_label(event_type: str, node: str) -> str:
         "qa_failed": "Vérification géométrique en échec",
         "user_issue_created": "Issue utilisateur créée",
         "edit_patch_created": "Patch d'édition créé",
+        "edit_patch_interpreted": "Modification comprise",
         "edit_patch_rejected": "Patch d'édition rejeté",
         "edit_patch_applied": "Édition appliquée",
         "version_created": "Version créée",
@@ -1935,6 +2496,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "qa_report": "qa_report.json",
     "generation_report": "generation_report.json",
     "rag_evidence": "rag_evidence.json",
+    "planning_decision": "planning_decision.json",
     "glb_inspection": "glb_inspection.json",
     "geometry_validation": "geometry_validation.json",
     "preview_inspection": "preview_inspection.json",

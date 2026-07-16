@@ -228,7 +228,13 @@ def _radio_candidates(
             )
         )
     bands = sorted(
-        set(re.findall(r"\b(?:NR700|NR3500|L800|L1800|L2100|L2600|5G|4G)\b", text, re.I))
+        set(
+            re.findall(
+                r"\b(?:NR700|NR3500|L700|L800|L900|L1800|L2100|L2600|5G|4G|LTE|MW)\b",
+                text,
+                re.I,
+            )
+        )
     )
     if bands:
         normalized = [band.upper() for band in bands]
@@ -240,18 +246,40 @@ def _radio_candidates(
                 _source(document, page, _evidence_for(text, normalized[0])),
             )
         )
-    tilt_values = _extract_number_list(
+    electrical_tilt_values = _extract_number_list(
         text,
-        r"\b(?:tilt|ret|mechanical tilt|tilt mecanique|tilt mécanique)\s*[:\-]\s*([0-9,\s;/.-]+)",
+        r"\b(?:ret|electrical tilt|tilt electrique|tilt électrique|e[\s_-]?tilt)"
+        r"\s*[:\-]\s*([0-9,\s;/.-]+)",
         maximum=30,
     )
-    if tilt_values:
+    mechanical_tilt_values = _extract_number_list(
+        text,
+        r"\b(?:mechanical tilt|tilt mecanique|tilt mécanique|m[\s_-]?tilt)"
+        r"\s*[:\-]\s*([0-9,\s;/.-]+)",
+        maximum=30,
+    )
+    if not mechanical_tilt_values:
+        mechanical_tilt_values = _extract_number_list(
+            text,
+            r"(?:^|\n)\s*tilt\s*[:\-]\s*([0-9,\s;/.-]+)",
+            maximum=30,
+        )
+    if mechanical_tilt_values:
         candidates.append(
             FieldCandidate(
                 "radio.mechanical_tilt_deg",
-                tilt_values,
+                mechanical_tilt_values,
                 0.68,
                 _source(document, page, _evidence_for(text, "tilt")),
+            )
+        )
+    if electrical_tilt_values:
+        candidates.append(
+            FieldCandidate(
+                "radio.electrical_tilt_deg",
+                electrical_tilt_values,
+                0.72,
+                _source(document, page, _evidence_for(text, "ret")),
             )
         )
     for field, tokens in {
@@ -393,6 +421,7 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
     azimuth_field = resolved.get("radio.azimuths_deg")
     hba_field = resolved.get("radio.hba_m")
     mechanical_tilt_field = resolved.get("radio.mechanical_tilt_deg")
+    electrical_tilt_field = resolved.get("radio.electrical_tilt_deg")
     if (
         not azimuth_field
         or azimuth_field.status != "confirmed"
@@ -402,9 +431,7 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
     hba_values = hba_field.value if hba_field and isinstance(hba_field.value, list) else []
     sectors = []
     for index, azimuth in enumerate(azimuth_field.value):
-        hba_value = (
-            hba_values[index] if index < len(hba_values) else hba_values[0] if hba_values else None
-        )
+        hba_value = _sector_list_value(hba_values, index)
         hba = (
             ExtractedField(
                 field=f"radio_sectors[{index}].hba_m",
@@ -426,6 +453,11 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
             index,
             field=f"radio_sectors[{index}].mechanical_tilt_deg",
         )
+        electrical_tilt = _sector_optional_numeric_field(
+            electrical_tilt_field,
+            index,
+            field=f"radio_sectors[{index}].electrical_tilt_deg",
+        )
         sectors.append(
             {
                 "sector_id": f"S{index + 1}",
@@ -439,6 +471,7 @@ def _radio_sectors(resolved: dict[str, ExtractedField]) -> list[dict]:
                 "hba_m": hba,
                 "bands": resolved.get("radio.bands"),
                 "mechanical_tilt_deg": mechanical_tilt,
+                "electrical_tilt_deg": electrical_tilt,
                 "rru": resolved.get("radio.include_rru"),
             }
         )
@@ -456,7 +489,7 @@ def _sector_optional_numeric_field(
     if isinstance(source.value, list):
         if not source.value:
             return None
-        raw_value = source.value[index] if index < len(source.value) else source.value[0]
+        raw_value = _sector_list_value(source.value, index)
     else:
         raw_value = source.value
     if not isinstance(raw_value, float | int):
@@ -468,6 +501,12 @@ def _sector_optional_numeric_field(
         confidence=source.confidence,
         sources=source.sources,
     )
+
+
+def _sector_list_value(values: list, index: int):
+    if len(values) == 1:
+        return values[0]
+    return values[index] if index < len(values) else None
 
 
 def _rru_inventory(resolved: dict[str, ExtractedField]) -> list[dict[str, ExtractedField]]:

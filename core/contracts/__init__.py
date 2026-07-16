@@ -8,6 +8,14 @@ from core.contracts.document_pack import (
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
+from core.contracts.planning_decision import (
+    PlanningCandidate,
+    PlanningCandidateProvenance,
+    PlanningCurrentValues,
+    PlanningDecisionRequest,
+    PlanningDecisionResult,
+    PlanningMemoryRisk,
+)
 from core.contracts.quality import QualityGateCheck, QualityGateReport
 from core.contracts.repair import RepairEvent, RepairReport
 from core.contracts.requirements import RequirementSpec
@@ -25,6 +33,12 @@ __all__ = [
     "MemoryIndexResult",
     "MemoryRecallResult",
     "MemorySummary",
+    "PlanningCandidate",
+    "PlanningCandidateProvenance",
+    "PlanningCurrentValues",
+    "PlanningDecisionRequest",
+    "PlanningDecisionResult",
+    "PlanningMemoryRisk",
     "QualityGateCheck",
     "QualityGateReport",
     "PreviewInspectionReport",

@@ -4,7 +4,11 @@ from pathlib import Path
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport
 from core.contracts.scene import SceneSpec
-from core.qa.mesh_qa import MeshQA
+from core.qa.mesh_qa import (
+    MeshQA,
+    _semantic_counts_from_names,
+    _semantic_sector_ids_from_names,
+)
 
 HEIGHT_TOLERANCE_M = 0.5
 AZIMUTH_TOLERANCE_DEG = 5.0
@@ -21,7 +25,7 @@ class GLBGeometryValidator:
         metadata = _load_metadata(metadata_path)
         mesh_qa = MeshQA().validate(glb_path, scene) if glb_path and glb_path.exists() else None
         object_names = glb_inspection.object_names
-        counts = _object_counts(object_names)
+        counts = glb_inspection.semantic_object_counts or _object_counts(object_names, scene)
         expected_antennas = len(scene.sectors)
         expected_rru = sum(1 for sector in scene.sectors if sector.radio_asset_id)
         expected_cables = sum(1 for sector in scene.sectors if sector.include_cable)
@@ -31,7 +35,15 @@ class GLBGeometryValidator:
         expected_gps = 1 if scene.visual_elements.include_gps_antenna else 0
         expected_foundation = _expected_foundation_count(scene)
         expected_labels = _expected_label_count(scene)
-        missing_objects = _missing_sector_objects(scene, object_names)
+        semantic_sector_ids = glb_inspection.semantic_sector_ids or _semantic_sector_ids_from_names(
+            object_names, scene
+        )
+        missing_objects = _missing_sector_objects(
+            scene,
+            object_names,
+            semantic_sector_ids,
+            counts,
+        )
 
         checks = {
             "tower_present": counts["tower"] >= 1,
@@ -71,11 +83,12 @@ class GLBGeometryValidator:
                 glb_inspection,
             ),
         }
-        warnings = []
+        warnings = list(glb_inspection.warnings)
         if "bounding_box_m" not in metadata:
             warnings.append("BOUNDING_BOX_GEOMETRY_NOT_PARSED")
         if mesh_qa is not None:
             warnings.extend(mesh_qa.warnings)
+            checks["mesh_qa_passed"] = mesh_qa.mesh_qa_passed
             if mesh_qa.bounding_box_m is not None:
                 bbox = mesh_qa.bounding_box_m
                 metadata["bounding_box_m"] = {
@@ -93,6 +106,8 @@ class GLBGeometryValidator:
                 checks["bounding_box_reasonable"] = _bounding_box_reasonable(
                     scene, metadata, glb_inspection
                 )
+        elif glb_inspection.inspection_mode == "glb_parse":
+            warnings.append("MESH_QA_NOT_EXECUTED")
         critical_errors = [name for name, passed in checks.items() if not passed]
         return GeometryValidationReport(
             status="passed" if not critical_errors else "failed",
@@ -111,29 +126,8 @@ class GLBGeometryValidator:
         )
 
 
-def _object_counts(object_names: list[str]) -> dict[str, int]:
-    normalized = [_normalize(name) for name in object_names]
-    return {
-        "tower": _count(normalized, ("tower",)),
-        "antenna": _count(normalized, ("antenna", "dish")),
-        "rru": _count(normalized, ("radio", "rru")),
-        "cable": _count(normalized, ("cable",)),
-        "beam": _count(normalized, ("sector_beam", "beam")),
-        "azimuth_arrow": _count(normalized, ("azimuth_arrow",)),
-        "power_cabinet": _count(normalized, ("power_cabinet", "cabinet")),
-        "gps": _count(normalized, ("gps_antenna", "gps")),
-        "foundation": _count(normalized, ("foundation", "foundation_concrete_pad")),
-        "label": _count(normalized, ("label",)),
-    }
-
-
-def _count(normalized_names: list[str], prefixes: tuple[str, ...]) -> int:
-    return sum(
-        1
-        for name in normalized_names
-        if not _is_auxiliary_object(name)
-        and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
-    )
+def _object_counts(object_names: list[str], scene: SceneSpec) -> dict[str, int]:
+    return _semantic_counts_from_names(object_names, scene)
 
 
 def _count_matches_option(actual: int, expected: int) -> bool:
@@ -142,45 +136,57 @@ def _count_matches_option(actual: int, expected: int) -> bool:
     return actual >= expected
 
 
-def _missing_sector_objects(scene: SceneSpec, object_names: list[str]) -> list[str]:
+def _missing_sector_objects(
+    scene: SceneSpec,
+    object_names: list[str],
+    semantic_sector_ids: dict[str, list[str]],
+    semantic_counts: dict[str, int],
+) -> list[str]:
     normalized = [_normalize(name) for name in object_names]
     missing = []
     for sector in scene.sectors:
         sector_token = _normalize(sector.sector_id)
-        if not _has_sector_object(normalized, ("antenna", "dish"), sector_token):
+        if not _has_sector_object(
+            normalized,
+            ("antenna", "dish"),
+            sector_token,
+            semantic_sector_ids.get("antenna", []),
+        ):
             missing.append(f"antenna:{sector.sector_id}")
         if sector.radio_asset_id and not _has_sector_object(
             normalized,
             ("radio", "rru"),
             sector_token,
+            semantic_sector_ids.get("rru", []),
         ):
             missing.append(f"radio:{sector.sector_id}")
-        if sector.include_cable and not _has_sector_object(normalized, ("cable",), sector_token):
+        if sector.include_cable and not _has_sector_object(
+            normalized,
+            ("cable",),
+            sector_token,
+            semantic_sector_ids.get("cable", []),
+        ):
             missing.append(f"cable:{sector.sector_id}")
         if scene.visual_elements.include_sector_beams and not _has_sector_object(
             normalized,
             ("sector_beam", "beam"),
             sector_token,
+            semantic_sector_ids.get("beam", []),
         ):
             missing.append(f"beam:{sector.sector_id}")
         if scene.visual_elements.include_labels and not _has_sector_object(
             normalized,
             ("label",),
             sector_token,
+            semantic_sector_ids.get("label", []),
         ):
             missing.append(f"label:{sector.sector_id}")
-    if scene.visual_elements.include_power_cabinet and not _has_object(
-        normalized, ("power_cabinet", "cabinet")
-    ):
+    if scene.visual_elements.include_power_cabinet and semantic_counts.get("power_cabinet", 0) < 1:
         missing.append("power_cabinet")
-    if scene.visual_elements.include_gps_antenna and not _has_object(
-        normalized, ("gps_antenna", "gps")
-    ):
+    if scene.visual_elements.include_gps_antenna and semantic_counts.get("gps", 0) < 1:
         missing.append("gps_antenna")
-    if _expected_foundation_count(scene) and not _has_object(
-        normalized, ("foundation", "foundation_concrete_pad")
-    ):
-        missing.append("foundation_concrete_pad")
+    if _expected_foundation_count(scene) and semantic_counts.get("foundation", 0) < 1:
+        missing.append(f"foundation_{scene.tower.characteristics.foundation_type}")
     if scene.visual_elements.include_labels:
         if scene.visual_elements.include_power_cabinet and not _has_object(
             normalized, ("label_power_cabinet",)
@@ -197,13 +203,25 @@ def _has_sector_object(
     normalized_names: list[str],
     prefixes: tuple[str, ...],
     sector_token: str,
+    semantic_sector_ids: list[str],
 ) -> bool:
+    if any(_normalize(value) == sector_token for value in semantic_sector_ids):
+        return True
     return any(
-        sector_token in name
+        _normalize(_sector_id_from_name_for_token(name, sector_token) or "") == sector_token
         and not _is_auxiliary_object(name)
         and any(name == prefix or name.startswith(f"{prefix}_") for prefix in prefixes)
         for name in normalized_names
     )
+
+
+def _sector_id_from_name_for_token(name: str, sector_token: str) -> str | None:
+    tokens = name.split("_")
+    expected = sector_token.split("_")
+    width = len(expected)
+    if any(tokens[index : index + width] == expected for index in range(len(tokens) - width + 1)):
+        return sector_token
+    return None
 
 
 def _has_object(normalized_names: list[str], prefixes: tuple[str, ...]) -> bool:
@@ -219,7 +237,7 @@ def _is_auxiliary_object(normalized_name: str) -> bool:
 
 
 def _expected_foundation_count(scene: SceneSpec) -> int:
-    return 1 if scene.tower.characteristics.foundation_type == "concrete_pad" else 0
+    return int(scene.tower.characteristics.foundation_type != "unknown")
 
 
 def _expected_label_count(scene: SceneSpec) -> int:

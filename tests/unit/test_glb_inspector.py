@@ -31,6 +31,9 @@ def test_glb_inspector_valid_file(tmp_path: Path) -> None:
     assert report.checks["has_tower"] is True
     assert report.checks["has_antennas"] is True
     assert report.checks["has_radios_or_rru"] is True
+    assert report.semantic_inspection_mode == "name_based"
+    assert report.semantic_root_count > 0
+    assert "GLB_SEMANTIC_EXTRAS_MISSING_NAME_BASED_MODE" in report.warnings
 
 
 def test_glb_inspector_missing_file(tmp_path: Path) -> None:
@@ -122,7 +125,7 @@ def test_preview_inspector_rejects_dark_flat_png(tmp_path: Path) -> None:
     assert "PREVIEW_VISUAL_QUALITY_INVALID" in report.critical_errors
 
 
-def test_preview_inspector_accepts_light_low_contrast_non_flat_tall_tower_preview(
+def test_preview_inspector_rejects_gradient_without_a_detectable_subject(
     tmp_path: Path,
 ) -> None:
     scene = _scene(
@@ -133,9 +136,45 @@ def test_preview_inspector_accepts_light_low_contrast_non_flat_tall_tower_previe
 
     report = PreviewInspector().inspect(preview_path, scene)
 
-    assert report.visual_quality_valid is True
-    assert report.checks["preview_visual_quality_valid"] is True
+    assert report.visual_quality_valid is False
+    assert report.checks["preview_subject_framing_valid"] is False
+    assert report.preview_qa_passed is False
+
+
+def test_preview_inspector_rejects_subject_touching_frame(tmp_path: Path) -> None:
+    scene = _scene()
+    preview_path = tmp_path / "preview.png"
+    preview_path.write_bytes(_subject_png_bytes(1920, 1080, top=0, bottom=1080))
+
+    report = PreviewInspector().inspect(preview_path, scene)
+
+    assert report.subject_touches_frame is True
+    assert report.checks["preview_subject_not_clipped"] is False
+    assert report.preview_qa_passed is False
+
+
+def test_preview_inspector_allows_bounded_ground_contact(tmp_path: Path) -> None:
+    scene = _scene()
+    preview_path = tmp_path / "preview.png"
+    preview_path.write_bytes(_subject_png_bytes(1920, 1080, top=100, bottom=900, ground_top=900))
+
+    report = PreviewInspector().inspect(preview_path, scene)
+
+    assert report.subject_min_edge_margin_ratio < 0.01
+    assert report.subject_touches_frame is False
+    assert report.checks["preview_subject_not_clipped"] is True
     assert report.preview_qa_passed is True
+
+
+def test_preview_inspector_rejects_upper_silhouette_touching_side(tmp_path: Path) -> None:
+    scene = _scene()
+    preview_path = tmp_path / "preview.png"
+    preview_path.write_bytes(_subject_png_bytes(1920, 1080, top=100, bottom=900, left=0, right=400))
+
+    report = PreviewInspector().inspect(preview_path, scene)
+
+    assert report.subject_touches_frame is True
+    assert report.preview_qa_passed is False
 
 
 def test_preview_inspector_missing_png(tmp_path: Path) -> None:
@@ -223,7 +262,8 @@ def _write_test_glb(path: Path, object_names: list[str]) -> None:
     payload: dict[str, Any] = {
         "asset": {"version": "2.0"},
         "nodes": [{"name": name, "mesh": 0} for name in object_names],
-        "meshes": [{"name": "mesh_0", "primitives": []}],
+        "meshes": [{"name": "mesh_0", "primitives": [{"attributes": {"POSITION": 0}}]}],
+        "accessors": [{"count": 3, "type": "VEC3", "componentType": 5126}],
         "materials": [{"name": "material_0"}],
     }
     json_chunk = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -252,10 +292,45 @@ def _png_bytes(
         row = bytearray([0])
         for x in range(width):
             if color is None:
-                gradient = 205 - int(42 * y / max(height - 1, 1)) + int(18 * x / max(width - 1, 1))
-                row.extend((gradient, gradient, min(255, gradient + 8)))
+                if width * 0.4 <= x <= width * 0.6 and height * 0.1 <= y <= height * 0.9:
+                    value = 155 + ((x + y) % 55)
+                    row.extend((value, min(255, value + 20), min(255, value + 28)))
+                else:
+                    row.extend((28, 40, 50))
             else:
                 row.extend(color)
+        rows.append(bytes(row))
+    image = zlib.compress(b"".join(rows), level=9)
+    return (
+        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
+    )
+
+
+def _subject_png_bytes(
+    width: int,
+    height: int,
+    *,
+    top: int,
+    bottom: int,
+    left: int | None = None,
+    right: int | None = None,
+    ground_top: int | None = None,
+) -> bytes:
+    def chunk(chunk_type: bytes, payload: bytes) -> bytes:
+        checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
+        return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
+
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
+    subject_left = left if left is not None else round(width * 0.4)
+    subject_right = right if right is not None else round(width * 0.6)
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            is_subject = subject_left <= x <= subject_right and top <= y < bottom
+            if ground_top is not None and y >= ground_top:
+                is_subject = True
+            row.extend((180, 205, 220) if is_subject else (28, 40, 50))
         rows.append(bytes(row))
     image = zlib.compress(b"".join(rows), level=9)
     return (

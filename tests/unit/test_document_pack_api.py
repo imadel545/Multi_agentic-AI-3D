@@ -3,8 +3,10 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 
+from apps.api.telecom_studio_api import main as api_main
 from apps.api.telecom_studio_api.main import app, document_pack_service, workflow_service
 
 
@@ -102,6 +104,9 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
             "conversion_available",
             "unsupported_without_converter",
         }
+        assert capabilities_payload["limits"]["max_member_count"] == 256
+        assert capabilities_payload["limits"]["max_uncompressed_size_mb"] == 200
+        assert capabilities_payload["limits"]["execution"] == "thread_offloaded"
         processing = client.get(f"/document-packs/{pack_id}/processing").json()
         assert processing["pack_id"] == pack_id
         assert processing["documents"][0]["extraction_status"] == "extracted"
@@ -207,6 +212,104 @@ def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
         document_pack_service.groq_extractor.enabled = original_groq_enabled
 
 
+def test_document_pack_upload_runs_blocking_ingestion_off_event_loop(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    original_groq_enabled = document_pack_service.groq_extractor.enabled
+    document_pack_service.outputs_dir = tmp_path
+    document_pack_service.groq_extractor.enabled = False
+    calls: list[str] = []
+
+    async def tracked_run_in_threadpool(function, *args, **kwargs):
+        calls.append(function.__name__)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(api_main, "run_in_threadpool", tracked_run_in_threadpool)
+    try:
+        response = TestClient(app).post(
+            "/document-packs",
+            content=_pack_zip(),
+            headers={"content-type": "application/zip"},
+        )
+
+        assert response.status_code == 200
+        assert calls == ["ingest_zip"]
+    finally:
+        document_pack_service.outputs_dir = original_outputs
+        document_pack_service.groq_extractor.enabled = original_groq_enabled
+
+
+def test_document_pack_invalid_zip_returns_422_and_leaves_no_partial_pack(
+    tmp_path: Path,
+) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    document_pack_service.outputs_dir = tmp_path
+    try:
+        response = TestClient(app).post(
+            "/document-packs",
+            content=b"not-a-zip",
+            headers={"content-type": "application/zip"},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "invalid ZIP archive"
+        assert not (tmp_path / "document_packs").exists()
+    finally:
+        document_pack_service.outputs_dir = original_outputs
+
+
+def test_document_pack_generate_design_requires_qa_and_mapping_gate(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    original_groq_enabled = document_pack_service.groq_extractor.enabled
+    document_pack_service.outputs_dir = tmp_path
+    document_pack_service.groq_extractor.enabled = False
+    summary = document_pack_service.ingest_zip(_pack_zip())
+    original_readiness = document_pack_service.get_generation_readiness
+
+    def qa_blocked_readiness(pack_id: str):
+        spec, qa_report, mapping, _ready = original_readiness(pack_id)
+        return (
+            spec,
+            qa_report.model_copy(
+                update={
+                    "status": "failed",
+                    "ready_to_generate": False,
+                    "blocking_issues": ["forced_qa_gate"],
+                }
+            ),
+            mapping,
+            False,
+        )
+
+    monkeypatch.setattr(
+        document_pack_service,
+        "get_generation_readiness",
+        qa_blocked_readiness,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "create_design_from_requirements",
+        lambda *args, **kwargs: pytest.fail("workflow must not start when QA is not ready"),
+    )
+    try:
+        response = TestClient(app).post(f"/document-packs/{summary.pack_id}/generate-design")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "blocked"
+        assert payload["mapping"]["status"] == "mapped"
+        assert payload["extraction_report"]["qa_ready_to_generate"] is False
+        assert payload["extraction_report"]["qa_blocking_issues"] == ["forced_qa_gate"]
+    finally:
+        document_pack_service.outputs_dir = original_outputs
+        document_pack_service.groq_extractor.enabled = original_groq_enabled
+
+
 def _pack_zip() -> bytes:
     buffer = BytesIO()
     with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
@@ -230,6 +333,6 @@ def _missing_hba_pack_zip() -> bytes:
     with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
         archive.writestr(
             "radio_plan.txt",
-            "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nRRU et câbles\n",
+            "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nBandes: NR3500 5G\nRRU et câbles\n",
         )
     return buffer.getvalue()

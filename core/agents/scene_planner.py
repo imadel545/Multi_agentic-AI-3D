@@ -8,6 +8,8 @@ from core.contracts.scene import (
     SectorSpec,
     VisualElements,
 )
+from core.contracts.tower import TowerCharacteristics
+from core.rag.planning import RagPlanningResolution, resolve_planning_hints
 
 
 class ScenePlanner:
@@ -21,41 +23,33 @@ class ScenePlanner:
         accessory_assets: list[AssetManifest] | None = None,
         rag_context: list[dict] | None = None,
         memory_recall: dict | None = None,
+        planning_resolution: RagPlanningResolution | dict | None = None,
     ) -> SceneSpec:
+        del memory_recall
+        if planning_resolution is None:
+            rag_resolution = resolve_planning_hints(requirements, rag_context)
+        elif isinstance(planning_resolution, RagPlanningResolution):
+            rag_resolution = planning_resolution
+        else:
+            rag_resolution = RagPlanningResolution(
+                antenna_install_height_m=float(planning_resolution["antenna_install_height_m"]),
+                beamwidth_deg=float(planning_resolution["beamwidth_deg"]),
+                include_cables=bool(planning_resolution["include_cables"]),
+                include_sector_beams=bool(planning_resolution["include_sector_beams"]),
+                decisions=tuple(planning_resolution.get("decisions", ())),
+            )
         visual_elements = VisualElements(
-            include_sector_beams=requirements.include_beams,
+            include_sector_beams=rag_resolution.include_sector_beams,
             include_azimuth_arrows=True,
             include_height_markers=True,
             include_labels=requirements.include_labels,
             include_power_cabinet=requirements.include_power_cabinet,
             include_gps_antenna=requirements.include_gps_antenna,
         )
-        beamwidth = requirements.beamwidth_deg
-        install_height = requirements.antenna_install_height_m
-        include_cables = requirements.include_cables
-        if rag_context:
-            for ctx in rag_context:
-                hints = _planning_hints(ctx)
-                beamwidth = _bounded_float_hint(
-                    hints, "beamwidth_deg", beamwidth, minimum=1.0, maximum=360.0
-                )
-                install_height = _bounded_float_hint(
-                    hints,
-                    "antenna_install_height_m",
-                    install_height,
-                    minimum=0.1,
-                    maximum=requirements.tower_height_m,
-                )
-                if isinstance(hints.get("include_cables"), bool):
-                    include_cables = hints["include_cables"]
-                if isinstance(hints.get("include_sector_beams"), bool):
-                    visual_elements.include_sector_beams = hints["include_sector_beams"]
-
-        if memory_recall:
-            for err in memory_recall.get("error_patterns", []):
-                code = err.get("issue_code", "")
-                if code == "RF_AZIMUTH_SPACING_LOW":
-                    visual_elements.include_sector_beams = True
+        beamwidth = rag_resolution.beamwidth_deg
+        install_height = rag_resolution.antenna_install_height_m
+        include_cables = rag_resolution.include_cables
+        tower_characteristics = _resolved_tower_characteristics(requirements, tower)
 
         sectors = [
             SectorSpec(
@@ -98,7 +92,7 @@ class ScenePlanner:
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],
                 height_m=requirements.tower_height_m,
-                characteristics=requirements.tower_characteristics,
+                characteristics=tower_characteristics,
             ),
             sectors=sectors,
             visual_elements=visual_elements,
@@ -131,28 +125,37 @@ def _accessory_placements(
 ) -> list[SceneAccessoryPlacement]:
     placements: list[SceneAccessoryPlacement] = []
     assets_by_type = {asset.type: asset for asset in assets}
-    base_width = (
-        requirements.tower_characteristics.base_width_m
-        or (tower.dimensions_m.width if tower.dimensions_m else 4.0)
-        or 4.0
-    )
+    characteristics = _resolved_tower_characteristics(requirements, tower)
+    base_width = float(characteristics.base_width_m or 4.0)
     if requirements.include_power_cabinet and (cabinet := assets_by_type.get("cabinet")):
         offset = max(3.0, float(base_width) * 1.2)
         placements.append(
             _accessory_placement(
                 cabinet,
                 asset_type="cabinet",
-                position=[offset, 0.0, 0.8],
+                # Accessory positions use a base datum. The Blender importer
+                # aligns base_center_ground assets to this Z coordinate.
+                position=[offset, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
             )
         )
     if requirements.include_gps_antenna and (gps := assets_by_type.get("gps")):
-        mount_radius = float(base_width) / 2 + 0.1
+        gps_height = max(0.5, requirements.tower_height_m - 0.5)
+        mount_radius = (
+            _tower_width_at_height(
+                height_m=gps_height,
+                tower_height_m=requirements.tower_height_m,
+                base_width_m=base_width,
+                top_width_m=float(characteristics.top_width_m or base_width),
+            )
+            / 2
+            + 0.1
+        )
         placements.append(
             _accessory_placement(
                 gps,
                 asset_type="gps",
-                position=[0.0, mount_radius, max(0.5, requirements.tower_height_m - 0.5)],
+                position=[0.0, mount_radius, gps_height],
                 rotation_deg=[0.0, 0.0, 0.0],
             )
         )
@@ -179,25 +182,42 @@ def _accessory_placement(
     )
 
 
-def _planning_hints(context: dict) -> dict:
-    payload = context.get("payload")
-    if not isinstance(payload, dict):
-        return {}
-    hints = payload.get("planning_hints")
-    return hints if isinstance(hints, dict) else {}
+def _resolved_tower_characteristics(
+    requirements: RequirementSpec,
+    tower: AssetManifest,
+) -> TowerCharacteristics:
+    """Resolve optional tower widths once so SceneSpec is generation-ready."""
+
+    characteristics = requirements.tower_characteristics
+    manifest_width = tower.dimensions_m.width if tower.dimensions_m else None
+    default_base = {
+        "lattice": 4.0,
+        "monopole": 0.8,
+        "rooftop_mast": 0.35,
+        "small_cell_pole": 0.3,
+    }[characteristics.structure]
+    base_width = float(characteristics.base_width_m or manifest_width or default_base)
+    default_top_ratio = {
+        "lattice": 0.25,
+        "monopole": 0.35,
+        "rooftop_mast": 0.4,
+        "small_cell_pole": 0.6,
+    }[characteristics.structure]
+    top_width = float(characteristics.top_width_m or (base_width * default_top_ratio))
+    return characteristics.model_copy(
+        update={
+            "base_width_m": base_width,
+            "top_width_m": min(top_width, base_width),
+        }
+    )
 
 
-def _bounded_float_hint(
-    hints: dict,
-    key: str,
-    current: float,
-    minimum: float,
-    maximum: float,
+def _tower_width_at_height(
+    *,
+    height_m: float,
+    tower_height_m: float,
+    base_width_m: float,
+    top_width_m: float,
 ) -> float:
-    value = hints.get(key)
-    if not isinstance(value, (int, float)):
-        return current
-    value = float(value)
-    if minimum <= value <= maximum:
-        return value
-    return current
+    ratio = min(max(float(height_m) / max(float(tower_height_m), 1e-6), 0.0), 1.0)
+    return float(base_width_m) + (float(top_width_m) - float(base_width_m)) * ratio

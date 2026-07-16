@@ -50,6 +50,7 @@ from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
                     "H=30m\n"
                     "AZ: 20, 140, 260\n"
                     "HMA: 25m, 25m, 25m\n"
+                    "Bandes: NR3500 5G\n"
                     "RRU remote radio unit\n"
                 )
             },
@@ -88,7 +89,9 @@ def test_irrelevant_admin_files_are_recorded_but_ignored(tmp_path: Path) -> None
                 "Admin/bail.txt": "Bail administratif et conditions de location.",
                 "Admin/cerfa.txt": "Document administratif.",
                 "Photos/vue_site.jpg": b"\xff\xd8\xff\x00",
-                "Plan_radio.txt": "Pylône treillis H=30m Azimuts: 0,120,240 HBA: 24m,24m,24m",
+                "Plan_radio.txt": (
+                    "Pylône treillis H=30m Azimuts: 0,120,240 HBA: 24m,24m,24m Bandes: NR3500 5G"
+                ),
             }
         )
     )
@@ -101,6 +104,42 @@ def test_irrelevant_admin_files_are_recorded_but_ignored(tmp_path: Path) -> None
         not doc["used_for_design"]
         for doc in documents
         if doc["purpose"] in {"administrative_reference", "visual_reference"}
+    )
+
+
+def test_irrelevant_admin_values_cannot_pollute_design_requirements(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    summary = service.ingest_zip(
+        _zip(
+            {
+                "Admin/bail.txt": (
+                    "Bail administratif. Hauteur pylone: 90m. "
+                    "Azimuts: 10, 130, 250. HBA: 70m,70m,70m."
+                ),
+                "APD/plan_radio.txt": (
+                    "Type pylone: pylone treillis\n"
+                    "Hauteur pylone: 30m\n"
+                    "Azimuts: 0,120,240\n"
+                    "HBA: 24m,24m,24m\n"
+                    "Bandes: NR3500 5G\n"
+                ),
+            }
+        )
+    )
+    spec = service.get_spec(summary.pack_id)
+    mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
+
+    assert summary.can_generate_design is True
+    assert mapping.status == "mapped"
+    assert mapping.requirements is not None
+    assert mapping.requirements["tower_height_m"] == 30.0
+    assert mapping.requirements["azimuths_deg"] == [0.0, 120.0, 240.0]
+    assert not spec.conflicts
+    assert all(
+        "Admin/bail.txt" not in source.file
+        for sources in spec.provenance_map.values()
+        for source in sources
     )
 
 
@@ -174,7 +213,8 @@ def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Pat
         _zip(
             {
                 "APD/tilt.txt": (
-                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nHBA: 24m, 24m, 24m\nTilt: 5\n"
+                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\n"
+                    "HBA: 24m, 24m, 24m\nTilt: 5\nRET: 2\nBandes: NR3500 5G\n"
                 )
             }
         )
@@ -188,12 +228,14 @@ def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Pat
     assert mapping.status == "mapped"
     assert mapping.requirements is not None
     assert mapping.requirements["mechanical_tilt_deg"] == 5.0
+    assert mapping.requirements["electrical_tilt_deg"] == 2.0
     warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
     assert "DOC_DEFAULT_MECHANICAL_TILT_USED" not in warning_codes
     fields = {
         field["project_field"]: field["status"] for field in mapping.mapping_loss_report["fields"]
     }
     assert fields["radio.mechanical_tilt_deg"] == "mapped"
+    assert fields["radio.electrical_tilt_deg"] == "mapped"
 
 
 def test_document_pack_mapping_respects_explicit_rru_false_correction(tmp_path: Path) -> None:
@@ -206,6 +248,7 @@ def test_document_pack_mapping_respects_explicit_rru_false_correction(tmp_path: 
                     "Pylône treillis H=30m\n"
                     "Azimuts: 0, 120, 240\n"
                     "HBA: 24m, 24m, 24m\n"
+                    "Bandes: NR3500 5G\n"
                     "RRU remote radio unit mentionnée dans une ancienne note\n"
                 )
             }
@@ -293,7 +336,8 @@ def test_user_correction_resolves_missing_hba_and_enables_mapping(tmp_path: Path
         _zip(
             {
                 "radio_note.txt": (
-                    "Type support: pylône treillis\nHauteur pylône: 30m\nAzimuts: 0, 120, 240\n"
+                    "Type support: pylône treillis\nHauteur pylône: 30m\n"
+                    "Azimuts: 0, 120, 240\nBandes: NR3500 5G\n"
                 )
             }
         )
@@ -324,7 +368,8 @@ def test_user_correction_resolves_conflicting_azimuths(tmp_path: Path) -> None:
         _zip(
             {
                 "APD_radio.txt": (
-                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nHBA: 24m, 24m, 24m\n"
+                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\n"
+                    "HBA: 24m, 24m, 24m\nBandes: NR3500 5G\n"
                 ),
                 "old_plan.txt": "AZ: 10, 130, 250\n",
             }

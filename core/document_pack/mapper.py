@@ -1,7 +1,16 @@
-from core.contracts.common import WarningItem
+from typing import TypedDict
+
+from core.contracts.common import NetworkType, WarningItem
 from core.contracts.document_pack import ProjectDesignSpec, RequirementMappingResult
 from core.contracts.requirements import RequirementSpec
 from core.contracts.tower import TowerCharacteristics
+
+
+class _MappingBlocker(TypedDict):
+    field: str
+    code: str
+    message: str
+    values: list[float | str]
 
 
 class ProjectDesignSpecMapper:
@@ -10,33 +19,54 @@ class ProjectDesignSpecMapper:
     ) -> RequirementMappingResult:
         blocking = [field.field for field in spec.missing_fields if field.severity == "blocking"]
         conflicts = [field.field for field in spec.conflicts]
-        if blocking or conflicts:
+        representation_blockers = _representation_blockers(spec)
+        if blocking or conflicts or representation_blockers:
             return RequirementMappingResult(
                 status="blocked",
-                blocking_fields=blocking,
+                blocking_fields=list(
+                    dict.fromkeys([*blocking, *(item["field"] for item in representation_blockers)])
+                ),
                 conflicts=conflicts,
-                mapping_loss_report=_mapping_loss_report(spec, None),
+                mapping_loss_report=_mapping_loss_report(
+                    spec,
+                    None,
+                    representation_blockers=representation_blockers,
+                ),
             )
 
         tower_type = _required_str(spec, "tower_spec", "tower_type")
         tower_height = _required_float(spec, "tower_spec", "tower_height_m")
         azimuths = _required_float_list(spec, "radio_sectors", "azimuth_deg")
         hba_values = _required_float_list(spec, "radio_sectors", "hba_m")
-        install_height = min(hba_values) if hba_values else tower_height
+        install_height = hba_values[0] if hba_values else tower_height
         network_type = _network_type(spec)
+        if network_type is None:
+            raise ValueError("radio network type must be resolved before mapping")
         include_rru = _confirmed_bool(_first_sector_field(spec, "rru")) or _confirmed_bool(
             spec.cabling_spec.get("include_rru")
         )
         include_cables = _confirmed_bool(spec.cabling_spec.get("include_cables"))
         include_gps_antenna = _confirmed_bool(spec.compound_spec.get("gps"))
         include_power_cabinet = _confirmed_bool(spec.compound_spec.get("power_cabinet"))
+        antenna_model = _first_sector_field(spec, "antenna_model")
+        antenna_family_confirmed = bool(
+            antenna_model and antenna_model.status == "confirmed" and antenna_model.value
+        )
+        foundation = spec.foundation_spec.get("foundation_type")
+        foundation_confirmed = bool(
+            foundation and foundation.status == "confirmed" and foundation.value
+        )
         mechanical_tilt = _uniform_confirmed_sector_float(spec, "mechanical_tilt_deg")
+        electrical_tilt = _uniform_confirmed_sector_float(spec, "electrical_tilt_deg")
         characteristics = _tower_characteristics(spec, tower_type)
         warnings = _mapping_warnings(
             spec,
             include_gps_antenna=include_gps_antenna,
             include_power_cabinet=include_power_cabinet,
             mechanical_tilt_confirmed=mechanical_tilt is not None,
+            electrical_tilt_confirmed=electrical_tilt is not None,
+            antenna_family_confirmed=antenna_family_confirmed,
+            foundation_confirmed=foundation_confirmed,
         )
         requirements = RequirementSpec(
             network_type=network_type,
@@ -45,10 +75,11 @@ class ProjectDesignSpecMapper:
             tower_height_m=tower_height,
             tower_characteristics=characteristics,
             sector_count=len(azimuths),
-            antenna_type="microwave_dish" if network_type == "MW" else "panel_5g",
+            antenna_type=_antenna_type(spec, network_type),
             antenna_install_height_m=install_height,
             azimuths_deg=azimuths,
             mechanical_tilt_deg=mechanical_tilt if mechanical_tilt is not None else 3.0,
+            electrical_tilt_deg=electrical_tilt if electrical_tilt is not None else 0.0,
             include_rru=include_rru if network_type != "MW" else False,
             include_cables=include_cables,
             include_beams=True,
@@ -110,6 +141,9 @@ def _mapping_warnings(
     include_gps_antenna: bool,
     include_power_cabinet: bool,
     mechanical_tilt_confirmed: bool,
+    electrical_tilt_confirmed: bool,
+    antenna_family_confirmed: bool,
+    foundation_confirmed: bool,
 ) -> list[WarningItem]:
     warnings: list[WarningItem] = []
     if include_gps_antenna:
@@ -172,6 +206,45 @@ def _mapping_warnings(
                 ),
             )
         )
+    if not electrical_tilt_confirmed:
+        warnings.append(
+            WarningItem(
+                code="DOC_DEFAULT_ELECTRICAL_TILT_USED",
+                message=(
+                    "Electrical tilt was not confirmed in the document pack; "
+                    "default 0 degrees is used."
+                ),
+            )
+        )
+    if not antenna_family_confirmed:
+        warnings.append(
+            WarningItem(
+                code="DOC_GENERIC_ANTENNA_FAMILY_USED",
+                message=(
+                    "No antenna model was confirmed in the document pack; a generic network "
+                    "antenna family is used and must not be presented as vendor-exact."
+                ),
+            )
+        )
+    if not foundation_confirmed:
+        warnings.append(
+            WarningItem(
+                code="DOC_FOUNDATION_UNSPECIFIED_NO_GEOMETRY",
+                message=(
+                    "No foundation type was confirmed; foundation remains unknown and no "
+                    "concrete pad is inferred."
+                ),
+            )
+        )
+    warnings.append(
+        WarningItem(
+            code="DOC_DEFAULT_VISUAL_AIDS_ENABLED",
+            message=(
+                "Sector beams and labels are enabled by a controlled product default; "
+                "the document pack does not currently model these presentation options."
+            ),
+        )
+    )
     return warnings
 
 
@@ -195,7 +268,11 @@ def _uniform_confirmed_sector_float(spec: ProjectDesignSpec, field: str) -> floa
 def _mapping_loss_report(
     spec: ProjectDesignSpec,
     requirements: RequirementSpec | None,
+    *,
+    representation_blockers: list[_MappingBlocker] | None = None,
 ) -> dict:
+    blockers = representation_blockers or []
+    blocker_status = {blocker["field"]: _blocker_status(blocker["code"]) for blocker in blockers}
     entries = [
         _mapping_entry(
             spec,
@@ -213,6 +290,14 @@ def _mapping_loss_report(
         ),
         _mapping_entry(
             spec,
+            "radio.bands",
+            requirement_field="network_type",
+            scene_field="network_type",
+            mapped=requirements is not None,
+            status_override=blocker_status.get("radio.network_type"),
+        ),
+        _mapping_entry(
+            spec,
             "radio.azimuths_deg",
             requirement_field="azimuths_deg",
             scene_field="sectors[].azimuth_deg",
@@ -224,6 +309,7 @@ def _mapping_loss_report(
             requirement_field="antenna_install_height_m",
             scene_field="sectors[].install_height_m",
             mapped=requirements is not None,
+            status_override=blocker_status.get("radio.hba_m"),
         ),
         _mapping_entry(
             spec,
@@ -231,9 +317,21 @@ def _mapping_loss_report(
             requirement_field="mechanical_tilt_deg",
             scene_field="sectors[].mechanical_tilt_deg",
             mapped=requirements is not None
-            and requirements.mechanical_tilt_deg != 3.0
             and _confirmed_any(spec, "radio_sectors", "mechanical_tilt_deg"),
-            fallback=requirements is not None and requirements.mechanical_tilt_deg == 3.0,
+            fallback=requirements is not None
+            and not _confirmed_any(spec, "radio_sectors", "mechanical_tilt_deg"),
+            status_override=blocker_status.get("radio.mechanical_tilt_deg"),
+        ),
+        _mapping_entry(
+            spec,
+            "radio.electrical_tilt_deg",
+            requirement_field="electrical_tilt_deg",
+            scene_field="sectors[].electrical_tilt_deg",
+            mapped=requirements is not None
+            and _confirmed_any(spec, "radio_sectors", "electrical_tilt_deg"),
+            fallback=requirements is not None
+            and not _confirmed_any(spec, "radio_sectors", "electrical_tilt_deg"),
+            status_override=blocker_status.get("radio.electrical_tilt_deg"),
         ),
         _mapping_entry(
             spec,
@@ -241,6 +339,26 @@ def _mapping_loss_report(
             requirement_field="include_rru",
             scene_field="sectors[].radio_asset_id",
             mapped=requirements is not None,
+        ),
+        _mapping_entry(
+            spec,
+            "radio.antenna_model",
+            requirement_field="antenna_type",
+            scene_field="sectors[].antenna_asset_id",
+            mapped=requirements is not None
+            and _confirmed_any(spec, "radio_sectors", "antenna_model"),
+            fallback=requirements is not None
+            and not _confirmed_any(spec, "radio_sectors", "antenna_model"),
+        ),
+        _mapping_entry(
+            spec,
+            "foundation.foundation_type",
+            requirement_field="tower_characteristics.foundation_type",
+            scene_field="tower.characteristics.foundation_type",
+            mapped=requirements is not None
+            and _confirmed_field(spec, "foundation_spec", "foundation_type") is not None,
+            fallback=requirements is not None
+            and _confirmed_field(spec, "foundation_spec", "foundation_type") is None,
         ),
         _mapping_entry(
             spec,
@@ -302,7 +420,12 @@ def _mapping_loss_report(
     counts: dict[str, int] = {}
     for entry in entries:
         counts[entry["status"]] = counts.get(entry["status"], 0) + 1
-    return {"pack_id": spec.pack_id, "counts": counts, "fields": entries}
+    return {
+        "pack_id": spec.pack_id,
+        "counts": counts,
+        "fields": entries,
+        "blocking_losses": blockers,
+    }
 
 
 def _mapping_entry(
@@ -314,18 +437,21 @@ def _mapping_entry(
     mapped: bool = False,
     not_modeled: bool = False,
     fallback: bool = False,
+    status_override: str | None = None,
 ) -> dict:
     field = _find_project_field(spec, project_field)
-    if _is_conflict(spec, project_field):
+    if status_override:
+        status = status_override
+    elif _is_conflict(spec, project_field):
         status = "conflict"
+    elif fallback:
+        status = "fallback"
     elif field is None or field.status == "missing":
         status = "missing"
     elif not_modeled and field.status == "confirmed":
         status = "not_modeled"
     elif mapped and field.status == "confirmed":
         status = "mapped"
-    elif fallback:
-        status = "fallback"
     elif field.status == "confirmed":
         status = "lost_field"
     else:
@@ -351,6 +477,17 @@ def _mapping_reason(status: str) -> str:
         "conflict": "Conflicting document values require user correction before mapping.",
         "fallback": "No confirmed field is available; controlled deterministic default is used.",
         "lost_field": "Confirmed field exists but is not preserved by the current mapper.",
+        "blocked_unknown_network": (
+            "Radio evidence does not resolve to one supported network type; generation is blocked."
+        ),
+        "blocked_non_uniform": (
+            "Sector-specific values cannot be represented by the current uniform RequirementSpec "
+            "field; generation is blocked instead of flattening them."
+        ),
+        "blocked_partial_sector_values": (
+            "Only part of the sectors have confirmed values; generation is blocked instead of "
+            "inventing the remaining values."
+        ),
     }.get(status, "Field is visible for frontend review.")
 
 
@@ -361,8 +498,14 @@ def _find_project_field(spec: ProjectDesignSpec, project_field: str):
         return spec.radio_sectors[0].hba_m
     if project_field == "radio.mechanical_tilt_deg" and spec.radio_sectors:
         return spec.radio_sectors[0].mechanical_tilt_deg
+    if project_field == "radio.electrical_tilt_deg" and spec.radio_sectors:
+        return spec.radio_sectors[0].electrical_tilt_deg
+    if project_field == "radio.bands" and spec.radio_sectors:
+        return spec.radio_sectors[0].bands
     if project_field == "radio.include_rru" and spec.radio_sectors:
         return spec.radio_sectors[0].rru
+    if project_field == "radio.antenna_model" and spec.radio_sectors:
+        return spec.radio_sectors[0].antenna_model
     sections = {
         "tower": spec.tower_spec,
         "cabling": spec.cabling_spec,
@@ -393,19 +536,138 @@ def _confirmed_any(spec: ProjectDesignSpec, section: str, field: str) -> bool:
     return False
 
 
-def _network_type(spec: ProjectDesignSpec) -> str:
-    bands = None
-    if spec.radio_sectors and spec.radio_sectors[0].bands:
-        bands = spec.radio_sectors[0].bands.value
-    if isinstance(bands, list):
+def _network_type(spec: ProjectDesignSpec) -> NetworkType | None:
+    network_types: set[NetworkType] = set()
+    for sector in spec.radio_sectors:
+        bands = sector.bands.value if sector.bands else None
+        if not isinstance(bands, list):
+            continue
         joined = " ".join(str(band).upper() for band in bands)
         if "NR" in joined or "5G" in joined:
-            return "5G"
-        if "MW" in joined:
-            return "MW"
-        if "4G" in joined or "L800" in joined or "L1800" in joined:
-            return "4G"
-    return "5G"
+            network_types.add("5G")
+        elif "MW" in joined or "MICROWAVE" in joined:
+            network_types.add("MW")
+        elif (
+            "4G" in joined
+            or "LTE" in joined
+            or any(token.startswith("L") and token[1:].isdigit() for token in joined.split())
+        ):
+            network_types.add("4G")
+    if len(network_types) == 1:
+        return next(iter(network_types))
+    return None
+
+
+def _representation_blockers(spec: ProjectDesignSpec) -> list[_MappingBlocker]:
+    blockers: list[_MappingBlocker] = []
+    if _network_type(spec) is None:
+        blockers.append(
+            {
+                "field": "radio.network_type",
+                "code": "UNKNOWN_OR_MIXED_NETWORK_TYPE",
+                "message": (
+                    "The document pack does not resolve to exactly one supported radio type "
+                    "(4G, 5G, or MW)."
+                ),
+                "values": _band_values(spec),
+            }
+        )
+    hba_values, hba_confirmed_count = _sector_numeric_values(spec, "hba_m")
+    if spec.radio_sectors:
+        if hba_confirmed_count != len(spec.radio_sectors):
+            blockers.append(
+                {
+                    "field": "radio.hba_m",
+                    "code": "PARTIAL_SECTOR_VALUES",
+                    "message": (
+                        f"radio.hba_m is confirmed for only {hba_confirmed_count} of "
+                        f"{len(spec.radio_sectors)} sectors."
+                    ),
+                    "values": hba_values,
+                }
+            )
+        elif not _values_are_uniform(hba_values):
+            blockers.append(
+                _non_uniform_blocker(
+                    "radio.hba_m",
+                    "Sector HBA values differ and cannot be flattened into one install height.",
+                    hba_values,
+                )
+            )
+    for field, public_field in (
+        ("mechanical_tilt_deg", "radio.mechanical_tilt_deg"),
+        ("electrical_tilt_deg", "radio.electrical_tilt_deg"),
+    ):
+        values, confirmed_count = _sector_numeric_values(spec, field)
+        if confirmed_count == 0:
+            continue
+        if confirmed_count != len(spec.radio_sectors):
+            blockers.append(
+                {
+                    "field": public_field,
+                    "code": "PARTIAL_SECTOR_VALUES",
+                    "message": (
+                        f"{public_field} is confirmed for only {confirmed_count} of "
+                        f"{len(spec.radio_sectors)} sectors."
+                    ),
+                    "values": values,
+                }
+            )
+        elif not _values_are_uniform(values):
+            blockers.append(
+                _non_uniform_blocker(
+                    public_field,
+                    f"{public_field} differs by sector and cannot be flattened safely.",
+                    values,
+                )
+            )
+    return blockers
+
+
+def _sector_numeric_values(spec: ProjectDesignSpec, field: str) -> tuple[list[float], int]:
+    values: list[float] = []
+    confirmed_count = 0
+    for sector in spec.radio_sectors:
+        candidate = getattr(sector, field)
+        if candidate is None or candidate.status != "confirmed":
+            continue
+        confirmed_count += 1
+        if isinstance(candidate.value, float | int):
+            values.append(float(candidate.value))
+    return values, confirmed_count
+
+
+def _values_are_uniform(values: list[float]) -> bool:
+    return bool(values) and all(abs(value - values[0]) < 0.05 for value in values)
+
+
+def _non_uniform_blocker(
+    field: str,
+    message: str,
+    values: list[float],
+) -> _MappingBlocker:
+    return {
+        "field": field,
+        "code": "NON_UNIFORM_SECTOR_VALUES",
+        "message": message,
+        "values": values,
+    }
+
+
+def _band_values(spec: ProjectDesignSpec) -> list[str]:
+    values: list[str] = []
+    for sector in spec.radio_sectors:
+        if sector.bands and isinstance(sector.bands.value, list):
+            values.extend(str(value) for value in sector.bands.value)
+    return list(dict.fromkeys(values))
+
+
+def _blocker_status(code: str) -> str:
+    if code == "UNKNOWN_OR_MIXED_NETWORK_TYPE":
+        return "blocked_unknown_network"
+    if code == "PARTIAL_SECTOR_VALUES":
+        return "blocked_partial_sector_values"
+    return "blocked_non_uniform"
 
 
 def _tower_characteristics(spec: ProjectDesignSpec, tower_type: str) -> TowerCharacteristics:
@@ -442,7 +704,7 @@ def _requirements_text(requirements: RequirementSpec, pack_id: str) -> str:
 def _foundation_type(spec: ProjectDesignSpec) -> str:
     field = spec.foundation_spec.get("foundation_type")
     if not field or not isinstance(field.value, str):
-        return "concrete_pad"
+        return "unknown"
     value = field.value.lower()
     if any(token in value for token in ["massif", "béton", "beton", "pad"]):
         return "concrete_pad"
@@ -451,3 +713,21 @@ def _foundation_type(spec: ProjectDesignSpec) -> str:
     if "pole" in value or "poteau" in value:
         return "pole_base"
     return "unknown"
+
+
+def _antenna_type(spec: ProjectDesignSpec, network_type: NetworkType) -> str:
+    field = _first_sector_field(spec, "antenna_model")
+    if field and field.status == "confirmed" and isinstance(field.value, str):
+        value = field.value.lower()
+        if any(token in value for token in ("microwave", "dish", "parabole")):
+            return "microwave_dish"
+        if any(token in value for token in ("massive mimo", "mimo", "aau")):
+            return "massive_mimo"
+        if "4g" in value or "lte" in value:
+            return "panel_4g"
+        if "5g" in value or "nr" in value or "panel" in value:
+            return "panel_5g"
+        return field.value
+    if network_type == "MW":
+        return "microwave_dish"
+    return "panel_4g" if network_type == "4G" else "panel_5g"

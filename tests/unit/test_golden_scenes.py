@@ -18,7 +18,7 @@ GOLDEN_SCENES = [
 
 
 @pytest.mark.parametrize("scene_name", GOLDEN_SCENES)
-def test_golden_scene_pipeline(scene_name: str, tmp_path: Path) -> None:
+def test_golden_scene_contract_rejects_missing_blender(scene_name: str, tmp_path: Path) -> None:
     golden_dir = Path("tests/golden_scenes") / scene_name
     requirements_text = (golden_dir / "input_requirements.txt").read_text(encoding="utf-8")
     expected_requirements = _load_json(golden_dir / "expected_requirement_spec.json")
@@ -44,20 +44,21 @@ def test_golden_scene_pipeline(scene_name: str, tmp_path: Path) -> None:
         use_llm=False,
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.requirements is not None
     assert result.scene is not None
-    assert result.report.status == expected_validation["status"]
+    assert expected_validation["status"] == "passed"
+    assert result.report.status == "failed"
     _assert_requirement_spec(result.requirements.model_dump(), expected_requirements)
     _assert_scene_spec(result.scene, expected_scene)
     for check in expected_validation["required_checks"]:
         assert result.report.checks[check] is True
     assert result.generation is not None
-    assert result.generation.mode in {"fallback_no_blender", "real_blender"}
+    assert result.generation.mode == "fallback_no_blender"
     assert result.qa_report is not None
-    assert result.qa_report.status == "passed"
+    assert result.qa_report.status == "failed"
     assert result.glb_inspection is not None
-    assert result.glb_inspection.structural_qa_passed is True
+    assert result.glb_inspection.structural_qa_passed is False
 
 
 @pytest.mark.skipif(

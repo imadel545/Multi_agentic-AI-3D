@@ -28,14 +28,14 @@ def asset_manifest_hash(manifests_dir: Path) -> str:
 
 def knowledge_index_hash(project_root: Path) -> str:
     entries = []
-    for root in [project_root / "data" / "knowledge", project_root / "docs"]:
-        for path in sorted(root.glob("*.md")):
-            entries.append(
-                {
-                    "path": str(path.relative_to(project_root)),
-                    "content": path.read_text(encoding="utf-8"),
-                }
-            )
+    root = project_root / "data" / "knowledge"
+    for path in sorted(root.glob("*.md")):
+        entries.append(
+            {
+                "path": str(path.relative_to(project_root)),
+                "content": path.read_text(encoding="utf-8"),
+            }
+        )
     return _hash_payload(entries)
 
 

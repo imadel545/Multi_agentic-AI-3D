@@ -10,6 +10,7 @@ GenerationStrategy = Literal[
     "stretched_imported_glb",
     "internal_project_generated",
     "procedural_fallback",
+    "mixed",
     "degraded",
     "unknown",
 ]
@@ -20,6 +21,7 @@ GeometrySource = Literal[
     "stretched_imported_glb",
     "internal_project_generated",
     "procedural_fallback",
+    "mixed",
     "degraded",
     "unknown",
 ]

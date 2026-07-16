@@ -16,12 +16,13 @@ def test_scene_repair_antenna_height_success(tmp_path: Path) -> None:
         ),
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.requirements is not None
     assert result.requirements.antenna_install_height_m == 27
     assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_ANTENNA_HEIGHT"]
     assert "scene_repair_handler" in [entry["node"] for entry in result.trace]
     assert result.generation is not None
+    assert result.generation.mode == "fallback_no_blender"
 
 
 def test_scene_repair_azimuth_normalization_success(tmp_path: Path) -> None:
@@ -30,7 +31,7 @@ def test_scene_repair_azimuth_normalization_success(tmp_path: Path) -> None:
         "Créer un site 5G sur pylône treillis 30m. Installer 1 secteur à 24m. Azimuts : 370°.",
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.scene is not None
     assert result.scene.sectors[0].azimuth_deg == 10
     assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_AZIMUTH_NORMALIZED"]
@@ -45,7 +46,7 @@ def test_scene_repair_sector_count_success_or_explicit_fail(tmp_path: Path) -> N
         ),
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.scene is not None
     assert [sector.azimuth_deg for sector in result.scene.sectors] == [0, 120, 240]
     assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_SECTOR_COUNT"]

@@ -45,7 +45,6 @@ def load_rag_documents(project_root: Path) -> list[RagDocument]:
     documents.extend(
         _load_asset_manifest_documents(project_root, project_root / "assets" / "manifests")
     )
-    documents.extend(_load_project_docs(project_root, project_root / "docs"))
     return documents
 
 
@@ -102,30 +101,6 @@ def _load_asset_manifest_documents(project_root: Path, manifests_dir: Path) -> l
                 },
             )
         )
-    return documents
-
-
-def _load_project_docs(project_root: Path, docs_dir: Path) -> list[RagDocument]:
-    documents: list[RagDocument] = []
-    for path in sorted(docs_dir.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        for index, chunk in enumerate(_markdown_chunks(text), start=1):
-            documents.append(
-                RagDocument(
-                    doc_id=f"doc:{path.stem}:{index}",
-                    collection="design_patterns",
-                    text=chunk,
-                    payload={
-                        "type": "project_doc",
-                        "doc_type": "project_doc",
-                        "source_path": _relative_source(project_root, path),
-                        "filename": path.name,
-                        "chunk_index": index,
-                        "network_type": _infer_network_type(chunk),
-                        "tower_type": _infer_tower_type(chunk),
-                    },
-                )
-            )
     return documents
 
 

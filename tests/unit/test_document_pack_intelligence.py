@@ -13,7 +13,8 @@ def test_document_pack_valid_dxf_extracts_layered_cad_evidence(tmp_path: Path) -
     doc = ezdxf.new()
     doc.layers.add("ANTENNES")
     doc.modelspace().add_text(
-        "Pylone treillis Hauteur pylone: 30m Azimuts: 0, 120, 240 HBA: 24m, 24m, 24m",
+        "Pylone treillis Hauteur pylone: 30m Azimuts: 0, 120, 240 "
+        "HBA: 24m, 24m, 24m Bandes: NR3500 5G",
         dxfattribs={"layer": "ANTENNES"},
     )
     stream = StringIO()
@@ -111,6 +112,80 @@ def test_document_pack_groq_values_are_normalized_from_evidence(tmp_path: Path) 
     assert [sector.hba_m.value for sector in spec.radio_sectors] == [24.0, 24.0, 24.0]
     assert spec.radio_sectors[0].bands is not None
     assert spec.radio_sectors[0].bands.value == ["5G", "NR3500", "NR700"]
+
+
+def test_document_pack_rejects_groq_value_not_supported_by_quote(tmp_path: Path) -> None:
+    class InventedHeightProvider:
+        model = "openai/gpt-oss-120b"
+
+        def _post_raw(self, payload: dict) -> dict:
+            user_content = payload["messages"][1]["content"]
+            document_id = user_content.split("document_id=", 1)[1].split(" ", 1)[0]
+            return {
+                "fields": [
+                    {
+                        "field": "tower.tower_height_m",
+                        "value": 45,
+                        "confidence": 0.99,
+                        "document_id": document_id,
+                        "page": None,
+                        "evidence": "Hauteur pylone: 30m",
+                    }
+                ]
+            }
+
+    service = DocumentPackService(
+        tmp_path,
+        groq_client=InventedHeightProvider(),
+        groq_provider_name="groq:test",
+        groq_bounded_extraction_enabled=True,
+    )
+    summary = service.ingest_zip(
+        _zip({"APD.txt": "Pylone treillis\nHauteur pylone: 30m\nAzimuts: 0,120,240\nHBA: 24,24,24"})
+    )
+    spec = service.get_spec(summary.pack_id)
+
+    assert spec.tower_spec["tower_height_m"].value == 30.0
+    assert any(
+        item["reason"] == "value_not_supported_by_evidence" for item in spec.groq_rejected_fields
+    )
+
+
+def test_document_pack_rejects_groq_boolean_without_matching_evidence(tmp_path: Path) -> None:
+    class InventedGpsProvider:
+        model = "openai/gpt-oss-120b"
+
+        def _post_raw(self, payload: dict) -> dict:
+            user_content = payload["messages"][1]["content"]
+            document_id = user_content.split("document_id=", 1)[1].split(" ", 1)[0]
+            return {
+                "fields": [
+                    {
+                        "field": "compound.gps",
+                        "value": True,
+                        "confidence": 0.99,
+                        "document_id": document_id,
+                        "page": None,
+                        "evidence": "Hauteur pylone: 30m",
+                    }
+                ]
+            }
+
+    service = DocumentPackService(
+        tmp_path,
+        groq_client=InventedGpsProvider(),
+        groq_provider_name="groq:test",
+        groq_bounded_extraction_enabled=True,
+    )
+    summary = service.ingest_zip(
+        _zip({"APD.txt": "Pylone treillis\nHauteur pylone: 30m\nAzimuts: 0,120,240\nHBA: 24,24,24"})
+    )
+    spec = service.get_spec(summary.pack_id)
+
+    assert any(
+        item["field"] == "compound.gps" and item["reason"] == "value_not_supported_by_evidence"
+        for item in spec.groq_rejected_fields
+    )
 
 
 def test_document_pack_memory_writeback_uses_compact_metadata(tmp_path: Path) -> None:

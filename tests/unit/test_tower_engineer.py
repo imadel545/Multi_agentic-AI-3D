@@ -80,7 +80,7 @@ def test_tower_engineer_warns_on_invalid_taper(agent, valid_requirements, tower_
     assert any(e.code == "TOWER_TAPER_INVALID" for e in report.errors)
 
 
-def test_tower_engineer_warns_on_rooftop_concrete_pad(agent, valid_requirements, tower_asset):
+def test_tower_engineer_blocks_rooftop_concrete_pad(agent, valid_requirements, tower_asset):
     req = valid_requirements.model_copy(
         update={
             "tower_characteristics": valid_requirements.tower_characteristics.model_copy(
@@ -94,7 +94,40 @@ def test_tower_engineer_warns_on_rooftop_concrete_pad(agent, valid_requirements,
         }
     )
     report = agent.validate(req, tower_asset)
-    assert any(w.code == "TOWER_FOUNDATION_RECOMMENDATION" for w in report.warnings)
+    assert report.status == "failed"
+    assert any(error.code == "TOWER_FOUNDATION_UNSUPPORTED" for error in report.errors)
+
+
+def test_tower_engineer_blocks_unknown_foundation(agent, valid_requirements, tower_asset):
+    req = valid_requirements.model_copy(
+        update={
+            "tower_characteristics": valid_requirements.tower_characteristics.model_copy(
+                update={"foundation_type": "unknown"}
+            )
+        }
+    )
+
+    report = agent.validate(req, tower_asset)
+
+    assert report.status == "failed"
+    assert report.checks["foundation_appropriate"] is False
+
+
+def test_tower_engineer_resolves_optional_widths_without_crashing(
+    agent, valid_requirements, tower_asset
+):
+    req = valid_requirements.model_copy(
+        update={
+            "tower_characteristics": valid_requirements.tower_characteristics.model_copy(
+                update={"base_width_m": None, "top_width_m": None}
+            )
+        }
+    )
+
+    report = agent.validate(req, tower_asset)
+
+    assert report.status == "passed"
+    assert report.checks["taper_valid"] is True
 
 
 def test_tower_engineer_recommends_aviation_light(agent, valid_requirements, tower_asset):

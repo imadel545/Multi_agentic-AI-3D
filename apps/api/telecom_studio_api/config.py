@@ -18,9 +18,16 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     enable_groq_extraction: bool = True
+    enable_groq_planning_decision: bool = True
+    groq_planning_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
+    groq_planning_max_completion_tokens: int = Field(default=2048, ge=128, le=2048)
     use_langgraph: bool = True
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
+    max_concurrent_workflows: int = Field(default=2, ge=1, le=8)
+    max_pending_workflows: int = Field(default=4, ge=0, le=64)
+    min_free_disk_mb: int = Field(default=256, ge=64, le=16_384)
+    checkpoint_retention_threads: int = Field(default=16, ge=0, le=4096)
     embedding_provider: str = "nvidia"
     embedding_model: str = "baai/bge-m3"
     nvidia_api_key: str | None = Field(default=None, repr=False)

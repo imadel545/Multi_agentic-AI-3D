@@ -65,7 +65,10 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "azimuths_deg": {
             "type": "array",
             "minItems": 1,
-            "items": {"type": "number", "minimum": 0, "exclusiveMaximum": 360},
+            # GPT-OSS may serialize a malformed azimuth token even under constrained
+            # decoding. The local RequirementSpec validator repairs non-numeric items
+            # from the deterministic baseline and records LLM_FIELD_REPAIRED.
+            "items": {"anyOf": [{"type": "number"}, {"type": "string"}]},
         },
         "mechanical_tilt_deg": {"type": "number", "minimum": -15, "maximum": 30},
         "electrical_tilt_deg": {"type": "number", "minimum": -15, "maximum": 30},
@@ -175,7 +178,7 @@ class GroqStructuredClient:
             },
         }
         try:
-            return self._post_and_validate(strict_payload, baseline)
+            return self._post_and_validate(strict_payload, baseline, requirements_text)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 400:
                 raise
@@ -195,27 +198,55 @@ class GroqStructuredClient:
             ],
             "response_format": {"type": "json_object"},
         }
-        return self._post_and_validate(json_object_payload, baseline)
+        requirements = self._post_and_validate(
+            json_object_payload,
+            baseline,
+            requirements_text,
+        )
+        return requirements.model_copy(
+            update={
+                "warnings": [
+                    *requirements.warnings,
+                    WarningItem(
+                        code="LLM_JSON_OBJECT_FALLBACK",
+                        message=(
+                            "Groq strict JSON Schema generation was rejected; a JSON Object "
+                            "response was accepted only after local RequirementSpec validation."
+                        ),
+                    ),
+                ]
+            }
+        )
 
     def _post_and_validate(
-        self, payload: dict[str, Any], baseline: RequirementSpec
+        self,
+        payload: dict[str, Any],
+        baseline: RequirementSpec,
+        requirements_text: str,
     ) -> RequirementSpec:
         raw = self._post_raw(payload)
-        raw, repaired_fields = _restore_missing_baseline_fields(raw, baseline)
+        raw, repaired_fields = _normalize_known_aliases(raw)
+        raw, missing_fields = _restore_missing_baseline_fields(raw, baseline)
+        repaired_fields.extend(missing_fields)
+        raw, protected_fields = _protect_explicit_source_fields(
+            raw,
+            baseline,
+            requirements_text,
+        )
         try:
             requirements = RequirementSpec.model_validate(raw)
         except ValidationError:
-            return _repair_and_validate(raw, baseline, initial_repaired_fields=repaired_fields)
-        if repaired_fields:
-            return requirements.model_copy(
-                update={
-                    "warnings": [
-                        *requirements.warnings,
-                        _repaired_warning(repaired_fields),
-                    ]
-                }
+            requirements = _repair_and_validate(
+                raw,
+                baseline,
+                initial_repaired_fields=repaired_fields,
             )
-        return requirements
+        return _finalize_requirements(
+            requirements,
+            baseline,
+            repaired_fields=repaired_fields,
+            protected_fields=protected_fields,
+        )
 
     def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = httpx.post(
@@ -241,11 +272,73 @@ def _restore_missing_baseline_fields(
 ) -> tuple[dict[str, Any], list[str]]:
     candidate = dict(raw)
     repaired_fields = []
-    for field in ("include_power_cabinet", "include_gps_antenna"):
+    baseline_payload = baseline.model_dump(exclude={"repair_events"})
+    for field in REQUIREMENT_SPEC_SCHEMA["required"]:
         if field not in candidate:
-            candidate[field] = getattr(baseline, field)
+            candidate[field] = baseline_payload[field]
             repaired_fields.append(field)
     return candidate, repaired_fields
+
+
+def _normalize_known_aliases(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    candidate = dict(raw)
+    repaired_fields: list[str] = []
+    network = candidate.get("network_type")
+    normalized_network = {
+        "LTE": "4G",
+        "LTE/4G": "4G",
+        "NR": "5G",
+        "5G NR": "5G",
+        "MICROWAVE": "MW",
+    }.get(str(network).strip().upper())
+    if normalized_network and normalized_network != network:
+        candidate["network_type"] = normalized_network
+        repaired_fields.append("network_type")
+    tower = candidate.get("tower_type")
+    normalized_tower = {
+        "LATTICE": "lattice_tower",
+        "LATTICE TOWER": "lattice_tower",
+        "ROOFTOP": "rooftop_mast",
+        "SMALL CELL": "small_cell_pole",
+        "SMALL-CELL": "small_cell_pole",
+    }.get(str(tower).strip().upper())
+    if normalized_tower and normalized_tower != tower:
+        candidate["tower_type"] = normalized_tower
+        repaired_fields.append("tower_type")
+    return candidate, repaired_fields
+
+
+def _protect_explicit_source_fields(
+    raw: dict[str, Any],
+    baseline: RequirementSpec,
+    requirements_text: str,
+) -> tuple[dict[str, Any], list[str]]:
+    candidate = dict(raw)
+    warning_codes = {warning.code for warning in baseline.warnings}
+    protected = {"detail_level"}
+    for field, default_warning in _DEFAULT_WARNING_BY_FIELD.items():
+        if default_warning not in warning_codes:
+            protected.add(field)
+
+    normalized_text = requirements_text.lower()
+    for field, terms in _EXPLICIT_TEXT_TERMS_BY_FIELD.items():
+        if any(term in normalized_text for term in terms):
+            protected.add(field)
+    if "network_type" in protected:
+        protected.add("antenna_type")
+    if "tower_type" in protected:
+        protected.add("tower_characteristics")
+
+    baseline_payload = baseline.model_dump(exclude={"repair_events"})
+    restored: list[str] = []
+    for field in sorted(protected):
+        if field not in candidate or field not in baseline_payload:
+            continue
+        if candidate[field] == baseline_payload[field]:
+            continue
+        candidate[field] = baseline_payload[field]
+        restored.append(field)
+    return candidate, restored
 
 
 def _repair_and_validate(
@@ -255,7 +348,7 @@ def _repair_and_validate(
 ) -> RequirementSpec:
     candidate = baseline.model_dump()
     candidate.update(raw)
-    repaired_fields: list[str] = list(initial_repaired_fields or [])
+    repaired_fields = initial_repaired_fields if initial_repaired_fields is not None else []
     if not _is_number_list(candidate.get("azimuths_deg")):
         candidate["azimuths_deg"] = baseline.azimuths_deg
         repaired_fields.append("azimuths_deg")
@@ -282,15 +375,70 @@ def _repair_and_validate(
                 update={"material": baseline_characteristics.material}
             ).model_dump()
             repaired_fields.append("tower_characteristics.material")
-    warnings = [
-        WarningItem.model_validate(warning).model_dump()
-        for warning in candidate.get("warnings", [])
-        if isinstance(warning, dict)
-    ]
-    if repaired_fields:
-        warnings.append(_repaired_warning(repaired_fields).model_dump())
+    warnings = []
+    for warning in candidate.get("warnings", []):
+        if not isinstance(warning, dict):
+            repaired_fields.append("warnings")
+            continue
+        try:
+            warnings.append(WarningItem.model_validate(warning).model_dump())
+        except ValidationError:
+            repaired_fields.append("warnings")
     candidate["warnings"] = warnings
+    for _ in range(3):
+        try:
+            return RequirementSpec.model_validate(candidate)
+        except ValidationError as exc:
+            repaired = False
+            baseline_payload = baseline.model_dump()
+            for error in exc.errors():
+                location = error.get("loc") or ()
+                field = location[0] if location else None
+                if not isinstance(field, str) or field not in baseline_payload:
+                    continue
+                candidate[field] = baseline_payload[field]
+                repaired_fields.append(".".join(str(part) for part in location))
+                repaired = True
+            if not repaired:
+                raise
     return RequirementSpec.model_validate(candidate)
+
+
+def _finalize_requirements(
+    requirements: RequirementSpec,
+    baseline: RequirementSpec,
+    *,
+    repaired_fields: list[str],
+    protected_fields: list[str],
+) -> RequirementSpec:
+    # LLM-authored DEFAULT_* warnings are authority-bearing: RAG uses them to
+    # decide whether a field may be changed. Only the deterministic baseline is
+    # allowed to issue those codes. LLM_* codes are likewise emitted locally.
+    warnings = [
+        warning
+        for warning in requirements.warnings
+        if not warning.code.startswith(("DEFAULT_", "LLM_"))
+    ]
+    for warning in baseline.warnings:
+        fields = _BASELINE_WARNING_FIELDS.get(warning.code, ())
+        if fields and not all(
+            getattr(requirements, field) == getattr(baseline, field) for field in fields
+        ):
+            continue
+        warnings.append(warning)
+    if repaired_fields:
+        warnings.append(_repaired_warning(repaired_fields))
+    if protected_fields:
+        warnings.append(_protected_warning(protected_fields))
+    unique = []
+    seen = set()
+    for warning in warnings:
+        identity = (warning.code, warning.message)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(warning)
+    return requirements.model_copy(update={"warnings": unique})
 
 
 def _repaired_warning(repaired_fields: list[str]) -> WarningItem:
@@ -303,7 +451,55 @@ def _repaired_warning(repaired_fields: list[str]) -> WarningItem:
     )
 
 
+def _protected_warning(protected_fields: list[str]) -> WarningItem:
+    return WarningItem(
+        code="LLM_SOURCE_FIELD_PROTECTED",
+        message=(
+            "LLM values conflicting with explicit source requirements were ignored: "
+            f"{sorted(set(protected_fields))}."
+        ),
+    )
+
+
 def _is_number_list(value: Any) -> bool:
     if not isinstance(value, list) or not value:
         return False
     return all(isinstance(item, int | float) for item in value)
+
+
+_DEFAULT_WARNING_BY_FIELD = {
+    "network_type": "DEFAULT_NETWORK_USED",
+    "tower_type": "DEFAULT_TOWER_USED",
+    "tower_height_m": "DEFAULT_TOWER_HEIGHT_USED",
+    "tower_characteristics": "DEFAULT_TOWER_CHARACTERISTICS_USED",
+    "sector_count": "DEFAULT_SECTOR_COUNT_USED",
+    "antenna_install_height_m": "DEFAULT_INSTALL_HEIGHT_USED",
+    "azimuths_deg": "DEFAULT_AZIMUTHS_USED",
+    "mechanical_tilt_deg": "DEFAULT_MECHANICAL_TILT_USED",
+    "electrical_tilt_deg": "DEFAULT_ELECTRICAL_TILT_USED",
+    "beamwidth_deg": "DEFAULT_BEAMWIDTH_USED",
+    "include_cables": "DEFAULT_CABLES_USED",
+    "include_beams": "DEFAULT_BEAMS_USED",
+    "include_labels": "DEFAULT_LABELS_USED",
+}
+
+_BASELINE_WARNING_FIELDS = {
+    warning: (field,) for field, warning in _DEFAULT_WARNING_BY_FIELD.items()
+}
+
+_EXPLICIT_TEXT_TERMS_BY_FIELD = {
+    "include_rru": ("rru", "radio"),
+    "include_cables": ("cable", "câble"),
+    "include_beams": ("faisceau", "beam"),
+    "include_labels": ("label", "étiquette", "etiquette"),
+    "include_power_cabinet": (
+        "armoire énergie",
+        "armoire energie",
+        "boîte alimentation",
+        "boite alimentation",
+        "power cabinet",
+        "power box",
+        "cabinet",
+    ),
+    "include_gps_antenna": ("gps", "gnss"),
+}

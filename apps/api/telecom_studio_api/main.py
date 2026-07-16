@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
@@ -31,17 +32,23 @@ from apps.api.telecom_studio_api.models import (
     WorkflowStatus,
 )
 from apps.api.telecom_studio_api.product import ProductNotFound, ProductService
-from apps.api.telecom_studio_api.workflow import WorkflowService
+from apps.api.telecom_studio_api.workflow import (
+    WorkflowBusyError,
+    WorkflowService,
+    WorkflowStorageError,
+)
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.document_pack import DocumentPackCorrection
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
-from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
+from core.document_pack import DocumentPackService
 from core.llm import GroqStructuredClient
+from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
+from core.performance import requirements_hash as compute_requirements_hash
 from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
@@ -54,8 +61,12 @@ from core.services.checkpoint_saver import SqliteCheckpointSaver
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    rag_service.close()
+    try:
+        workflow_service.reconcile_interrupted_workflows()
+        yield
+    finally:
+        workflow_service.shutdown()
+        rag_service.close()
 
 
 app = FastAPI(
@@ -97,7 +108,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 registry = AssetRegistry(settings.manifests_dir)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
-project_spec_mapper = ProjectDesignSpecMapper()
 rag_embedding_provider = build_embedding_provider(
     settings.embedding_provider,
     settings.embedding_model,
@@ -130,6 +140,17 @@ groq_client = (
     if settings.resolved_groq_api_key
     else None
 )
+planning_decision_client = (
+    GroqPlanningDecisionClient(
+        api_key=settings.resolved_groq_api_key,
+        model=settings.groq_model,
+        base_url=settings.groq_base_url,
+        timeout_s=settings.groq_planning_timeout_s,
+        max_completion_tokens=settings.groq_planning_max_completion_tokens,
+    )
+    if settings.resolved_groq_api_key and settings.enable_groq_planning_decision
+    else None
+)
 document_pack_service = DocumentPackService(
     settings.temp_outputs_dir,
     groq_client=groq_client,
@@ -148,6 +169,13 @@ blender_runner = BlenderRunner(
     timeout_s=settings.blender_timeout_s,
 )
 checkpoint_saver = SqliteCheckpointSaver(settings.local_sqlite_path.with_name("checkpoints.db"))
+while True:
+    checkpoint_retention = checkpoint_saver.enforce_thread_quota(
+        settings.checkpoint_retention_threads,
+        max_delete=1000,
+    )
+    if checkpoint_retention.remaining_over_quota == 0:
+        break
 orchestrator = DesignOrchestrator(
     registry=registry,
     extractor=requirement_extractor,
@@ -155,6 +183,7 @@ orchestrator = DesignOrchestrator(
     memory_service=memory_service,
     blender_runner=blender_runner,
     checkpoint_saver=checkpoint_saver,
+    planning_decision_client=planning_decision_client,
     allow_blender_fallback=settings.allow_blender_fallback,
 )
 scene_edit_agent = SceneEditAgent(groq_client=groq_client)
@@ -163,6 +192,9 @@ workflow_service = WorkflowService(
     outputs_dir=settings.temp_outputs_dir,
     orchestrator=orchestrator,
     scene_edit_agent=scene_edit_agent,
+    max_concurrent_workflows=settings.max_concurrent_workflows,
+    max_pending_workflows=settings.max_pending_workflows,
+    min_free_disk_mb=settings.min_free_disk_mb,
 )
 product_service = ProductService(workflow_service, asset_inventory_service)
 
@@ -179,11 +211,33 @@ def get_studio_summary() -> dict:
 
 @app.post("/designs", response_model=CreateDesignResponse)
 def create_design(request: CreateDesignRequest) -> dict:
-    return workflow_service.create_design(
-        requirements_text=request.requirements_text,
-        detail_level=request.options.detail_level,
-        use_llm=request.options.use_llm,
-    )
+    try:
+        if request.confirmed_requirements is not None:
+            actual_hash = compute_requirements_hash(request.confirmed_requirements)
+            if actual_hash != request.confirmed_requirements_hash:
+                raise HTTPException(
+                    status_code=422,
+                    detail="confirmed RequirementSpec hash does not match its payload",
+                )
+            return workflow_service.create_design_from_requirements(
+                request.confirmed_requirements,
+                detail_level=request.options.detail_level,
+                source_label="confirmed_requirement_spec",
+                source_text=request.requirements_text,
+            )
+        return workflow_service.create_design(
+            requirements_text=request.requirements_text,
+            detail_level=request.options.detail_level,
+            use_llm=request.options.use_llm,
+        )
+    except WorkflowBusyError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": "5"},
+        ) from exc
+    except WorkflowStorageError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
 
 
 @app.get("/designs/{workflow_id}", response_model=WorkflowStatus)
@@ -274,6 +328,8 @@ def delete_design(workflow_id: str) -> dict:
     try:
         workflow_service.delete_design(workflow_id)
         return {"workflow_id": workflow_id, "deleted": True}
+    except WorkflowBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workflow not found") from exc
 
@@ -290,7 +346,12 @@ def parse_requirements(request: ParseRequirementsRequest) -> dict:
 
 @app.post("/designs/{workflow_id}/edit", response_model=EditDesignResponse)
 def edit_design(workflow_id: str, request: EditDesignRequest) -> dict:
-    result = workflow_service.edit_design(workflow_id, request.edit_prompt)
+    try:
+        result = workflow_service.edit_design(workflow_id, request.edit_prompt)
+    except WorkflowBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkflowStorageError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
     return workflow_service.public_edit_response(result)
 
 
@@ -306,6 +367,8 @@ def list_versions(workflow_id: str) -> list[dict]:
 def rollback_version(workflow_id: str, version_id: str) -> dict:
     try:
         return workflow_service.rollback_version(workflow_id, version_id)
+    except WorkflowBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="version not found") from exc
 
@@ -316,14 +379,17 @@ def get_events(workflow_id: str) -> list[dict]:
 
 
 @app.get("/designs/{workflow_id}/events/stream")
-def stream_events(workflow_id: str):
+def stream_events(workflow_id: str, after_event_id: str | None = None):
     if not workflow_service.workflow_exists(workflow_id):
         raise HTTPException(status_code=404, detail="workflow not found")
 
     def event_generator():
         import json
 
-        for event in workflow_service.stream_events(workflow_id):
+        for event in workflow_service.stream_events(
+            workflow_id,
+            after_event_id=after_event_id,
+        ):
             event_type = event.get("event_type", "workflow_event")
             yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
 
@@ -350,14 +416,38 @@ def get_asset(asset_id: str) -> dict:
 
 @app.post("/document-packs")
 async def create_document_pack(request: Request) -> dict:
-    content = await request.body()
+    limits = document_pack_service.archive_limits()
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > limits["max_zip_size_bytes"]:
+                raise HTTPException(status_code=422, detail="document pack exceeds ZIP size limit")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="invalid content-length header") from exc
+    content = await _read_limited_request_body(request, limits["max_zip_size_bytes"])
     if not content:
         raise HTTPException(status_code=422, detail="empty document pack body")
     filename = request.headers.get("x-filename")
     try:
-        return document_pack_service.ingest_zip(content, filename=filename).model_dump()
+        summary = await run_in_threadpool(
+            document_pack_service.ingest_zip,
+            content,
+            filename=filename,
+        )
+        return summary.model_dump()
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _read_limited_request_body(request: Request, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(status_code=422, detail="document pack exceeds ZIP size limit")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.get("/document-packs")
@@ -368,6 +458,7 @@ def list_document_packs() -> list[dict]:
 @app.get("/document-packs/capabilities", response_model=DocumentPackCapabilitiesView)
 def get_document_pack_capabilities() -> dict:
     capabilities = document_pack_service.capabilities()
+    archive_limits = document_pack_service.archive_limits()
     payload = capabilities.model_dump()
     status_map = capabilities.status_map()
     available_tools = [
@@ -418,13 +509,19 @@ def get_document_pack_capabilities() -> dict:
                 ".xlsx",
             ],
             "limits": {
-                "max_zip_size_mb": 80,
-                "max_member_size_mb": 15,
+                "max_zip_size_mb": archive_limits["max_zip_size_bytes"] // (1024 * 1024),
+                "max_member_size_mb": archive_limits["max_member_size_bytes"] // (1024 * 1024),
+                "max_member_count": archive_limits["max_member_count"],
+                "max_uncompressed_size_mb": archive_limits["max_uncompressed_size_bytes"]
+                // (1024 * 1024),
                 "processing_mode": "synchronous_local",
+                "execution": "thread_offloaded",
             },
             "max_size": {
-                "zip_mb": 80,
-                "member_mb": 15,
+                "zip_mb": archive_limits["max_zip_size_bytes"] // (1024 * 1024),
+                "member_mb": archive_limits["max_member_size_bytes"] // (1024 * 1024),
+                "uncompressed_mb": archive_limits["max_uncompressed_size_bytes"] // (1024 * 1024),
+                "member_count": archive_limits["max_member_count"],
             },
             "available_tools": available_tools,
             "disabled_tools": disabled_tools,
@@ -441,7 +538,7 @@ def get_document_pack_capabilities() -> dict:
                 "ocr_requires_local_tesseract_languages": True,
                 "dwg_requires_local_converter": True,
                 "processing_mode": "synchronous_local",
-                "generation_from_pack": "available_when_required_fields_are_confirmed",
+                "generation_from_pack": "available_when_qa_ready_and_mapping_mapped",
             },
             "next_action": (
                 "Uploader un ZIP de documents techniques, vérifier les champs manquants, "
@@ -563,22 +660,36 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
 )
 def generate_design_from_document_pack(pack_id: str) -> dict:
     try:
-        spec = document_pack_service.get_spec(pack_id)
+        _spec, qa_report, mapping, ready = document_pack_service.get_generation_readiness(pack_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="document pack not found") from exc
-    mapping = project_spec_mapper.map_to_requirements(spec)
-    if mapping.status != "mapped":
+    if not ready:
         return {
             "pack_id": pack_id,
             "status": "blocked",
             "mapping": mapping.model_dump(),
+            "extraction_report": {
+                "source": "project_design_spec",
+                "prompt_text_reparse": False,
+                "qa_status": qa_report.status,
+                "qa_ready_to_generate": qa_report.ready_to_generate,
+                "qa_blocking_issues": qa_report.blocking_issues,
+                "mapping_loss_report": mapping.mapping_loss_report,
+            },
         }
     requirements = RequirementSpec.model_validate(mapping.requirements)
-    design = workflow_service.create_design_from_requirements(
-        requirements=requirements,
-        detail_level="high",
-        source_label="project_design_spec",
-    )
+    try:
+        design = workflow_service.create_design_from_requirements(
+            requirements=requirements,
+            detail_level="high",
+            source_label="project_design_spec",
+        )
+    except WorkflowBusyError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": "5"},
+        ) from exc
     if design.get("workflow_id"):
         document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
     return {
@@ -608,15 +719,13 @@ def rag_reindex() -> dict:
 
 @app.get("/rag/search", response_model=RagSearchResponse)
 def rag_search(
-    q: str,
-    limit: int = 5,
+    q: str = Query(min_length=1, max_length=1000),
+    limit: int = Query(5, ge=1, le=25),
     collection: str | None = None,
     network_type: str | None = None,
     tower_type: str | None = None,
     doc_type: str | None = None,
 ) -> dict:
-    if limit < 1 or limit > 25:
-        raise HTTPException(status_code=422, detail="limit must be between 1 and 25")
     try:
         results = rag_service.search(
             query=q,

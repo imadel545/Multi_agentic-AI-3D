@@ -37,7 +37,9 @@ class RequirementExtractor:
         detail_level: str,
         enabled: bool | None = None,
     ) -> ExtractionResult:
-        effective_enabled = self.enabled if enabled is None else enabled
+        # A request may opt out, but it must never override the server policy and
+        # re-enable a provider that an operator deliberately disabled.
+        effective_enabled = self.enabled and enabled is not False
         if self.provider is None or not effective_enabled:
             return ExtractionResult(
                 requirements=parse_requirements_text(requirements_text, detail_level=detail_level),
@@ -46,10 +48,13 @@ class RequirementExtractor:
             )
         try:
             requirements = self.provider.extract_requirements(requirements_text, detail_level)
+            provider_fallback = any(
+                warning.code == "LLM_JSON_OBJECT_FALLBACK" for warning in requirements.warnings
+            )
             return ExtractionResult(
                 requirements=requirements,
                 provider=self.provider_name,
-                fallback_used=False,
+                fallback_used=provider_fallback,
             )
         except Exception as exc:
             requirements = parse_requirements_text(requirements_text, detail_level=detail_level)

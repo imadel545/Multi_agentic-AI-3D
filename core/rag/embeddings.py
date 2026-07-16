@@ -13,15 +13,25 @@ import hashlib
 import logging
 import math
 import os
-import re
-import shutil
-from pathlib import Path
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
+
+from core.rag.text import normalized_tokens
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "baai/bge-m3"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+DEFAULT_NVIDIA_TIMEOUT_S = 8.0
+DEFAULT_NVIDIA_MAX_RETRIES = 1
+DEFAULT_NVIDIA_BATCH_SIZE = 32
+NVIDIA_INPUT_PROFILE = "query_passage_v1"
+
+# NVIDIA publishes these dimensions for the supported Retriever embedding NIMs.
+# Keeping them local prevents a network probe during application import/startup.
+NVIDIA_MODEL_DIMENSIONS = {
+    "baai/bge-m3": 1024,
+}
 
 
 @runtime_checkable
@@ -31,6 +41,8 @@ class EmbeddingProvider(Protocol):
 
     def embed(self, text: str) -> list[float]: ...
 
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]: ...
+
 
 class HashEmbeddingProvider:
     """Deterministic hash embedding. No external dependency. Test / emergency fallback only."""
@@ -38,10 +50,11 @@ class HashEmbeddingProvider:
     def __init__(self, dimensions: int = 1024) -> None:
         self.dimensions = dimensions
         self.name = f"hashing-{dimensions}"
+        self.input_profile = "symmetric_v1"
 
     def embed(self, text: str) -> list[float]:
         vector = [0.0] * self.dimensions
-        tokens = re.findall(r"[a-zA-Z0-9]+", text.lower())
+        tokens = normalized_tokens(text)
         for token in tokens:
             digest = hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest()
             index = int.from_bytes(digest[:4], "big") % self.dimensions
@@ -52,11 +65,29 @@ class HashEmbeddingProvider:
             return vector
         return [value / norm for value in vector]
 
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed(text)
+
+    def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed_many(texts)
+
 
 class NvidiaEmbeddingProvider:
     """NVIDIA API provider for BAAI/bge-m3. OpenAI-compatible endpoint."""
 
-    def __init__(self, model_name: str = DEFAULT_MODEL, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL,
+        api_key: str | None = None,
+        *,
+        dimensions: int | None = None,
+        timeout_s: float = DEFAULT_NVIDIA_TIMEOUT_S,
+        max_retries: int = DEFAULT_NVIDIA_MAX_RETRIES,
+        batch_size: int = DEFAULT_NVIDIA_BATCH_SIZE,
+    ) -> None:
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -68,19 +99,73 @@ class NvidiaEmbeddingProvider:
         )
         if not self.api_key:
             raise RuntimeError("NVIDIA API key is required")
-        self.client = OpenAI(api_key=self.api_key, base_url=NVIDIA_BASE_URL)
+        resolved_dimensions = dimensions or NVIDIA_MODEL_DIMENSIONS.get(model_name)
+        if resolved_dimensions is None:
+            raise RuntimeError(
+                f"Embedding dimensions are unknown for NVIDIA model {model_name!r}; "
+                "configure an explicit dimension instead of probing the network at startup."
+            )
+        if timeout_s <= 0:
+            raise ValueError("NVIDIA embedding timeout must be positive")
+        if max_retries < 0:
+            raise ValueError("NVIDIA embedding max_retries cannot be negative")
+        if batch_size <= 0:
+            raise ValueError("NVIDIA embedding batch_size must be positive")
+
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=NVIDIA_BASE_URL,
+            timeout=timeout_s,
+            max_retries=max_retries,
+        )
         self.name = f"nvidia:{model_name}"
-        sample = self.embed("dimension probe")
-        self.dimensions = len(sample)
+        self.dimensions = resolved_dimensions
+        self.batch_size = batch_size
+        self.input_profile = NVIDIA_INPUT_PROFILE
 
     def embed(self, text: str) -> list[float]:
-        response = self.client.embeddings.create(
-            input=[text],
-            model=self.model_name,
-            encoding_format="float",
-            extra_body={"truncate": "NONE"},
-        )
-        return response.data[0].embedding
+        return self.embed_query(text)
+
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed_passages(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed_batch([text], input_type="query")[0]
+
+    def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
+        return self._embed_batch(texts, input_type="passage")
+
+    def _embed_batch(
+        self,
+        texts: Sequence[str],
+        *,
+        input_type: str,
+    ) -> list[list[float]]:
+        if not texts:
+            return []
+
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = list(texts[start : start + self.batch_size])
+            response = self.client.embeddings.create(
+                input=batch,
+                model=self.model_name,
+                encoding_format="float",
+                extra_body={"input_type": input_type, "truncate": "NONE"},
+            )
+            ordered = sorted(response.data, key=lambda item: getattr(item, "index", 0))
+            batch_vectors = [list(item.embedding) for item in ordered]
+            if len(batch_vectors) != len(batch):
+                raise RuntimeError(
+                    "NVIDIA embedding response count does not match the submitted batch"
+                )
+            for vector in batch_vectors:
+                if len(vector) != self.dimensions:
+                    raise RuntimeError(
+                        "NVIDIA embedding response dimension does not match the configured model"
+                    )
+            vectors.extend(batch_vectors)
+        return vectors
 
 
 class SentenceTransformersProvider:
@@ -93,33 +178,26 @@ class SentenceTransformersProvider:
         self.model = SentenceTransformer(model_name, trust_remote_code=False)
         self.name = f"sentence-transformers:{model_name}"
         self.dimensions = self.model.get_embedding_dimension()
+        self.input_profile = "symmetric_v1"
 
     def embed(self, text: str) -> list[float]:
         return self.model.encode(text, convert_to_numpy=True).tolist()
 
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        encoded = self.model.encode(list(texts), convert_to_numpy=True)
+        return encoded.tolist()
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed(text)
+
+    def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed_many(texts)
+
 
 def _strict_quality_mode() -> bool:
     return os.getenv("TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY", "").lower() in {"1", "true", "yes"}
-
-
-def _local_model_cache_dir() -> Path | None:
-    """Return the Hugging Face cache directory for BAAI/bge-m3 if it exists."""
-    try:
-        hf_home = Path(os.path.expanduser(os.getenv("HF_HOME", "~/.cache/huggingface")))
-        candidate = hf_home / "hub" / "models--BAAI--bge-m3"
-        return candidate if candidate.exists() else None
-    except Exception:
-        return None
-
-
-def _remove_local_model_cache(model_name: str) -> None:
-    """Remove the local model cache to free disk space when API is used."""
-    if model_name != DEFAULT_MODEL:
-        return
-    cache_dir = _local_model_cache_dir()
-    if cache_dir and cache_dir.exists():
-        logger.info("Removing local embedding model cache to free disk space: %s", cache_dir)
-        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 def build_embedding_provider(
@@ -149,7 +227,6 @@ def build_embedding_provider(
         try:
             provider = NvidiaEmbeddingProvider(model_name, api_key=api_key)
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
-            _remove_local_model_cache(model_name)
             return provider
         except Exception as exc:
             raise RuntimeError(
@@ -161,7 +238,6 @@ def build_embedding_provider(
         try:
             provider = NvidiaEmbeddingProvider(model_name, api_key=api_key)
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
-            _remove_local_model_cache(model_name)
             return provider
         except Exception as exc:
             if _strict_quality_mode():

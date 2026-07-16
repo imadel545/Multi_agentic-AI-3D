@@ -127,15 +127,30 @@ class ProductService:
         status = self._status_or_raise(workflow_id)
         events = self.workflow_service.get_events(workflow_id)
         issues = _collect_user_issues(status, events)
-        runtime = _current_runtime_state(events)
+        active_operation = status.get("active_operation")
+        runtime = (
+            _runtime_from_active_operation(active_operation)
+            if isinstance(active_operation, dict)
+            else _current_runtime_state(events)
+        )
         backend_status = status.get("status", "unknown")
         current_operation = _current_operation(status, events)
+        if backend_status in {"completed", "failed"} and not isinstance(active_operation, dict):
+            runtime = {
+                "node": "workflow",
+                "phase": "workflow",
+                "source": "status",
+                "operation": _event_to_human(f"workflow_{backend_status}", {}),
+                "node_status": backend_status,
+                "timestamp": runtime.get("timestamp"),
+            }
         current_node = runtime.get("node")
         phase = runtime.get("phase")
         llm = llm_truth(status, workflow_service=self.workflow_service)
         human_label = (
             runtime.get("operation")
-            if current_node == "workflow" and runtime.get("operation")
+            if runtime.get("source") == "persisted_active_operation"
+            or (current_node == "workflow" and runtime.get("operation"))
             else _trace_node_label(current_node)
             if current_node
             else current_operation
@@ -220,6 +235,9 @@ class ProductService:
         )
         viewer_artifacts.append(_artifact("rag_evidence.json", "application/json", "rag_evidence"))
         viewer_artifacts.append(
+            _artifact("planning_decision.json", "application/json", "planning_decision")
+        )
+        viewer_artifacts.append(
             _artifact("geometry_validation.json", "application/json", "geometry_validation")
         )
         viewer_artifacts.append(
@@ -250,19 +268,17 @@ class ProductService:
             "asset_import_summary": status.get("asset_import_summary"),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
-            "primary_glb_url": primary_glb.get("url") if primary_glb else None,
-            "preview_url": preview.get("url") if preview else None,
-            "report_url": report.get("url") if report else None,
-            "metadata_url": metadata.get("url") if metadata else None,
-            "requirements_spec_url": requirements_spec.get("url") if requirements_spec else None,
-            "extraction_report_url": extraction_report.get("url") if extraction_report else None,
-            "scene_spec_url": scene_spec.get("url") if scene_spec else None,
-            "qa_report_url": qa_report.get("url") if qa_report else None,
-            "generation_report_url": generation_report.get("url") if generation_report else None,
-            "rag_evidence_url": rag_evidence.get("url") if rag_evidence else None,
-            "geometry_validation_url": geometry_validation.get("url")
-            if geometry_validation
-            else None,
+            "primary_glb_url": _available_artifact_url(primary_glb),
+            "preview_url": _available_artifact_url(preview),
+            "report_url": _available_artifact_url(report),
+            "metadata_url": _available_artifact_url(metadata),
+            "requirements_spec_url": _available_artifact_url(requirements_spec),
+            "extraction_report_url": _available_artifact_url(extraction_report),
+            "scene_spec_url": _available_artifact_url(scene_spec),
+            "qa_report_url": _available_artifact_url(qa_report),
+            "generation_report_url": _available_artifact_url(generation_report),
+            "rag_evidence_url": _available_artifact_url(rag_evidence),
+            "geometry_validation_url": _available_artifact_url(geometry_validation),
             "extraction_provider": llm["extraction_provider"],
             "llm_provider": status.get("llm_provider"),
             "llm_available": llm["llm_available"],
@@ -470,6 +486,9 @@ def _operation_for_status(status: str) -> str:
 
 def _current_operation(status: dict, events: list[dict] | None = None) -> str:
     backend_status = status.get("status", "unknown")
+    active_operation = status.get("active_operation")
+    if isinstance(active_operation, dict) and active_operation.get("status") == "running":
+        return str(active_operation.get("human_label") or "Opération en cours")
     metrics = status.get("metrics", {})
     runtime = _current_runtime_state(events or [])
     if backend_status in {"pending", "running"} and runtime.get("node"):
@@ -486,6 +505,18 @@ def _current_operation(status: dict, events: list[dict] | None = None) -> str:
     if running_step:
         return f"Étape en cours : {running_step}"
     return f"Traitement en cours ({backend_status})"
+
+
+def _runtime_from_active_operation(operation: dict) -> dict:
+    kind = str(operation.get("kind") or "operation")
+    return {
+        "node": kind,
+        "phase": "revision" if kind == "edit" else kind,
+        "source": "persisted_active_operation",
+        "operation": str(operation.get("human_label") or "Opération en cours"),
+        "node_status": str(operation.get("status") or "running"),
+        "timestamp": operation.get("started_at"),
+    }
 
 
 def _current_runtime_state(events: list[dict]) -> dict:
@@ -604,6 +635,13 @@ def _artifact_by_name(artifacts: list[dict], name: str) -> dict | None:
     return None
 
 
+def _available_artifact_url(artifact: dict | None) -> str | None:
+    if artifact is None or artifact.get("available") is not True:
+        return None
+    url = artifact.get("url")
+    return str(url) if isinstance(url, str) and url else None
+
+
 def _qa_summary(status: dict) -> str:
     qa_score = status.get("qa_score")
     if qa_score is None:
@@ -654,7 +692,13 @@ def _viewer_qa_summary(status: dict) -> dict:
         "object_counts": geometry.get("object_counts"),
         "missing_objects": geometry.get("missing_objects"),
         "glb_parse_structural": glb.get("structural_qa_passed"),
-        "preview_luminance_only": preview.get("inspection_mode") == "png_parse",
+        "preview_pixel_framing_qa": preview.get("inspection_mode") == "png_parse",
+        "preview_subject_framing_valid": preview.get("subject_framing_valid"),
+        "preview_subject_bbox_width_ratio": preview.get("subject_bbox_width_ratio"),
+        "preview_subject_bbox_height_ratio": preview.get("subject_bbox_height_ratio"),
+        "preview_subject_center_x_ratio": preview.get("subject_center_x_ratio"),
+        "preview_subject_min_edge_margin_ratio": preview.get("subject_min_edge_margin_ratio"),
+        "preview_subject_touches_frame": preview.get("subject_touches_frame"),
     }
 
 
@@ -858,6 +902,26 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
                     "avant validation produit."
                 ),
                 "technical_code": "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED",
+            }
+        )
+    planning_summary = status.get("rag_planning_summary") or {}
+    if planning_summary.get("decision_fallback_used") and not any(
+        i.get("technical_code") == "PLANNING_DECISION_FALLBACK_INFERRED" for i in issues
+    ):
+        reason = planning_summary.get("decision_fallback_reason") or "provider_unavailable"
+        issues.append(
+            {
+                "title": "Décision de planification en repli",
+                "severity": "info",
+                "impact": (
+                    "GPT-OSS n'a pas arbitré les candidats RAG. Le backend a conservé "
+                    f"les valeurs déjà validées ({reason})."
+                ),
+                "recommended_action": (
+                    "Le design reste déterministe; vérifiez les suggestions RAG si vous "
+                    "souhaitez les appliquer explicitement."
+                ),
+                "technical_code": "PLANNING_DECISION_FALLBACK_INFERRED",
             }
         )
     issues.extend(_collect_runtime_event_issues(events or [], status))

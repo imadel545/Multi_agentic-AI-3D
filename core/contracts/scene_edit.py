@@ -15,6 +15,19 @@ class PatchOperation(StrictModel):
     @field_validator("path")
     @classmethod
     def path_must_be_allowed(cls, value: str) -> str:
+        allowed_tower_characteristics = {
+            "structure",
+            "leg_count",
+            "base_width_m",
+            "top_width_m",
+            "foundation_type",
+            "has_platform",
+            "platform_count",
+            "has_ladder",
+            "has_lightning_rod",
+            "has_aviation_light",
+            "material",
+        }
         allowed_sector_paths = {
             "azimuth_deg",
             "install_height_m",
@@ -35,10 +48,16 @@ class PatchOperation(StrictModel):
         if value == "/tower/height_m":
             return value
         if value.startswith("/tower/characteristics/"):
-            return value
+            parts = value.split("/")
+            if len(parts) == 4 and parts[3] in allowed_tower_characteristics:
+                return value
         if value.startswith("/sectors/"):
             parts = value.split("/")
-            if len(parts) >= 4 and parts[3] in allowed_sector_paths:
+            if (
+                len(parts) == 4
+                and (parts[2] == "*" or parts[2].isdigit())
+                and parts[3] in allowed_sector_paths
+            ):
                 return value
         if value.startswith("/visual_elements/"):
             parts = value.split("/")
@@ -52,6 +71,7 @@ class ScenePatch(StrictModel):
     operations: list[PatchOperation] = Field(min_length=1)
     edit_llm_provider: str | None = None
     edit_llm_fallback_used: bool = False
+    edit_llm_fallback_reason: str | None = Field(default=None, max_length=160)
 
 
 class SceneEditResult(StrictModel):
@@ -69,5 +89,6 @@ class SceneEditResult(StrictModel):
     qa_score: float | None = None
     llm_provider: str | None = None
     llm_fallback_used: bool | None = None
+    llm_fallback_reason: str | None = Field(default=None, max_length=160)
     errors: list[ValidationIssue] = Field(default_factory=list)
     warnings: list[ValidationIssue] = Field(default_factory=list)

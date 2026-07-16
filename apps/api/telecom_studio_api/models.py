@@ -1,6 +1,8 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from core.contracts.requirements import RequirementSpec
 
 
 class DesignOptions(BaseModel):
@@ -11,6 +13,19 @@ class DesignOptions(BaseModel):
 class CreateDesignRequest(BaseModel):
     requirements_text: str = Field(min_length=1, max_length=5000)
     options: DesignOptions = Field(default_factory=DesignOptions)
+    confirmed_requirements: RequirementSpec | None = None
+    confirmed_requirements_hash: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+
+    @model_validator(mode="after")
+    def validate_confirmed_requirements_pair(self) -> "CreateDesignRequest":
+        if (self.confirmed_requirements is None) != (self.confirmed_requirements_hash is None):
+            raise ValueError(
+                "confirmed_requirements and confirmed_requirements_hash must be provided together"
+            )
+        return self
 
 
 class CreateDesignResponse(BaseModel):
@@ -52,6 +67,7 @@ class WorkflowStatus(BaseModel):
     created_at: str | None = None
     version_id: str | None = None
     active_version_id: str | None = None
+    active_operation: dict | None = None
     artifacts: dict[str, str]
     active_version_artifacts: dict[str, str] | None = None
     warnings: list[dict]
@@ -105,7 +121,8 @@ class ParseRequirementsRequest(BaseModel):
 
 
 class ParseRequirementsResponse(BaseModel):
-    requirements: dict | None
+    requirements: RequirementSpec | None
+    requirements_hash: str | None = None
     warnings: list[dict]
     errors: list[dict]
     provider: str | None

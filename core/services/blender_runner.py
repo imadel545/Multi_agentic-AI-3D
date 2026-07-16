@@ -2,9 +2,8 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
-import zlib
-from binascii import crc32
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -38,6 +37,7 @@ class BlenderRunner:
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()
         output_dir.mkdir(parents=True, exist_ok=True)
+        _clear_generated_artifacts(output_dir)
         scene_spec_path = output_dir / "scene_spec.json"
         scene_spec_path.write_text(
             json.dumps(scene.model_dump(), indent=2, ensure_ascii=False),
@@ -55,6 +55,7 @@ class BlenderRunner:
                 install_hint=_blender_install_hint(),
             )
 
+        staging_dir = Path(tempfile.mkdtemp(prefix=".blender-staging-", dir=output_dir))
         command = [
             str(blender_path),
             "-b",
@@ -62,7 +63,7 @@ class BlenderRunner:
             str(self.worker_script),
             "--",
             str(scene_spec_path),
-            str(output_dir),
+            str(staging_dir),
         ]
         completed: subprocess.CompletedProcess[str] | None = None
         attempt_errors: list[str] = []
@@ -70,6 +71,7 @@ class BlenderRunner:
             try:
                 completed = self._run_blender_command(command)
             except subprocess.TimeoutExpired as exc:
+                shutil.rmtree(staging_dir, ignore_errors=True)
                 self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_timeout")
                 return self._result(
                     started,
@@ -89,6 +91,7 @@ class BlenderRunner:
             if attempt < 3:
                 time.sleep(attempt)
         if completed is None or completed.returncode != 0:
+            shutil.rmtree(staging_dir, ignore_errors=True)
             self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_error")
             return self._result(
                 started,
@@ -99,8 +102,10 @@ class BlenderRunner:
                 blender_path=str(blender_path),
                 error="\n".join(attempt_errors)[-2000:] or "Blender failed.",
             )
-        if not _artifacts_valid(output_dir):
+        validation_error = _validate_staged_artifacts(staging_dir, scene)
+        if validation_error:
             error_output = (completed.stderr or completed.stdout).strip()[-2000:]
+            shutil.rmtree(staging_dir, ignore_errors=True)
             self._write_fallback_artifacts(
                 output_dir, scene, mode="fallback_blender_missing_artifacts"
             )
@@ -111,8 +116,11 @@ class BlenderRunner:
                 "fallback_blender_missing_artifacts",
                 True,
                 blender_path=str(blender_path),
-                error=error_output or "Blender completed without required artifacts.",
+                error=(
+                    validation_error or error_output or "Blender completed without valid artifacts."
+                ),
             )
+        _promote_staged_artifacts(staging_dir, output_dir)
         return self._result(
             started,
             output_dir,
@@ -185,11 +193,7 @@ class BlenderRunner:
         )
 
     def _write_fallback_artifacts(self, output_dir: Path, scene: SceneSpec, mode: str) -> None:
-        (output_dir / "design.glb").write_bytes(
-            b"glTF fallback artifact generated from validated SceneSpec: " + scene.scene_id.encode()
-        )
-        width, height = scene.preview.resolution
-        (output_dir / "preview.png").write_bytes(_minimal_png(width, height))
+        _clear_generated_artifacts(output_dir)
         asset_imports = _fallback_asset_imports(scene, self.project_root)
         warnings = _unique_strings(
             [
@@ -225,31 +229,16 @@ class BlenderRunner:
                         accessory.model_dump() for accessory in scene.accessory_assets
                     ],
                     "preview_camera": _preview_camera_metadata(scene),
+                    "artifacts_available": {
+                        "glb": False,
+                        "preview": False,
+                    },
                     "warnings": warnings,
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
-
-
-def _minimal_png(width: int, height: int) -> bytes:
-    def chunk(chunk_type: bytes, payload: bytes) -> bytes:
-        checksum = crc32(chunk_type + payload) & 0xFFFFFFFF
-        return len(payload).to_bytes(4, "big") + chunk_type + payload + checksum.to_bytes(4, "big")
-
-    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00"
-    rows = []
-    for y in range(height):
-        row = bytearray([0])
-        for x in range(width):
-            gradient = 205 - int(42 * y / max(height - 1, 1)) + int(18 * x / max(width - 1, 1))
-            row.extend((gradient, gradient, min(255, gradient + 8)))
-        rows.append(bytes(row))
-    image = zlib.compress(b"".join(rows), level=9)
-    return (
-        b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b"")
-    )
 
 
 def _assets_used(scene: SceneSpec) -> list[str]:
@@ -466,11 +455,11 @@ def _unique_strings(values: list[str]) -> list[str]:
 def _preview_camera_metadata(scene: SceneSpec) -> dict:
     tower_height = scene.tower.height_m
     return {
-        "camera": "fallback_preview",
+        "camera": "not_rendered",
         "camera_type": "not_rendered",
         "target": [0.0, 0.0, round(tower_height * 0.52, 3)],
         "ortho_scale": round(max(tower_height * 1.28, 18.0), 3),
-        "background": "fallback_png",
+        "background": "not_rendered",
     }
 
 
@@ -481,10 +470,43 @@ def _blender_install_hint() -> str:
     )
 
 
-def _artifacts_valid(output_dir: Path) -> bool:
-    required = [
-        output_dir / "design.glb",
-        output_dir / "preview.png",
-        output_dir / "scene_metadata.json",
-    ]
-    return all(path.exists() and path.stat().st_size > 32 for path in required)
+def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None:
+    # Imported lazily to avoid the qa package's GenerationResult dependency cycle.
+    from core.qa.glb_inspector import GLBInspector
+    from core.qa.preview_inspector import PreviewInspector
+
+    glb_path = output_dir / "design.glb"
+    preview_path = output_dir / "preview.png"
+    metadata_path = output_dir / "scene_metadata.json"
+    if not metadata_path.exists():
+        return "BLENDER_METADATA_MISSING"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "BLENDER_METADATA_INVALID"
+    if metadata.get("scene_id") != scene.scene_id:
+        return "BLENDER_METADATA_SCENE_ID_MISMATCH"
+    if metadata.get("generation_mode") != "real_blender":
+        return "BLENDER_METADATA_MODE_INVALID"
+    glb_report = GLBInspector().inspect(glb_path, scene, metadata_path)
+    if not glb_report.structural_qa_passed:
+        return "BLENDER_GLB_INVALID:" + ",".join(glb_report.critical_errors)
+    preview_report = PreviewInspector().inspect(preview_path, scene)
+    if not preview_report.preview_qa_passed:
+        return "BLENDER_PREVIEW_INVALID:" + ",".join(preview_report.critical_errors)
+    return None
+
+
+def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
+    for name in ("design.glb", "preview.png", "scene_metadata.json", "design.blend"):
+        source = staging_dir / name
+        if source.exists():
+            source.replace(output_dir / name)
+    shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def _clear_generated_artifacts(output_dir: Path) -> None:
+    for name in ("design.glb", "preview.png", "scene_metadata.json", "design.blend"):
+        path = output_dir / name
+        if path.exists():
+            path.unlink()

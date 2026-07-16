@@ -20,10 +20,12 @@ def test_asset_fallback_selects_compatible_tower(tmp_path: Path) -> None:
         ),
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.scene is not None
     assert result.scene.tower.asset_id == "TOWER_LATTICE_30M"
     assert "ASSET_FALLBACK_TOWER_SELECTED" in _warning_codes(result)
+    assert result.generation is not None
+    assert result.generation.mode == "fallback_no_blender"
 
 
 def test_asset_fallback_selects_compatible_antenna(tmp_path: Path) -> None:
@@ -40,10 +42,12 @@ def test_asset_fallback_selects_compatible_antenna(tmp_path: Path) -> None:
         registry=MissingExactAntennaRegistry(Path("assets/manifests")),
     )
 
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.scene is not None
     assert result.scene.sectors[0].antenna_asset_id == "ANT_PANEL_5G_001"
     assert "ASSET_FALLBACK_ANTENNA_SELECTED" in _warning_codes(result)
+    assert result.generation is not None
+    assert result.generation.mode == "fallback_no_blender"
 
 
 def test_asset_fallback_fails_when_no_compatible_asset(tmp_path: Path) -> None:

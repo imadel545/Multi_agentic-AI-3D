@@ -82,20 +82,12 @@ class RfEngineerAgent:
                 )
             )
 
-        # Beamwidth vs sector count
-        checks["beamwidth_sector_compatible"] = True
-        expected_beamwidth = 360.0 / sector_count
-        if requirements.beamwidth_deg < expected_beamwidth * 0.7:
-            warnings.append(
-                ValidationIssue(
-                    code="RF_BEAMWIDTH_NARROW",
-                    message=(
-                        f"Beamwidth {requirements.beamwidth_deg}° may be too narrow "
-                        f"for {sector_count} sectors (expected ~{expected_beamwidth:.0f}°)."
-                    ),
-                    severity="warning",
-                )
-            )
+        # Sector spacing is not an RF coverage model. A 65 degree panel on a
+        # three-sector site is common and must not be compared with the 120
+        # degree azimuth spacing as though both represented the same quantity.
+        # Keep this bounded validator to syntax/range and expose RF propagation
+        # as an explicit product limitation instead of generating a false alert.
+        checks["beamwidth_value_valid"] = 0.0 < requirements.beamwidth_deg <= 180.0
 
         # Height vs tilt consistency
         checks["height_tilt_consistent"] = True

@@ -42,6 +42,8 @@ def test_edit_design_creates_version(client, tmp_path):
         assert payload["generation_mode"] in {"real_blender", "fallback_no_blender"}
         assert payload["qa_score"] == 1.0
         assert payload["patch"]["edit_llm_provider"] in {"groq", "deterministic_fallback"}
+        if payload["llm_fallback_used"]:
+            assert payload["llm_fallback_reason"]
         version_id = payload["version_id"]
         version_artifacts = payload["artifacts"]
         assert payload["viewer_bundle_url"] == f"/designs/{workflow_id}/viewer-bundle"
@@ -124,11 +126,31 @@ def test_edit_design_creates_version(client, tmp_path):
         rolled_status = client.get(f"/designs/{workflow_id}").json()
         assert rolled_status["active_version_id"] == first_version
 
+        active_version = workflow_service.versioning.get_active_version(workflow_id)
+        assert active_version is not None
+        failed_version = workflow_service.versioning.save_version(
+            workflow_id,
+            active_version.scene,
+            parent_version_id=first_version,
+            edit_description="failed revision",
+            status="failed",
+            artifact_dir=str(tmp_path / workflow_id / "failed_artifacts"),
+            activate=False,
+        )
+        failed_rollback = client.post(
+            f"/designs/{workflow_id}/versions/{failed_version.version_id}/rollback"
+        )
+        assert failed_rollback.status_code == 404
+        assert workflow_service.versioning.active_version_id(workflow_id) == first_version
+
         # Events
         events_resp = client.get(f"/designs/{workflow_id}/events")
         assert events_resp.status_code == 200
         events = events_resp.json()
         assert any(e["event_type"] == "edit_patch_applied" for e in events)
+        interpreted = next(e for e in events if e["event_type"] == "edit_patch_interpreted")
+        assert interpreted["payload"]["llm_provider"] in {"groq", "deterministic_fallback"}
+        assert interpreted["payload"]["operation_count"] >= 1
         assert any(e["payload"].get("version_id") == version_id for e in events)
         rollback_event = next(e for e in events if e["event_type"] == "version_rolled_back")
         assert rollback_event["payload"]["version_id"] == first_version
@@ -161,5 +183,8 @@ def test_edit_design_rejected_on_bad_prompt(client, tmp_path):
         assert payload["edit_status"] == "failed"
         assert payload["message"]
         assert "edit_prompt_again" in payload["available_actions"]
+        restored_status = client.get(f"/designs/{workflow_id}").json()
+        assert restored_status["status"] == "completed"
+        assert restored_status.get("active_operation") is None
     finally:
         workflow_service.outputs_dir = original_outputs

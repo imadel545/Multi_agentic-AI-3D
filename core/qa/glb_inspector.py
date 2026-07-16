@@ -5,6 +5,11 @@ from typing import Any
 
 from core.contracts.glb_inspection import GlbInspectionReport
 from core.contracts.scene import SceneSpec
+from core.qa.mesh_qa import (
+    _build_semantic_index,
+    _semantic_object_counts,
+    _semantic_sector_ids,
+)
 
 GLB_MAGIC = b"glTF"
 GLB_JSON_CHUNK_TYPE = 0x4E4F534A
@@ -29,6 +34,8 @@ class GLBInspector:
                 object_names=[],
                 node_count=0,
                 mesh_count=0,
+                primitive_count=0,
+                position_accessor_count=0,
                 material_count=0,
                 metadata_exists=metadata_path.exists() if metadata_path else False,
                 warnings=[],
@@ -44,6 +51,8 @@ class GLBInspector:
                 object_names=[],
                 node_count=0,
                 mesh_count=0,
+                primitive_count=0,
+                position_accessor_count=0,
                 material_count=0,
                 metadata_exists=metadata_path.exists() if metadata_path else False,
                 warnings=[],
@@ -52,7 +61,14 @@ class GLBInspector:
 
         parsed = _parse_glb_or_gltf(glb_path)
         if parsed is not None:
-            payload, node_count, mesh_count, material_count = parsed
+            (
+                payload,
+                node_count,
+                mesh_count,
+                primitive_count,
+                position_accessor_count,
+                material_count,
+            ) = parsed
             object_names = [
                 str(node.get("name", ""))
                 for node in payload.get("nodes", [])
@@ -67,8 +83,11 @@ class GLBInspector:
                 object_names=object_names,
                 node_count=node_count,
                 mesh_count=mesh_count,
+                primitive_count=primitive_count,
+                position_accessor_count=position_accessor_count,
                 material_count=material_count,
                 metadata_exists=metadata_path.exists() if metadata_path else False,
+                payload=payload,
                 warnings=[],
                 critical_errors=[],
             )
@@ -87,6 +106,8 @@ class GLBInspector:
                 object_names=procedural_objects,
                 node_count=len(procedural_objects),
                 mesh_count=0,
+                primitive_count=0,
+                position_accessor_count=0,
                 material_count=0,
                 metadata_exists=True,
                 warnings=["GLB_PARSE_FAILED_METADATA_FALLBACK_USED"],
@@ -102,6 +123,8 @@ class GLBInspector:
             object_names=[],
             node_count=0,
             mesh_count=0,
+            primitive_count=0,
+            position_accessor_count=0,
             material_count=0,
             metadata_exists=metadata_path.exists() if metadata_path else False,
             warnings=[],
@@ -109,7 +132,7 @@ class GLBInspector:
         )
 
 
-def _parse_glb_or_gltf(path: Path) -> tuple[dict[str, Any], int, int, int] | None:
+def _parse_glb_or_gltf(path: Path) -> tuple[dict[str, Any], int, int, int, int, int] | None:
     try:
         if path.suffix.lower() == ".gltf":
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -122,10 +145,35 @@ def _parse_glb_or_gltf(path: Path) -> tuple[dict[str, Any], int, int, int] | Non
     nodes = payload.get("nodes", [])
     meshes = payload.get("meshes", [])
     materials = payload.get("materials", [])
+    accessors = payload.get("accessors", [])
+    primitive_count = 0
+    position_accessor_count = 0
+    if isinstance(meshes, list):
+        for mesh in meshes:
+            if not isinstance(mesh, dict):
+                continue
+            primitives = mesh.get("primitives", [])
+            if not isinstance(primitives, list):
+                continue
+            primitive_count += len(primitives)
+            for primitive in primitives:
+                if not isinstance(primitive, dict):
+                    continue
+                accessor_index = primitive.get("attributes", {}).get("POSITION")
+                if (
+                    isinstance(accessor_index, int)
+                    and isinstance(accessors, list)
+                    and 0 <= accessor_index < len(accessors)
+                    and isinstance(accessors[accessor_index], dict)
+                    and int(accessors[accessor_index].get("count") or 0) > 0
+                ):
+                    position_accessor_count += 1
     return (
         payload,
         len(nodes) if isinstance(nodes, list) else 0,
         len(meshes) if isinstance(meshes, list) else 0,
+        primitive_count,
+        position_accessor_count,
         len(materials) if isinstance(materials, list) else 0,
     )
 
@@ -160,19 +208,31 @@ def _report(
     object_names: list[str],
     node_count: int,
     mesh_count: int,
+    primitive_count: int,
+    position_accessor_count: int,
     material_count: int,
     metadata_exists: bool,
     warnings: list[str],
     critical_errors: list[str],
+    payload: dict[str, Any] | None = None,
 ) -> GlbInspectionReport:
-    expected = _expected_prefixes(scene)
+    semantic_payload = payload or {"nodes": [{"name": name} for name in object_names]}
+    semantic_index = _build_semantic_index(semantic_payload, scene)
+    semantic_counts = _semantic_object_counts(semantic_index)
+    semantic_sector_ids = _semantic_sector_ids(semantic_index)
+    expected = _expected_semantic_categories(scene)
     found = {
-        category: _count_matching(object_names, prefixes) >= minimum
-        for category, prefixes, minimum in expected
+        category: semantic_counts.get(role, 0) >= minimum for category, role, minimum in expected
     }
     expected_objects_present = all(found.values())
     minimum_node_count = _minimum_node_count(scene)
     minimum_node_count_valid = node_count >= minimum_node_count
+    minimum_semantic_object_count_valid = len(semantic_index.entities) >= minimum_node_count
+    report_warnings = list(warnings)
+    if semantic_index.mode == "name_based":
+        report_warnings.append("GLB_SEMANTIC_EXTRAS_MISSING_NAME_BASED_MODE")
+    elif semantic_index.mode == "mixed_semantic_name_based":
+        report_warnings.append("GLB_SEMANTIC_EXTRAS_PARTIAL_MIXED_MODE")
     checks = {
         "has_tower": found["tower"],
         "has_antennas": found["antennas"],
@@ -187,14 +247,27 @@ def _report(
         "has_metadata": metadata_exists,
         "expected_objects_present": expected_objects_present,
         "minimum_node_count_valid": minimum_node_count_valid,
+        "minimum_semantic_object_count_valid": minimum_semantic_object_count_valid,
+        "semantic_roots_available": bool(semantic_index.entities),
+        "semantic_root_coverage_complete": (
+            semantic_index.mode == "semantic_extras" and expected_objects_present
+        ),
+        "mesh_primitives_present": primitive_count > 0,
+        "position_accessors_nonempty": position_accessor_count > 0,
     }
     errors = list(critical_errors)
     if not expected_objects_present:
         errors.append("EXPECTED_GLB_OBJECTS_MISSING")
     if not minimum_node_count_valid:
         errors.append("MINIMUM_GLB_NODE_COUNT_NOT_MET")
-    if inspection_mode == "glb_parse" and not format_valid:
+    if not minimum_semantic_object_count_valid:
+        errors.append("MINIMUM_SEMANTIC_OBJECT_COUNT_NOT_MET")
+    if not format_valid:
         errors.append("GLB_FORMAT_INVALID")
+    if inspection_mode == "glb_parse" and primitive_count == 0:
+        errors.append("GLB_MESH_PRIMITIVES_MISSING")
+    if inspection_mode == "glb_parse" and position_accessor_count == 0:
+        errors.append("GLB_POSITION_ACCESSORS_EMPTY")
     structural_qa_passed = not errors
     return GlbInspectionReport(
         inspection_mode=inspection_mode,  # type: ignore[arg-type]
@@ -203,17 +276,25 @@ def _report(
         format_valid=format_valid,
         node_count=node_count,
         mesh_count=mesh_count,
+        primitive_count=primitive_count,
+        position_accessor_count=position_accessor_count,
         material_count=material_count,
         object_names=object_names,
+        semantic_inspection_mode=semantic_index.mode,
+        semantic_root_count=len(semantic_index.entities),
+        semantic_extras_root_count=semantic_index.extras_root_count,
+        semantic_extras_coverage_ratio=semantic_index.extras_coverage_ratio,
+        semantic_object_counts=semantic_counts,
+        semantic_sector_ids=semantic_sector_ids,
         expected_object_prefixes_found=found,
         checks=checks,
-        warnings=warnings,
+        warnings=report_warnings,
         critical_errors=errors,
         structural_qa_passed=structural_qa_passed,
     )
 
 
-def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int]]:
+def _expected_semantic_categories(scene: SceneSpec) -> list[tuple[str, str, int]]:
     sector_count = len(scene.sectors)
     radio_count = sum(1 for sector in scene.sectors if sector.radio_asset_id)
     cable_count = sum(1 for sector in scene.sectors if sector.include_cable)
@@ -224,20 +305,16 @@ def _expected_prefixes(scene: SceneSpec) -> list[tuple[str, tuple[str, ...], int
     foundation_count = _expected_foundation_count(scene)
     label_count = _expected_label_count(scene)
     return [
-        ("tower", ("tower", "tower_"), 1),
-        (
-            "antennas",
-            ("antenna", "antenna_", "antenna_panel", "antenna_dish", "dish_"),
-            sector_count,
-        ),
-        ("radios_or_rru", ("radio", "radio_", "rru", "rru_"), radio_count),
-        ("cables", ("cable", "cable_"), cable_count),
-        ("sector_beams", ("beam", "beam_", "sector_beam", "sector_beam_"), beam_count),
-        ("azimuth_arrows", ("azimuth_arrow", "azimuth_arrow_"), arrow_count),
-        ("power_cabinet", ("power_cabinet", "cabinet"), cabinet_count),
-        ("gps_antenna", ("gps_antenna", "gps"), gps_count),
-        ("foundation", ("foundation", "foundation_"), foundation_count),
-        ("labels", ("label", "label_"), label_count),
+        ("tower", "tower", 1),
+        ("antennas", "antenna", sector_count),
+        ("radios_or_rru", "rru", radio_count),
+        ("cables", "cable", cable_count),
+        ("sector_beams", "beam", beam_count),
+        ("azimuth_arrows", "azimuth_arrow", arrow_count),
+        ("power_cabinet", "power_cabinet", cabinet_count),
+        ("gps_antenna", "gps", gps_count),
+        ("foundation", "foundation", foundation_count),
+        ("labels", "label", label_count),
     ]
 
 
@@ -259,7 +336,7 @@ def _minimum_node_count(scene: SceneSpec) -> int:
 
 
 def _expected_foundation_count(scene: SceneSpec) -> int:
-    return 1 if scene.tower.characteristics.foundation_type == "concrete_pad" else 0
+    return int(scene.tower.characteristics.foundation_type != "unknown")
 
 
 def _expected_label_count(scene: SceneSpec) -> int:
@@ -271,17 +348,6 @@ def _expected_label_count(scene: SceneSpec) -> int:
     if scene.visual_elements.include_gps_antenna:
         count += 1
     return count
-
-
-def _count_matching(object_names: list[str], prefixes: tuple[str, ...]) -> int:
-    if not prefixes:
-        return 0
-    normalized = [name.lower().replace(":", "_") for name in object_names]
-    return sum(
-        1
-        for name in normalized
-        if any(name == prefix or name.startswith(prefix) for prefix in prefixes)
-    )
 
 
 def _load_metadata(path: Path | None) -> dict:

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 import time
 import uuid
 import zipfile
@@ -16,16 +17,18 @@ from core.contracts.document_pack import (
     DocumentPackSummary,
     DocumentReference,
     ProjectDesignSpec,
+    RequirementMappingResult,
     SourceEvidence,
 )
 from core.document_pack.cad import extract_cad_text_pages
-from core.document_pack.classifier import classify_document
+from core.document_pack.classifier import classify_document, reclassify_document
 from core.document_pack.extractor import (
     FieldCandidate,
     consolidate_candidates,
     extract_field_candidates,
 )
 from core.document_pack.groq_extractor import GroqDocumentExtractor
+from core.document_pack.mapper import ProjectDesignSpecMapper
 from core.document_pack.orchestrator import DocumentPackOrchestrator, DocumentPackWorkflowState
 from core.document_pack.text_extractor import extract_text_result
 from core.document_pack.tooling import detect_document_pack_capabilities
@@ -36,6 +39,8 @@ if TYPE_CHECKING:
 
 MAX_MEMBER_SIZE_BYTES = 15 * 1024 * 1024
 MAX_PACK_SIZE_BYTES = 80 * 1024 * 1024
+MAX_MEMBER_COUNT = 256
+MAX_UNCOMPRESSED_SIZE_BYTES = 200 * 1024 * 1024
 
 
 class DocumentPackService:
@@ -63,24 +68,38 @@ class DocumentPackService:
         return self.outputs_dir / "document_packs"
 
     def ingest_zip(self, content: bytes, filename: str | None = None) -> DocumentPackSummary:
-        if len(content) > MAX_PACK_SIZE_BYTES:
-            raise ValueError("document pack exceeds local MVP size limit")
+        _validate_zip_archive(content)
         capabilities = self.capabilities()
         tool_status = capabilities.status_map()
         pack_id = f"pack_{uuid.uuid4().hex[:12]}"
         pack_dir = self.packs_dir / pack_id
         pack_dir.mkdir(parents=True, exist_ok=False)
-        state = self.orchestrator.run(
-            {
-                "pack_id": pack_id,
-                "pack_dir": pack_dir,
-                "content": content,
-                "filename": filename,
-                "capabilities": capabilities,
-                "tool_status": tool_status,
-            }
-        )
-        return DocumentPackSummary.model_validate(state["summary"])
+        try:
+            state = self.orchestrator.run(
+                {
+                    "pack_id": pack_id,
+                    "pack_dir": pack_dir,
+                    "content": content,
+                    "filename": filename,
+                    "capabilities": capabilities,
+                    "tool_status": tool_status,
+                }
+            )
+            return DocumentPackSummary.model_validate(state["summary"])
+        except zipfile.BadZipFile as exc:
+            shutil.rmtree(pack_dir, ignore_errors=True)
+            raise ValueError("invalid ZIP archive") from exc
+        except Exception:
+            shutil.rmtree(pack_dir, ignore_errors=True)
+            raise
+
+    def archive_limits(self) -> dict[str, int]:
+        return {
+            "max_zip_size_bytes": MAX_PACK_SIZE_BYTES,
+            "max_member_size_bytes": MAX_MEMBER_SIZE_BYTES,
+            "max_member_count": MAX_MEMBER_COUNT,
+            "max_uncompressed_size_bytes": MAX_UNCOMPRESSED_SIZE_BYTES,
+        }
 
     def capabilities(self) -> DocumentPackCapabilities:
         return detect_document_pack_capabilities(
@@ -115,22 +134,6 @@ class DocumentPackService:
             for info in sorted(archive.infolist(), key=lambda item: item.filename):
                 if info.is_dir() or _unsafe_zip_path(info.filename):
                     continue
-                if info.file_size > MAX_MEMBER_SIZE_BYTES:
-                    document = classify_document(info.filename, b"", duplicate_of=None)
-                    documents.append(
-                        document.model_copy(
-                            update={
-                                "reason": "File exceeds local MVP per-document size limit.",
-                                "priority": "ignore",
-                                "purpose": "unsupported_but_recorded",
-                                "extraction_status": "unsupported",
-                                "processing_warnings": [
-                                    "File exceeds local MVP per-document size limit."
-                                ],
-                            }
-                        )
-                    )
-                    continue
                 payload = archive.read(info)
                 digest = hashlib.sha256(payload).hexdigest()
                 duplicate_of = seen_hashes.get(digest)
@@ -148,7 +151,10 @@ class DocumentPackService:
                     cad_result.extraction_status,
                     document.extractability,
                 )
-                document = document.model_copy(
+                document = reclassify_document(
+                    document,
+                    "\n".join(page.text for page in pages if page.text.strip()),
+                ).model_copy(
                     update={
                         "cad_status": cad_result.cad_status
                         if document.extractability == "cad"
@@ -160,7 +166,8 @@ class DocumentPackService:
                 )
                 documents.append(document)
                 pages_by_document[document.document_id] = pages
-                candidates.extend(extract_field_candidates(document, pages))
+                if document.used_for_design:
+                    candidates.extend(extract_field_candidates(document, pages))
                 processing_warnings.extend(f"{document.path}: {warning}" for warning in warnings)
         update = {
             "documents": documents,
@@ -347,11 +354,16 @@ class DocumentPackService:
         ):
             summary_path = pack_dir / "summary.json"
             if summary_path.exists():
-                packs.append(_read_json(summary_path))
+                packs.append(self.get_summary(pack_dir.name))
         return packs
 
     def get_summary(self, pack_id: str) -> dict:
-        return _read_json(self._pack_dir(pack_id) / "summary.json")
+        pack_dir = self._pack_dir(pack_id)
+        persisted = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
+        qa_report, _mapping, ready = _evaluate_generation_readiness(self.get_spec(pack_id))
+        return persisted.model_copy(
+            update={"can_generate_design": ready, "qa_score": qa_report.score}
+        ).model_dump()
 
     def get_documents(self, pack_id: str) -> list[dict]:
         return _read_json(self._pack_dir(pack_id) / "index.json")
@@ -377,13 +389,28 @@ class DocumentPackService:
         }
 
     def get_qa_report(self, pack_id: str) -> dict:
-        return _read_json(self._pack_dir(pack_id) / "qa_report.json")
+        pack_dir = self._pack_dir(pack_id)
+        persisted = DocumentPackQAReport.model_validate(_read_json(pack_dir / "qa_report.json"))
+        qa_report, _mapping, _ready = _evaluate_generation_readiness(self.get_spec(pack_id))
+        return qa_report.model_copy(
+            update={"memory_writeback": persisted.memory_writeback}
+        ).model_dump()
 
     def get_processing_report(self, pack_id: str) -> dict:
         return _read_json(self._pack_dir(pack_id) / "processing_report.json")
 
     def get_memory_summary(self, pack_id: str) -> dict:
-        return _read_json(self._pack_dir(pack_id) / "memory_summary.json")
+        payload = _read_json(self._pack_dir(pack_id) / "memory_summary.json")
+        payload["can_generate_design"] = self.get_summary(pack_id)["can_generate_design"]
+        return payload
+
+    def get_generation_readiness(
+        self,
+        pack_id: str,
+    ) -> tuple[ProjectDesignSpec, DocumentPackQAReport, RequirementMappingResult, bool]:
+        spec = self.get_spec(pack_id)
+        qa_report, mapping, ready = _evaluate_generation_readiness(spec)
+        return spec, qa_report, mapping, ready
 
     def apply_correction(
         self,
@@ -520,7 +547,7 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
     for document in spec.document_references:
         cad_status[document.cad_status] = cad_status.get(document.cad_status, 0) + 1
     blocking = [field for field in spec.missing_fields if field.severity == "blocking"]
-    qa = _qa_report(spec)
+    qa, _mapping, ready = _evaluate_generation_readiness(spec)
     return DocumentPackSummary(
         pack_id=spec.pack_id,
         status="processed",
@@ -528,7 +555,7 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
         high_priority_count=sum(1 for doc in spec.document_references if doc.priority == "high"),
         missing_blocking_count=len(blocking),
         conflict_count=len(spec.conflicts),
-        can_generate_design=not blocking and not spec.conflicts,
+        can_generate_design=ready,
         cad_status=cad_status,
         qa_score=qa.score,
         correction_count=correction_count,
@@ -538,7 +565,11 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
     )
 
 
-def _qa_report(spec: ProjectDesignSpec) -> DocumentPackQAReport:
+def _qa_report(
+    spec: ProjectDesignSpec,
+    mapping: RequirementMappingResult | None = None,
+) -> DocumentPackQAReport:
+    mapping = mapping or ProjectDesignSpecMapper().map_to_requirements(spec)
     checks = [
         DocumentPackQACheck(
             name="critical_fields_have_sources",
@@ -607,14 +638,28 @@ def _qa_report(spec: ProjectDesignSpec) -> DocumentPackQAReport:
             passed=not spec.groq_rejected_fields,
             reason="Groq fields without valid document/page/evidence must be rejected visibly.",
         ),
+        DocumentPackQACheck(
+            name="requirements_mapping_representable",
+            passed=mapping.status == "mapped",
+            reason=(
+                "Document values must map to RequirementSpec without flattening sector values "
+                "or inventing a radio network type."
+            ),
+        ),
     ]
     passed_count = sum(1 for check in checks if check.passed)
     score = round(passed_count / len(checks), 3)
     status = "passed" if score == 1 else "warning" if score >= 0.7 else "failed"
     warnings = [check.name for check in checks if not check.passed]
-    blocking = [field.field for field in spec.missing_fields if field.severity == "blocking"] + [
-        field.field for field in spec.conflicts
-    ]
+    blocking = list(
+        dict.fromkeys(
+            [
+                *(field.field for field in spec.missing_fields if field.severity == "blocking"),
+                *(field.field for field in spec.conflicts),
+                *mapping.blocking_fields,
+            ]
+        )
+    )
     return DocumentPackQAReport(
         pack_id=spec.pack_id,
         status=status,
@@ -622,16 +667,51 @@ def _qa_report(spec: ProjectDesignSpec) -> DocumentPackQAReport:
         checks=checks,
         warnings=warnings,
         blocking_issues=blocking,
-        ready_to_generate=not blocking and status != "failed",
+        ready_to_generate=not blocking and status != "failed" and mapping.status == "mapped",
         ready_confidence=score if not blocking else min(score, 0.49),
-        recommended_user_actions=_recommended_user_actions(spec, warnings),
+        recommended_user_actions=_recommended_user_actions(spec, warnings, mapping),
         tool_failures=_tool_failures(spec),
     )
+
+
+def _evaluate_generation_readiness(
+    spec: ProjectDesignSpec,
+) -> tuple[DocumentPackQAReport, RequirementMappingResult, bool]:
+    mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
+    qa_report = _qa_report(spec, mapping)
+    ready = qa_report.ready_to_generate and mapping.status == "mapped"
+    return qa_report, mapping, ready
 
 
 def _unsafe_zip_path(path: str) -> bool:
     candidate = Path(path)
     return candidate.is_absolute() or ".." in candidate.parts
+
+
+def _validate_zip_archive(content: bytes) -> None:
+    if len(content) > MAX_PACK_SIZE_BYTES:
+        raise ValueError("document pack exceeds the 80 MB compressed size limit")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            infos = [info for info in archive.infolist() if not info.is_dir()]
+    except zipfile.BadZipFile as exc:
+        raise ValueError("invalid ZIP archive") from exc
+    if not infos:
+        raise ValueError("document pack ZIP contains no files")
+    if len(infos) > MAX_MEMBER_COUNT:
+        raise ValueError(f"document pack exceeds the {MAX_MEMBER_COUNT} file limit")
+    unsafe_paths = [info.filename for info in infos if _unsafe_zip_path(info.filename)]
+    if unsafe_paths:
+        raise ValueError("document pack contains an unsafe ZIP member path")
+    encrypted = [info.filename for info in infos if info.flag_bits & 0x1]
+    if encrypted:
+        raise ValueError("encrypted ZIP members are not supported")
+    oversized = [info.filename for info in infos if info.file_size > MAX_MEMBER_SIZE_BYTES]
+    if oversized:
+        raise ValueError("document pack contains a file exceeding the 15 MB member limit")
+    total_uncompressed = sum(info.file_size for info in infos)
+    if total_uncompressed > MAX_UNCOMPRESSED_SIZE_BYTES:
+        raise ValueError("document pack exceeds the 200 MB uncompressed size limit")
 
 
 def _combined_extraction_status(
@@ -1064,7 +1144,11 @@ def _tool_failures(spec: ProjectDesignSpec) -> list[str]:
     return failures
 
 
-def _recommended_user_actions(spec: ProjectDesignSpec, warnings: list[str]) -> list[str]:
+def _recommended_user_actions(
+    spec: ProjectDesignSpec,
+    warnings: list[str],
+    mapping: RequirementMappingResult,
+) -> list[str]:
     actions: list[str] = []
     blocking_missing = [
         field.field for field in spec.missing_fields if field.severity == "blocking"
@@ -1085,6 +1169,25 @@ def _recommended_user_actions(spec: ProjectDesignSpec, warnings: list[str]) -> l
     if "hba_not_above_tower_height" in warnings:
         actions.append(
             "Corriger HBA ou hauteur pylône: HBA ne peut pas dépasser la hauteur pylône."
+        )
+    if "radio.network_type" in mapping.blocking_fields:
+        actions.append(
+            "Confirmer un type radio supporté (4G, 5G ou MW) avec une preuve documentaire."
+        )
+    sector_fields = [
+        field
+        for field in mapping.blocking_fields
+        if field
+        in {
+            "radio.hba_m",
+            "radio.mechanical_tilt_deg",
+            "radio.electrical_tilt_deg",
+        }
+    ]
+    if sector_fields:
+        actions.append(
+            "Les valeurs sectorielles suivantes diffèrent ou sont partielles et ne peuvent pas "
+            "être aplaties sans perte: " + ", ".join(sector_fields)
         )
     return actions
 

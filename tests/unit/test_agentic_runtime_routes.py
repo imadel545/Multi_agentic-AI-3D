@@ -1,4 +1,7 @@
+import shutil
 from pathlib import Path
+
+import pytest
 
 from core.agents.requirement_extractor import RequirementExtractor
 from core.contracts.quality import QualityGateReport
@@ -30,10 +33,11 @@ def test_agentic_route_repair_then_success(tmp_path: Path) -> None:
     )
 
     nodes = [entry["node"] for entry in result.trace]
-    assert result.status == "completed"
+    assert result.status == "failed"
     assert result.requirements is not None
     assert result.requirements.azimuths_deg == [0.0, 120.0, 240.0]
     assert result.generation is not None
+    assert result.generation.mode == "fallback_no_blender"
     assert nodes.index("scene_repair_handler") < nodes.index("pre_blender_gate")
     assert nodes.index("pre_blender_gate") < nodes.index("generate_blender")
     assert any(event["route"] == "scene_repair" for event in result.route_history)
@@ -69,8 +73,15 @@ def test_agentic_route_unrepairable_failure(tmp_path: Path) -> None:
     assert [event["attempt"] for event in scene_repair_routes] == [1, 2]
 
 
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is required to create truthful workflow memory",
+)
 def test_memory_recall_before_planning(tmp_path: Path) -> None:
-    orchestrator = _orchestrator(memory_service=MemoryService(tmp_path / "memory.db"))
+    orchestrator = _orchestrator(
+        memory_service=MemoryService(tmp_path / "memory.db"), real_blender=True
+    )
     _run_success(orchestrator, "wf_memory_seed", PROMPT_5G, tmp_path / "seed")
 
     result = _run_success(
@@ -86,9 +97,14 @@ def test_memory_recall_before_planning(tmp_path: Path) -> None:
     assert nodes.index("memory_recall") < nodes.index("plan_scene")
 
 
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is required to create truthful workflow memory",
+)
 def test_memory_writeback_after_success(tmp_path: Path) -> None:
     memory_service = MemoryService(tmp_path / "memory.db")
-    orchestrator = _orchestrator(memory_service=memory_service)
+    orchestrator = _orchestrator(memory_service=memory_service, real_blender=True)
 
     result = _run_success(orchestrator, "wf_memory_writeback", PROMPT_5G, tmp_path / "writeback")
 
@@ -146,15 +162,18 @@ def test_no_blender_call_before_quality_gate(tmp_path: Path) -> None:
     assert "generate_blender" not in nodes
 
 
-def _orchestrator(memory_service: MemoryService | None = None) -> DesignOrchestrator:
+def _orchestrator(
+    memory_service: MemoryService | None = None, *, real_blender: bool = False
+) -> DesignOrchestrator:
     return DesignOrchestrator(
         registry=AssetRegistry(Path("assets/manifests")),
         extractor=RequirementExtractor(enabled=False),
         rag_service=None,
         memory_service=memory_service,
-        blender_runner=BlenderRunner(
-            project_root=Path.cwd(),
-            blender_binary="definitely-missing-blender-binary",
+        blender_runner=BlenderRunner(project_root=Path.cwd())
+        if real_blender
+        else BlenderRunner(
+            project_root=Path.cwd(), blender_binary="definitely-missing-blender-binary"
         ),
         allow_blender_fallback=True,
     )

@@ -19,6 +19,7 @@ class TowerEngineerAgent:
 
         characteristics = requirements.tower_characteristics
         height = requirements.tower_height_m
+        base_width, top_width = _resolved_tower_widths(requirements, tower)
 
         # Leg count rules
         checks["leg_count_appropriate"] = True
@@ -34,7 +35,7 @@ class TowerEngineerAgent:
                 )
 
         # Taper validation
-        checks["taper_valid"] = characteristics.top_width_m <= characteristics.base_width_m
+        checks["taper_valid"] = top_width <= base_width
         if not checks["taper_valid"]:
             errors.append(
                 ValidationIssue(
@@ -45,20 +46,28 @@ class TowerEngineerAgent:
             )
 
         # Foundation appropriateness
-        checks["foundation_appropriate"] = True
-        if characteristics.structure in ("rooftop_mast", "small_cell_pole"):
-            if characteristics.foundation_type == "concrete_pad":
-                checks["foundation_appropriate"] = False
-                warnings.append(
-                    ValidationIssue(
-                        code="TOWER_FOUNDATION_RECOMMENDATION",
-                        message=(
-                            f"{characteristics.structure} typically uses "
-                            "rooftop_anchored or pole_base foundation."
-                        ),
-                        severity="warning",
-                    )
+        allowed_foundations = {
+            "lattice": {"concrete_pad"},
+            "monopole": {"concrete_pad", "pole_base"},
+            "rooftop_mast": {"rooftop_anchored"},
+            "small_cell_pole": {"concrete_pad", "pole_base"},
+        }
+        foundation_type = characteristics.foundation_type
+        checks["foundation_appropriate"] = (
+            foundation_type in allowed_foundations[characteristics.structure]
+        )
+        if not checks["foundation_appropriate"]:
+            errors.append(
+                ValidationIssue(
+                    code="TOWER_FOUNDATION_UNSUPPORTED",
+                    message=(
+                        f"Foundation {foundation_type!r} is not supported for "
+                        f"{characteristics.structure}; supported values are "
+                        f"{sorted(allowed_foundations[characteristics.structure])}."
+                    ),
+                    severity="error",
                 )
+            )
 
         # Accessory recommendations based on height
         recommended["has_platform"] = height >= 20
@@ -109,3 +118,26 @@ class TowerEngineerAgent:
             recommended_accessories=recommended,
             structural_score=round(score, 4),
         )
+
+
+def _resolved_tower_widths(
+    requirements: RequirementSpec,
+    tower: AssetManifest,
+) -> tuple[float, float]:
+    characteristics = requirements.tower_characteristics
+    manifest_width = tower.dimensions_m.width if tower.dimensions_m else None
+    default_base = {
+        "lattice": 4.0,
+        "monopole": 0.8,
+        "rooftop_mast": 0.35,
+        "small_cell_pole": 0.3,
+    }[characteristics.structure]
+    base_width = float(characteristics.base_width_m or manifest_width or default_base)
+    default_top_ratio = {
+        "lattice": 0.25,
+        "monopole": 0.35,
+        "rooftop_mast": 0.4,
+        "small_cell_pole": 0.6,
+    }[characteristics.structure]
+    top_width = float(characteristics.top_width_m or (base_width * default_top_ratio))
+    return base_width, top_width

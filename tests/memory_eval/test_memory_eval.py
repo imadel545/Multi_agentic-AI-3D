@@ -1,4 +1,7 @@
+import shutil
 from pathlib import Path
+
+import pytest
 
 from core.agents.requirement_extractor import RequirementExtractor
 from core.memory import MemoryService
@@ -8,6 +11,11 @@ from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 
 
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is required to evaluate truthful successful workflow memory",
+)
 def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_query(
     tmp_path: Path,
 ) -> None:
@@ -22,10 +30,7 @@ def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_quer
         extractor=RequirementExtractor(enabled=False),
         rag_service=None,
         memory_service=memory_service,
-        blender_runner=BlenderRunner(
-            project_root=Path.cwd(),
-            blender_binary="definitely-missing-blender-binary",
-        ),
+        blender_runner=BlenderRunner(project_root=Path.cwd()),
         allow_blender_fallback=True,
     )
 

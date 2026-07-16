@@ -48,7 +48,8 @@ def test_rf_engineer_warns_on_high_tilt(agent, valid_requirements):
     assert any(w.code == "RF_TILT_HIGH" for w in report.warnings)
 
 
-def test_rf_engineer_warns_on_narrow_beamwidth(agent, valid_requirements):
+def test_rf_engineer_does_not_infer_coverage_from_sector_spacing(agent, valid_requirements):
     req = valid_requirements.model_copy(update={"beamwidth_deg": 30})
     report = agent.validate(req)
-    assert any(w.code == "RF_BEAMWIDTH_NARROW" for w in report.warnings)
+    assert report.checks["beamwidth_value_valid"] is True
+    assert not any(w.code == "RF_BEAMWIDTH_NARROW" for w in report.warnings)

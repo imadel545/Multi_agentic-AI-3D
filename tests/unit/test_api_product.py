@@ -120,6 +120,16 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
             _synchronous=True,
         )
         workflow_id = response["workflow_id"]
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "workflow_failed",
+            {
+                "phase": "runtime",
+                "node": "stale_recovery_event",
+                "status": "failed",
+                "error": "STALE_EVENT_FOR_PROJECTION_TEST",
+            },
+        )
         operation = client.get(f"/designs/{workflow_id}/current-operation").json()
 
         assert operation["workflow_id"] == workflow_id
@@ -148,10 +158,48 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
         }
         assert operation["current_node"]
         assert operation["event_source"] == "push_sse"
-        assert operation["state_source"] == "runtime_events"
+        assert operation["state_source"] == "status"
         assert operation["runtime_capabilities"]["streaming_transport"] == "push_sse"
         assert operation["runtime_capabilities"]["can_cancel"] is False
         assert any(action["action"] == "pause" for action in operation["unsupported_actions"])
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
+    tmp_path: Path,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=("Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m."),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+        previous = workflow_service._begin_active_operation(
+            workflow_id,
+            operation_id="edit_test",
+            kind="edit",
+            human_label="Révision du design",
+        )
+
+        status = client.get(f"/designs/{workflow_id}").json()
+        operation = client.get(f"/designs/{workflow_id}/current-operation").json()
+
+        assert status["status"] == "running"
+        assert status["active_operation"]["operation_id"] == "edit_test"
+        assert operation["human_label"] == "Révision du design"
+        assert operation["state_source"] == "persisted_active_operation"
+        assert operation["is_running"] is True
+        assert operation["is_terminal"] is False
+        workflow_service._restore_status_after_operation(
+            workflow_id, previous, operation_id="edit_test"
+        )
+        assert client.get(f"/designs/{workflow_id}").json()["status"] == "completed"
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -228,6 +276,48 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
             assert artifact["url"].startswith(f"/designs/{workflow_id}/artifacts/")
             assert "/Users/" not in artifact["url"]
             assert isinstance(artifact["available"], bool)
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_failed_blender_workflow_does_not_advertise_viewer_artifacts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    monkeypatch.setattr(
+        workflow_service.orchestrator.blender_runner,
+        "_resolve_blender_binary",
+        lambda: None,
+    )
+    client = TestClient(app)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+
+        assert response["status"] == "failed"
+        status = client.get(f"/designs/{workflow_id}").json()
+        bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
+        events = client.get(f"/designs/{workflow_id}/events").json()
+
+        assert "glb" not in status["artifacts"]
+        assert "preview" not in status["artifacts"]
+        assert bundle["primary_glb_url"] is None
+        assert bundle["preview_url"] is None
+        assert not any(event["event_type"] == "artifact_ready" for event in events)
+        availability = {
+            artifact["name"]: artifact["available"] for artifact in bundle["viewer_artifacts"]
+        }
+        assert availability["design.glb"] is False
+        assert availability["preview.png"] is False
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -612,3 +702,28 @@ def test_product_issues_include_failed_runtime_nodes() -> None:
             "technical_code": "RUNTIME_NODE_FAILED:retrieve_rag_context",
         }
     ]
+
+
+def test_product_issues_expose_bounded_planning_fallback_without_degrading_3d() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    issues = _collect_user_issues(
+        {
+            "status": "completed",
+            "generation_mode": "real_blender",
+            "warnings": [],
+            "errors": [],
+            "rag_planning_summary": {
+                "decision_fallback_used": True,
+                "decision_fallback_reason": "provider_timeout",
+            },
+        }
+    )
+
+    planning_issue = next(
+        issue
+        for issue in issues
+        if issue["technical_code"] == "PLANNING_DECISION_FALLBACK_INFERRED"
+    )
+    assert planning_issue["severity"] == "info"
+    assert "valeurs déjà validées" in planning_issue["impact"]

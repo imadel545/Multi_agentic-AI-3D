@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import json
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,21 +16,35 @@ from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemoryS
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
-from core.services.blender_runner import GenerationResult
 
 if TYPE_CHECKING:
     from core.rag import RagService
+    from core.services.blender_runner import GenerationResult
 
 HIGH_QA_THRESHOLD = 0.95
+MAX_MEMORY_ISSUES_PER_WORKFLOW = 32
 
 
 class MemoryService:
-    def __init__(self, db_path: Path, rag_service: "RagService | None" = None) -> None:
+    def __init__(self, db_path: Path, rag_service: RagService | None = None) -> None:
         self.db_path = db_path
         self.rag_service = rag_service
+        self._last_index_result = threading.local()
         self.last_index_result = MemoryIndexResult(status="not_indexed")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
+
+    @property
+    def last_index_result(self) -> MemoryIndexResult:
+        return getattr(
+            self._last_index_result,
+            "value",
+            MemoryIndexResult(status="not_indexed"),
+        )
+
+    @last_index_result.setter
+    def last_index_result(self, value: MemoryIndexResult) -> None:
+        self._last_index_result.value = value
 
     def recall(self, requirements: RequirementSpec, limit: int = 5) -> MemoryRecallResult:
         with self._connect() as conn:
@@ -92,9 +109,12 @@ class MemoryService:
             return None
         generation_mode = generation.mode if generation else "not_run"
         qa_score = report.score
-        reusable_pattern = report.status == "passed" and qa_score >= HIGH_QA_THRESHOLD
+        reusable_pattern = _is_reusable_workflow(report, generation)
         created_at = int(time.time())
-        warnings = [warning.model_dump() for warning in report.warnings]
+        issues = _unique_issues([*report.warnings, *report.errors])
+        warnings = [warning.model_dump() for warning in _unique_issues(report.warnings)]
+        portable_scene_path = scene_spec_path.name
+        portable_validation_path = validation_report_path.name
         summary = MemorySummary(
             workflow_id=workflow_id,
             network_type=requirements.network_type,
@@ -103,8 +123,8 @@ class MemoryService:
             generation_mode=generation_mode,
             qa_score=qa_score,
             warnings=warnings,
-            scene_spec_path=str(scene_spec_path),
-            validation_report_path=str(validation_report_path),
+            scene_spec_path=portable_scene_path,
+            validation_report_path=portable_validation_path,
             reusable_pattern=reusable_pattern,
             created_at=created_at,
         )
@@ -132,7 +152,7 @@ class MemoryService:
                     created_at,
                 ),
             )
-            if scene is not None:
+            if scene is not None and reusable_pattern:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO design_memory (
@@ -151,7 +171,9 @@ class MemoryService:
                         created_at,
                     ),
                 )
-            for issue in [*report.warnings, *report.errors]:
+            else:
+                conn.execute("DELETE FROM design_memory WHERE workflow_id = ?", (workflow_id,))
+            for issue in issues:
                 _insert_issue_memory(
                     conn=conn,
                     workflow_id=workflow_id,
@@ -160,7 +182,7 @@ class MemoryService:
                     issue=issue,
                     created_at=created_at,
                 )
-        self.last_index_result = self._index_summary(summary, [*report.warnings, *report.errors])
+        self.last_index_result = self._index_summary(summary, issues)
         return summary
 
     def stats(self) -> dict:
@@ -329,6 +351,10 @@ class MemoryService:
                 "reusable_pattern)"
             )
             conn.execute(
+                "UPDATE workflow_memory SET reusable_pattern = 0 "
+                "WHERE generation_mode != 'real_blender'"
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_error_memory_lookup "
                 "ON error_memory(network_type, tower_type, created_at)"
             )
@@ -384,16 +410,17 @@ class MemoryService:
             return MemoryIndexResult(status="skipped", errors=["rag_service_not_configured"])
         indexed = {"design_memory": 0, "error_memory": 0}
         errors: list[str] = []
-        try:
-            self.rag_service.upsert_runtime_document(
-                collection="design_memory",
-                doc_id=f"memory:design:{summary.workflow_id}",
-                text=_summary_text(summary),
-                payload=_summary_payload(summary),
-            )
-            indexed["design_memory"] = 1
-        except Exception as exc:
-            errors.append(f"design_memory:{type(exc).__name__}:{exc}")
+        if summary.reusable_pattern:
+            try:
+                self.rag_service.upsert_runtime_document(
+                    collection="design_memory",
+                    doc_id=f"memory:design:{summary.workflow_id}",
+                    text=_summary_text(summary),
+                    payload=_summary_payload(summary),
+                )
+                indexed["design_memory"] = 1
+            except Exception as exc:
+                errors.append(f"design_memory:{type(exc).__name__}:{exc}")
         for issue in issues:
             try:
                 self.rag_service.upsert_runtime_document(
@@ -531,10 +558,26 @@ def _insert_issue_memory(
     )
 
 
+def _unique_issues(issues: list[ValidationIssue]) -> list[ValidationIssue]:
+    unique: list[ValidationIssue] = []
+    seen: set[tuple[str, str, str]] = set()
+    for issue in issues:
+        identity = (issue.code, issue.message, issue.severity)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(issue)
+        if len(unique) >= MAX_MEMORY_ISSUES_PER_WORKFLOW:
+            break
+    return unique
+
+
 def _decode_workflow_row(row: sqlite3.Row) -> dict:
     payload = dict(row)
     payload["warnings"] = json.loads(payload.pop("warnings_json") or "[]")
     payload["reusable_pattern"] = bool(payload["reusable_pattern"])
+    payload.pop("scene_spec_path", None)
+    payload.pop("validation_report_path", None)
     return payload
 
 
@@ -549,8 +592,6 @@ def _summary_payload(summary: MemorySummary) -> dict:
         "generation_mode": summary.generation_mode,
         "qa_score": summary.qa_score,
         "warnings": summary.warnings,
-        "scene_spec_path": summary.scene_spec_path,
-        "validation_report_path": summary.validation_report_path,
         "reusable_pattern": summary.reusable_pattern,
         "created_at": summary.created_at,
     }
@@ -566,9 +607,21 @@ def _summary_text(summary: MemorySummary) -> str:
             f"generation_mode: {summary.generation_mode}",
             f"qa_score: {summary.qa_score}",
             f"reusable_pattern: {summary.reusable_pattern}",
-            f"scene_spec_path: {summary.scene_spec_path}",
-            f"validation_report_path: {summary.validation_report_path}",
         ]
+    )
+
+
+def _is_reusable_workflow(
+    report: ValidationReport,
+    generation: GenerationResult | None,
+) -> bool:
+    return bool(
+        generation is not None
+        and generation.status == "generated"
+        and generation.mode == "real_blender"
+        and generation.blender_available
+        and report.status == "passed"
+        and report.score >= HIGH_QA_THRESHOLD
     )
 
 

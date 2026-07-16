@@ -57,6 +57,12 @@ def test_patch_applier_rejects_unknown_path(sample_scene):
         PatchOperation(op="replace", path="/unknown/path", value=1)
 
 
+def test_patch_contract_rejects_unknown_tower_characteristic(sample_scene):
+    del sample_scene
+    with pytest.raises(ValidationError):
+        PatchOperation(op="replace", path="/tower/characteristics/vendor_secret", value=1)
+
+
 def test_patch_applier_replace_sector_azimuth(sample_scene):
     applier = PatchApplier()
     patch = ScenePatch(
@@ -98,6 +104,7 @@ def test_scene_edit_agent_fallback_height(sample_scene):
     agent = SceneEditAgent(groq_client=None)
     patch = agent.create_patch("wf_test", sample_scene, "mets la tour à 40m")
     assert patch.edit_llm_fallback_used is True
+    assert patch.edit_llm_fallback_reason == "groq_edit_client_unavailable"
     assert any(op.path == "/tower/height_m" and op.value == 40 for op in patch.operations)
 
 
@@ -111,3 +118,41 @@ def test_scene_edit_agent_fallback_cable_removal(sample_scene):
     agent = SceneEditAgent(groq_client=None)
     patch = agent.create_patch("wf_test", sample_scene, "supprime les câbles")
     assert all(op.value is False for op in patch.operations if "include_cable" in op.path)
+
+
+def test_scene_edit_agent_rejects_llm_operation_unrelated_to_prompt(sample_scene):
+    class MisalignedGroq:
+        model = "openai/gpt-oss-120b"
+
+        def _post_raw(self, _payload):
+            return {
+                "edit_description": "invented height",
+                "operations": [{"op": "replace", "path": "/tower/height_m", "value": 90}],
+            }
+
+    agent = SceneEditAgent(groq_client=MisalignedGroq())  # type: ignore[arg-type]
+    patch = agent.create_patch("wf_test", sample_scene, "ajoute GPS")
+
+    assert patch.edit_llm_fallback_used is True
+    assert patch.edit_llm_fallback_reason == "groq_edit_failed:ValueError"
+    assert [operation.path for operation in patch.operations] == [
+        "/visual_elements/include_gps_antenna"
+    ]
+
+
+def test_scene_edit_agent_rejects_llm_patch_for_wrong_sector(sample_scene):
+    class WrongSectorGroq:
+        model = "openai/gpt-oss-120b"
+
+        def _post_raw(self, _payload):
+            return {
+                "edit_description": "wrong sector",
+                "operations": [{"op": "replace", "path": "/sectors/1/azimuth_deg", "value": 45}],
+            }
+
+    agent = SceneEditAgent(groq_client=WrongSectorGroq())  # type: ignore[arg-type]
+    patch = agent.create_patch("wf_test", sample_scene, "oriente le secteur 1 à 45 degrés")
+
+    assert patch.edit_llm_fallback_used is True
+    assert patch.operations[0].path == "/sectors/0/azimuth_deg"
+    assert patch.operations[0].value == 45

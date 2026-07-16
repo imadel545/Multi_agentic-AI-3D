@@ -62,10 +62,9 @@ class GenerationQA:
             "metadata_no_missing_asset_without_fallback": not any(
                 record.get("import_mode") == "missing_file" for record in asset_imports
             ),
-            "generation_real_blender": allow_fallback
-            or (generation.status == "generated" and generation.mode == "real_blender"),
-            "glb_inspection_available": allow_fallback
-            or glb_inspection.inspection_mode == "glb_parse",
+            "generation_real_blender": generation.status == "generated"
+            and generation.mode == "real_blender",
+            "glb_inspection_available": glb_inspection.inspection_mode == "glb_parse",
             "glb_structure_valid": glb_inspection.structural_qa_passed,
             "expected_objects_present": glb_inspection.checks.get(
                 "expected_objects_present", False
@@ -153,6 +152,7 @@ def _load_metadata(path: Path) -> dict:
 def _asset_import_modes_valid(asset_imports: list) -> bool:
     valid_modes = {
         "imported_glb",
+        "stretched_imported_glb",
         "procedural_fallback",
         "missing_file",
         "parametric_generated",
@@ -191,6 +191,7 @@ def _asset_import_summary_valid(summary: object, asset_imports: list) -> bool:
         return False
     for mode in {
         "imported_glb",
+        "stretched_imported_glb",
         "procedural_fallback",
         "missing_file",
         "parametric_generated",
@@ -208,7 +209,7 @@ def _imported_glb_records_valid(asset_imports: list) -> bool:
     for record in asset_imports:
         if not isinstance(record, dict):
             return False
-        if record.get("import_mode") != "imported_glb":
+        if record.get("import_mode") not in {"imported_glb", "stretched_imported_glb"}:
             continue
         if record.get("asset_file_exists") is not True:
             return False

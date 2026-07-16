@@ -14,14 +14,22 @@ if TYPE_CHECKING:
     pass  # type: ignore[import-not-found]
 
 
-def _material(bpy, name: str, color: tuple[float, float, float, float]) -> object:
+def _material(
+    bpy,
+    name: str,
+    color: tuple[float, float, float, float],
+    *,
+    roughness: float = 0.55,
+    metallic: float = 0.0,
+) -> object:
     mat = bpy.data.materials.new(name=name)
+    mat.diffuse_color = color
     mat.use_nodes = True
     principled = mat.node_tree.nodes.get("Principled BSDF")
     if principled is not None:
         principled.inputs["Base Color"].default_value = color
-        principled.inputs["Roughness"].default_value = 0.55
-        principled.inputs["Metallic"].default_value = 0.6
+        principled.inputs["Roughness"].default_value = roughness
+        principled.inputs["Metallic"].default_value = metallic
     return mat
 
 
@@ -114,6 +122,90 @@ def _tower_corners(width: float, z: float, leg_count: int) -> list[tuple[float, 
     return [(-half, -half, z), (half, -half, z), (half, half, z), (-half, half, z)]
 
 
+def sector_forward_vector(
+    azimuth_deg: float,
+    mechanical_tilt_deg: float,
+) -> tuple[float, float, float]:
+    """Return the world direction of an asset whose local front axis is +Y."""
+
+    azimuth = math.radians(float(azimuth_deg))
+    tilt = math.radians(float(mechanical_tilt_deg))
+    horizontal = math.cos(tilt)
+    return (
+        math.sin(azimuth) * horizontal,
+        math.cos(azimuth) * horizontal,
+        -math.sin(tilt),
+    )
+
+
+def apply_sector_pose(
+    obj,
+    *,
+    azimuth_deg: float,
+    mechanical_tilt_deg: float,
+    front_axis: str = "+Y",
+) -> None:
+    """Apply yaw around world Z followed by downtilt around the asset local X axis."""
+
+    from mathutils import Matrix, Vector  # type: ignore[import-not-found]
+
+    yaw = Matrix.Rotation(-math.radians(float(azimuth_deg)), 4, "Z")
+    local_downtilt = Matrix.Rotation(-math.radians(float(mechanical_tilt_deg)), 4, "X")
+    source_front = {
+        "+X": Vector((1.0, 0.0, 0.0)),
+        "-X": Vector((-1.0, 0.0, 0.0)),
+        "+Y": Vector((0.0, 1.0, 0.0)),
+        "-Y": Vector((0.0, -1.0, 0.0)),
+    }.get(str(front_axis).upper())
+    if source_front is None:
+        raise ValueError(f"Unsupported horizontal asset front_axis: {front_axis!r}")
+    front_correction = (
+        source_front.rotation_difference(Vector((0.0, 1.0, 0.0))).to_matrix().to_4x4()
+    )
+    obj.rotation_mode = "QUATERNION"
+    obj.rotation_quaternion = (yaw @ local_downtilt @ front_correction).to_quaternion()
+
+
+def tower_material_profile(
+    material_name: str,
+) -> tuple[tuple[float, float, float, float], float, float]:
+    profiles = {
+        "galvanized_steel": ((0.48, 0.53, 0.58, 1.0), 0.3, 0.72),
+        "painted_steel": ((0.12, 0.24, 0.38, 1.0), 0.38, 0.52),
+        "concrete": ((0.56, 0.57, 0.55, 1.0), 0.82, 0.0),
+        "unknown": ((0.45, 0.47, 0.49, 1.0), 0.58, 0.2),
+    }
+    return profiles.get(material_name, profiles["unknown"])
+
+
+def tower_envelope_radius_at_height(
+    *,
+    height_m: float,
+    tower_height_m: float,
+    base_width_m: float,
+    top_width_m: float | None,
+    structure: str,
+    leg_count: int,
+    azimuth_rad: float,
+) -> float:
+    """Return the tower envelope in a horizontal direction at a given height."""
+
+    top_ratio = {
+        "lattice": 0.25,
+        "monopole": 0.35,
+        "rooftop_mast": 0.4,
+        "small_cell_pole": 0.6,
+    }.get(structure, 0.5)
+    top_width = float(top_width_m or (base_width_m * top_ratio))
+    ratio = min(max(float(height_m) / max(float(tower_height_m), 1e-6), 0.0), 1.0)
+    width = float(base_width_m) + ((top_width - float(base_width_m)) * ratio)
+    half_width = max(width * 0.5, 0.02)
+    if structure == "lattice" and leg_count != 3:
+        direction = max(abs(math.sin(azimuth_rad)), abs(math.cos(azimuth_rad)), 1e-6)
+        return half_width / direction
+    return half_width
+
+
 def build_parametric_tower(
     bpy,
     *,
@@ -129,7 +221,14 @@ def build_parametric_tower(
 
     Returns the list of created objects.
     """
-    steel = _material(bpy, material_name, (0.48, 0.51, 0.54, 1))
+    color, roughness, metallic = tower_material_profile(material_name)
+    steel = _material(
+        bpy,
+        f"tower_{material_name}",
+        color,
+        roughness=roughness,
+        metallic=metallic,
+    )
     created: list[object] = []
 
     if structure == "lattice":
@@ -183,17 +282,32 @@ def build_parametric_tower(
         pole.data.materials.append(steel)
         created.append(pole)
         # Reinforcing rings every 5 m
-        ring_mat = _material(bpy, "monopole_ring", (0.40, 0.43, 0.46, 1))
+        ring_mat = _material(
+            bpy,
+            f"tower_{material_name}_ring",
+            color,
+            roughness=roughness,
+            metallic=metallic,
+        )
         ring_count = max(1, int(height // 5))
         for i in range(1, ring_count + 1):
             z = i * 5.0
             if z >= height:
                 continue
+            ring_radius = tower_envelope_radius_at_height(
+                height_m=z,
+                tower_height_m=height,
+                base_width_m=base_width,
+                top_width_m=top_width,
+                structure=structure,
+                leg_count=leg_count,
+                azimuth_rad=0.0,
+            )
             ring = _create_cylinder(
                 bpy,
                 name=f"tower_{asset_id}_ring_{i}",
-                radius_bottom=base_radius + 0.04,
-                radius_top=base_radius + 0.04,
+                radius_bottom=ring_radius + 0.04,
+                radius_top=ring_radius + 0.04,
                 height=0.15,
                 location=(0.0, 0.0, z),
                 vertices=32,
@@ -261,6 +375,86 @@ def build_parametric_panel_antenna(
     box.rotation_euler = rotation
     box.data.materials.append(_material(bpy, "antenna_white", (0.88, 0.88, 0.90, 1)))
     return box
+
+
+def build_parametric_microwave_dish(
+    bpy,
+    *,
+    name: str,
+    width: float,
+    depth: float,
+    height: float,
+    location: tuple[float, float, float],
+) -> object:
+    """Generate a parabolic dish whose local front axis is +Y."""
+
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+
+    radial_segments = 8
+    angular_segments = 32
+    radius_x = max(float(width) / 2, 0.05)
+    radius_z = max(float(height) / 2, 0.05)
+    bowl_depth = min(max(float(depth), 0.04), max(radius_x, radius_z) * 0.8)
+    vertices: list[tuple[float, float, float]] = [(0.0, -bowl_depth, 0.0)]
+    faces: list[tuple[int, ...]] = []
+    for ring in range(1, radial_segments + 1):
+        ratio = ring / radial_segments
+        y = -bowl_depth * (1.0 - ratio * ratio)
+        for segment in range(angular_segments):
+            angle = 2 * math.pi * segment / angular_segments
+            vertices.append(
+                (
+                    radius_x * ratio * math.cos(angle),
+                    y,
+                    radius_z * ratio * math.sin(angle),
+                )
+            )
+    for segment in range(angular_segments):
+        faces.append((0, 1 + segment, 1 + ((segment + 1) % angular_segments)))
+    for ring in range(1, radial_segments):
+        previous_start = 1 + (ring - 1) * angular_segments
+        current_start = 1 + ring * angular_segments
+        for segment in range(angular_segments):
+            next_segment = (segment + 1) % angular_segments
+            faces.append(
+                (
+                    previous_start + segment,
+                    current_start + segment,
+                    current_start + next_segment,
+                    previous_start + next_segment,
+                )
+            )
+
+    mesh = bpy.data.meshes.new(f"{name}_surface_mesh")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    surface = bpy.data.objects.new(f"{name}_surface", mesh)
+    bpy.context.collection.objects.link(surface)
+    surface.parent = root
+    surface.data.materials.append(
+        _material(bpy, "microwave_dish_white", (0.78, 0.81, 0.84, 1.0), roughness=0.42)
+    )
+    solidify = surface.modifiers.new(name="dish_thickness", type="SOLIDIFY")
+    solidify.thickness = 0.012
+
+    feed_distance = max(bowl_depth * 1.7, radius_x * 0.35)
+    feed = _create_cylinder(
+        bpy,
+        name=f"{name}_feed",
+        radius_bottom=max(radius_x * 0.045, 0.015),
+        radius_top=max(radius_x * 0.035, 0.012),
+        height=max(radius_x * 0.18, 0.08),
+        location=(0.0, feed_distance, 0.0),
+        vertices=16,
+    )
+    feed.rotation_euler[0] = math.radians(90)
+    feed.parent = root
+    feed.data.materials.append(
+        _material(bpy, "microwave_feed_dark", (0.12, 0.14, 0.16, 1.0), roughness=0.36)
+    )
+    return root
 
 
 def build_parametric_radio(
@@ -332,9 +526,19 @@ def build_parametric_accessory_cabinet(
     *,
     name: str,
     location: tuple[float, float, float],
+    width: float = 1.0,
+    depth: float = 0.45,
+    height: float = 1.6,
 ) -> object:
-    """Generate a simple outdoor cabinet primitive."""
-    box = _create_box(bpy, name, 1.0, 0.45, 1.6, location)
+    """Generate a cabinet from a base-center-ground datum."""
+    box = _create_box(
+        bpy,
+        name,
+        width,
+        depth,
+        height,
+        (location[0], location[1], location[2] + height / 2),
+    )
     box.data.materials.append(_material(bpy, "cabinet_green", (0.25, 0.42, 0.28, 1)))
     return box
 
@@ -346,18 +550,29 @@ def build_parametric_accessory_gps(
     location: tuple[float, float, float],
 ) -> object:
     """Generate a simple GPS radome on a short pole."""
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
     pole = _create_cylinder(
         bpy,
         f"{name}_pole",
         0.02,
         0.02,
         0.6,
-        (location[0], location[1], location[2] + 0.3),
+        (0.0, 0.0, 0.3),
         vertices=8,
     )
     pole.data.materials.append(_material(bpy, "gps_pole", (0.42, 0.44, 0.46, 1)))
+    pole.parent = root
     radome = _create_cylinder(
-        bpy, name, 0.16, 0.16, 0.22, (location[0], location[1], location[2] + 0.7), vertices=16
+        bpy,
+        f"{name}_radome",
+        0.16,
+        0.16,
+        0.22,
+        (0.0, 0.0, 0.7),
+        vertices=16,
     )
     radome.data.materials.append(_material(bpy, "gps_white", (0.92, 0.92, 0.94, 1)))
-    return radome
+    radome.parent = root
+    return root

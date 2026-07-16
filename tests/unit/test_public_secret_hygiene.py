@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 PUBLIC_PATHS = [
@@ -6,7 +7,11 @@ PUBLIC_PATHS = [
     Path("tests"),
 ]
 
-FORBIDDEN_SECRET_MARKERS = ("gs" + "k_", "nv" + "api-", "s" + "k-")
+SECRET_PATTERNS = (
+    re.compile(r"\b" + "gs" + r"k_[A-Za-z0-9_-]{10,}"),
+    re.compile(r"\b" + "nv" + r"api-[A-Za-z0-9_-]{10,}"),
+    re.compile(r"\b" + "s" + r"k-[A-Za-z0-9_-]{10,}"),
+)
 
 
 def test_public_files_do_not_contain_real_secret_markers() -> None:
@@ -17,7 +22,7 @@ def test_public_files_do_not_contain_real_secret_markers() -> None:
             if "__pycache__" in path.parts or path.suffix == ".pyc":
                 continue
             text = path.read_text(encoding="utf-8", errors="ignore")
-            if any(marker in text for marker in FORBIDDEN_SECRET_MARKERS):
+            if any(pattern.search(text) for pattern in SECRET_PATTERNS):
                 offenders.append(str(path))
 
     assert offenders == []

@@ -41,7 +41,8 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert isinstance(status["rag_planning_summary"], dict)
         assert status["rag_planning_summary"]["rag_used_for_extraction"] is False
         assert status["rag_planning_summary"]["rag_planning_mode"] in {
-            "structured_planning_hints",
+            "structured_hints_applied",
+            "candidates_rejected_or_no_op",
             "context_only_no_structured_hints",
         }
         assert isinstance(status["rag_planning_summary"]["controlled_hint_fields"], list)

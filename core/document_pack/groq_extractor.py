@@ -23,6 +23,17 @@ ALLOWED_FIELD_PREFIXES = (
     "compound.",
 )
 
+BOOLEAN_EVIDENCE_TERMS: dict[str, tuple[str, ...]] = {
+    "radio.include_rru": ("rru", "radio"),
+    "cabling.include_cables": ("câble", "cable"),
+    "compound.gps": ("gps", "gnss"),
+    "compound.power_cabinet": ("cabinet", "armoire", "alimentation"),
+    "tower.has_aviation_light": ("balisage", "aviation"),
+    "tower.has_ladder": ("échelle", "echelle", "ladder"),
+    "tower.has_lightning_rod": ("paratonnerre", "lightning rod"),
+    "grounding.grounding": ("terre", "grounding", "mise à la terre"),
+}
+
 DOCUMENT_FIELD_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -38,7 +49,6 @@ DOCUMENT_FIELD_SCHEMA: dict[str, Any] = {
                         "anyOf": [
                             {"type": "string"},
                             {"type": "number"},
-                            {"type": "integer"},
                             {"type": "boolean"},
                             {"type": "array", "items": {"type": ["string", "number"]}},
                         ]
@@ -132,6 +142,7 @@ class GroqDocumentExtractor:
                 },
             },
         }
+        json_object_fallback_used = False
         try:
             raw = self.provider._post_raw(payload)
         except httpx.HTTPStatusError as exc:
@@ -142,6 +153,7 @@ class GroqDocumentExtractor:
                     f"Groq document extraction failed: HTTP {exc.response.status_code}.",
                 )
             try:
+                json_object_fallback_used = True
                 raw = self.provider._post_raw(
                     {
                         "model": self.provider.model,
@@ -179,8 +191,15 @@ class GroqDocumentExtractor:
             candidates=candidates,
             rejected_fields=rejected,
             provider=self.provider_name,
-            fallback_used=False,
-            warnings=[],
+            fallback_used=json_object_fallback_used,
+            warnings=(
+                [
+                    "Groq strict JSON Schema generation was rejected; a validated JSON "
+                    "Object fallback was used."
+                ]
+                if json_object_fallback_used
+                else []
+            ),
             chunks=chunks,
         )
 
@@ -311,6 +330,8 @@ def _field_rejection_reason(
     if field_name in {"radio.azimuths_deg", "radio.hba_m"}:
         if not _valid_number_list_value(field_name, normalized_value):
             return "invalid_value_shape"
+    if not _value_is_supported_by_evidence(field_name, normalized_value, evidence):
+        return "value_not_supported_by_evidence"
     return None
 
 
@@ -343,6 +364,60 @@ def _normalize_groq_value(field: str, value: Any, evidence: str = "") -> Any:
         except ValueError:
             return value
     return value
+
+
+def _value_is_supported_by_evidence(field: str, value: Any, evidence: str) -> bool:
+    if field in {"radio.azimuths_deg", "radio.hba_m"}:
+        expected = _number_list(evidence)
+        return _same_numbers(value, expected)
+    if field == "tower.tower_type":
+        evidence_value = _normalize_groq_value(field, evidence)
+        return evidence_value == value
+    if (
+        field == "radio.sector_count"
+        or field.endswith(("_m", "_deg"))
+        or field
+        in {
+            "coordinates.latitude",
+            "coordinates.longitude",
+            "coordinates.x",
+            "coordinates.y",
+            "coordinates.z",
+        }
+    ):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return False
+        numbers = _number_list(evidence)
+        if not isinstance(numbers, list):
+            return False
+        return any(abs(float(number) - float(value)) <= 0.01 for number in numbers)
+    if isinstance(value, bool) and field in BOOLEAN_EVIDENCE_TERMS:
+        expected_boolean = _boolean_from_evidence(field, evidence)
+        return expected_boolean is not None and value is expected_boolean
+    return True
+
+
+def _same_numbers(left: Any, right: Any) -> bool:
+    if not isinstance(left, list) or not isinstance(right, list) or len(left) != len(right):
+        return False
+    try:
+        return all(abs(float(a) - float(b)) <= 0.01 for a, b in zip(left, right, strict=True))
+    except (TypeError, ValueError):
+        return False
+
+
+def _boolean_from_evidence(field: str, evidence: str) -> bool | None:
+    terms = BOOLEAN_EVIDENCE_TERMS.get(field)
+    if not terms:
+        return None
+    lowered = evidence.lower()
+    if not any(term in lowered for term in terms):
+        return None
+    negated = any(
+        marker in lowered
+        for marker in ("sans ", "aucun", "absence", "non prévu", "non prevu", "no ")
+    )
+    return not negated
 
 
 def _number_list(value: Any) -> Any:
@@ -393,7 +468,7 @@ def _valid_number_list_value(field: str, value: Any) -> bool:
 
 def _band_list(value: str) -> list[str]:
     bands = set()
-    for raw in re.findall(r"\b(?:NR\d{3,4}|L\d{3,4}|[45]G)\b", value.upper()):
+    for raw in re.findall(r"\b(?:NR\d{3,4}|L\d{3,4}|[45]G|LTE|MW)\b", value.upper()):
         bands.add(raw)
     return sorted(bands)
 

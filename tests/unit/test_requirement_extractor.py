@@ -1,4 +1,5 @@
 from core.agents.requirement_extractor import RequirementExtractor
+from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
 
 
@@ -50,6 +51,37 @@ def test_requirement_extractor_accepts_structured_provider() -> None:
     assert result.requirements.tower_type == "lattice_tower"
 
 
+def test_requirement_extractor_exposes_validated_json_object_fallback() -> None:
+    provider = RecordingRequirementProvider()
+    original_extract = provider.extract_requirements
+
+    def extract_with_fallback(requirements_text: str, detail_level: str) -> RequirementSpec:
+        requirements = original_extract(requirements_text, detail_level)
+        return requirements.model_copy(
+            update={
+                "warnings": [
+                    WarningItem(
+                        code="LLM_JSON_OBJECT_FALLBACK",
+                        message="Strict schema failed; JSON Object was locally validated.",
+                    )
+                ]
+            }
+        )
+
+    provider.extract_requirements = extract_with_fallback  # type: ignore[method-assign]
+    extractor = RequirementExtractor(
+        provider=provider,
+        provider_name="groq:test-provider",
+        enabled=True,
+    )
+
+    result = extractor.extract("Créer un site 5G treillis 30m avec 3 secteurs.", "high")
+
+    assert result.provider == "groq:test-provider"
+    assert result.fallback_used is True
+    assert result.error is None
+
+
 def test_requirement_extractor_disabled_does_not_call_structured_provider() -> None:
     provider = RecordingRequirementProvider()
     extractor = RequirementExtractor(
@@ -62,6 +94,25 @@ def test_requirement_extractor_disabled_does_not_call_structured_provider() -> N
         "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°.",
         "high",
         enabled=False,
+    )
+
+    assert provider.calls == []
+    assert result.provider == "deterministic"
+    assert result.fallback_used is True
+
+
+def test_request_cannot_reenable_provider_disabled_by_server_policy() -> None:
+    provider = RecordingRequirementProvider()
+    extractor = RequirementExtractor(
+        provider=provider,
+        provider_name="groq:test-provider",
+        enabled=False,
+    )
+
+    result = extractor.extract(
+        "Créer un site 5G treillis 30m avec 3 secteurs.",
+        "high",
+        enabled=True,
     )
 
     assert provider.calls == []

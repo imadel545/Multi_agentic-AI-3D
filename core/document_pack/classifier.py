@@ -1,4 +1,5 @@
 import hashlib
+import re
 from pathlib import Path
 
 from core.contracts.document_pack import (
@@ -27,8 +28,13 @@ def classify_document(
 ) -> DocumentReference:
     filename = Path(path).name
     extension = Path(filename).suffix.lower().lstrip(".") or "none"
-    normalized = _normalize(f"{path}\n{_text_preview(content, extension)}")
-    category, reason = _category_for(normalized, extension)
+    preview = _text_preview(content, extension)
+    normalized = _normalize(f"{path}\n{preview}")
+    category, reason = _category_for(
+        normalized,
+        extension,
+        semantic_text_available=bool(preview.strip()),
+    )
     extractability = _extractability_for(extension)
     priority = _priority_for(category, duplicate_of)
     purpose = _purpose_for(category, extractability, duplicate_of)
@@ -59,6 +65,44 @@ def classify_document(
     )
 
 
+def reclassify_document(
+    document: DocumentReference,
+    extracted_text: str,
+) -> DocumentReference:
+    """Re-evaluate relevance after PDF/OCR/CAD tools produced readable text."""
+
+    normalized = _normalize(f"{document.path}\n{extracted_text[:50000]}")
+    category, reason = _category_for(
+        normalized,
+        document.extension,
+        semantic_text_available=bool(extracted_text.strip()),
+    )
+    priority = _priority_for(category, document.duplicate_of)
+    purpose = _purpose_for(category, document.extractability, document.duplicate_of)
+    return document.model_copy(
+        update={
+            "category": category,
+            "document_type": category,
+            "relevance_score": _relevance_for(priority, category, document.duplicate_of),
+            "confidence": _confidence_for(
+                category,
+                document.extractability,
+                normalized,
+                document.duplicate_of,
+            ),
+            "reason": reason,
+            "priority": priority,
+            "purpose": purpose,
+            "used_for_design": priority in {"high", "medium"} and not document.duplicate_of,
+            "why_used_or_ignored": _why_used_or_ignored(
+                category,
+                purpose,
+                document.duplicate_of,
+            ),
+        }
+    )
+
+
 def _document_id(path: str, content: bytes) -> str:
     digest = hashlib.sha256(path.encode("utf-8") + b"\0" + content[:4096]).hexdigest()
     return f"doc_{digest[:12]}"
@@ -85,7 +129,7 @@ def _normalize(value: str) -> str:
 
 
 def _text_preview(content: bytes, extension: str) -> str:
-    if extension not in {"txt", "md", "csv", "json", "pdf"}:
+    if extension not in {"txt", "md", "csv", "json"}:
         return ""
     try:
         decoded = content[:12000].decode("utf-8")
@@ -94,12 +138,17 @@ def _text_preview(content: bytes, extension: str) -> str:
     return decoded
 
 
-def _category_for(text: str, extension: str) -> tuple[DocumentCategory, str]:
+def _category_for(
+    text: str,
+    extension: str,
+    *,
+    semantic_text_available: bool,
+) -> tuple[DocumentCategory, str]:
     if extension == "dwg":
         return "cad_dwg", "DWG CAD candidate recorded for local conversion strategy."
     if extension == "dxf":
         return "cad_dxf", "DXF CAD candidate can be parsed by a future ezdxf adapter."
-    if extension in {"jpg", "jpeg", "png", "heic", "webp"}:
+    if extension in {"jpg", "jpeg", "png", "heic", "webp"} and not semantic_text_available:
         if "photomontage" in text:
             return "photomontage", "Photomontage is visual context for frontend review."
         return "photo", "Photo/image is visual reference, not primary numeric evidence."
@@ -121,7 +170,7 @@ def _category_for(text: str, extension: str) -> tuple[DocumentCategory, str]:
             "rru",
             "ret",
         ]
-    ):
+    ) or (semantic_text_available and re.search(r"\baz\s*[:=\-]", text)):
         return "antenna_plan", "Antenna/radio terms indicate high-value extraction."
     if any(token in text for token in ["elevation", "facade", "coupe", "hauteur totale"]):
         return "elevation_plan", "Elevation/cut plan can contain heights."
@@ -140,8 +189,21 @@ def _category_for(text: str, extension: str) -> tuple[DocumentCategory, str]:
         return "equipment_list", "Equipment list can provide antenna/RRU/cabinet inventory."
     if "apd" in text:
         return "apd_plan", "APD document can contain consolidated site design values."
+    if any(
+        token in text
+        for token in [
+            "fiche technique",
+            "technical sheet",
+            "datasheet",
+            "specification pylone",
+            "spécification pylône",
+        ]
+    ):
+        return "technical_sheet", "Technical specification contains direct design evidence."
+    if extension in {"jpg", "jpeg", "png", "heic", "webp"}:
+        return "photo", "Image OCR contains no strong telecom design signal."
     if extension in {"txt", "md", "csv", "pdf"}:
-        return "technical_sheet", "Text-like technical document is extractable."
+        return "unknown", "Text is extractable but has no direct telecom design signal."
     return "unknown", "No strong telecom design signal detected."
 
 

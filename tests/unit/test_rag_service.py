@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import httpx
 import pytest
 
 from core.rag import RagService
@@ -7,6 +8,7 @@ from core.rag.documents import load_rag_documents
 from core.rag.embeddings import HashEmbeddingProvider, build_embedding_provider
 from core.rag.models import RagSearchResult
 from core.rag.reranker import NvidiaReranker, PassthroughReranker, build_reranker
+from core.rag.text import normalized_tokens
 
 
 def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
@@ -36,7 +38,7 @@ def test_rag_search_reindexes_when_docs_change(tmp_path: Path) -> None:
     (project_root / "docs").mkdir(parents=True)
     (project_root / "data" / "knowledge").mkdir(parents=True)
     (project_root / "assets" / "manifests").mkdir(parents=True)
-    old_doc = project_root / "docs" / "OLD_CONTEXT.md"
+    old_doc = project_root / "data" / "knowledge" / "design_patterns.md"
     old_doc.write_text("# Old\n\nobsolete deleted context for lattice demo", encoding="utf-8")
     service = RagService(
         project_root=project_root,
@@ -47,7 +49,7 @@ def test_rag_search_reindexes_when_docs_change(tmp_path: Path) -> None:
     service.reindex()
 
     old_doc.unlink()
-    (project_root / "docs" / "CURRENT_CONTEXT.md").write_text(
+    (project_root / "data" / "knowledge" / "design_patterns.md").write_text(
         "# Current\n\nfresh active context for rooftop planning",
         encoding="utf-8",
     )
@@ -55,8 +57,8 @@ def test_rag_search_reindexes_when_docs_change(tmp_path: Path) -> None:
     results = service.search("fresh active rooftop planning", limit=5)
 
     assert results
-    assert all(result.payload.get("source_path") != "docs/OLD_CONTEXT.md" for result in results)
-    assert any(result.payload.get("source_path") == "docs/CURRENT_CONTEXT.md" for result in results)
+    assert all("obsolete deleted context" not in result.text for result in results)
+    assert any("fresh active context" in result.text for result in results)
 
 
 def test_rag_filtered_search_by_network_and_tower(tmp_path: Path) -> None:
@@ -95,6 +97,21 @@ def test_rag_documents_expose_structured_hints_without_absolute_paths() -> None:
     assert not str(template.payload["source_path"]).startswith("/")
 
 
+def test_rag_documents_exclude_developer_architecture_docs() -> None:
+    documents = load_rag_documents(Path.cwd())
+
+    assert documents
+    assert all(document.payload.get("doc_type") != "project_doc" for document in documents)
+    assert all(
+        not str(document.payload.get("source_path", "")).startswith("docs/")
+        for document in documents
+    )
+
+
+def test_french_token_normalization_is_accent_insensitive() -> None:
+    assert normalized_tokens("Pylône câblé à 30 m") == ["pylone", "cable", "a", "30", "m"]
+
+
 def test_nvidia_embedding_provider_is_strict_when_configured(monkeypatch) -> None:
     class FailingNvidiaProvider:
         def __init__(self, *args, **kwargs) -> None:
@@ -104,6 +121,30 @@ def test_nvidia_embedding_provider_is_strict_when_configured(monkeypatch) -> Non
 
     with pytest.raises(RuntimeError, match="NVIDIA API embedding provider is required"):
         build_embedding_provider("nvidia", "baai/bge-m3")
+
+
+def test_nvidia_embedding_provider_never_deletes_user_model_cache(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cache_dir = tmp_path / "hub" / "models--BAAI--bge-m3"
+    cache_dir.mkdir(parents=True)
+    marker = cache_dir / "user-owned-cache"
+    marker.write_text("keep", encoding="utf-8")
+
+    class StubNvidiaProvider:
+        name = "nvidia:baai/bge-m3"
+        dimensions = 1024
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", StubNvidiaProvider)
+
+    provider = build_embedding_provider("nvidia", "baai/bge-m3", api_key="test")
+
+    assert provider.name == "nvidia:baai/bge-m3"
+    assert marker.read_text(encoding="utf-8") == "keep"
 
 
 def test_auto_embedding_provider_can_bootstrap_with_hash(monkeypatch) -> None:
@@ -122,21 +163,17 @@ def test_reranker_defaults_to_passthrough() -> None:
     assert isinstance(build_reranker(), PassthroughReranker)
 
 
-def test_nvidia_reranker_uses_remote_scores_without_real_network(monkeypatch) -> None:
-    class FakeResponse:
-        def raise_for_status(self) -> None:
-            return None
+def test_nvidia_reranker_uses_remote_scores_without_real_network() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer nvidia-test-token"
+        assert "passages" in request.content.decode("utf-8")
+        return httpx.Response(
+            200,
+            json={"rankings": [{"index": 1, "score": 0.91}, {"index": 0, "score": 0.12}]},
+        )
 
-        def json(self) -> dict:
-            return {"rankings": [{"index": 1, "score": 0.91}, {"index": 0, "score": 0.12}]}
-
-    def fake_post(*args, **kwargs):
-        assert kwargs["headers"]["Authorization"] == "Bearer nvidia-test-token"
-        assert "passages" in kwargs["json"]
-        return FakeResponse()
-
-    monkeypatch.setattr("core.rag.reranker.httpx.post", fake_post)
-    reranker = NvidiaReranker(api_key="nvidia-test-token")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    reranker = NvidiaReranker(api_key="nvidia-test-token", http_client=client)
     results = [
         RagSearchResult(collection="c", doc_id="a", score=0.1, text="A", payload={}),
         RagSearchResult(collection="c", doc_id="b", score=0.2, text="B", payload={}),
@@ -147,6 +184,7 @@ def test_nvidia_reranker_uses_remote_scores_without_real_network(monkeypatch) ->
     assert [result.doc_id for result in reranked] == ["b", "a"]
     assert reranker.status == "primary_nvidia_reranker"
     assert reranker.degraded_reason is None
+    client.close()
 
 
 def test_nvidia_reranker_missing_key_is_visible_passthrough() -> None:

@@ -1,4 +1,7 @@
+import re
+import threading
 import time
+import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -17,6 +20,13 @@ from core.contracts.assets import AssetManifest
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
+from core.contracts.planning_decision import (
+    PlanningCandidate,
+    PlanningCandidateProvenance,
+    PlanningCurrentValues,
+    PlanningDecisionRequest,
+    PlanningMemoryRisk,
+)
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
 from core.contracts.rf_validation import RfValidationReport
@@ -24,10 +34,17 @@ from core.contracts.runtime import AgentStepTrace, WorkflowTrace
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.contracts.tower_validation import TowerValidationReport
 from core.contracts.validation import ValidationIssue, ValidationReport
+from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
 from core.performance import knowledge_index_hash, requirements_hash, scene_spec_hash
 from core.qa import GenerationQA, GLBGeometryValidator, GLBInspector, PreviewInspector
 from core.rag import RagService
+from core.rag.planning import (
+    RagPlanningEvidence,
+    apply_bounded_planning_decision,
+    collect_planning_evidence,
+    resolve_planning_hints,
+)
 from core.repair.scene_repair import repair_scene_spec
 from core.rules import RuleEngine
 from core.services.asset_registry import AssetRegistry
@@ -40,10 +57,12 @@ from core.validation.quality_gates import (
 
 RuntimeEventSink = Callable[[str, str, dict], Any]
 _RUNTIME_EVENT_SINKS: dict[str, RuntimeEventSink] = {}
+_RUNTIME_EVENT_SINKS_LOCK = threading.Lock()
 
 
 class WorkflowState(TypedDict, total=False):
     workflow_id: str
+    runtime_event_sink_id: str
     entry_mode: str
     revision_id: str | None
     requirements_text: str
@@ -55,6 +74,8 @@ class WorkflowState(TypedDict, total=False):
     extraction_fallback_used: bool
     extraction_error: str | None
     rag_context: list[dict]
+    rag_planning_resolution: dict
+    planning_decision: dict
     memory_recall: dict
     memory_writeback: dict
     asset_error: str
@@ -111,6 +132,7 @@ class OrchestratorResult:
     quality_gate_reports: list[QualityGateReport]
     generation: GenerationResult | None
     rag_context: list[dict]
+    planning_decision: dict | None
     memory_recall: MemoryRecallResult | None
     memory_writeback: dict | None
     trace: list[dict]
@@ -131,6 +153,7 @@ class DesignOrchestrator:
         blender_runner: BlenderRunner,
         memory_service: MemoryService | None = None,
         checkpoint_saver: Any | None = None,
+        planning_decision_client: GroqPlanningDecisionClient | None = None,
         allow_blender_fallback: bool = False,
         runtime_event_sink: RuntimeEventSink | None = None,
     ) -> None:
@@ -140,8 +163,9 @@ class DesignOrchestrator:
         self.memory_service = memory_service
         self.blender_runner = blender_runner
         self.allow_blender_fallback = allow_blender_fallback
-        self.runtime_event_sink = runtime_event_sink
+        self.default_runtime_event_sink = runtime_event_sink
         self.checkpoint_saver = checkpoint_saver
+        self.planning_decision_client = planning_decision_client
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
         self.rf_engineer = RfEngineerAgent()
@@ -152,15 +176,35 @@ class DesignOrchestrator:
         self.preview_inspector = PreviewInspector()
         self.graph = self._build_graph()
 
-    def set_runtime_event_sink(self, runtime_event_sink: RuntimeEventSink | None) -> None:
-        self.runtime_event_sink = runtime_event_sink
+    def _register_runtime_event_sink(
+        self,
+        invocation_id: str,
+        runtime_event_sink: RuntimeEventSink | None,
+    ) -> None:
+        sink = runtime_event_sink or self.default_runtime_event_sink
+        if sink is None:
+            return
+        with _RUNTIME_EVENT_SINKS_LOCK:
+            _RUNTIME_EVENT_SINKS[invocation_id] = sink
 
-    def _register_runtime_event_sink(self, workflow_id: str) -> None:
-        if self.runtime_event_sink is not None:
-            _RUNTIME_EVENT_SINKS[workflow_id] = self.runtime_event_sink
+    def _clear_runtime_event_sink(self, invocation_id: str) -> None:
+        with _RUNTIME_EVENT_SINKS_LOCK:
+            _RUNTIME_EVENT_SINKS.pop(invocation_id, None)
 
-    def _clear_runtime_event_sink(self, workflow_id: str) -> None:
-        _RUNTIME_EVENT_SINKS.pop(workflow_id, None)
+    def _invoke_graph(
+        self,
+        initial_state: WorkflowState,
+        config: dict,
+        runtime_event_sink: RuntimeEventSink | None,
+    ) -> WorkflowState:
+        workflow_id = initial_state["workflow_id"]
+        invocation_id = f"{workflow_id}:{uuid.uuid4().hex}"
+        initial_state["runtime_event_sink_id"] = invocation_id
+        self._register_runtime_event_sink(invocation_id, runtime_event_sink)
+        try:
+            return self.graph.invoke(initial_state, config=config)
+        finally:
+            self._clear_runtime_event_sink(invocation_id)
 
     def run(
         self,
@@ -169,6 +213,7 @@ class DesignOrchestrator:
         detail_level: str,
         output_dir: Path,
         use_llm: bool | None = None,
+        runtime_event_sink: RuntimeEventSink | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
         config = {"configurable": {"thread_id": workflow_id}}
@@ -186,11 +231,7 @@ class DesignOrchestrator:
             "scene_repair_recorded": False,
             "route_history": [],
         }
-        self._register_runtime_event_sink(workflow_id)
-        try:
-            state = self.graph.invoke(initial_state, config=config)
-        finally:
-            self._clear_runtime_event_sink(workflow_id)
+        state = self._invoke_graph(initial_state, config, runtime_event_sink)
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -201,6 +242,7 @@ class DesignOrchestrator:
         detail_level: str,
         output_dir: Path,
         source_label: str = "project_design_spec",
+        runtime_event_sink: RuntimeEventSink | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
         initial_state: WorkflowState = {
@@ -229,13 +271,11 @@ class DesignOrchestrator:
             "quality_gate_reports": [],
             "cache_metrics": self._cache_metrics(),
         }
-        self._register_runtime_event_sink(workflow_id)
-        try:
-            state = self.graph.invoke(
-                initial_state, config={"configurable": {"thread_id": workflow_id}}
-            )
-        finally:
-            self._clear_runtime_event_sink(workflow_id)
+        state = self._invoke_graph(
+            initial_state,
+            {"configurable": {"thread_id": workflow_id}},
+            runtime_event_sink,
+        )
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -246,6 +286,7 @@ class DesignOrchestrator:
         output_dir: Path,
         detail_level: str = "high",
         revision_id: str | None = None,
+        runtime_event_sink: RuntimeEventSink | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
         # Scene revisions preserve the generation strategy stamped on the incoming
@@ -280,13 +321,11 @@ class DesignOrchestrator:
             "extraction_fallback_used": False,
             "extraction_error": None,
         }
-        self._register_runtime_event_sink(workflow_id)
-        try:
-            state = self.graph.invoke(
-                initial_state, config={"configurable": {"thread_id": workflow_id}}
-            )
-        finally:
-            self._clear_runtime_event_sink(workflow_id)
+        state = self._invoke_graph(
+            initial_state,
+            {"configurable": {"thread_id": workflow_id}},
+            runtime_event_sink,
+        )
         state["total_duration_ms"] = _duration_ms(started)
         return _result_from_state(state)
 
@@ -309,6 +348,10 @@ class DesignOrchestrator:
         graph.add_node(
             "retrieve_rag_context",
             self._runtime_node("retrieve_rag_context", self._retrieve_rag_context),
+        )
+        graph.add_node(
+            "decide_planning_context",
+            self._runtime_node("decide_planning_context", self._decide_planning_context),
         )
         if self.memory_service is not None:
             graph.add_node(
@@ -372,7 +415,6 @@ class DesignOrchestrator:
                 "scene_revision": "_prepare_scene_revision",
             },
         )
-        graph.add_edge("_prepare_scene_revision", "validate_requirements")
         graph.add_conditional_edges(
             "extract_requirements",
             _extraction_route,
@@ -385,9 +427,10 @@ class DesignOrchestrator:
         graph.add_edge("missing_data_handler", terminal_node)
         if self.memory_service is not None:
             graph.add_edge("retrieve_rag_context", "memory_recall")
-            graph.add_edge("memory_recall", "select_assets")
+            graph.add_edge("memory_recall", "decide_planning_context")
         else:
-            graph.add_edge("retrieve_rag_context", "select_assets")
+            graph.add_edge("retrieve_rag_context", "decide_planning_context")
+        graph.add_edge("decide_planning_context", "select_assets")
         graph.add_conditional_edges(
             "select_assets",
             _asset_route,
@@ -490,35 +533,30 @@ class DesignOrchestrator:
     def _apply_update(state: WorkflowState, update: dict) -> None:
         state.update(update)
 
-    def _entry_point(self, state: WorkflowState) -> Command:
+    def _entry_point(self, state: WorkflowState) -> dict:
         mode = state.get("entry_mode", "natural_language")
         if mode == "validated_requirements":
-            return Command(
-                goto="retrieve_rag_context",
-                update={
-                    "trace": _trace(
-                        state,
-                        "use_validated_requirements",
-                        state.get("extraction_provider", "project_design_spec"),
-                        time.perf_counter(),
-                    )
-                },
-            )
-        if mode == "scene_revision":
-            return Command(goto="_prepare_scene_revision", update={})
-        return Command(goto="extract_requirements", update={})
+            return {
+                "trace": _trace(
+                    state,
+                    "use_validated_requirements",
+                    state.get("extraction_provider", "project_design_spec"),
+                    time.perf_counter(),
+                )
+            }
+        return {}
 
     def _prepare_scene_revision(self, state: WorkflowState) -> Command:
         started = time.perf_counter()
         scene = state["scene"]
         try:
-            scene = _scene_with_required_accessories(scene, self.registry)
+            scene = _scene_with_revision_dependencies(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
             scene = _scene_with_asset_metadata(scene, selected_assets)
             requirements = _requirements_from_scene(
                 scene, tower, antenna, radio, state["detail_level"]
             )
-        except (KeyError, ValueError) as exc:
+        except (KeyError, LookupError, ValueError) as exc:
             report = _failed_report(
                 design_id=state["workflow_id"],
                 code="SCENE_REVISION_ASSET_ERROR",
@@ -690,10 +728,103 @@ class DesignOrchestrator:
         started = time.perf_counter()
         if self.memory_service is None:
             return {"trace": _trace(state, "memory_recall", "skipped", started, status="skipped")}
-        recall = self.memory_service.recall(state["requirements"])
+        try:
+            recall = self.memory_service.recall(state["requirements"])
+        except Exception as exc:
+            return {
+                "memory_recall": MemoryRecallResult().model_dump(),
+                "trace": _trace(
+                    state,
+                    "memory_recall",
+                    f"failed:{type(exc).__name__}",
+                    started,
+                    status="failed",
+                    errors=[str(exc)],
+                ),
+            }
         return {
             "memory_recall": recall.model_dump(),
             "trace": _trace(state, "memory_recall", f"{recall.memory_hits} hits", started),
+        }
+
+    def _decide_planning_context(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        requirements = state["requirements"]
+        contexts = state.get("rag_context", [])
+        evidence = collect_planning_evidence(requirements, contexts)
+        eligible_candidates = [
+            candidate
+            for candidate in evidence.candidates
+            if candidate.field in evidence.inferred_fields
+            and candidate.value != evidence.current_values[candidate.field]
+        ]
+
+        if self.planning_decision_client is None or not eligible_candidates:
+            resolution = resolve_planning_hints(requirements, contexts)
+            status = "not_needed" if not eligible_candidates else "deterministic_policy"
+            reason = (
+                "no_eligible_inferred_candidates"
+                if not eligible_candidates
+                else "planning_model_not_configured"
+            )
+            decision = {
+                "authority": "validated_candidates_only",
+                "status": status,
+                "reason": reason,
+                "provider": None,
+                "model_name": None,
+                "fallback_used": False,
+                "candidate_count": len(evidence.candidates),
+                "eligible_candidate_count": len(eligible_candidates),
+                "protected_fields": sorted(
+                    set(evidence.current_values) - set(evidence.inferred_fields)
+                ),
+                "memory_risk_count": 0,
+                "selections": [],
+            }
+            return {
+                "rag_planning_resolution": _planning_resolution_payload(resolution),
+                "planning_decision": decision,
+                "trace": _trace(
+                    state,
+                    "decide_planning_context",
+                    reason,
+                    started,
+                    status="skipped" if status == "not_needed" else "passed",
+                ),
+            }
+
+        request = _planning_decision_request(evidence, state.get("memory_recall"))
+        result = self.planning_decision_client.decide(request)
+        resolution = apply_bounded_planning_decision(requirements, contexts, result)
+        decision = {
+            "authority": "validated_candidates_only",
+            "status": result.diagnostics.status,
+            "reason": result.diagnostics.fallback_reason,
+            "provider": result.diagnostics.provider,
+            "model_name": result.diagnostics.model_name,
+            "fallback_used": result.diagnostics.fallback_used,
+            "latency_ms": result.diagnostics.latency_ms,
+            "candidate_count": len(request.candidates),
+            "eligible_candidate_count": len(eligible_candidates),
+            "protected_fields": request.protected_fields,
+            "memory_risk_count": len(request.memory_risks),
+            "selections": [selection.model_dump() for selection in result.selections],
+        }
+        return {
+            "rag_planning_resolution": _planning_resolution_payload(resolution),
+            "planning_decision": decision,
+            "trace": _trace(
+                state,
+                "decide_planning_context",
+                (
+                    "provider_fallback_keep_validated_values"
+                    if result.diagnostics.fallback_used
+                    else f"{len(resolution.applied_fields)} fields applied"
+                ),
+                started,
+                warnings=["PLANNING_DECISION_FALLBACK"] if result.diagnostics.fallback_used else [],
+            ),
         }
 
     def _select_assets(self, state: WorkflowState) -> dict:
@@ -942,6 +1073,7 @@ class DesignOrchestrator:
             accessory_assets=state.get("accessory_assets", []),
             rag_context=state.get("rag_context"),
             memory_recall=state.get("memory_recall"),
+            planning_resolution=state.get("rag_planning_resolution"),
         )
         return {
             "scene": scene,
@@ -1092,8 +1224,7 @@ class DesignOrchestrator:
         started = time.perf_counter()
         generation = self.blender_runner.generate(state["scene"], state["output_dir"])
         real_generation = generation.status == "generated" and generation.mode == "real_blender"
-        fallback_allowed = self.allow_blender_fallback and generation.status == "fallback"
-        status = "passed" if (real_generation or fallback_allowed) else "failed"
+        status = "passed" if real_generation else "failed"
         return {
             "generation": generation,
             "trace": _trace(
@@ -1119,6 +1250,7 @@ class DesignOrchestrator:
                 started,
                 warnings=[generation.mode],
                 errors=[generation.error] if generation.error else [],
+                status="failed",
                 route="blender_failure",
                 attempt=state.get("repair_attempts", 0),
             ),
@@ -1263,16 +1395,32 @@ class DesignOrchestrator:
                     state, "memory_writeback", "skipped:no_report", started, status="skipped"
                 )
             }
-        summary = self.memory_service.write_workflow_summary(
-            workflow_id=state["workflow_id"],
-            requirements=state.get("requirements"),
-            scene=state.get("scene"),
-            report=report,
-            generation=state.get("generation"),
-            scene_spec_path=state["output_dir"] / "scene_spec.json",
-            validation_report_path=state["output_dir"] / "validation_report.json",
-        )
-        stats = self.memory_service.stats()
+        try:
+            summary = self.memory_service.write_workflow_summary(
+                workflow_id=state["workflow_id"],
+                requirements=state.get("requirements"),
+                scene=state.get("scene"),
+                report=report,
+                generation=state.get("generation"),
+                scene_spec_path=state["output_dir"] / "scene_spec.json",
+                validation_report_path=state["output_dir"] / "validation_report.json",
+            )
+            stats = self.memory_service.stats()
+        except Exception as exc:
+            return {
+                "memory_writeback": {
+                    "status": "failed_non_blocking",
+                    "error": f"{type(exc).__name__}: {exc}",
+                },
+                "trace": _trace(
+                    state,
+                    "memory_writeback",
+                    f"failed_non_blocking:{type(exc).__name__}",
+                    started,
+                    status="failed",
+                    errors=[str(exc)],
+                ),
+            }
         writeback = stats | {
             "summary": summary.model_dump() if summary else None,
             "index": self.memory_service.last_index_result.model_dump(),
@@ -1286,6 +1434,83 @@ class DesignOrchestrator:
                 started,
             ),
         }
+
+
+def _planning_decision_request(
+    evidence: RagPlanningEvidence,
+    memory_recall: dict | None,
+) -> PlanningDecisionRequest:
+    candidates = []
+    for candidate in evidence.candidates[:24]:
+        provenance = candidate.provenance
+        score = provenance.get("score")
+        candidates.append(
+            PlanningCandidate(
+                candidate_id=candidate.candidate_id,
+                field=candidate.field,  # type: ignore[arg-type]
+                value=candidate.value,  # type: ignore[arg-type]
+                provenance=PlanningCandidateProvenance(
+                    source="rag",
+                    reference_id=str(
+                        provenance.get("doc_id") or f"context-{candidate.context_index + 1}"
+                    )[:120],
+                    rank=int(provenance.get("rank") or candidate.context_index + 1),
+                    score=float(score) if isinstance(score, int | float) else None,
+                    collection=_bounded_text(provenance.get("collection"), 120),
+                    document_name=_bounded_text(provenance.get("filename"), 180),
+                    excerpt=_bounded_text(provenance.get("excerpt"), 320),
+                ),
+            )
+        )
+    memory_risks = _planning_memory_risks(memory_recall)
+    return PlanningDecisionRequest(
+        current_values=PlanningCurrentValues.model_validate(evidence.current_values),
+        protected_fields=sorted(set(evidence.current_values) - set(evidence.inferred_fields)),  # type: ignore[arg-type]
+        candidates=candidates,
+        memory_risks=memory_risks,
+    )
+
+
+def _planning_memory_risks(memory_recall: dict | None) -> list[PlanningMemoryRisk]:
+    if not isinstance(memory_recall, dict):
+        return []
+    patterns = memory_recall.get("error_patterns")
+    if not isinstance(patterns, list):
+        return []
+    risks: list[PlanningMemoryRisk] = []
+    for index, pattern in enumerate(patterns[:12], start=1):
+        if not isinstance(pattern, dict):
+            continue
+        code = str(pattern.get("issue_code") or "prior_issue")
+        safe_code = re.sub(r"[^A-Za-z0-9._:-]+", "-", code).strip("-.") or "prior_issue"
+        raw_severity = str(pattern.get("severity") or "warning").lower()
+        severity = "high" if raw_severity in {"error", "critical", "high"} else "medium"
+        summary = str(pattern.get("message") or code).strip() or code
+        risks.append(
+            PlanningMemoryRisk(
+                risk_id=f"memory:{index}:{safe_code}"[:96],
+                severity=severity,
+                summary=summary[:240],
+            )
+        )
+    return risks
+
+
+def _planning_resolution_payload(resolution: Any) -> dict:
+    return {
+        "antenna_install_height_m": resolution.antenna_install_height_m,
+        "beamwidth_deg": resolution.beamwidth_deg,
+        "include_cables": resolution.include_cables,
+        "include_sector_beams": resolution.include_sector_beams,
+        "decisions": list(resolution.decisions),
+    }
+
+
+def _bounded_text(value: object, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text[:limit] if text else None
 
 
 def _entry_route(state: WorkflowState) -> str:
@@ -1468,43 +1693,84 @@ def _select_accessory_assets(
     return assets
 
 
-def _scene_with_required_accessories(scene: SceneSpec, registry: AssetRegistry) -> SceneSpec:
-    existing_types = {accessory.asset_type for accessory in scene.accessory_assets}
-    additions = []
-    tower_type = (
-        scene.tower.characteristics.structure
-        if scene.tower.characteristics.structure != "lattice"
-        else "lattice_tower"
+def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry) -> SceneSpec:
+    """Rebind derived assets and placements after a validated SceneSpec edit."""
+
+    tower_type = _tower_type_for_structure(scene.tower.characteristics.structure)
+    tower_asset = registry.select_tower(tower_type, scene.network_type, scene.tower.height_m)
+    tower = scene.tower.model_copy(
+        update={
+            "asset_id": tower_asset.asset_id,
+            "asset_file": tower_asset.file,
+            "asset_source": tower_asset.source,
+            "asset_metadata": _runtime_asset_metadata(tower_asset),
+            "import_fallback_allowed": tower_asset.import_fallback_allowed,
+            "dimensions_m": tower_asset.dimensions_m,
+            "generation_strategy": "parametric_generated",
+            "geometry_source": "parametric_generated",
+            "generation_reason": "revision dependencies normalized from tower structure",
+        }
     )
-    if scene.visual_elements.include_power_cabinet and "cabinet" not in existing_types:
-        asset = registry.select_asset("cabinet", scene.network_type, tower_type)
-        additions.append(
+
+    sectors = []
+    for sector in scene.sectors:
+        antenna = registry.get(sector.antenna_asset_id)
+        if antenna.compatible_tower_types and tower_type not in antenna.compatible_tower_types:
+            antenna = registry.select_asset("antenna", scene.network_type, tower_type)
+        radio = registry.get(sector.radio_asset_id) if sector.radio_asset_id else None
+        if (
+            radio is not None
+            and radio.compatible_tower_types
+            and tower_type not in radio.compatible_tower_types
+        ):
+            radio = registry.select_asset("radio", scene.network_type, tower_type)
+        sectors.append(
+            sector.model_copy(
+                update={
+                    "antenna_asset_id": antenna.asset_id,
+                    "radio_asset_id": radio.asset_id if radio else None,
+                }
+            )
+        )
+
+    characteristics = tower.characteristics
+    base_width = float(characteristics.base_width_m or tower_asset.dimensions_m.width or 4.0)
+    top_width = float(characteristics.top_width_m or min(base_width, base_width * 0.25))
+    accessories = []
+    if scene.visual_elements.include_power_cabinet:
+        cabinet = registry.select_asset("cabinet", scene.network_type, tower_type)
+        accessories.append(
             _accessory_from_asset(
-                asset,
+                cabinet,
                 asset_type="cabinet",
-                position=[
-                    max(3.0, (scene.tower.characteristics.base_width_m or 4.0) * 1.2),
-                    0,
-                    0.8,
-                ],
+                position=[max(3.0, base_width * 1.2), 0.0, 0.0],
             )
         )
-    if scene.visual_elements.include_gps_antenna and "gps" not in existing_types:
-        asset = registry.select_asset("gps", scene.network_type, tower_type)
-        additions.append(
+    if scene.visual_elements.include_gps_antenna:
+        gps = registry.select_asset("gps", scene.network_type, tower_type)
+        gps_height = max(0.5, scene.tower.height_m - 0.5)
+        tower_width = base_width + (top_width - base_width) * (
+            gps_height / max(scene.tower.height_m, 1e-6)
+        )
+        accessories.append(
             _accessory_from_asset(
-                asset,
+                gps,
                 asset_type="gps",
-                position=[
-                    0,
-                    (scene.tower.characteristics.base_width_m or 4.0) / 2 + 0.1,
-                    max(0.5, scene.tower.height_m - 0.5),
-                ],
+                position=[0.0, tower_width / 2 + 0.1, gps_height],
             )
         )
-    if not additions:
-        return scene
-    return scene.model_copy(update={"accessory_assets": [*scene.accessory_assets, *additions]})
+    accessories.extend(
+        accessory
+        for accessory in scene.accessory_assets
+        if accessory.asset_type not in {"cabinet", "gps"}
+    )
+    return scene.model_copy(
+        update={"tower": tower, "sectors": sectors, "accessory_assets": accessories}
+    )
+
+
+def _tower_type_for_structure(structure: str) -> str:
+    return "lattice_tower" if structure == "lattice" else structure
 
 
 def _accessory_from_asset(asset: AssetManifest, *, asset_type: str, position: list[float]):
@@ -1618,7 +1884,7 @@ def _trace(
 
 
 def _emit_node_started_runtime_event(state: WorkflowState, node: str) -> None:
-    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    sink = _runtime_event_sink(state)
     if sink is None:
         return
     sink(
@@ -1643,7 +1909,7 @@ def _emit_node_exception_runtime_event(
     node: str,
     exc: Exception,
 ) -> None:
-    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    sink = _runtime_event_sink(state)
     if sink is None:
         return
     sink(
@@ -1664,7 +1930,7 @@ def _emit_node_exception_runtime_event(
 
 
 def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None:
-    sink = _RUNTIME_EVENT_SINKS.get(state["workflow_id"])
+    sink = _runtime_event_sink(state)
     if sink is None:
         return
     event_type = {
@@ -1690,6 +1956,14 @@ def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None
     )
 
 
+def _runtime_event_sink(state: WorkflowState) -> RuntimeEventSink | None:
+    invocation_id = state.get("runtime_event_sink_id")
+    if not invocation_id:
+        return None
+    with _RUNTIME_EVENT_SINKS_LOCK:
+        return _RUNTIME_EVENT_SINKS.get(invocation_id)
+
+
 def _phase_for_node(node: str) -> str:
     if node in {
         "extract_requirements",
@@ -1699,7 +1973,7 @@ def _phase_for_node(node: str) -> str:
         "rule_violation_handler",
     }:
         return "requirements"
-    if node == "retrieve_rag_context":
+    if node in {"retrieve_rag_context", "decide_planning_context"}:
         return "rag"
     if node in {"memory_recall", "memory_writeback"}:
         return "memory"
@@ -1724,6 +1998,7 @@ def _human_label_for_node(node: str) -> str:
         "use_validated_requirements": "Lecture des exigences validées",
         "missing_data_handler": "Vérification des données manquantes",
         "retrieve_rag_context": "Recherche dans la connaissance telecom",
+        "decide_planning_context": "Arbitrage des preuves de conception",
         "memory_recall": "Rappel mémoire projet",
         "select_assets": "Sélection des assets telecom",
         "asset_fallback_handler": "Sélection d'un asset alternatif",
@@ -1748,6 +2023,9 @@ def _progress_message_for_node(node: str) -> str:
     return {
         "extract_requirements": "Le backend extrait les contraintes importantes du brief.",
         "retrieve_rag_context": "Le backend cherche le contexte telecom pertinent.",
+        "decide_planning_context": (
+            "GPT-OSS compare les preuves RAG validées sans modifier les contraintes explicites."
+        ),
         "memory_recall": "Le backend récupère les souvenirs utiles de designs précédents.",
         "select_assets": "Le backend choisit les assets compatibles avec le site.",
         "validate_requirements": "Le backend vérifie les contraintes radio et pylône.",
@@ -1913,6 +2191,7 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         preview_inspection=state.get("preview_inspection"),
         generation=state.get("generation"),
         rag_context=state.get("rag_context", []),
+        planning_decision=state.get("planning_decision"),
         memory_recall=MemoryRecallResult(**memory_recall) if memory_recall else None,
         memory_writeback=state.get("memory_writeback"),
         trace=state.get("trace", []),
@@ -1945,6 +2224,10 @@ def _workflow_metrics(
         "trace_steps": len(trace),
         "rag_context_count": len(state.get("rag_context", [])),
         "rag_planning_hint_context_count": _rag_hint_context_count(state.get("rag_context", [])),
+        "planning_decision_status": (state.get("planning_decision") or {}).get("status"),
+        "planning_decision_fallback_used": (state.get("planning_decision") or {}).get(
+            "fallback_used"
+        ),
         "memory_hits": memory_recall.get("memory_hits", 0),
         "memory_context_count": memory_recall.get("memory_context_count", 0),
         "rag_duration_ms": _duration_for_nodes(trace, {"retrieve_rag_context"}),
@@ -1952,6 +2235,7 @@ def _workflow_metrics(
             trace,
             {
                 "select_assets",
+                "decide_planning_context",
                 "validate_requirements",
                 "plan_scene",
                 "validate_scene",

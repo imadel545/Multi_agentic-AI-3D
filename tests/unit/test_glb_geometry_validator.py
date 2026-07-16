@@ -3,8 +3,14 @@ from pathlib import Path
 
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.glb_inspection import GlbInspectionReport
+from core.contracts.parametric import MeshCheckResult, MeshQAReport
 from core.qa.glb_geometry_validator import GLBGeometryValidator
-from core.qa.mesh_qa import _object_prefix_counts
+from core.qa.mesh_qa import (
+    _apply_matrix,
+    _node_transform,
+    _object_prefix_counts,
+    _world_node_transforms,
+)
 from core.services.asset_registry import AssetRegistry
 from core.services.requirement_parser import parse_requirements_text
 
@@ -24,6 +30,7 @@ def test_geometry_validation_valid_5g_scene(tmp_path: Path) -> None:
     assert report.checks["tower_characteristics_metadata_valid"] is True
     assert report.checks["azimuth_metadata_valid"] is True
     assert report.checks["mechanical_tilt_metadata_valid"] is True
+    assert report.object_counts["tower"] == 1
 
 
 def test_geometry_validation_missing_antenna_fails(tmp_path: Path) -> None:
@@ -39,6 +46,24 @@ def test_geometry_validation_missing_antenna_fails(tmp_path: Path) -> None:
     assert report.status == "failed"
     assert report.checks["antenna_count_valid"] is False
     assert "antenna:S3" in report.missing_objects
+
+
+def test_geometry_validation_does_not_match_s1_to_s10(tmp_path: Path) -> None:
+    scene = _scene()
+    names = [
+        name.replace("antenna_S1", "antenna_S10") if name.startswith("antenna_S1") else name
+        for name in _object_names(scene)
+    ]
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(names),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert report.status == "failed"
+    assert report.checks["antenna_count_valid"] is True
+    assert "antenna:S1" in report.missing_objects
 
 
 def test_geometry_validation_missing_beam_fails(tmp_path: Path) -> None:
@@ -137,6 +162,32 @@ def test_geometry_validation_requires_requested_accessories(tmp_path: Path) -> N
     assert "power_cabinet" in missing.missing_objects
 
 
+def test_geometry_validation_requires_supported_non_concrete_foundation(tmp_path: Path) -> None:
+    base_scene = _scene()
+    scene = base_scene.model_copy(
+        update={
+            "tower": base_scene.tower.model_copy(
+                update={
+                    "characteristics": base_scene.tower.characteristics.model_copy(
+                        update={"foundation_type": "rooftop_anchored"}
+                    )
+                }
+            )
+        }
+    )
+    names = _object_names(scene) + ["foundation_rooftop_anchored_root"]
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(names),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert report.status == "passed"
+    assert report.object_counts["foundation"] == 1
+    assert report.checks["foundation_count_valid"] is True
+
+
 def test_geometry_validation_scales_bounding_box_sanity_for_tall_parametric_tower(
     tmp_path: Path,
 ) -> None:
@@ -176,6 +227,74 @@ def test_mesh_qa_prefix_counts_do_not_treat_gps_as_sector_antenna() -> None:
     assert counts.get("antenna", 0) == 0
     assert counts["gps"] == 1
     assert counts["power_cabinet"] == 1
+
+
+def test_mesh_qa_reads_gltf_column_major_matrices() -> None:
+    matrix = _node_transform(
+        {
+            "matrix": [
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                1,
+                0,
+                4,
+                5,
+                6,
+                1,
+            ]
+        }
+    )
+
+    assert _apply_matrix(matrix, (1, 2, 3)) == (5, 7, 9)
+
+
+def test_mesh_qa_composes_parent_and_child_transforms() -> None:
+    transforms = _world_node_transforms(
+        {
+            "nodes": [
+                {"translation": [10, 0, 0], "children": [1]},
+                {"translation": [0, 5, 0]},
+            ]
+        }
+    )
+
+    assert _apply_matrix(transforms[1], (0, 0, 0)) == (10, 5, 0)
+
+
+def test_geometry_validation_fails_when_mesh_qa_fails(tmp_path: Path, monkeypatch) -> None:
+    scene = _scene()
+    glb_path = tmp_path / "design.glb"
+    glb_path.write_bytes(b"glTF-invalid-for-mocked-mesh-qa")
+    failed_mesh_qa = MeshQAReport(
+        level="mesh_level_basic",
+        glb_parse_ok=True,
+        checks=[MeshCheckResult(name="tower_height_approx", passed=False)],
+        critical_errors=["MESH_TOWER_HEIGHT_MISMATCH"],
+        mesh_qa_passed=False,
+    )
+    monkeypatch.setattr(
+        "core.qa.glb_geometry_validator.MeshQA.validate",
+        lambda *_: failed_mesh_qa,
+    )
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(_object_names(scene)),
+        _metadata_path(tmp_path, scene),
+        glb_path,
+    )
+
+    assert report.status == "failed"
+    assert report.checks["mesh_qa_passed"] is False
+    assert "mesh_qa_passed" in report.critical_errors
 
 
 def _scene(prompt: str | None = None):
