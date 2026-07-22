@@ -15,6 +15,7 @@ FastAPI
   -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
   -> asset registry + inventory
+  -> qualified asset-library retrieval only (raw CAD stays quarantined)
   -> SceneSpec planner
   -> SceneSpec validation + quality gates
   -> Blender runner
@@ -36,6 +37,10 @@ FastAPI
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
+- `core/services/asset_library.py`: immutable-source catalog, SHA-256
+  deduplication, metadata search, deterministic CAD-to-source-preview links and
+  isolated LibreDWG probes. Preview links are retrieval evidence only. The
+  service does not promote or tessellate a raw CAD asset.
 - `core/qa`: GLB structural parse, mesh/accessor/transform basic QA, proxy
   geometry, preview pixel/framing QA.
 
@@ -62,6 +67,10 @@ FastAPI
   inventory has 12 manifests, 12 GLB files, and 0 missing files.
 - Geometry QA is mesh/accessor/role-transform basic plus object/name/count/metadata
   checks; it is not collision/RF/vendor-grade QA.
+- The separate 11,974-file CAD library is not part of that active inventory.
+  Its 11,531 unique contents remain quarantined until licence, units, B-Rep
+  conversion and geometry QA produce a validated manifest. Only validated,
+  generation-eligible catalog rows may enter the asset RAG collection.
 - RAG is not used for extraction in v1; only structured, whitelisted
   `payload.planning_hints` can influence planning, and `rag_planning_summary`
   plus `rag_evidence.json` expose whether that happened.

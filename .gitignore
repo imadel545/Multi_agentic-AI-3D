@@ -16,3 +16,6 @@ outputs/temp/*
 !outputs/temp/.gitkeep
 data/sqlite/
 data/qdrant/
+assets/library/raw/
+assets/library/index/
+assets/library/converted/

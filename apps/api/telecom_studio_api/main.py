@@ -10,6 +10,9 @@ from starlette.concurrency import run_in_threadpool
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
     AssetInventoryResponse,
+    AssetLibraryProbeResponse,
+    AssetLibrarySearchResponse,
+    AssetLibrarySummaryResponse,
     CreateDesignRequest,
     CreateDesignResponse,
     CurrentOperation,
@@ -54,6 +57,7 @@ from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
 from core.rag.service import RagIndexCompatibilityError
 from core.services.asset_inventory import AssetInventoryService
+from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound, AssetLibraryService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 from core.services.checkpoint_saver import SqliteCheckpointSaver
@@ -108,6 +112,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 registry = AssetRegistry(settings.manifests_dir)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
+asset_library_service = AssetLibraryService(settings.asset_library_dir)
 rag_embedding_provider = build_embedding_provider(
     settings.embedding_provider,
     settings.embedding_model,
@@ -404,6 +409,39 @@ def list_assets() -> list[dict]:
 @app.get("/assets/inventory", response_model=AssetInventoryResponse)
 def asset_inventory() -> dict:
     return asset_inventory_service.inspect()
+
+
+@app.get("/assets/library/summary", response_model=AssetLibrarySummaryResponse)
+def asset_library_summary() -> dict:
+    return asset_library_service.summary()
+
+
+@app.get("/assets/library/search", response_model=AssetLibrarySearchResponse)
+def asset_library_search(
+    q: str = Query(min_length=1, max_length=240),
+    claimed_dimension: str | None = Query(default=None, pattern="^(2d|3d|unspecified)$"),
+    extension: str | None = Query(default=None, min_length=1, max_length=12),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> dict:
+    try:
+        return asset_library_service.search(
+            q,
+            claimed_dimension=claimed_dimension,
+            extension=extension,
+            limit=limit,
+        )
+    except AssetLibraryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/assets/library/{file_id}/probe", response_model=AssetLibraryProbeResponse)
+def asset_library_probe(file_id: str) -> dict:
+    try:
+        return asset_library_service.probe(file_id)
+    except AssetLibraryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AssetLibraryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/assets/{asset_id}")

@@ -18,7 +18,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not a dev dashboard.
 - Not an LLM-free-form Blender code generator.
 - Not marketing proof where a fallback is presented as a real result.
-- Not yet a complete vendor-grade asset library.
+- Not yet a complete vendor-grade asset library. A large local CAD corpus is
+  catalogued, but remains quarantined until rights and geometry are qualified.
 
 ## Current backend
 
@@ -89,6 +90,24 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Towers are generated parametrically by default. GLB import happens only when
   the resolver explicitly selects `imported_glb_exact` or
   `internal_project_generated`.
+- The local `assets/library` corpus is a lossless copy of `MAJ des Blocs`:
+  11,974 files (11,531 unique contents; 443 duplicates by SHA-256), including
+  2,834 paths claimed as 3D and 8,514 as 2D. These directory labels are
+  provenance only, not geometry proof.
+- Catalog, search and DWG probe APIs are operational, but every imported
+  library file is currently `quarantined_unverified`: 0 is generation-eligible.
+  No global source licence was detected. Raw files and generated indexes remain
+  local and ignored by Git.
+- Catalog schema `1.1.0` links nearby source preview images by deterministic
+  filename provenance: 7 CAD files have 15 preview links. A linked image is a
+  retrieval aid only; it is not geometry, scale, licence or conversion proof.
+- Real probes show DWG `3DSOLID`/ACIS content. LibreDWG can inventory entities,
+  but it is not accepted as a B-Rep tessellator. A controlled ACIS/OpenCascade,
+  ODA or vendor-CAD conversion path plus unit/material/geometry QA is required
+  before any entry can become a production manifest.
+- ODA Drawings Explorer 27.1 is installed locally and can visually inspect the
+  representative DWG, but its application bundle exposes no verified headless
+  STL/DAE export route. Its presence therefore does not make conversion active.
 
 ## Current 3D and QA
 

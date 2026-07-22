@@ -123,7 +123,7 @@ def _entity_coordinates(entity) -> str:
 
 
 def _local_dwg_converter() -> Path | None:
-    for command in ("ODAFileConverter", "FreeCAD", "dwgread"):
+    for command in ("ODAFileConverter", "FreeCAD", "dwg2dxf"):
         path = shutil.which(command)
         if path:
             return Path(path)

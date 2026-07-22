@@ -18,8 +18,8 @@ def detect_document_pack_capabilities(
     tesseract_path = shutil.which("tesseract")
     oda_path = shutil.which("ODAFileConverter")
     freecad_path = shutil.which("FreeCAD")
-    dwgread_path = shutil.which("dwgread")
-    dwg_converter = oda_path or freecad_path or dwgread_path
+    dwg2dxf_path = shutil.which("dwg2dxf")
+    dwg_converter = oda_path or freecad_path or dwg2dxf_path
 
     return DocumentPackCapabilities(
         pdf_text_extraction=DocumentToolCapability(
@@ -78,11 +78,21 @@ def detect_document_pack_capabilities(
         ),
         dwg_conversion=DocumentToolCapability(
             name="Local DWG converter",
-            status="conversion_available" if dwg_converter else "unsupported_without_converter",
-            purpose="Convert DWG to DXF using local tooling before parsing.",
+            status="installed_import_only" if dwg_converter else "unsupported_without_converter",
+            purpose=(
+                "Detect a local DWG-to-DXF tool. Conversion is not executed by the current "
+                "document-pack pipeline."
+            ),
             command=dwg_converter,
-            fallback="DWG files are recorded as unsupported; no cloud conversion is attempted.",
-            warnings=[] if dwg_converter else ["local_dwg_converter_missing"],
+            fallback=(
+                "DWG files remain inventory-only until conversion, DXF parsing and evidence "
+                "validation are wired into the request."
+            ),
+            warnings=(
+                ["dwg_converter_detected_but_execution_disabled"]
+                if dwg_converter
+                else ["local_dwg_converter_missing"]
+            ),
         ),
         coordinate_conversion=DocumentToolCapability(
             name="pyproj",

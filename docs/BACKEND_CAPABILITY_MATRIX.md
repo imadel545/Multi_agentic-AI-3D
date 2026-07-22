@@ -16,13 +16,15 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | OCR | IMPLEMENTED_LIMITED | Tesseract + `pytesseract` | Limité à une sélection de pages; langues système requises. |
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
 | DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
-| DWG | UNSUPPORTED_WITHOUT_TOOL | `dwgread`/ODA/FreeCAD detection | Conversion dépend d'outil local. |
+| DWG library inventory/probe | IMPLEMENTED_LIMITED | `core/services/asset_library.py`, `/assets/library/*`, LibreDWG `dwgread` | Hash, déduplication, métadonnées et types d'entités; aucune tessellation ACIS revendiquée. |
+| DWG 3D conversion | UNSUPPORTED_WITHOUT_TOOL | Route de conversion reportée par le probe; détection import-only dans `core/document_pack/tooling.py` | Les `3DSOLID` exigent une passerelle B-Rep/ACIS contrôlée. `dwgread` et ODA Drawings Explorer ne sont pas déclarés convertisseurs; 0 fichier brut est éligible à Blender. |
 | RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; l'index statique se resynchronise quand les docs/manifests changent; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py`, `/studio/summary` | NVIDIA API par défaut; passthrough seulement explicite ou dégradé visible; modèle local seulement si activé explicitement. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
 | Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
+| Local CAD library | IMPLEMENTED_LIMITED | `/assets/library/summary`, `/assets/library/search`, `/assets/library/{file_id}/probe` | 11 974 fichiers, 11 531 contenus uniques, 443 doublons; schéma 1.1 relie 15 aperçus à 7 CAD. Recherche metadata-only; licences et conversion à qualifier; corpus brut hors Git. |
 | Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |
 | GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
 | Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py`, `core/qa/mesh_qa.py` | `mesh_level_transform_basic` quand transforms GLB lisibles, sinon `mesh_level_basic`; toujours pas collision/RF/vendor-grade. |

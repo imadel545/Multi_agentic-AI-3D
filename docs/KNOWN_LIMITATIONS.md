@@ -65,7 +65,24 @@ frontend.
   `document_pack_status=limited`.
 - OCR is limited and depends on installed Tesseract + languages.
 - Docling is import-only / not active by default.
-- DXF extracts text/layers; DWG depends on a local converter.
+- DXF document-pack extracts text/layers; it is not a solid-CAD importer.
+- The local CAD library is fully copied and catalogued, but remains quarantined:
+  11,974 files, 11,531 unique contents, 443 duplicate contents and 0
+  generation-eligible entry. No global licence file was found in the source.
+- LibreDWG `dwgread` provides honest DWG metadata/entity probes. Sample telecom
+  models contain `3DSOLID` ACIS/B-Rep entities, so converting them through DXF
+  alone is not accepted as mesh proof. A real B-Rep conversion tool and
+  post-conversion unit, mesh, semantic-role and visual QA are still required.
+- Tool failures, timeouts and non-UTF/invalid JSON probe output are returned as
+  controlled quarantine errors; they never qualify a file or expose a raw decode
+  exception as a product result.
+- The catalog links 15 nearby source images to 7 CAD files for retrieval and
+  human comparison. These links do not prove that an image matches the complete
+  CAD geometry. No local preview is sent to a remote vision model by default.
+- Detecting `ODAFileConverter`, FreeCAD or `dwg2dxf` only reports
+  `installed_import_only`; document-pack processing does not execute a silent
+  DWG conversion. The installed ODA Drawings Explorer is an inspector, not an
+  accepted headless production converter.
 - Missing foundation evidence remains `unknown`; no concrete pad is invented.
 - Missing antenna model evidence selects a generic network family with a visible
   warning, never a vendor-exact claim.

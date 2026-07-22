@@ -309,6 +309,43 @@ class AssetInventoryResponse(BaseModel):
     missing_files: list[AssetInventoryEntry] = Field(default_factory=list)
 
 
+class AssetLibrarySummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    schema_version: str
+    catalog_available: bool = False
+    generation_eligible_count: int = 0
+    limitations: list[str] = Field(default_factory=list)
+
+
+class AssetLibrarySearchResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    query: str
+    filters: dict[str, Any] = Field(default_factory=dict)
+    result_count: int
+    results: list[dict[str, Any]] = Field(default_factory=list)
+    selection_policy: str
+    generation_eligible: bool
+    next_action: str
+
+
+class AssetLibraryProbeResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    file: dict[str, Any]
+    probe_status: str
+    tool: str
+    entity_counts: dict[str, int] = Field(default_factory=dict)
+    contains_acis_3d_solids: bool
+    contains_mesh_convertible_geometry: bool
+    conversion_route: str
+    blender_ready: bool
+    generation_eligible: bool
+    limitations: list[str] = Field(default_factory=list)
+
+
 class UserIssue(BaseModel):
     title: str
     severity: Literal["info", "warning", "error"]

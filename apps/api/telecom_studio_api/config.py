@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     project_root: Path = Path(__file__).resolve().parents[3]
     asset_manifests_dir: Path | None = None
+    asset_library_path: Path | None = None
     outputs_dir: Path | None = None
     qdrant_url: str | None = None
     qdrant_path: Path | None = None
@@ -40,6 +41,10 @@ class Settings(BaseSettings):
     @property
     def manifests_dir(self) -> Path:
         return self.asset_manifests_dir or self.project_root / "assets" / "manifests"
+
+    @property
+    def asset_library_dir(self) -> Path:
+        return self.asset_library_path or self.project_root / "assets" / "library"
 
     @property
     def temp_outputs_dir(self) -> Path:
