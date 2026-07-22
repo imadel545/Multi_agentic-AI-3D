@@ -83,6 +83,9 @@ frontend.
   **not** verify exact antenna azimuth from vertices and does **not** perform
   collision detection.
 - No material, RF, structural wind-load, or vendor-grade mesh dimension validation yet.
+- The tower validator uses height only as a conservative trigger for aviation-marking
+  review. It does not determine whether lighting is legally required; national rules,
+  obstacle location and the competent aviation authority remain authoritative.
 - Internal/CC-BY assets are not vendor-grade.
 
 ## Can wait

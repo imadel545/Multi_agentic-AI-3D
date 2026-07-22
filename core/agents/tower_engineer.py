@@ -69,11 +69,13 @@ class TowerEngineerAgent:
                 )
             )
 
-        # Accessory recommendations based on height
+        # Accessory recommendations based on supported design heuristics. Aviation
+        # marking is different: height alone cannot establish a legal obligation.
+        # The threshold below only triggers a regulatory review signal.
         recommended["has_platform"] = height >= 20
         recommended["has_ladder"] = height >= 6
         recommended["has_lightning_rod"] = height >= 10
-        recommended["has_aviation_light"] = height >= 45
+        recommended["aviation_marking_review_required"] = height >= 45
 
         checks["accessories_recommended"] = True
         if height >= 20 and not characteristics.has_platform:
@@ -87,8 +89,13 @@ class TowerEngineerAgent:
         if height >= 45 and not characteristics.has_aviation_light:
             warnings.append(
                 ValidationIssue(
-                    code="TOWER_AVIATION_LIGHT_RECOMMENDED",
-                    message="Aviation light required for towers >= 45m per ICAO.",
+                    code="TOWER_AVIATION_MARKING_REVIEW_REQUIRED",
+                    message=(
+                        "Tower height reached the internal aviation-screening threshold. "
+                        "Applicable national aviation rules, obstacle location and authority "
+                        "requirements must be reviewed; this validator cannot conclude that "
+                        "an aviation light is legally required."
+                    ),
                     severity="warning",
                 )
             )

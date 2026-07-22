@@ -1086,14 +1086,27 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
             "Ajouter une plateforme/support si le cahier de charge le confirme."
         ),
     },
-    "TOWER_AVIATION_LIGHT_RECOMMENDED": {
-        "title": "Balisage aviation recommandé",
+    "TOWER_AVIATION_MARKING_REVIEW_REQUIRED": {
+        "title": "Balisage aviation à vérifier",
         "impact": (
-            "La hauteur du pylône peut nécessiter un feu aviation ou une vérification "
-            "réglementaire avant usage réel."
+            "La hauteur a déclenché un contrôle préliminaire, mais elle ne suffit pas à "
+            "déterminer seule si un balisage est légalement requis."
         ),
         "recommended_action": (
-            "Afficher ce point comme exigence de revue et confirmer la règle locale applicable."
+            "Confirmer la réglementation nationale, la proximité aéronautique et la décision "
+            "de l'autorité compétente avant de figer le design."
+        ),
+    },
+    # Compatibility for statuses persisted before the warning was renamed.
+    "TOWER_AVIATION_LIGHT_RECOMMENDED": {
+        "title": "Balisage aviation à vérifier",
+        "impact": (
+            "Un ancien contrôle de hauteur a signalé ce point; il ne constitue pas une "
+            "conclusion réglementaire."
+        ),
+        "recommended_action": (
+            "Confirmer la réglementation nationale, la proximité aéronautique et la décision "
+            "de l'autorité compétente avant de figer le design."
         ),
     },
 }

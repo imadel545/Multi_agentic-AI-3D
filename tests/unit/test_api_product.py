@@ -653,8 +653,8 @@ def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:
                 "severity": "warning",
             },
             {
-                "code": "TOWER_AVIATION_LIGHT_RECOMMENDED",
-                "message": "Aviation light required for towers >= 45m per ICAO.",
+                "code": "TOWER_AVIATION_MARKING_REVIEW_REQUIRED",
+                "message": "Applicable aviation rules require review.",
                 "severity": "warning",
             },
         ],
@@ -668,7 +668,7 @@ def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:
     assert "Champ IA réparé par le backend" in titles
     assert "Beamwidth à vérifier" in titles
     assert "Plateforme pylône recommandée" in titles
-    assert "Balisage aviation recommandé" in titles
+    assert "Balisage aviation à vérifier" in titles
 
 
 def test_product_issues_include_failed_runtime_nodes() -> None:

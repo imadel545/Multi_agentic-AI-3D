@@ -130,7 +130,14 @@ def test_tower_engineer_resolves_optional_widths_without_crashing(
     assert report.checks["taper_valid"] is True
 
 
-def test_tower_engineer_recommends_aviation_light(agent, valid_requirements, tower_asset):
+def test_tower_engineer_requests_regulatory_review_without_claiming_a_light_is_required(
+    agent,
+    valid_requirements,
+    tower_asset,
+):
     req = valid_requirements.model_copy(update={"tower_height_m": 50})
     report = agent.validate(req, tower_asset)
-    assert any(w.code == "TOWER_AVIATION_LIGHT_RECOMMENDED" for w in report.warnings)
+    warning = next(w for w in report.warnings if w.code == "TOWER_AVIATION_MARKING_REVIEW_REQUIRED")
+    assert "cannot conclude" in warning.message
+    assert report.recommended_accessories["aviation_marking_review_required"] is True
+    assert "has_aviation_light" not in report.recommended_accessories
