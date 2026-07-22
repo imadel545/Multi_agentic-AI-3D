@@ -51,6 +51,7 @@ class GenerationQA:
             "metadata_accessory_assets_valid": _metadata_accessory_assets_valid(metadata, scene),
             "metadata_preview_camera_valid": isinstance(metadata.get("preview_camera"), dict)
             and bool(metadata["preview_camera"].get("camera")),
+            "metadata_segment_connectivity_valid": _segment_connectivity_valid(metadata),
             "metadata_asset_imports_present": isinstance(asset_imports, list)
             and len(asset_imports) >= expected_asset_placements,
             "metadata_asset_import_modes_valid": _asset_import_modes_valid(asset_imports),
@@ -179,6 +180,21 @@ def _metadata_accessory_assets_valid(metadata: dict, scene: SceneSpec) -> bool:
         return False
     actual_ids = {entry.get("asset_id") for entry in raw if isinstance(entry, dict)}
     return expected_ids.issubset(actual_ids)
+
+
+def _segment_connectivity_valid(metadata: dict) -> bool:
+    report = metadata.get("segment_connectivity")
+    return (
+        isinstance(report, dict)
+        and report.get("status") == "passed"
+        and report.get("passed") is True
+        and isinstance(report.get("evaluated_segment_count"), int)
+        and report["evaluated_segment_count"] > 0
+        and report.get("failed_segment_count") == 0
+        and isinstance(report.get("maximum_endpoint_error_m"), (int, float))
+        and isinstance(report.get("tolerance_m"), (int, float))
+        and report["maximum_endpoint_error_m"] <= report["tolerance_m"]
+    )
 
 
 def _asset_import_summary_valid(summary: object, asset_imports: list) -> bool:

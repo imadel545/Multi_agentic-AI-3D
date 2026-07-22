@@ -25,6 +25,17 @@ FastAPI
   -> Product API summaries
 ```
 
+Une révision par prompt suit d'abord un graphe spécialisé:
+
+```text
+active SceneSpec + prompt
+  -> resolve manifest capability profiles
+  -> bounded Groq JSON-Schema plan or visible deterministic fallback
+  -> capability/path/tool/value/grounding validation
+  -> SceneSpec mutation
+  -> main revision graph -> Blender -> QA -> certified version activation
+```
+
 ## Modules
 
 - `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
@@ -57,20 +68,24 @@ FastAPI
 
 ## Known weak points
 
-- Edit patch creation, artifact copying, and version bookkeeping are service-level concerns
-  outside the graph; generation paths enter the compiled LangGraph graph.
+- Artifact copying and version bookkeeping remain service-level. Edit planning,
+  validation and SceneSpec mutation now run inside a dedicated checkpointed
+  LangGraph graph before the main revision graph.
 - Revision preparation rebinds tower/equipment assets and recalculates derived
-  GPS/cabinet placements before validation and Blender generation.
+  GPS/cabinet placements before validation and Blender generation. Existing
+  accessory rotation/scale are preserved; explicitly moved positions are marked
+  `user_defined`, while derived positions continue to follow tower geometry.
 - Events are frontend-readable and `/events/stream` is `push_sse` local-process, but there is
   no broker, cancellation manager, or durable resume yet.
 - Asset import fallback can still create procedural geometry if an import fails, but the active
   inventory has 12 manifests, 12 GLB files, and 0 missing files.
-- Geometry QA is mesh/accessor/role-transform basic plus object/name/count/metadata
-  checks; it is not collision/RF/vendor-grade QA.
 - The separate 11,974-file CAD library is not part of that active inventory.
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,
   generation-eligible catalog rows may enter the asset RAG collection.
+- Geometry QA combines binary accessor checks, semantic role transforms and a
+  real-vertex AABB interference screen for primary equipment. It is not exact
+  triangle/BVH collision, RF, structural or vendor-grade QA.
 - RAG is not used for extraction in v1; only structured, whitelisted
   `payload.planning_hints` can influence planning, and `rag_planning_summary`
   plus `rag_evidence.json` expose whether that happened.

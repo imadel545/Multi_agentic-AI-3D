@@ -22,16 +22,6 @@ os.environ["TELECOM_STUDIO_ENABLE_GROQ_EXTRACTION"] = "false"
 os.environ["TELECOM_STUDIO_ENABLE_GROQ_PLANNING_DECISION"] = "false"
 
 from apps.api.telecom_studio_api.config import settings  # noqa: E402
-from core.rag.embeddings import DEFAULT_MODEL, build_embedding_provider  # noqa: E402
-
-
-@pytest.fixture(scope="session")
-def nvidia_embedding_provider():
-    return build_embedding_provider(
-        "nvidia",
-        DEFAULT_MODEL,
-        api_key=settings.resolved_nvidia_api_key,
-    )
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

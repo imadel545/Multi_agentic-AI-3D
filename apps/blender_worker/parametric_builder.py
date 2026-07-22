@@ -8,6 +8,7 @@ SceneSpec parameters rather than fixed GLB assets.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -79,32 +80,120 @@ def _create_box(
     return obj
 
 
-def _create_cylinder_between(
-    bpy,
+@dataclass(frozen=True)
+class SegmentGeometry:
+    midpoint: tuple[float, float, float]
+    direction: tuple[float, float, float]
+    length: float
+
+
+def segment_geometry(
     start: tuple[float, float, float],
     end: tuple[float, float, float],
-    radius: float,
-    name: str,
-    material: object,
-) -> object:
+) -> SegmentGeometry | None:
+    """Return the canonical geometry of a segment in Blender's Z-up frame."""
+
     dx = end[0] - start[0]
     dy = end[1] - start[1]
     dz = end[2] - start[2]
     length = math.sqrt(dx * dx + dy * dy + dz * dz)
     if length < 1e-9:
         return None
-    mid = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2, (start[2] + end[2]) / 2)
-    bpy.ops.mesh.primitive_cylinder_add(radius=radius, depth=length, location=mid)
+    return SegmentGeometry(
+        midpoint=(
+            (start[0] + end[0]) / 2,
+            (start[1] + end[1]) / 2,
+            (start[2] + end[2]) / 2,
+        ),
+        direction=(dx / length, dy / length, dz / length),
+        length=length,
+    )
+
+
+def create_cylinder_between(
+    bpy,
+    start: tuple[float, float, float],
+    end: tuple[float, float, float],
+    radius: float,
+    name: str,
+    material: object,
+    *,
+    vertices: int = 32,
+) -> object:
+    """Create a cylinder whose local +Z axis joins ``start`` and ``end`` exactly."""
+
+    geometry = segment_geometry(start, end)
+    if geometry is None:
+        return None
+    from mathutils import Vector  # type: ignore[import-not-found]
+
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=vertices,
+        radius=radius,
+        depth=geometry.length,
+        location=geometry.midpoint,
+    )
     obj = bpy.context.object
     obj.name = name
-    obj.rotation_mode = "XYZ"
-    obj.rotation_euler = (
-        math.atan2(math.sqrt(dx * dx + dy * dy), dz),
-        0,
-        math.atan2(dy, dx),
-    )
+    obj.rotation_mode = "QUATERNION"
+    obj.rotation_quaternion = Vector(geometry.direction).to_track_quat("Z", "Y")
+    obj["segment_start_m"] = list(start)
+    obj["segment_end_m"] = list(end)
+    obj["segment_length_m"] = geometry.length
     obj.data.materials.append(material)
+    # Do not leak an active segment into later context-sensitive bpy operators.
+    obj.select_set(False)
+    if bpy.context.view_layer.objects.active is obj:
+        bpy.context.view_layer.objects.active = None
     return obj
+
+
+def measure_segment_endpoint_errors(obj) -> tuple[float, float] | None:
+    """Measure endpoint errors from transformed mesh vertices, not object metadata alone."""
+
+    start_value = obj.get("segment_start_m")
+    end_value = obj.get("segment_end_m")
+    try:
+        start_coordinates = tuple(float(value) for value in start_value)
+        end_coordinates = tuple(float(value) for value in end_value)
+    except (TypeError, ValueError):
+        return None
+    if len(start_coordinates) != 3 or len(end_coordinates) != 3 or not getattr(obj, "data", None):
+        return None
+    geometry = segment_geometry(start_coordinates, end_coordinates)
+    vertices = getattr(obj.data, "vertices", ())
+    if geometry is None or not vertices:
+        return None
+
+    local_z_values = [float(vertex.co.z) for vertex in vertices]
+    minimum = min(local_z_values)
+    maximum = max(local_z_values)
+    local_tolerance = max(1e-7, geometry.length * 1e-8)
+    start_ring = [
+        vertex.co for vertex in vertices if abs(float(vertex.co.z) - minimum) <= local_tolerance
+    ]
+    end_ring = [
+        vertex.co for vertex in vertices if abs(float(vertex.co.z) - maximum) <= local_tolerance
+    ]
+    if not start_ring or not end_ring:
+        return None
+
+    local_start = tuple(
+        sum(getattr(vertex, axis) for vertex in start_ring) / len(start_ring)
+        for axis in ("x", "y", "z")
+    )
+    local_end = tuple(
+        sum(getattr(vertex, axis) for vertex in end_ring) / len(end_ring)
+        for axis in ("x", "y", "z")
+    )
+    measured_start_vector = obj.matrix_world @ vertices[0].co.__class__(local_start)
+    measured_end_vector = obj.matrix_world @ vertices[0].co.__class__(local_end)
+    measured_start = tuple(getattr(measured_start_vector, axis) for axis in ("x", "y", "z"))
+    measured_end = tuple(getattr(measured_end_vector, axis) for axis in ("x", "y", "z"))
+    return (
+        math.dist(measured_start, start_coordinates),
+        math.dist(measured_end, end_coordinates),
+    )
 
 
 def _tower_corners(width: float, z: float, leg_count: int) -> list[tuple[float, float, float]]:
@@ -242,11 +331,11 @@ def build_parametric_tower(
             corners0 = _tower_corners(width0, z0, leg_count)
             corners1 = _tower_corners(width1, z1, leg_count)
             for c0, c1 in zip(corners0, corners1, strict=True):
-                leg = _create_cylinder_between(bpy, c0, c1, 0.045, "tower_leg", steel)
+                leg = create_cylinder_between(bpy, c0, c1, 0.045, "tower_leg", steel)
                 if leg is not None:
                     created.append(leg)
             for side in range(len(corners0)):
-                brace = _create_cylinder_between(
+                brace = create_cylinder_between(
                     bpy,
                     corners0[side],
                     corners1[(side + 1) % len(corners1)],
@@ -256,7 +345,7 @@ def build_parametric_tower(
                 )
                 if brace is not None:
                     created.append(brace)
-                brace = _create_cylinder_between(
+                brace = create_cylinder_between(
                     bpy,
                     corners0[(side + 1) % len(corners0)],
                     corners1[side],
@@ -412,7 +501,7 @@ def build_parametric_microwave_dish(
                 )
             )
     for segment in range(angular_segments):
-        faces.append((0, 1 + segment, 1 + ((segment + 1) % angular_segments)))
+        faces.append((0, 1 + ((segment + 1) % angular_segments), 1 + segment))
     for ring in range(1, radial_segments):
         previous_start = 1 + (ring - 1) * angular_segments
         current_start = 1 + ring * angular_segments
@@ -420,10 +509,10 @@ def build_parametric_microwave_dish(
             next_segment = (segment + 1) % angular_segments
             faces.append(
                 (
-                    previous_start + segment,
-                    current_start + segment,
-                    current_start + next_segment,
                     previous_start + next_segment,
+                    current_start + next_segment,
+                    current_start + segment,
+                    previous_start + segment,
                 )
             )
 
@@ -515,7 +604,7 @@ def build_parametric_beam(
         origin[1] + direction[1] * length,
         origin[2] + direction[2] * length,
     )
-    beam = _create_cylinder_between(
+    beam = create_cylinder_between(
         bpy, origin, end, radius, name, _material(bpy, "beam_blue", (0.25, 0.55, 0.95, 0.35))
     )
     return beam

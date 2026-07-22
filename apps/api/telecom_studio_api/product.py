@@ -241,6 +241,16 @@ class ProductService:
             _artifact("geometry_validation.json", "application/json", "geometry_validation")
         )
         viewer_artifacts.append(
+            _artifact("requirement_coverage.json", "application/json", "requirement_coverage")
+        )
+        viewer_artifacts.append(
+            _artifact(
+                "completion_certificate.json",
+                "application/json",
+                "completion_certificate",
+            )
+        )
+        viewer_artifacts.append(
             _artifact("technical_report.md", "text/markdown", "technical_report")
         )
         primary_glb = _artifact_by_name(viewer_artifacts, "design.glb")
@@ -253,6 +263,8 @@ class ProductService:
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
         rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
         geometry_validation = _artifact_by_name(viewer_artifacts, "geometry_validation.json")
+        requirement_coverage = _artifact_by_name(viewer_artifacts, "requirement_coverage.json")
+        completion_certificate = _artifact_by_name(viewer_artifacts, "completion_certificate.json")
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
 
         return {
@@ -279,6 +291,11 @@ class ProductService:
             "generation_report_url": _available_artifact_url(generation_report),
             "rag_evidence_url": _available_artifact_url(rag_evidence),
             "geometry_validation_url": _available_artifact_url(geometry_validation),
+            "requirement_coverage_url": _available_artifact_url(requirement_coverage),
+            "completion_certificate_url": _available_artifact_url(completion_certificate),
+            "requirement_coverage_passed": status.get("requirement_coverage_passed"),
+            "requirement_coverage_ratio": status.get("requirement_coverage_ratio"),
+            "completion_certificate_status": status.get("completion_certificate_status"),
             "extraction_provider": llm["extraction_provider"],
             "llm_provider": status.get("llm_provider"),
             "llm_available": llm["llm_available"],
@@ -775,6 +792,12 @@ def _collect_limitations(status: dict) -> list[str]:
             "La QA géométrique est mesh_level_transform_basic: elle lit des transforms GLB de base "
             "et une hauteur HBA approximative, sans collision/RF/vendor-grade."
         )
+    if mesh_qa_level == "mesh_level_spatial_basic":
+        limitations.append(
+            "La QA mesh_level_spatial_basic contrôle les transforms RF et les recouvrements AABB "
+            "des équipements primaires à partir des vertices GLB; ce n'est pas une collision "
+            "triangle/BVH ni une certification d'ingénierie."
+        )
     asset_summary = status.get("asset_import_summary") or {}
     if asset_summary.get("procedural_fallback_count", 0):
         limitations.append(
@@ -866,18 +889,27 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
     is_basic_mesh_qa = status.get("mesh_qa_level") in {
         "mesh_level_basic",
         "mesh_level_transform_basic",
+        "mesh_level_spatial_basic",
     }
     if is_basic_mesh_qa and not any(
         i.get("technical_code") == "MESH_QA_BASIC_INFERRED" for i in issues
     ):
         mesh_level = status.get("mesh_qa_level")
+        spatial = mesh_level == "mesh_level_spatial_basic"
         issues.append(
             {
-                "title": "QA géométrique basique",
+                "title": "QA spatiale bornée" if spatial else "QA géométrique basique",
                 "severity": "info",
                 "impact": (
-                    f"La QA {mesh_level} confirme des propriétés structurales de base, "
-                    "pas une validation ingénierie complète."
+                    (
+                        "La QA contrôle les transforms RF et les interférences AABB des "
+                        "équipements primaires, mais pas les collisions triangle/BVH."
+                    )
+                    if spatial
+                    else (
+                        f"La QA {mesh_level} confirme des propriétés structurales de base, "
+                        "pas une validation ingénierie complète."
+                    )
                 ),
                 "recommended_action": (
                     "Afficher cette limite dans le drawer QA et ne pas annoncer une QA avancée."

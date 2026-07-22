@@ -29,8 +29,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   frontend. Do not add `/projects`, `/runs`, `job_id`, or a new state model
   unless a later architecture decision proves it necessary.
 - LangGraph is used for prompt workflows, document-pack generated requirements,
-  and scene revision generation. Edit patch creation and version bookkeeping
-  remain service-level logic outside the graph.
+  scene revision generation, and bounded asset adaptation. `SceneEditAgent`
+  executes a checkpointed four-node adaptation graph: discover declared
+  capabilities, plan, validate, then mutate `SceneSpec`. Version bookkeeping
+  remains service-level.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
 - GPT-OSS is the bounded decision layer for ambiguous extraction, controlled
@@ -59,23 +61,25 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current frontend
 
-- `apps/frontend` is a Vite + React + TypeScript work-in-progress connected to
-  the real FastAPI backend with Zod contract validation.
-- The first technical kernel was rejected as too dashboard-like. It must not be
-  treated as an accepted product gate.
-- The current frontend direction is a product studio rework: conversation-first
-  command, dominant 3D viewer, contextual drawers, narrative agent progress,
-  document-pack intake, visible QA/RAG/issues, and no raw JSON as the primary
-  surface.
+- `apps/frontend` is a Vite + React + TypeScript product rework connected to the
+  real FastAPI backend with Zod contract validation.
+- The rejected dashboard kernel has been removed from the active layout. The
+  current baseline is conversation-first, 3D-dominant, and uses contextual
+  drawers for agent history, QA, alerts, deliverables, and versions.
+- Raw workflow ids, runtime capability counts, permanent stage grids, and raw
+  QA/RAG JSON are not part of the primary product surface.
 - It consumes `/designs` + `workflow_id`, not `/projects`, `/runs`, `job_id`, or
   a new state model.
-- The command field starts empty; example prompts are user-selected helpers, not
-  hidden demo state.
+- The command field starts empty and never injects demo content. When a verified
+  design is restored, the same composer switches to bounded design adaptation;
+  the user can explicitly switch back to a new design.
 - The viewer loads only backend artifact URLs and must show either a visible GLB
   or an explicit backend preview/error fallback during smoke.
-- This frontend is not accepted as final until a real smoke proves: prompt or
-  document pack -> backend workflow -> streamed progress -> visible GLB or honest
-  fallback -> QA/RAG/issues/artifacts in user language.
+- Visual/runtime smoke on 2026-07-20 restored `wf_3c86a159cd7b`, loaded its real
+  Blender GLB, proved visible rendering and camera fit, and exercised the
+  contextual agent drawer against real backend events. The broader frontend gate
+  still requires one recorded pass for every mutation flow listed in
+  `FRONTEND_ACCEPTANCE_CRITERIA.md`.
 - Old dashboard patterns remain rejected.
 
 ## Current assets
@@ -90,6 +94,14 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Towers are generated parametrically by default. GLB import happens only when
   the resolver explicitly selects `imported_glb_exact` or
   `internal_project_generated`.
+- Every manifest references an explicit adaptation profile. The versioned
+  catalog under `assets/capabilities/adaptation_profiles.json` declares the
+  editable parameter, JSON pointer, value type, bounds, effect, and execution
+  tool. The LLM cannot add a path or tool outside the resolved scene profile.
+- Parametric towers support bounded reconstruction; sector antennas support
+  height/azimuth/tilt/beam/cable/label layout; cabinet/GPS accessories support
+  verified position, rotation, and positive XYZ scale. Opaque mesh topology
+  editing and arbitrary materials are not claimed.
 - The local `assets/library` corpus is a lossless copy of `MAJ des Blocs`:
   11,974 files (11,531 unique contents; 443 duplicates by SHA-256), including
   2,834 paths claimed as 3D and 8,514 as 2D. These directory labels are
@@ -114,9 +126,19 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - `SceneSpec + parametric generator` is the source of truth for geometry.
 - GLB is only the exported viewer result, not the source of truth.
 - Blender produces `design.glb`, `preview.png`, `scene_metadata.json`, and
-  reports.
+  a runner-owned `build.lock.json` containing the isolated attempt/build ID,
+  SceneSpec/worker hashes, Blender runtime identity and artifact hashes. Blender
+  starts in background factory mode and every retry uses a fresh staging directory.
+  reports. The workflow also persists `requirement_coverage.json` and
+  `completion_certificate.json`.
+- Successful revisions also persist `adaptation_plan.json`,
+  `adaptation_capabilities.json`, `scene_patch.json`, and `scene_diff.json`.
+  Blender still regenerates from the validated `SceneSpec`; the LLM never
+  emits or executes Python.
 - Real QA categories:
   - `glb_parse_structural`
+  - `mesh_level_spatial_basic` — readable semantic transforms plus real-vertex
+    world-space AABB interference screening for antennas, RRUs, GPS and cabinets
   - `mesh_level_transform_basic` — GLB accessors plus readable role transforms
     and approximate antenna HBA when transforms are available
   - `mesh_level_basic` — real bounding box from GLB accessors
@@ -126,7 +148,26 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Mesh QA v1 checks: GLB parse OK, tower height approximation, scene above
   ground, scale realism, antenna count, readable object transforms when present,
   approximate HBA from antenna node transforms when possible, RRU/cable/cabinet/GPS
-  presence, concrete pad presence when requested, and real label object presence.
+  presence, concrete pad presence when requested, real label object presence, and
+  primary-equipment AABB interference. Same-sector antenna/RRU contact is the only
+  declared primary-equipment overlap allowed by this gate.
+- GLB integrity QA reads actual binary buffers, buffer views, `POSITION`
+  accessors and optional index accessors. It rejects JSON-only accessor claims,
+  non-finite vertex values, out-of-range indices, incomplete primitives, and
+  semantic entities that have no valid mesh in their node tree.
+- Before export, every generated cylindrical member records its requested
+  endpoints and is measured from transformed Blender mesh vertices. Generation
+  hard-fails above 1 mm endpoint error; this protects lattice legs/braces,
+  mounting members, beams, arrows, ladders and similar segment primitives.
+- `RequirementCoverageReport` proves the critical `RequirementSpec -> SceneSpec`
+  mapping. A planning override is accepted only when an applied, typed decision
+  carries matching evidence.
+- A workflow may be `completed` only after `certify_completion` issues a
+  certificate binding requirement/SceneSpec hashes,
+  GLB/preview/metadata/build-lock hashes,
+  real-Blender mode, requirement coverage, both quality gates, GLB binary
+  integrity, geometry QA and preview QA. The persistence boundary re-verifies
+  those hashes before activation.
 - Mesh QA v1 does **not** verify exact antenna azimuth from vertices and does
   **not** perform collision/RF/structural wind-load validation.
 - Preview QA parses PNG pixels and checks subject occupancy, framing, clipping,
@@ -157,6 +198,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `active_operation`; a reconnect therefore sees `running` instead of the old
   terminal design status. Failed/rejected edits restore the previous active
   version and status.
+- `active_design.json` is the canonical, atomically published active-version
+  commit. It is created only for a completed version whose completion
+  certificate and four certified artifacts revalidate. `active_version.json`
+  and the root status are compatibility projections.
 - Startup recovery distinguishes an interrupted initial generation from an
   interrupted revision. Initial generation fails without a valid product
   version; an interrupted revision marks only its candidate version failed,
@@ -173,8 +218,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Frontend "scene plan" maps to the `scene_spec` artifact. `SceneSpec` remains
   the geometry source of truth.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
-  metadata, SceneSpec, QA report, generation report, geometry validation, and
-  technical report, plus a compact QA summary for drawers.
+  metadata, SceneSpec, QA report, generation report, geometry validation,
+  requirement coverage, completion certificate, and technical report, plus a
+  compact QA summary for drawers.
 - Public workflow/viewer responses expose `rag_planning_summary` and
   `rag_evidence_url` so the frontend can distinguish retrieved context from
   structured hints that actually influenced SceneSpec planning. RAG is not used
@@ -182,6 +228,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Edit and rollback responses expose frontend action URLs (`viewer-bundle`,
   `timeline-summary`, `user-issues`, `current-operation`) and available actions
   so the UI does not infer post-action state.
+- `/assets/adaptation-capabilities` exposes the versioned catalog and
+  `/designs/{id}/adaptation-capabilities` resolves only the capabilities of the
+  active scene. The frontend capabilities drawer consumes these contracts.
 - Public workflow/product responses expose `runtime_capabilities` and
   `unsupported_actions`; cancel, pause, resume, same-workflow retry,
   human-in-loop, and WebSocket runtime are explicitly unsupported in v1.
@@ -190,15 +239,15 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current verdict
 
-`FRONTEND_PRODUCT_REWORK_IN_PROGRESS`
+`FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has reusable real-backend pieces, but the previous dashboard-like
-kernel is not accepted as product UX. The active frontend work must prove a
-studio experience, not only a connected technical shell.
+frontend now has a verified chat-first/3D-first product baseline. It is not yet
+the final product gate because document-pack mutation, rollback, and every
+degraded path have not been replayed in one recorded acceptance session.
 
-The frontend must keep these limitations visible: `mesh_level_transform_basic`
-or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack
+The frontend must keep these limitations visible: `mesh_level_spatial_basic`,
+`mesh_level_transform_basic` or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack
 intelligence, fail-open reranking, non-vendor-grade assets, and no durable
 broker/cancellation.
 

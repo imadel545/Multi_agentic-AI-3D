@@ -71,7 +71,10 @@ RAG retrieval are separate surfaces.
 - Qdrant local default: `data/qdrant`.
 - Optional external Qdrant: `TELECOM_STUDIO_QDRANT_URL`.
 - Static collections: the five controlled `data/knowledge` files and asset
-  manifests. Developer documentation is deliberately excluded from retrieval.
+  manifests. Library catalog entries join `asset_manifests` only when both
+  `validated=true` and `generation_eligible=true`; quarantined/raw CAD never
+  enters planning retrieval. Developer documentation is deliberately excluded
+  from retrieval.
 - NVIDIA indexing uses `input_type=passage`; retrieval queries use
   `input_type=query`. The embedding profile is part of index identity so an old
   index is rebuilt instead of mixed silently.

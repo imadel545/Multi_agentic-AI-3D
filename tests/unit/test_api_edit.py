@@ -12,6 +12,16 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def isolate_unit_tests_from_groq():
+    original = workflow_service.scene_edit_agent.groq
+    workflow_service.scene_edit_agent.groq = None
+    try:
+        yield
+    finally:
+        workflow_service.scene_edit_agent.groq = original
+
+
 def test_edit_design_creates_version(client, tmp_path):
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -41,7 +51,7 @@ def test_edit_design_creates_version(client, tmp_path):
         assert payload["artifacts"]
         assert payload["generation_mode"] in {"real_blender", "fallback_no_blender"}
         assert payload["qa_score"] == 1.0
-        assert payload["patch"]["edit_llm_provider"] in {"groq", "deterministic_fallback"}
+        assert payload["patch"]["edit_llm_provider"] == "deterministic_fallback"
         if payload["llm_fallback_used"]:
             assert payload["llm_fallback_reason"]
         version_id = payload["version_id"]
@@ -80,6 +90,8 @@ def test_edit_design_creates_version(client, tmp_path):
         assert Path(raw_artifacts["scene_spec"]).parent != tmp_path / workflow_id
         assert (Path(raw_artifacts["scene_spec"]).parent / "scene_patch.json").exists()
         assert (Path(raw_artifacts["scene_spec"]).parent / "scene_diff.json").exists()
+        assert (Path(raw_artifacts["scene_spec"]).parent / "adaptation_plan.json").exists()
+        assert (Path(raw_artifacts["scene_spec"]).parent / "adaptation_capabilities.json").exists()
         scene_payload = json.loads(Path(raw_artifacts["scene_spec"]).read_text())
         assert [sector["install_height_m"] for sector in scene_payload["sectors"]] == [
             26.0,
@@ -149,8 +161,19 @@ def test_edit_design_creates_version(client, tmp_path):
         events = events_resp.json()
         assert any(e["event_type"] == "edit_patch_applied" for e in events)
         interpreted = next(e for e in events if e["event_type"] == "edit_patch_interpreted")
-        assert interpreted["payload"]["llm_provider"] in {"groq", "deterministic_fallback"}
+        assert interpreted["payload"]["llm_provider"] == "deterministic_fallback"
         assert interpreted["payload"]["operation_count"] >= 1
+        adaptation_nodes = [
+            event["payload"]["node"]
+            for event in events
+            if event["event_type"] == "edit_adaptation_node_completed"
+        ]
+        assert adaptation_nodes == [
+            "discover_capabilities",
+            "plan_adaptation",
+            "validate_adaptation",
+            "execute_adaptation",
+        ]
         assert any(e["payload"].get("version_id") == version_id for e in events)
         rollback_event = next(e for e in events if e["event_type"] == "version_rolled_back")
         assert rollback_event["payload"]["version_id"] == first_version

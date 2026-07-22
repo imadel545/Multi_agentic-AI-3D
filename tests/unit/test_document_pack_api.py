@@ -101,7 +101,7 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         }
         assert capabilities_payload["pdf_layout_extraction"]["status"] != "available"
         assert capabilities_payload["dwg_conversion"]["status"] in {
-            "conversion_available",
+            "installed_import_only",
             "unsupported_without_converter",
         }
         assert capabilities_payload["limits"]["max_member_count"] == 256

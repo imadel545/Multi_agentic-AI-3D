@@ -2,8 +2,31 @@
 
 LangGraph structure le pipeline de génération. Les entrées prompt, exigences validées issues
 du document-pack, et génération de révision entrent toutes dans le graphe compilé avec un
-`entry_mode` explicite. La création du patch d'édition, la copie d'artefacts et le versioning
-restent des responsabilités `WorkflowService` hors graphe.
+`entry_mode` explicite. L'interprétation d'une édition utilise en plus un sous-système LangGraph
+compilé et checkpointé. La copie d'artefacts et le versioning restent des responsabilités
+`WorkflowService` hors graphe.
+
+## Graphe d'adaptation d'asset
+
+```text
+discover_capabilities
+  -> plan_adaptation
+  -> validate_adaptation
+  -> execute_adaptation
+```
+
+- `discover_capabilities` résout les profils actifs depuis les manifests et le
+  catalogue versionné; aucun chemin n'est inventé dans le prompt.
+- `plan_adaptation` utilise Groq `openai/gpt-oss-120b` avec JSON Schema strict.
+  La valeur est transportée comme littéral JSON puis parsée et typée localement
+  pour éviter les ambiguïtés de vecteurs du modèle.
+- `validate_adaptation` vérifie capability id, chemin, outil, type, bornes et
+  ancrage dans le prompt. Un plan LLM invalide déclenche le fallback contrôlé
+  avant toute mutation.
+- `execute_adaptation` applique uniquement les chemins résolus, revalide
+  `SceneSpec`, puis le graphe de révision exécute Blender et toute la QA.
+- Les threads d'adaptation sont isolés sous
+  `{workflow_id}:adaptation:{invocation_uuid}` et utilisent le même saver SQLite.
 
 ## Noeuds principaux
 
@@ -18,12 +41,14 @@ validate_requirements
 plan_scene
 validate_scene
 scene_repair_handler
+pre_blender_gate
 quality_gate_failure_handler
 generate_blender
 blender_failure_handler
 qa_generation
 qa_failure_handler
 post_blender_gate
+certify_completion
 memory_writeback
 ```
 
@@ -40,7 +65,10 @@ memory_writeback
 - `decide_planning_context` demande à GPT-OSS d'arbitrer uniquement des
   candidats RAG typés et validés; le modèle ne peut ni écrire de géométrie
   libre ni contourner les règles déterministes.
-- Le checkpoint saver persiste des snapshots locaux sérialisables; il ne
+- Le checkpoint saver persiste des snapshots locaux sérialisables. Chaque
+  création utilise `{workflow_id}:initial` et chaque révision
+  `{workflow_id}:revision:{version_id}` afin qu'une révision ne reprenne jamais
+  l'état d'une opération précédente. Il ne
   constitue pas encore un gestionnaire de cancellation/reprise durable.
 - Une révision persiste son opération active dans le statut existant, reprend
   le stream après le dernier event durable, normalise les dépendances d'assets,
@@ -53,6 +81,13 @@ memory_writeback
   `node_failed` ou `node_skipped` avec phase, label humain, message de
   progression, détail, durée, warnings et errors.
 - `workflow_trace.json` reste la preuve complète post-run.
+- `validate_scene` produit une couverture champ par champ des exigences. Toute
+  divergence critique sans décision de planning appliquée et prouvée bloque le
+  passage vers Blender.
+- Après le post-gate, `certify_completion` émet ou rejette une preuve terminale
+  liée aux hashes des exigences, de `SceneSpec`, du GLB, de la preview, des
+  métadonnées et du build lock. Sans certificat `issued`, le statut final reste `failed` et la
+  version n'est pas activée.
 
 ## Frontend impact
 
@@ -68,8 +103,8 @@ memory_writeback
 
 ## À corriger plus tard
 
-- Décider si la création de patch d'édition et le versioning doivent devenir des nœuds LangGraph
-  si le frontend exige une progression plus fine sur ces actions.
+- Décider si le versioning doit devenir un nœud LangGraph; les quatre étapes
+  d'adaptation émettent déjà une progression fine et persistée.
 - Ajouter cancellation/retry/recovery et reprise durable si l'expérience frontend
   dépasse le modèle local-thread.
 - Décider queue/job manager seulement si le runtime local-thread devient bloquant.

@@ -9,6 +9,7 @@ from core.qa.mesh_qa import (
     MeshQA,
     _build_semantic_index,
     _guess_geometry_source,
+    _primary_equipment_spatial_checks,
     _semantic_object_counts,
     _semantic_sector_ids,
     _tower_bounding_box,
@@ -160,6 +161,34 @@ def test_name_based_legacy_glb_is_inspectable_but_not_mesh_qa_passed(tmp_path: P
     assert "tower_only=30.00m" in (tower_check.detail or "")
 
 
+def test_mesh_qa_rejects_accessor_bounds_without_vertex_buffer(tmp_path: Path) -> None:
+    scene = _minimal_semantic_scene().model_copy(
+        update={"sectors": [_minimal_semantic_scene().sectors[0]]}
+    )
+    payload = {
+        "asset": {"version": "2.0"},
+        "nodes": [{"name": "tower_root", "mesh": 0}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+        "accessors": [
+            {
+                "count": 8,
+                "type": "VEC3",
+                "componentType": 5126,
+                "min": [-1.0, 0.0, -1.0],
+                "max": [1.0, 30.0, 1.0],
+            }
+        ],
+    }
+    glb_path = tmp_path / "claims_only.glb"
+    _write_json_glb(glb_path, payload, include_binary=False)
+
+    report = MeshQA().validate(glb_path, scene)
+
+    assert report.glb_parse_ok is False
+    assert report.mesh_qa_passed is False
+    assert "GLB_MESH_PARSE_FAILED" in report.critical_errors
+
+
 def test_semantic_transform_checks_validate_hba_and_azimuth_per_sector() -> None:
     scene = _minimal_semantic_scene()
     payload = _semantic_transform_payload(scene)
@@ -204,6 +233,61 @@ def test_mixed_geometry_sources_are_reported_explicitly() -> None:
 
     assert source == "mixed"
     assert mixed is False
+
+
+def test_primary_equipment_spatial_qa_rejects_cross_sector_overlap(tmp_path: Path) -> None:
+    scene = _minimal_semantic_scene()
+    payload = _primary_equipment_payload(
+        [
+            ("antenna_S1", "antenna", "S1", [0.0, 24.0, 0.0]),
+            ("antenna_S2", "antenna", "S2", [0.1, 24.0, 0.0]),
+        ]
+    )
+    glb_path = tmp_path / "spatial_overlap.glb"
+    _write_json_glb(glb_path, payload)
+
+    result = _primary_equipment_spatial_checks(
+        glb_path,
+        payload,
+        _build_semantic_index(payload, scene),
+    )
+    checks = {check.name: check for check in result["checks"]}
+
+    assert result["spatial_checks_complete"] is True
+    assert checks["primary_equipment_bounds_complete"].passed is True
+    assert checks["primary_equipment_aabb_interference_free"].passed is False
+    assert "antenna_S1<->antenna_S2" in (
+        checks["primary_equipment_aabb_interference_free"].detail or ""
+    )
+    assert "MESH_PRIMARY_EQUIPMENT_AABB_INTERFERENCE_DETECTED" in result["warnings"]
+
+
+def test_primary_equipment_spatial_qa_allows_same_sector_antenna_rru_contact(
+    tmp_path: Path,
+) -> None:
+    scene = _minimal_semantic_scene()
+    payload = _primary_equipment_payload(
+        [
+            ("antenna_S1", "antenna", "S1", [0.0, 24.0, 0.0]),
+            ("radio_S1", "radio", "S1", [0.0, 24.0, 0.0]),
+            ("antenna_S2", "antenna", "S2", [3.0, 24.0, 0.0]),
+        ]
+    )
+    glb_path = tmp_path / "spatial_allowed_contact.glb"
+    _write_json_glb(glb_path, payload)
+
+    result = _primary_equipment_spatial_checks(
+        glb_path,
+        payload,
+        _build_semantic_index(payload, scene),
+    )
+    checks = {check.name: check for check in result["checks"]}
+
+    assert result["spatial_checks_complete"] is True
+    assert checks["primary_equipment_aabb_interference_free"].passed is True
+    assert "antenna_S1<->radio_S1" in (
+        checks["primary_equipment_aabb_interference_free"].detail or ""
+    )
 
 
 def _scene():
@@ -291,13 +375,84 @@ def _semantic_transform_payload(scene) -> dict[str, Any]:
     return {"asset": {"version": "2.0"}, "nodes": nodes}
 
 
-def _write_json_glb(path: Path, payload: dict[str, Any]) -> None:
+def _primary_equipment_payload(
+    placements: list[tuple[str, str, str | None, list[float]]],
+) -> dict[str, Any]:
+    nodes = []
+    for name, role, sector_id, translation in placements:
+        extras: dict[str, Any] = {
+            "semantic_root": name,
+            "role": role,
+            "geometry_source": "parametric_generated",
+            "generation_strategy": "parametric_generated",
+        }
+        if sector_id is not None:
+            extras["sector_id"] = sector_id
+        nodes.append(
+            {
+                "name": name,
+                "mesh": 0,
+                "translation": translation,
+                "extras": extras,
+            }
+        )
+    return {
+        "asset": {"version": "2.0"},
+        "nodes": nodes,
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+        "accessors": [
+            {
+                "count": 8,
+                "type": "VEC3",
+                "componentType": 5126,
+                "min": [-0.25, -0.5, -0.15],
+                "max": [0.25, 0.5, 0.15],
+            }
+        ],
+    }
+
+
+def _write_json_glb(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    include_binary: bool = True,
+) -> None:
+    if not include_binary:
+        json_chunk = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
+        length = 12 + 8 + len(json_chunk)
+        path.write_bytes(
+            b"glTF"
+            + struct.pack("<II", 2, length)
+            + struct.pack("<II", len(json_chunk), 0x4E4F534A)
+            + json_chunk
+        )
+        return
+    binary_parts: list[bytes] = []
+    buffer_views: list[dict[str, int]] = []
+    for accessor in payload.get("accessors", []):
+        minimum = accessor.get("min", [0.0, 0.0, 0.0])
+        maximum = accessor.get("max", minimum)
+        count = int(accessor.get("count", 0))
+        values = [minimum, maximum, *([minimum] * max(0, count - 2))]
+        data = b"".join(struct.pack("<3f", *value) for value in values[:count])
+        offset = sum(len(part) for part in binary_parts)
+        buffer_views.append({"buffer": 0, "byteOffset": offset, "byteLength": len(data)})
+        accessor["bufferView"] = len(buffer_views) - 1
+        binary_parts.append(data)
+    binary_chunk = b"".join(binary_parts)
+    binary_chunk += b"\0" * ((4 - len(binary_chunk) % 4) % 4)
+    payload["buffers"] = [{"byteLength": len(binary_chunk)}]
+    payload["bufferViews"] = buffer_views
     json_chunk = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
-    length = 12 + 8 + len(json_chunk)
+    length = 12 + 8 + len(json_chunk) + 8 + len(binary_chunk)
     path.write_bytes(
         b"glTF"
         + struct.pack("<II", 2, length)
         + struct.pack("<II", len(json_chunk), 0x4E4F534A)
         + json_chunk
+        + struct.pack("<II", len(binary_chunk), 0x004E4942)
+        + binary_chunk
     )

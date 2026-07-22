@@ -89,10 +89,17 @@ def test_golden_glb_structure_if_blender_available(scene_name: str, tmp_path: Pa
     )
 
     assert result.status == "completed"
+    assert result.requirement_coverage is not None
+    assert result.requirement_coverage.passed is True
+    assert result.completion_certificate is not None
+    assert result.completion_certificate.status == "issued"
     assert result.generation is not None
     assert result.generation.mode == "real_blender"
     assert result.glb_inspection is not None
     assert result.glb_inspection.inspection_mode == "glb_parse"
+    assert result.glb_inspection.valid_primitive_count == result.glb_inspection.primitive_count
+    assert result.glb_inspection.binary_chunk_count == 1
+    assert result.glb_inspection.checks["semantic_mesh_coverage_complete"] is True
     assert result.glb_inspection.node_count >= expected_structure["min_node_count"]
     assert result.glb_inspection.mesh_count >= expected_structure["min_mesh_count"]
     for check, expected in expected_structure["expected"].items():

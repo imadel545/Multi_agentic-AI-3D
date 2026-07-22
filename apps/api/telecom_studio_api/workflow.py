@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import queue
@@ -27,6 +28,7 @@ from core.services.event_log import EventLogService
 from core.services.patch_applier import PatchApplier
 from core.services.scene_versioning import SceneVersioningService
 from core.validation import validate_scene_spec
+from core.validation.completion_certificate import verify_completion_certificate
 
 from .runtime_contract import (
     extraction_provider_label,
@@ -421,7 +423,7 @@ class WorkflowService:
                     {"error": str(exc), "error_type": type(exc).__name__},
                 )
             finally:
-                self._release_workflow_checkpoint(workflow_id)
+                self._release_workflow_checkpoint(f"{workflow_id}:initial")
                 self._mark_workflow_inactive(workflow_id)
 
         if _synchronous:
@@ -519,7 +521,7 @@ class WorkflowService:
                     {"error": str(exc), "error_type": type(exc).__name__},
                 )
             finally:
-                self._release_workflow_checkpoint(workflow_id)
+                self._release_workflow_checkpoint(f"{workflow_id}:initial")
                 self._mark_workflow_inactive(workflow_id)
 
         if _synchronous:
@@ -563,6 +565,7 @@ class WorkflowService:
                 runtime_event_sink=self._event_sink_for(workflow_id),
             )
         finally:
+            self._release_workflow_checkpoint(f"{workflow_id}:revision:{revision_id}")
             self._mark_workflow_inactive(workflow_id)
 
     def _release_workflow_checkpoint(self, workflow_id: str) -> None:
@@ -586,6 +589,7 @@ class WorkflowService:
         result: OrchestratorResult,
         edit_description: str,
     ) -> tuple[str | None, str | None]:
+        self._enforce_completion_proof(result)
         self._write_result_files(output_dir, requirements_text, result)
         self._write_status(workflow_id, "running", output_dir, result)
 
@@ -637,9 +641,7 @@ class WorkflowService:
                 active=False,
             )
             if activate:
-                activated_version = self.versioning.rollback(workflow_id, version.version_id)
-                if activated_version is None:
-                    raise RuntimeError("unable to activate persisted scene version")
+                self.versioning.commit_active_version(workflow_id, version.version_id)
                 self.versioning.update_version(
                     workflow_id,
                     version.version_id,
@@ -688,7 +690,23 @@ class WorkflowService:
         status_path = self.outputs_dir / workflow_id / "status.json"
         if not status_path.exists():
             raise KeyError(workflow_id)
-        return json.loads(status_path.read_text(encoding="utf-8"))
+        root_status = json.loads(status_path.read_text(encoding="utf-8"))
+        if root_status.get("status") in {"pending", "running"}:
+            return root_status
+        manifest = self.versioning.active_design_manifest(workflow_id)
+        if manifest is None:
+            return root_status
+        workflow_dir = (self.outputs_dir / workflow_id).resolve()
+        candidate_status = (workflow_dir / manifest["artifact_dir"] / "status.json").resolve()
+        try:
+            candidate_status.relative_to(workflow_dir)
+        except ValueError as exc:
+            raise RuntimeError("ACTIVE_DESIGN_STATUS_OUTSIDE_WORKFLOW") from exc
+        if not candidate_status.is_file() or _sha256_file(candidate_status) != manifest.get(
+            "status_sha256"
+        ):
+            raise RuntimeError("ACTIVE_DESIGN_STATUS_HASH_MISMATCH")
+        return json.loads(candidate_status.read_text(encoding="utf-8"))
 
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""
@@ -861,7 +879,6 @@ class WorkflowService:
                     )
                     raise
                 finally:
-                    self._release_workflow_checkpoint(workflow_id)
                     self._mark_workflow_inactive(workflow_id)
 
     def _edit_design(
@@ -896,8 +913,18 @@ class WorkflowService:
             },
         )
 
+        adaptation_decision = None
         try:
-            patch = self.scene_edit_agent.create_patch(workflow_id, original_scene, edit_prompt)
+            if self.scene_edit_agent.capability_service is not None:
+                adaptation_decision = self.scene_edit_agent.create_adaptation(
+                    workflow_id, original_scene, edit_prompt
+                )
+                patch = adaptation_decision.patch
+                patched_scene = adaptation_decision.patched_scene
+                validation_report = adaptation_decision.validation_report
+            else:
+                patch = self.scene_edit_agent.create_patch(workflow_id, original_scene, edit_prompt)
+                patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
         except Exception as exc:
             self._emit_workflow_event(
                 workflow_id,
@@ -918,27 +945,41 @@ class WorkflowService:
                 ],
             )
 
+        graph_trace = adaptation_decision.graph_trace if adaptation_decision else []
+        for trace_item in graph_trace:
+            node = str(trace_item.get("node") or "adaptation")
+            self._emit_workflow_event(
+                workflow_id,
+                "edit_adaptation_node_completed",
+                {
+                    "edit_id": edit_id,
+                    **trace_item,
+                    "agent": "SceneEditAgent",
+                    "human_label": _adaptation_node_label(node),
+                    "progress_message": _adaptation_node_message(node, patch),
+                },
+            )
         self._emit_workflow_event(
             workflow_id,
             "edit_patch_interpreted",
             {
                 "edit_id": edit_id,
-                "node": "interpret_scene_edit",
+                "node": "validate_adaptation",
                 "status": "completed",
                 "llm_provider": patch.edit_llm_provider,
                 "llm_fallback_used": patch.edit_llm_fallback_used,
                 "llm_fallback_reason": patch.edit_llm_fallback_reason,
                 "operation_count": len(patch.operations),
-                "human_label": "Modification comprise",
+                "adaptation_tools": patch.adaptation_tools,
+                "unsupported_requests": patch.unsupported_requests,
+                "human_label": "Plan d’adaptation validé",
                 "progress_message": (
                     "La modification a été comprise par le repli déterministe contrôlé."
                     if patch.edit_llm_fallback_used
-                    else "GPT-OSS a structuré une modification validable de la scène."
+                    else "GPT-OSS a produit un plan borné par les capacités réelles des assets."
                 ),
             },
         )
-
-        patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
 
         if validation_report.status == "failed":
             self._emit_workflow_event(
@@ -990,9 +1031,19 @@ class WorkflowService:
             detail_level="high",
             revision_id=version.version_id,
         )
+        self._enforce_completion_proof(result)
         self._write_result_files(version_output_dir, edit_prompt, result)
         self._write_json(version_output_dir / "scene_patch.json", patch.model_dump())
         self._write_json(version_output_dir / "scene_diff.json", diff_summary)
+        if adaptation_decision is not None:
+            self._write_json(
+                version_output_dir / "adaptation_plan.json",
+                adaptation_decision.plan.model_dump(mode="json"),
+            )
+            self._write_json(
+                version_output_dir / "adaptation_capabilities.json",
+                adaptation_decision.capabilities.model_dump(mode="json"),
+            )
         self._write_status(
             workflow_id,
             result.status,
@@ -1014,6 +1065,7 @@ class WorkflowService:
         self.versioning.update_version(
             workflow_id,
             version.version_id,
+            scene=result.scene or patched_scene,
             status=result.status,
             artifact_dir=str(version_output_dir),
             artifacts=version_status.get("artifacts", {}),
@@ -1080,8 +1132,6 @@ class WorkflowService:
                 warnings=[*validation_report.warnings, *result.report.warnings],
             )
 
-        self.versioning.update_version(workflow_id, version.version_id, active=True)
-        self.versioning.rollback(workflow_id, version.version_id)
         self._write_status(
             workflow_id,
             result.status,
@@ -1090,6 +1140,8 @@ class WorkflowService:
             version_id=version.version_id,
             active_version_id=version.version_id,
         )
+        self.versioning.update_version(workflow_id, version.version_id, active=True)
+        self.versioning.commit_active_version(workflow_id, version.version_id)
         self._copy_active_status_to_root(workflow_id, version_output_dir)
         self._emit_workflow_event(
             workflow_id,
@@ -1264,9 +1316,10 @@ class WorkflowService:
             candidate = self.versioning.get_version(workflow_id, version_id)
             if candidate is None or candidate.status != "completed" or not candidate.artifact_dir:
                 raise KeyError(version_id)
-            version = self.versioning.rollback(workflow_id, version_id)
-            if version is None:
-                raise KeyError(version_id)
+            try:
+                version = self.versioning.commit_active_version(workflow_id, version_id)
+            except ValueError as exc:
+                raise KeyError(version_id) from exc
             self._copy_active_status_to_root(workflow_id, Path(version.artifact_dir))
             self._emit_workflow_event(
                 workflow_id,
@@ -1462,6 +1515,8 @@ class WorkflowService:
             "scene_spec": str(output_dir / "scene_spec.json"),
             "validation_report": str(output_dir / "validation_report.json"),
             "quality_gates": str(output_dir / "quality_gates.json"),
+            "requirement_coverage": str(output_dir / "requirement_coverage.json"),
+            "completion_certificate": str(output_dir / "completion_certificate.json"),
             "qa_report": str(output_dir / "qa_report.json"),
             "generation_report": str(output_dir / "generation_report.json"),
             "rag_evidence": str(output_dir / "rag_evidence.json"),
@@ -1474,8 +1529,13 @@ class WorkflowService:
             "glb": str(output_dir / "design.glb"),
             "preview": str(output_dir / "preview.png"),
             "metadata": str(output_dir / "scene_metadata.json"),
+            "build_lock": str(output_dir / "build.lock.json"),
             "download": str(output_dir / "artifacts.zip"),
             "trace": str(output_dir / "workflow_trace.json"),
+            "scene_patch": str(output_dir / "scene_patch.json"),
+            "scene_diff": str(output_dir / "scene_diff.json"),
+            "adaptation_plan": str(output_dir / "adaptation_plan.json"),
+            "adaptation_capabilities": str(output_dir / "adaptation_capabilities.json"),
         }
         payload = {
             "workflow_id": workflow_id,
@@ -1525,6 +1585,9 @@ class WorkflowService:
             "structural_qa_passed": result.glb_inspection.structural_qa_passed
             if result.glb_inspection
             else None,
+            "glb_binary_integrity_passed": result.glb_inspection.structural_qa_passed
+            if result.glb_inspection
+            else None,
             "expected_objects_present": result.glb_inspection.checks.get("expected_objects_present")
             if result.glb_inspection
             else None,
@@ -1532,6 +1595,15 @@ class WorkflowService:
             "total_workflow_duration_ms": metrics.get("total_workflow_duration_ms"),
             "metrics": metrics,
             "quality_gates": [gate.model_dump() for gate in result.quality_gate_reports],
+            "requirement_coverage_passed": result.requirement_coverage.passed
+            if result.requirement_coverage
+            else None,
+            "requirement_coverage_ratio": result.requirement_coverage.coverage_ratio
+            if result.requirement_coverage
+            else None,
+            "completion_certificate_status": result.completion_certificate.status
+            if result.completion_certificate
+            else None,
             "download_url": f"/designs/{workflow_id}/download",
             "trace_path": str(output_dir / "workflow_trace.json"),
             "runtime_capabilities": runtime_capabilities(),
@@ -1644,6 +1716,16 @@ class WorkflowService:
             self._write_json(
                 output_dir / "scene_validation_report.json", result.scene_report.model_dump()
             )
+        if result.requirement_coverage:
+            self._write_json(
+                output_dir / "requirement_coverage.json",
+                result.requirement_coverage.model_dump(),
+            )
+        if result.completion_certificate:
+            self._write_json(
+                output_dir / "completion_certificate.json",
+                result.completion_certificate.model_dump(mode="json"),
+            )
         if result.qa_report:
             self._write_json(output_dir / "qa_report.json", result.qa_report.model_dump())
         if result.generation:
@@ -1671,6 +1753,20 @@ class WorkflowService:
             self._write_json(output_dir / "memory_recall.json", result.memory_recall.model_dump())
         self._write_json(output_dir / "workflow_trace.json", result.workflow_trace.model_dump())
         self._write_technical_report(output_dir / "technical_report.md", requirements_text, result)
+
+    @staticmethod
+    def _enforce_completion_proof(result: OrchestratorResult) -> None:
+        if result.status != "completed":
+            return
+        if not verify_completion_certificate(
+            getattr(result, "completion_certificate", None),
+            requirements=result.requirements,
+            scene=result.scene,
+            generation=result.generation,
+        ):
+            raise RuntimeError(
+                "COMPLETION_CERTIFICATE_INVALID: terminal artifacts or hashes are not proven"
+            )
 
     @staticmethod
     def _write_json(path: Path, payload: dict) -> None:
@@ -1726,8 +1822,18 @@ class WorkflowService:
                     f"- Memory hits: {memory_hits}",
                     f"- Total duration: {result.total_duration_ms} ms",
                     f"- Quality gates: {len(result.quality_gate_reports)}",
-                    f"- Structural QA: {_structural_qa_status(result)}",
+                    f"- GLB binary integrity: {_structural_qa_status(result)}",
                     f"- Geometry QA: {_geometry_qa_status(result)}",
+                    (
+                        f"- Requirement coverage: {result.requirement_coverage.coverage_ratio:.3f}"
+                        if result.requirement_coverage
+                        else "- Requirement coverage: not_run"
+                    ),
+                    (
+                        f"- Completion certificate: {result.completion_certificate.status}"
+                        if result.completion_certificate
+                        else "- Completion certificate: not_issued"
+                    ),
                     "",
                     "## Validation",
                     f"- Status: {result.report.status}",
@@ -2061,7 +2167,12 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
         "node_count": result.glb_inspection.node_count,
         "mesh_count": result.glb_inspection.mesh_count,
         "primitive_count": result.glb_inspection.primitive_count,
+        "valid_primitive_count": result.glb_inspection.valid_primitive_count,
         "position_accessor_count": result.glb_inspection.position_accessor_count,
+        "buffer_count": result.glb_inspection.buffer_count,
+        "buffer_view_count": result.glb_inspection.buffer_view_count,
+        "binary_chunk_count": result.glb_inspection.binary_chunk_count,
+        "semantic_mesh_coverage_ratio": result.glb_inspection.semantic_mesh_coverage_ratio,
         "material_count": result.glb_inspection.material_count,
         "checks": result.glb_inspection.checks,
         "structural_qa_passed": result.glb_inspection.structural_qa_passed,
@@ -2487,12 +2598,47 @@ def _geometry_qa_status(result: OrchestratorResult) -> str:
     return result.geometry_validation.status
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _adaptation_node_label(node: str) -> str:
+    return {
+        "discover_capabilities": "Capacités 3D vérifiées",
+        "plan_adaptation": "Plan d’adaptation préparé",
+        "validate_adaptation": "Plan contrôlé",
+        "execute_adaptation": "SceneSpec adapté",
+    }.get(node, "Adaptation du design")
+
+
+def _adaptation_node_message(node: str, patch) -> str:
+    if node == "discover_capabilities":
+        return "Les paramètres réellement modifiables ont été résolus depuis les manifests."
+    if node == "plan_adaptation":
+        return (
+            "Le plan a été extrait par le repli déterministe contrôlé."
+            if patch.edit_llm_fallback_used
+            else "GPT-OSS a sélectionné les outils déclarés sans générer de code Blender."
+        )
+    if node == "validate_adaptation":
+        return "Chaque chemin, valeur et outil a été validé contre le profil actif."
+    if node == "execute_adaptation":
+        return "La source SceneSpec a été modifiée et revalidée avant Blender."
+    return "L’adaptation du design progresse."
+
+
 _ALLOWED_ARTIFACT_FILES = {
     "requirements_spec": "requirements_spec.json",
     "extraction_report": "extraction_report.json",
     "scene_spec": "scene_spec.json",
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
+    "requirement_coverage": "requirement_coverage.json",
+    "completion_certificate": "completion_certificate.json",
     "qa_report": "qa_report.json",
     "generation_report": "generation_report.json",
     "rag_evidence": "rag_evidence.json",
@@ -2505,8 +2651,11 @@ _ALLOWED_ARTIFACT_FILES = {
     "glb": "design.glb",
     "preview": "preview.png",
     "metadata": "scene_metadata.json",
+    "build_lock": "build.lock.json",
     "download": "artifacts.zip",
     "trace": "workflow_trace.json",
     "scene_patch": "scene_patch.json",
     "scene_diff": "scene_diff.json",
+    "adaptation_plan": "adaptation_plan.json",
+    "adaptation_capabilities": "adaptation_capabilities.json",
 }

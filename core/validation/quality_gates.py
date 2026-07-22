@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.contracts.assets import AssetManifest
+from core.contracts.completion import RequirementCoverageReport
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.quality import QualityGateReport
@@ -11,6 +12,7 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
 from core.services.blender_runner import GenerationResult
+from core.validation.requirement_coverage import evaluate_requirement_coverage
 from core.validation.scene_validator import validate_scene_spec
 
 POST_BLENDER_QA_THRESHOLD = 0.95
@@ -26,8 +28,11 @@ def evaluate_pre_blender_gate(
     all_assets: list[AssetManifest],
     repair_attempts: int,
     max_repair_attempts: int,
+    requirement_coverage: RequirementCoverageReport | None = None,
 ) -> QualityGateReport:
     started = time.perf_counter()
+    if requirement_coverage is None and requirements is not None and scene is not None:
+        requirement_coverage = evaluate_requirement_coverage(requirements, scene)
     checks: dict[str, bool] = {}
     critical_errors: list[str] = []
     warnings: list[str] = []
@@ -45,6 +50,9 @@ def evaluate_pre_blender_gate(
     checks["assets_tower_compatible"] = _assets_tower_compatible(requirements, selected_assets)
     checks["scene_spec_valid"] = _scene_valid(scene, all_assets)
     checks["scene_report_valid"] = scene_report is not None and scene_report.status == "passed"
+    checks["requirement_coverage_valid"] = (
+        requirement_coverage is not None and requirement_coverage.passed
+    )
     checks["repair_attempts_valid"] = repair_attempts <= max_repair_attempts
     checks["no_critical_errors"] = not (
         (requirement_report and requirement_report.errors) or (scene_report and scene_report.errors)

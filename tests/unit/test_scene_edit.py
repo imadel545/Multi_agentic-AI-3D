@@ -53,14 +53,21 @@ def test_patch_applier_replace_height(sample_scene):
 
 
 def test_patch_applier_rejects_unknown_path(sample_scene):
-    with pytest.raises(ValidationError):
-        PatchOperation(op="replace", path="/unknown/path", value=1)
+    operation = PatchOperation(op="replace", path="/unknown/path", value=1)
+    patch = ScenePatch(edit_description="unsafe", operations=[operation])
+    _, report = PatchApplier().apply(
+        sample_scene,
+        patch,
+        allowed_paths={"/tower/height_m"},
+    )
+    assert report.status == "failed"
+    assert report.errors[0].code == "PATCH_APPLY_ERROR"
 
 
 def test_patch_contract_rejects_unknown_tower_characteristic(sample_scene):
     del sample_scene
     with pytest.raises(ValidationError):
-        PatchOperation(op="replace", path="/tower/characteristics/vendor_secret", value=1)
+        PatchOperation(op="replace", path="tower/characteristics/vendor_secret", value=1)
 
 
 def test_patch_applier_replace_sector_azimuth(sample_scene):
@@ -106,6 +113,18 @@ def test_scene_edit_agent_fallback_height(sample_scene):
     assert patch.edit_llm_fallback_used is True
     assert patch.edit_llm_fallback_reason == "groq_edit_client_unavailable"
     assert any(op.path == "/tower/height_m" and op.value == 40 for op in patch.operations)
+
+
+def test_scene_edit_agent_fallback_does_not_confuse_gps_with_sector_height(sample_scene):
+    agent = SceneEditAgent(groq_client=None)
+    patch = agent.create_patch(
+        "wf_test",
+        sample_scene,
+        "mets le pylône à 34 m et ajoute une antenne GPS",
+    )
+
+    assert any(op.path == "/tower/height_m" and op.value == 34 for op in patch.operations)
+    assert all(op.path != "/sectors/0/install_height_m" for op in patch.operations)
 
 
 def test_scene_edit_agent_fallback_gps(sample_scene):

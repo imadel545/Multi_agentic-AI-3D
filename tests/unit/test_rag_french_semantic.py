@@ -1,25 +1,25 @@
-"""Semantic RAG tests for French telecom queries using NVIDIA BAAI/bge-m3."""
+"""Deterministic unit tests for French telecom RAG and NVIDIA provider metadata."""
 
 from pathlib import Path
 
 from core.rag import RagService
-from core.rag.embeddings import EmbeddingProvider
+from core.rag.embeddings import DEFAULT_MODEL, HashEmbeddingProvider, NvidiaEmbeddingProvider
 
 
-def test_french_query_finds_lattice_tower_assets(
-    nvidia_embedding_provider: EmbeddingProvider, tmp_path: Path
-) -> None:
+def test_french_query_finds_lattice_tower_assets_without_network(tmp_path: Path) -> None:
+    provider = HashEmbeddingProvider()
     service = RagService(
         project_root=Path.cwd(),
         qdrant_path=tmp_path / "qdrant",
-        embedding_provider=nvidia_embedding_provider,
+        embedding_provider=provider,
     )
     service.reindex()
 
     results = service.search("pylône treillis pour antennes 5G", limit=5)
 
     assert results
-    # bge-m3 should understand the French paraphrase and rank the lattice tower high.
+    # Project documents/manifests carry enough French telecom vocabulary for a
+    # deterministic unit test. BGE-M3 quality belongs to an explicit live test.
     assert any(
         "treillis" in result.text.lower()
         or result.payload.get("asset_id") == "TOWER_LATTICE_30M"
@@ -28,7 +28,9 @@ def test_french_query_finds_lattice_tower_assets(
     )
 
 
-def test_embedding_provider_is_nvidia_bge_m3(nvidia_embedding_provider: EmbeddingProvider) -> None:
-    assert "nvidia" in nvidia_embedding_provider.name
-    assert "bge-m3" in nvidia_embedding_provider.name
-    assert nvidia_embedding_provider.dimensions == 1024
+def test_embedding_provider_is_nvidia_bge_m3_without_network() -> None:
+    provider = NvidiaEmbeddingProvider(DEFAULT_MODEL, api_key="unit-test-key")
+
+    assert "nvidia" in provider.name
+    assert "bge-m3" in provider.name
+    assert provider.dimensions == 1024

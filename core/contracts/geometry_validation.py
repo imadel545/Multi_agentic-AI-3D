@@ -25,6 +25,7 @@ class GeometryValidationReport(StrictModel):
     bounding_box_m: BoundingBoxM | None = None
     mesh_qa: MeshQAReport | None = None
     mesh_qa_level: Literal[
+        "mesh_level_spatial_basic",
         "mesh_level_transform_basic",
         "mesh_level_basic",
         "metadata_only",

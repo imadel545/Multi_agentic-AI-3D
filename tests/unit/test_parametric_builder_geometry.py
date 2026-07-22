@@ -1,12 +1,25 @@
 import math
+from types import SimpleNamespace
 
 import pytest
 
+from apps.blender_worker.generate_scene import _compute_scene_bounding_box
 from apps.blender_worker.parametric_builder import (
     sector_forward_vector,
+    segment_geometry,
     tower_envelope_radius_at_height,
     tower_material_profile,
 )
+
+
+class _Vector:
+    def __init__(self, coordinates) -> None:
+        self.x, self.y, self.z = coordinates
+
+
+class _IdentityMatrix:
+    def __matmul__(self, vector: _Vector) -> _Vector:
+        return vector
 
 
 @pytest.mark.parametrize(
@@ -56,3 +69,50 @@ def test_tower_material_profiles_are_physically_distinct() -> None:
     assert galvanized != painted
     assert concrete[2] == 0.0
     assert concrete[1] > galvanized[1]
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)),
+        ((0.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        ((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+        ((-2.0, 3.0, 1.0), (4.0, -5.0, 8.0)),
+    ],
+)
+def test_segment_geometry_reconstructs_requested_endpoints(start, end) -> None:
+    geometry = segment_geometry(start, end)
+
+    assert geometry is not None
+    half = geometry.length / 2
+    reconstructed_start = tuple(
+        geometry.midpoint[index] - geometry.direction[index] * half for index in range(3)
+    )
+    reconstructed_end = tuple(
+        geometry.midpoint[index] + geometry.direction[index] * half for index in range(3)
+    )
+    assert reconstructed_start == pytest.approx(start)
+    assert reconstructed_end == pytest.approx(end)
+
+
+def test_segment_geometry_rejects_zero_length() -> None:
+    assert segment_geometry((1.0, 2.0, 3.0), (1.0, 2.0, 3.0)) is None
+
+
+def test_scene_bounding_box_metadata_exposes_extents_and_dimensions() -> None:
+    mesh = SimpleNamespace(
+        type="MESH",
+        data=SimpleNamespace(vertices=[object()]),
+        bound_box=[(-2.0, -1.5, 0.0), (3.0, 2.5, 30.0)],
+        matrix_world=_IdentityMatrix(),
+        location=_Vector((0.0, 0.0, 0.0)),
+    )
+    bpy = SimpleNamespace(
+        context=SimpleNamespace(scene=SimpleNamespace(objects=[mesh])),
+    )
+
+    bounding_box = _compute_scene_bounding_box(bpy)
+
+    assert bounding_box["width"] == pytest.approx(5.0)
+    assert bounding_box["depth"] == pytest.approx(4.0)
+    assert bounding_box["height"] == pytest.approx(30.0)

@@ -243,7 +243,7 @@ def _expected_foundation_count(scene: SceneSpec) -> int:
 def _expected_label_count(scene: SceneSpec) -> int:
     if not scene.visual_elements.include_labels:
         return 0
-    count = len(scene.sectors)
+    count = sum(1 for sector in scene.sectors if sector.include_label)
     if scene.visual_elements.include_power_cabinet:
         count += 1
     if scene.visual_elements.include_gps_antenna:

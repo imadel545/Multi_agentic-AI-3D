@@ -95,6 +95,15 @@ class SceneAccessoryPlacement(StrictModel):
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
     generation_strategy: GenerationStrategy = "internal_project_generated"
     geometry_source: GeometrySource = "unknown"
+    placement_policy: Literal["derived_default", "user_defined"] = "derived_default"
+
+    @field_validator("scale")
+    @classmethod
+    def validate_scale_positive(cls, value: list[float]) -> list[float]:
+        for index, component in enumerate(value):
+            if component <= 0:
+                raise ValueError(f"scale[{index}] must be positive, got {component}")
+        return value
 
 
 class VisualElements(StrictModel):
@@ -124,6 +133,21 @@ class ExportSpec(StrictModel):
         default_factory=lambda: ["glb", "png", "json_report"]
     )
 
+    @field_validator("formats")
+    @classmethod
+    def validate_operational_formats(cls, value: list[str]) -> list[str]:
+        if len(value) != len(set(value)):
+            raise ValueError("export formats must be unique")
+        if "gltf" in value:
+            raise ValueError("gltf export is not operational; request glb instead")
+        missing = {"glb", "png", "json_report"} - set(value)
+        if missing:
+            raise ValueError(
+                "the verified pipeline requires glb, png and json_report; missing "
+                + ", ".join(sorted(missing))
+            )
+        return value
+
 
 class SceneSpec(StrictModel):
     schema_version: str = "1.0.0"
@@ -139,6 +163,12 @@ class SceneSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_scene_geometry(self) -> "SceneSpec":
+        if self.tower.position != [0.0, 0.0, 0.0]:
+            raise ValueError("tower.position is not operational and must remain [0, 0, 0]")
+        if self.tower.rotation_deg != [0.0, 0.0, 0.0]:
+            raise ValueError("tower.rotation_deg is not operational and must remain [0, 0, 0]")
+        if self.tower.scale != [1.0, 1.0, 1.0]:
+            raise ValueError("tower.scale is not operational and must remain [1, 1, 1]")
         for sector in self.sectors:
             if sector.install_height_m > self.tower.height_m:
                 raise ValueError(

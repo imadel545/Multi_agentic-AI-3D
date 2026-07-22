@@ -53,6 +53,7 @@ class AssetManifest(StrictModel):
     pivot_policy: str | None = None
     front_axis: str | None = None
     import_fallback_allowed: bool = True
+    adaptation_profile_id: str | None = Field(default=None, min_length=1)
 
     @property
     def is_validated(self) -> bool:

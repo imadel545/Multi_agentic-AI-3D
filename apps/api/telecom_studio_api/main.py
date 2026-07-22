@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
+    AdaptationCapabilityCatalogResponse,
     AssetInventoryResponse,
     AssetLibraryProbeResponse,
     AssetLibrarySearchResponse,
@@ -42,6 +43,7 @@ from apps.api.telecom_studio_api.workflow import (
 )
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.adaptation import SceneAdaptationCapabilities
 from core.contracts.document_pack import DocumentPackCorrection
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
@@ -56,6 +58,7 @@ from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
 from core.rag.service import RagIndexCompatibilityError
+from core.services.adaptation_capabilities import AdaptationCapabilityService
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound, AssetLibraryService
 from core.services.asset_registry import AssetRegistry
@@ -113,6 +116,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 registry = AssetRegistry(settings.manifests_dir)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
 asset_library_service = AssetLibraryService(settings.asset_library_dir)
+adaptation_capability_service = AdaptationCapabilityService(settings.project_root, registry)
 rag_embedding_provider = build_embedding_provider(
     settings.embedding_provider,
     settings.embedding_model,
@@ -191,7 +195,11 @@ orchestrator = DesignOrchestrator(
     planning_decision_client=planning_decision_client,
     allow_blender_fallback=settings.allow_blender_fallback,
 )
-scene_edit_agent = SceneEditAgent(groq_client=groq_client)
+scene_edit_agent = SceneEditAgent(
+    groq_client=groq_client,
+    capability_service=adaptation_capability_service,
+    checkpoint_saver=checkpoint_saver,
+)
 workflow_service = WorkflowService(
     registry=registry,
     outputs_dir=settings.temp_outputs_dir,
@@ -398,7 +406,15 @@ def stream_events(workflow_id: str, after_event_id: str | None = None):
             event_type = event.get("event_type", "workflow_event")
             yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/assets")
@@ -442,6 +458,25 @@ def asset_library_probe(file_id: str) -> dict:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AssetLibraryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get(
+    "/assets/adaptation-capabilities",
+    response_model=AdaptationCapabilityCatalogResponse,
+)
+def asset_adaptation_capabilities() -> dict:
+    return adaptation_capability_service.public_catalog()
+
+
+@app.get(
+    "/designs/{workflow_id}/adaptation-capabilities",
+    response_model=SceneAdaptationCapabilities,
+)
+def design_adaptation_capabilities(workflow_id: str) -> dict:
+    active_version = workflow_service.versioning.get_active_version(workflow_id)
+    if active_version is None:
+        raise HTTPException(status_code=404, detail="active design version not found")
+    return adaptation_capability_service.resolve(active_version.scene).model_dump(mode="json")
 
 
 @app.get("/assets/{asset_id}")

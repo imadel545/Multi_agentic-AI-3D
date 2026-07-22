@@ -6,13 +6,21 @@ from core.contracts.validation import ValidationIssue, ValidationReport
 
 
 class PatchApplier:
-    def apply(self, scene: SceneSpec, patch: ScenePatch) -> tuple[SceneSpec, ValidationReport]:
+    def apply(
+        self,
+        scene: SceneSpec,
+        patch: ScenePatch,
+        *,
+        allowed_paths: set[str] | None = None,
+    ) -> tuple[SceneSpec, ValidationReport]:
         data = scene.model_dump(mode="json")
         errors: list[ValidationIssue] = []
         warnings: list[ValidationIssue] = []
 
         for op in patch.operations:
             try:
+                if allowed_paths is not None and op.path not in allowed_paths:
+                    raise ValueError("path is not declared by the active capability profile")
                 self._apply_op(data, op)
             except (ValueError, IndexError, KeyError, TypeError) as exc:
                 errors.append(

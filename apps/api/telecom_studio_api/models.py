@@ -99,11 +99,15 @@ class WorkflowStatus(BaseModel):
     asset_import_summary: dict | None = None
     asset_imports: list[dict] | None = None
     structural_qa_passed: bool | None = None
+    glb_binary_integrity_passed: bool | None = None
     expected_objects_present: bool | None = None
     total_duration_ms: int | None = None
     total_workflow_duration_ms: int | None = None
     metrics: dict[str, int | float | str | bool | None] | None = None
     quality_gates: list[dict] | None = None
+    requirement_coverage_passed: bool | None = None
+    requirement_coverage_ratio: float | None = None
+    completion_certificate_status: Literal["issued", "rejected"] | None = None
     download_url: str | None = None
     trace_path: str | None = None
     trace_url: str | None = None
@@ -291,6 +295,7 @@ class AssetInventoryEntry(BaseModel):
     status: str | None = None
     dimensions_m: dict[str, Any] | None = None
     asset_dimensions_checked: bool = False
+    adaptation_profile_id: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -344,6 +349,12 @@ class AssetLibraryProbeResponse(BaseModel):
     blender_ready: bool
     generation_eligible: bool
     limitations: list[str] = Field(default_factory=list)
+
+
+class AdaptationCapabilityCatalogResponse(BaseModel):
+    schema_version: str
+    catalog_hash: str
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class UserIssue(BaseModel):
@@ -449,6 +460,11 @@ class ViewerBundle(BaseModel):
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None
+    requirement_coverage_url: str | None = None
+    completion_certificate_url: str | None = None
+    requirement_coverage_passed: bool | None = None
+    requirement_coverage_ratio: float | None = None
+    completion_certificate_status: Literal["issued", "rejected"] | None = None
     rag_evidence_url: str | None = None
     extraction_provider: str | None = None
     llm_provider: str | None = None

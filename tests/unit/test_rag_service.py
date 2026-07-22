@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import httpx
@@ -106,6 +107,41 @@ def test_rag_documents_exclude_developer_architecture_docs() -> None:
         not str(document.payload.get("source_path", "")).startswith("docs/")
         for document in documents
     )
+
+
+def test_rag_indexes_only_validated_generation_eligible_library_assets(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    catalog = project_root / "assets" / "library" / "index" / "catalog.jsonl"
+    catalog.parent.mkdir(parents=True)
+    entries = [
+        {
+            "file_id": "lib_validated",
+            "relative_path": "3D/Pylone/tower.glb",
+            "category": "Pylone",
+            "claimed_dimension": "3d",
+            "extension": "glb",
+            "qualification_status": "validated",
+            "generation_eligible": True,
+        },
+        {
+            "file_id": "lib_quarantined",
+            "relative_path": "3D/Pylone/raw.dwg",
+            "category": "Pylone",
+            "claimed_dimension": "3d",
+            "extension": "dwg",
+            "qualification_status": "quarantined_unverified",
+            "generation_eligible": False,
+        },
+    ]
+    catalog.write_text("\n".join(json.dumps(item) for item in entries) + "\n", encoding="utf-8")
+
+    documents = load_rag_documents(project_root)
+
+    library_docs = [
+        doc for doc in documents if doc.payload.get("doc_type") == "asset_library_entry"
+    ]
+    assert [doc.payload["file_id"] for doc in library_docs] == ["lib_validated"]
+    assert library_docs[0].payload["planning_hints"] == {}
 
 
 def test_french_token_normalization_is_accent_insensitive() -> None:

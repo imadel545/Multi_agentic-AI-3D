@@ -24,11 +24,19 @@ from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
 from core.orchestration.langgraph_orchestrator import (
     _emit_node_started_runtime_event,
+    _initial_checkpoint_thread_id,
+    _revision_checkpoint_thread_id,
     _scene_with_revision_dependencies,
 )
 from core.rag import RagService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
+
+
+def test_langgraph_checkpoint_threads_are_operation_scoped() -> None:
+    assert _initial_checkpoint_thread_id("wf_1") == "wf_1:initial"
+    assert _revision_checkpoint_thread_id("wf_1", "v1") == "wf_1:revision:v1"
+    assert _revision_checkpoint_thread_id("wf_1", "v2") == "wf_1:revision:v2"
 
 
 def test_scene_revision_rebinds_tower_and_repositions_derived_accessories() -> None:

@@ -121,6 +121,10 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["camera_type"] == "ORTHO"
     assert metadata["preview_camera"]["framing"] == "geometry_bounds_three_quarter"
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
+    assert metadata["segment_connectivity"]["passed"] is True
+    assert metadata["segment_connectivity"]["evaluated_segment_count"] > 0
+    assert metadata["segment_connectivity"]["failed_segment_count"] == 0
+    assert metadata["segment_connectivity"]["maximum_endpoint_error_m"] <= 0.001
     assert metadata["procedural_objects_created"]
     assert "foundation_concrete_pad" in metadata["procedural_objects_created"]
     assert "label:S1" in metadata["procedural_objects_created"]
@@ -174,6 +178,10 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     )
     assert glb_report.checks["has_foundation"] is True
     assert glb_report.checks["has_labels"] is True
+    assert glb_report.checks["all_mesh_primitives_have_binary_data"] is True
+    assert glb_report.checks["semantic_mesh_coverage_complete"] is True
+    assert glb_report.valid_primitive_count == glb_report.primitive_count > 0
+    assert glb_report.binary_chunk_count == 1
     assert geometry_report.checks["foundation_count_valid"] is True
     assert geometry_report.checks["label_count_valid"] is True
     assert geometry_report.object_counts["foundation"] >= 1
@@ -362,6 +370,69 @@ def test_blender_runner_generates_real_microwave_dishes_not_panels(tmp_path: Pat
     assert not any("panel" in name.lower() for name in node_names)
 
 
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is not available",
+)
+def test_blender_runner_honors_operational_scene_switches_and_build_lock(
+    tmp_path: Path,
+) -> None:
+    base = _accessory_scene()
+    scene = base.model_copy(
+        update={
+            "tower": base.tower.model_copy(
+                update={
+                    "characteristics": base.tower.characteristics.model_copy(
+                        update={"foundation_type": "unknown"}
+                    )
+                }
+            ),
+            "sectors": [
+                base.sectors[0].model_copy(update={"include_label": False}),
+                *base.sectors[1:],
+            ],
+            "visual_elements": base.visual_elements.model_copy(
+                update={"include_height_markers": False}
+            ),
+            "preview": base.preview.model_copy(update={"camera": "front"}),
+            "accessory_assets": [
+                accessory.model_copy(update={"scale": [1.5, 1.0, 1.0]})
+                if accessory.asset_type == "gps"
+                else accessory
+                for accessory in base.accessory_assets
+            ],
+        }
+    )
+
+    result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
+
+    assert result.status == "generated"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    assert "height_marker" not in metadata["procedural_objects_created"]
+    assert "label:S1" not in metadata["procedural_objects_created"]
+    assert "label:S2" in metadata["procedural_objects_created"]
+    assert "label:S3" in metadata["procedural_objects_created"]
+    assert "FOUNDATION_UNKNOWN_NO_GEOMETRY_GENERATED" in metadata["warnings"]
+    assert metadata["preview_camera"]["requested_camera"] == "front"
+    assert metadata["preview_camera"]["framing"] == "geometry_bounds_front"
+    assert metadata["blender_runtime"]["background"] is True
+    gps_record = next(
+        record for record in metadata["asset_imports"] if record["asset_id"] == "GPS_ANTENNA_001"
+    )
+    assert gps_record["scale_factors"][0] == pytest.approx(1.5)
+    build_lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
+    assert build_lock["scene_id"] == scene.scene_id
+    assert build_lock["blender_runtime"]["background"] is True
+    assert build_lock["blender_runtime"]["version"]
+    assert build_lock["command_profile"]["factory_startup"] is True
+
+    glb_payload = _read_glb_json(Path(result.artifacts["glb"]))
+    semantic_roles = {node.get("extras", {}).get("role") for node in glb_payload.get("nodes", [])}
+    assert "foundation" not in semantic_roles
+    assert not any(node.get("name") == "label_sector_S1_0deg" for node in glb_payload["nodes"])
+
+
 def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypatch) -> None:
     registry = AssetRegistry(Path("assets/manifests"))
     requirements = parse_requirements_text(
@@ -377,16 +448,32 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
     scene = ScenePlanner().build_scene_spec("wf_blender_retry", requirements, tower, antenna, radio)
     runner = BlenderRunner(project_root=Path.cwd())
     attempts = 0
+    attempt_directories: list[Path] = []
+    commands: list[list[str]] = []
 
     def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
         nonlocal attempts
         attempts += 1
+        commands.append(command)
+        attempt_directories.append(Path(command[-1]))
         if attempts == 1:
             return subprocess.CompletedProcess(command, 42, stdout="", stderr="")
         output_dir = Path(command[-1])
         (output_dir / "design.glb").write_bytes(b"x" * 64)
         (output_dir / "preview.png").write_bytes(b"x" * 64)
-        (output_dir / "scene_metadata.json").write_text('{"generation_mode":"real_blender"}')
+        (output_dir / "scene_metadata.json").write_text(
+            json.dumps(
+                {
+                    "scene_id": scene.scene_id,
+                    "generation_mode": "real_blender",
+                    "blender_runtime": {
+                        "version": "test",
+                        "background": True,
+                        "factory_startup": True,
+                    },
+                }
+            )
+        )
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
     monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
@@ -396,8 +483,54 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
     result = runner.generate(scene, tmp_path)
 
     assert attempts == 2
+    assert attempt_directories[0] != attempt_directories[1]
+    assert all("--factory-startup" in command for command in commands)
+    assert all("--python-exit-code" in command for command in commands)
     assert result.status == "generated"
     assert result.mode == "real_blender"
+    assert Path(result.artifacts["build_lock"]).is_file()
+    build_lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
+    assert build_lock["attempt_number"] == 2
+    assert build_lock["command_profile"]["factory_startup"] is True
+    assert build_lock["artifacts"]["design.glb"]["size_bytes"] == 64
+    assert not any(path.exists() for path in attempt_directories)
+
+
+def test_blender_runner_never_reuses_failed_attempt_artifacts(tmp_path: Path, monkeypatch) -> None:
+    scene = _accessory_scene()
+    runner = BlenderRunner(project_root=Path.cwd())
+    attempts = 0
+    attempt_directories: list[Path] = []
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        attempt_dir = Path(command[-1])
+        attempt_directories.append(attempt_dir)
+        if attempts == 1:
+            (attempt_dir / "design.glb").write_bytes(b"stale-glb")
+            (attempt_dir / "preview.png").write_bytes(b"stale-preview")
+            (attempt_dir / "scene_metadata.json").write_text(
+                json.dumps({"scene_id": scene.scene_id, "generation_mode": "real_blender"}),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 42, stdout="", stderr="transient")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(runner, "_run_blender_command", fake_run)
+    monkeypatch.setattr("core.services.blender_runner.time.sleep", lambda *_: None)
+
+    result = runner.generate(scene, tmp_path)
+
+    assert attempts == 3
+    assert len(set(attempt_directories)) == 3
+    assert result.status == "fallback"
+    assert result.mode == "fallback_blender_error"
+    assert not Path(result.artifacts["glb"]).exists()
+    assert not Path(result.artifacts["preview"]).exists()
+    assert not Path(result.artifacts["build_lock"]).exists()
+    assert all(not path.exists() for path in attempt_directories)
 
 
 def _accessory_scene():

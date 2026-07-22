@@ -21,5 +21,6 @@
   "normalized_by": "Codex Agent",
   "pivot_policy": "base_center_mount",
   "front_axis": "+Y",
-  "import_fallback_allowed": true
+  "import_fallback_allowed": true,
+  "adaptation_profile_id": "accessory_transform_v1"
 }

@@ -28,12 +28,54 @@ def test_glb_inspector_valid_file(tmp_path: Path) -> None:
     assert report.mesh_count >= 1
     assert report.material_count >= 1
     assert report.structural_qa_passed is True
+    assert report.binary_chunk_count == 1
+    assert report.buffer_count == 1
+    assert report.valid_primitive_count == report.primitive_count
+    assert report.checks["semantic_mesh_coverage_complete"] is True
     assert report.checks["has_tower"] is True
     assert report.checks["has_antennas"] is True
     assert report.checks["has_radios_or_rru"] is True
     assert report.semantic_inspection_mode == "name_based"
     assert report.semantic_root_count > 0
     assert "GLB_SEMANTIC_EXTRAS_MISSING_NAME_BASED_MODE" in report.warnings
+
+
+def test_glb_inspector_rejects_json_only_accessor_claims(tmp_path: Path) -> None:
+    scene = _scene()
+    glb_path = tmp_path / "json_only.glb"
+    _write_json_only_glb(glb_path, _expected_object_names(scene))
+
+    report = GLBInspector().inspect(glb_path, scene)
+
+    assert report.format_valid is True
+    assert report.structural_qa_passed is False
+    assert report.valid_primitive_count == 0
+    assert "GLB_BINARY_CHUNK_MISSING" in report.critical_errors
+    assert report.checks["all_mesh_primitives_have_binary_data"] is False
+
+
+def test_glb_inspector_rejects_semantic_entity_without_mesh(tmp_path: Path) -> None:
+    scene = _scene()
+    names = _expected_object_names(scene)
+    glb_path = tmp_path / "empty_semantic_root.glb"
+    _write_test_glb(glb_path, names, empty_node_name=names[-1])
+
+    report = GLBInspector().inspect(glb_path, scene)
+
+    assert report.structural_qa_passed is False
+    assert report.semantic_mesh_coverage_ratio < 1.0
+    assert "GLB_SEMANTIC_ENTITY_WITHOUT_MESH" in report.critical_errors
+
+
+def test_glb_inspector_rejects_out_of_range_indices(tmp_path: Path) -> None:
+    scene = _scene()
+    glb_path = tmp_path / "bad_indices.glb"
+    _write_test_glb(glb_path, _expected_object_names(scene), indices=[0, 1, 99])
+
+    report = GLBInspector().inspect(glb_path, scene)
+
+    assert report.structural_qa_passed is False
+    assert "GLTF_INDEX_DATA_INVALID" in report.critical_errors
 
 
 def test_glb_inspector_missing_file(tmp_path: Path) -> None:
@@ -258,22 +300,84 @@ def _expected_object_names(scene) -> list[str]:
     return names
 
 
-def _write_test_glb(path: Path, object_names: list[str]) -> None:
+def _write_test_glb(
+    path: Path,
+    object_names: list[str],
+    *,
+    empty_node_name: str | None = None,
+    indices: list[int] | None = None,
+) -> None:
+    vertices = struct.pack("<9f", 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+    index_values = indices or [0, 1, 2]
+    index_bytes = struct.pack("<3H", *index_values)
+    index_bytes += b"\0" * ((4 - len(index_bytes) % 4) % 4)
+    binary_chunk = vertices + index_bytes
+    payload: dict[str, Any] = {
+        "asset": {"version": "2.0"},
+        "nodes": [
+            {"name": name} if name == empty_node_name else {"name": name, "mesh": 0}
+            for name in object_names
+        ],
+        "meshes": [
+            {
+                "name": "mesh_0",
+                "primitives": [{"attributes": {"POSITION": 0}, "indices": 1}],
+            }
+        ],
+        "buffers": [{"byteLength": len(binary_chunk)}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": len(vertices)},
+            {"buffer": 0, "byteOffset": len(vertices), "byteLength": len(index_bytes)},
+        ],
+        "accessors": [
+            {
+                "bufferView": 0,
+                "count": 3,
+                "type": "VEC3",
+                "componentType": 5126,
+                "min": [0.0, 0.0, 0.0],
+                "max": [1.0, 1.0, 0.0],
+            },
+            {"bufferView": 1, "count": 3, "type": "SCALAR", "componentType": 5123},
+        ],
+        "materials": [{"name": "material_0"}],
+    }
+    _write_glb_payload(path, payload, binary_chunk)
+
+
+def _write_json_only_glb(path: Path, object_names: list[str]) -> None:
     payload: dict[str, Any] = {
         "asset": {"version": "2.0"},
         "nodes": [{"name": name, "mesh": 0} for name in object_names],
-        "meshes": [{"name": "mesh_0", "primitives": [{"attributes": {"POSITION": 0}}]}],
-        "accessors": [{"count": 3, "type": "VEC3", "componentType": 5126}],
-        "materials": [{"name": "material_0"}],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+        "accessors": [
+            {
+                "count": 3,
+                "type": "VEC3",
+                "componentType": 5126,
+                "min": [0.0, 0.0, 0.0],
+                "max": [1.0, 1.0, 0.0],
+            }
+        ],
     }
+    _write_glb_payload(path, payload, None)
+
+
+def _write_glb_payload(path: Path, payload: dict[str, Any], binary_chunk: bytes | None) -> None:
     json_chunk = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     json_chunk += b" " * ((4 - len(json_chunk) % 4) % 4)
-    length = 12 + 8 + len(json_chunk)
+    binary_record = (
+        struct.pack("<II", len(binary_chunk), 0x004E4942) + binary_chunk
+        if binary_chunk is not None
+        else b""
+    )
+    length = 12 + 8 + len(json_chunk) + len(binary_record)
     path.write_bytes(
         b"glTF"
         + struct.pack("<II", 2, length)
         + struct.pack("<II", len(json_chunk), 0x4E4F534A)
         + json_chunk
+        + binary_record
     )
 
 

@@ -231,6 +231,11 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["qa_report_url"]
         assert bundle["generation_report_url"]
         assert bundle["geometry_validation_url"]
+        assert bundle["requirement_coverage_url"]
+        assert bundle["completion_certificate_url"]
+        assert bundle["requirement_coverage_passed"] is True
+        assert bundle["requirement_coverage_ratio"] == 1.0
+        assert bundle["completion_certificate_status"] == "issued"
         assert bundle["rag_evidence_url"]
         assert bundle["llm_provider"] == "deterministic"
         assert bundle["extraction_provider"] == "deterministic"

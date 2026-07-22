@@ -23,7 +23,13 @@ from qdrant_client.models import (
     VectorParams,
 )
 
-from core.performance import TTLCache, asset_manifest_hash, knowledge_index_hash, rag_query_hash
+from core.performance import (
+    TTLCache,
+    asset_manifest_hash,
+    knowledge_index_hash,
+    qualified_asset_library_hash,
+    rag_query_hash,
+)
 from core.rag.documents import load_rag_documents
 from core.rag.embeddings import DEFAULT_MODEL, EmbeddingProvider, build_embedding_provider
 from core.rag.models import RagDocument, RagIndexReport, RagSearchResult
@@ -442,6 +448,9 @@ class RagService:
         return {
             "knowledge_index_hash": knowledge_index_hash(self.project_root),
             "asset_manifest_hash": asset_manifest_hash(self.project_root / "assets" / "manifests"),
+            "qualified_asset_library_hash": qualified_asset_library_hash(
+                self.project_root / "assets" / "library" / "index" / "catalog.jsonl"
+            ),
             "embedding_provider": self.embedding_provider.name,
             "embedding_dimensions": self.embedding_provider.dimensions,
             "embedding_input_profile": getattr(

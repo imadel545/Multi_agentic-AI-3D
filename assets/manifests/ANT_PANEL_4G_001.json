@@ -21,5 +21,6 @@
   "normalized_by": "Codex Agent",
   "pivot_policy": "center_mount",
   "front_axis": "+Y",
-  "import_fallback_allowed": true
+  "import_fallback_allowed": true,
+  "adaptation_profile_id": "sector_antenna_pose_v1"
 }

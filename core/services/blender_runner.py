@@ -1,9 +1,12 @@
+import hashlib
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import time
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -37,11 +40,10 @@ class BlenderRunner:
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()
         output_dir.mkdir(parents=True, exist_ok=True)
-        _clear_generated_artifacts(output_dir)
         scene_spec_path = output_dir / "scene_spec.json"
-        scene_spec_path.write_text(
+        _atomic_write_text(
+            scene_spec_path,
             json.dumps(scene.model_dump(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
         )
         blender_path = self._resolve_blender_binary()
         if blender_path is None:
@@ -55,19 +57,24 @@ class BlenderRunner:
                 install_hint=_blender_install_hint(),
             )
 
-        staging_dir = Path(tempfile.mkdtemp(prefix=".blender-staging-", dir=output_dir))
-        command = [
-            str(blender_path),
-            "-b",
-            "--python",
-            str(self.worker_script),
-            "--",
-            str(scene_spec_path),
-            str(staging_dir),
-        ]
         completed: subprocess.CompletedProcess[str] | None = None
         attempt_errors: list[str] = []
         for attempt in range(1, 4):
+            build_id = f"build_{uuid.uuid4().hex}"
+            attempt_id = f"{build_id}_attempt_{attempt}"
+            staging_dir = Path(tempfile.mkdtemp(prefix=f".blender-{attempt_id}-", dir=output_dir))
+            command = [
+                str(blender_path),
+                "--background",
+                "--factory-startup",
+                "--python-exit-code",
+                "97",
+                "--python",
+                str(self.worker_script),
+                "--",
+                str(scene_spec_path),
+                str(staging_dir),
+            ]
             try:
                 completed = self._run_blender_command(command)
             except subprocess.TimeoutExpired as exc:
@@ -82,16 +89,55 @@ class BlenderRunner:
                     blender_path=str(blender_path),
                     error=str(exc),
                 )
-            if completed.returncode == 0:
-                break
-            raw_error = (completed.stderr or completed.stdout).strip()
-            attempt_errors.append(
-                f"attempt_{attempt}: {raw_error or f'exit_code={completed.returncode}'}"
+            if completed.returncode != 0:
+                raw_error = (completed.stderr or completed.stdout).strip()
+                attempt_errors.append(
+                    f"attempt_{attempt}: {raw_error or f'exit_code={completed.returncode}'}"
+                )
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
+
+            validation_error = _validate_staged_artifacts(staging_dir, scene)
+            if validation_error:
+                raw_error = (completed.stderr or completed.stdout).strip()[-2000:]
+                attempt_errors.append(
+                    f"attempt_{attempt}: {validation_error}"
+                    + (f"; {raw_error}" if raw_error else "")
+                )
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
+
+            _write_build_lock(
+                staging_dir=staging_dir,
+                scene_spec_path=scene_spec_path,
+                worker_script=self.worker_script,
+                blender_path=blender_path,
+                build_id=build_id,
+                attempt_id=attempt_id,
+                attempt_number=attempt,
             )
-            if attempt < 3:
-                time.sleep(attempt)
-        if completed is None or completed.returncode != 0:
-            shutil.rmtree(staging_dir, ignore_errors=True)
+            lock_error = _validate_build_lock(staging_dir, scene_spec_path, self.worker_script)
+            if lock_error:
+                attempt_errors.append(f"attempt_{attempt}: {lock_error}")
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
+            _promote_staged_artifacts(staging_dir, output_dir)
+            return self._result(
+                started,
+                output_dir,
+                "generated",
+                "real_blender",
+                True,
+                blender_path=str(blender_path),
+            )
+
+        if completed is None or completed.returncode != 0 or attempt_errors:
             self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_error")
             return self._result(
                 started,
@@ -102,33 +148,7 @@ class BlenderRunner:
                 blender_path=str(blender_path),
                 error="\n".join(attempt_errors)[-2000:] or "Blender failed.",
             )
-        validation_error = _validate_staged_artifacts(staging_dir, scene)
-        if validation_error:
-            error_output = (completed.stderr or completed.stdout).strip()[-2000:]
-            shutil.rmtree(staging_dir, ignore_errors=True)
-            self._write_fallback_artifacts(
-                output_dir, scene, mode="fallback_blender_missing_artifacts"
-            )
-            return self._result(
-                started,
-                output_dir,
-                "fallback",
-                "fallback_blender_missing_artifacts",
-                True,
-                blender_path=str(blender_path),
-                error=(
-                    validation_error or error_output or "Blender completed without valid artifacts."
-                ),
-            )
-        _promote_staged_artifacts(staging_dir, output_dir)
-        return self._result(
-            started,
-            output_dir,
-            "generated",
-            "real_blender",
-            True,
-            blender_path=str(blender_path),
-        )
+        raise RuntimeError("unreachable Blender runner state")
 
     def _run_blender_command(self, command: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -187,6 +207,7 @@ class BlenderRunner:
                 "glb": str(output_dir / "design.glb"),
                 "preview": str(output_dir / "preview.png"),
                 "metadata": str(output_dir / "scene_metadata.json"),
+                "build_lock": str(output_dir / "build.lock.json"),
             },
             error=error,
             install_hint=install_hint,
@@ -281,7 +302,9 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
     if scene.visual_elements.include_gps_antenna:
         objects.append("gps_antenna")
     if scene.visual_elements.include_labels:
-        objects.extend(f"label:{sector.sector_id}" for sector in scene.sectors)
+        objects.extend(
+            f"label:{sector.sector_id}" for sector in scene.sectors if sector.include_label
+        )
         if scene.visual_elements.include_power_cabinet:
             objects.append("label:power_cabinet")
         if scene.visual_elements.include_gps_antenna:
@@ -457,6 +480,7 @@ def _preview_camera_metadata(scene: SceneSpec) -> dict:
     return {
         "camera": "not_rendered",
         "camera_type": "not_rendered",
+        "requested_camera": scene.preview.camera,
         "target": [0.0, 0.0, round(tower_height * 0.52, 3)],
         "ortho_scale": round(max(tower_height * 1.28, 18.0), 3),
         "background": "not_rendered",
@@ -498,15 +522,155 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
 
 
 def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
-    for name in ("design.glb", "preview.png", "scene_metadata.json", "design.blend"):
+    # The lock is the commit marker: publish it last, after every payload file
+    # has been atomically projected into the candidate output directory.
+    names = ("design.glb", "preview.png", "scene_metadata.json", "design.blend")
+    for name in names:
         source = staging_dir / name
         if source.exists():
-            source.replace(output_dir / name)
+            _atomic_copy(source, output_dir / name)
+    _atomic_copy(staging_dir / "build.lock.json", output_dir / "build.lock.json")
     shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def _clear_generated_artifacts(output_dir: Path) -> None:
-    for name in ("design.glb", "preview.png", "scene_metadata.json", "design.blend"):
+    for name in (
+        "design.glb",
+        "preview.png",
+        "scene_metadata.json",
+        "design.blend",
+        "build.lock.json",
+    ):
         path = output_dir / name
         if path.exists():
             path.unlink()
+
+
+def _write_build_lock(
+    *,
+    staging_dir: Path,
+    scene_spec_path: Path,
+    worker_script: Path,
+    blender_path: Path,
+    build_id: str,
+    attempt_id: str,
+    attempt_number: int,
+) -> None:
+    metadata_path = staging_dir / "scene_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    artifact_hashes = {
+        name: {
+            "sha256": _sha256(staging_dir / name),
+            "size_bytes": (staging_dir / name).stat().st_size,
+        }
+        for name in ("design.glb", "preview.png", "scene_metadata.json")
+    }
+    payload = {
+        "schema_version": "1.0.0",
+        "build_id": build_id,
+        "attempt_id": attempt_id,
+        "attempt_number": attempt_number,
+        "created_at": datetime.now(UTC).isoformat(),
+        "scene_id": metadata.get("scene_id"),
+        "scene_spec_sha256": _sha256(scene_spec_path),
+        "worker_script_sha256": _sha256(worker_script),
+        "blender_binary": str(blender_path),
+        "blender_runtime": metadata.get("blender_runtime"),
+        "command_profile": {
+            "background": True,
+            "factory_startup": True,
+            "python_exit_code": 97,
+        },
+        "artifacts": artifact_hashes,
+    }
+    _atomic_write_text(
+        staging_dir / "build.lock.json",
+        json.dumps(payload, indent=2, ensure_ascii=False),
+    )
+
+
+def _validate_build_lock(
+    output_dir: Path,
+    scene_spec_path: Path,
+    worker_script: Path,
+) -> str | None:
+    lock_path = output_dir / "build.lock.json"
+    try:
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "BLENDER_BUILD_LOCK_INVALID"
+    try:
+        scene_payload = json.loads(scene_spec_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "BLENDER_BUILD_LOCK_SCENE_INVALID"
+    if payload.get("scene_id") != scene_payload.get("scene_id"):
+        return "BLENDER_BUILD_LOCK_SCENE_ID_MISMATCH"
+    if not isinstance(payload.get("build_id"), str) or not isinstance(
+        payload.get("attempt_id"), str
+    ):
+        return "BLENDER_BUILD_LOCK_IDENTITY_INVALID"
+    if payload.get("scene_spec_sha256") != _sha256(scene_spec_path):
+        return "BLENDER_BUILD_LOCK_SCENE_MISMATCH"
+    if payload.get("worker_script_sha256") != _sha256(worker_script):
+        return "BLENDER_BUILD_LOCK_WORKER_MISMATCH"
+    command_profile = payload.get("command_profile")
+    if command_profile != {
+        "background": True,
+        "factory_startup": True,
+        "python_exit_code": 97,
+    }:
+        return "BLENDER_BUILD_LOCK_COMMAND_PROFILE_INVALID"
+    blender_runtime = payload.get("blender_runtime")
+    if (
+        not isinstance(blender_runtime, dict)
+        or not isinstance(blender_runtime.get("version"), str)
+        or not blender_runtime["version"]
+        or blender_runtime.get("background") is not True
+        or blender_runtime.get("factory_startup") is not True
+    ):
+        return "BLENDER_BUILD_LOCK_RUNTIME_INVALID"
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return "BLENDER_BUILD_LOCK_ARTIFACTS_INVALID"
+    for name in ("design.glb", "preview.png", "scene_metadata.json"):
+        evidence = artifacts.get(name)
+        path = output_dir / name
+        if (
+            not isinstance(evidence, dict)
+            or not path.is_file()
+            or evidence.get("size_bytes") != path.stat().st_size
+            or evidence.get("sha256") != _sha256(path)
+        ):
+            return f"BLENDER_BUILD_LOCK_ARTIFACT_MISMATCH:{name}"
+    return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_copy(source: Path, target: Path) -> None:
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copy2(source, temporary)
+        with temporary.open("rb") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)

@@ -40,6 +40,11 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `POST` | `/designs/{id}/versions/{vid}/rollback` | Rollback vers une version. |
 | `GET` | `/designs/{id}/artifacts/{name}` | Télécharger GLB, PNG, metadata, rapports. |
 | `GET` | `/assets/inventory` | Inventaire des assets et leur état. |
+| `GET` | `/assets/adaptation-capabilities` | Catalogue versionné des profils d'adaptation. |
+| `GET` | `/designs/{id}/adaptation-capabilities` | Paramètres réellement modifiables dans la version active. |
+| `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles. |
+| `GET` | `/assets/library/search?q=...` | Recherche metadata-only consommée par le drawer Bibliothèque; expose quarantaine et liens d'aperçus, sans bouton de sélection Blender tant que `generation_eligible=false`. |
+| `POST` | `/assets/library/{file_id}/probe` | Probe isolé du format/entités et route de conversion requise; ne promeut pas le fichier. |
 | `POST` | `/document-packs` | Uploader un ZIP. |
 | `GET` | `/document-packs/{pack_id}` | Résumé du pack. |
 | `GET` | `/document-packs/{pack_id}/consolidated-spec` | Spec consolidée. |
@@ -54,13 +59,20 @@ Noms d'artifact utilisés par le frontend :
 - `glb` → `design.glb`
 - `preview` → `preview.png`
 - `metadata` → `scene_metadata.json`
+- `build_lock` → `build.lock.json`
 - `scene_spec` → `scene_spec.json`
 - `qa_report` → `qa_report.json`
 - `geometry_validation` → `geometry_validation.json`
+- `requirement_coverage` → `requirement_coverage.json`
+- `completion_certificate` → `completion_certificate.json`
 - `rag_evidence` → `rag_evidence.json`
 - `quality_gates` → `quality_gates.json`
 - `trace` → `workflow_trace.json`
 - `download` → `artifacts.zip`
+- `adaptation_plan` → `adaptation_plan.json`
+- `adaptation_capabilities` → `adaptation_capabilities.json`
+- `scene_patch` → `scene_patch.json`
+- `scene_diff` → `scene_diff.json`
 
 Dans les réponses publiques (`/designs/{id}`, `/designs/{id}/edit`,
 `/designs/{id}/versions`, `/viewer-bundle`), ces artefacts sont exposés via
@@ -72,11 +84,17 @@ restent internes au backend.
 - `status` : `pending`, `running`, `completed`, `failed`.
 - `generation_mode` : `real_blender` ou fallback.
 - `generation_strategy`, `geometry_source`, `mesh_qa_level`, `mesh_qa_passed` :
-  vérité 3D/QA affichable.
+  vérité 3D/QA affichable. `mesh_qa_level` peut être
+  `mesh_level_spatial_basic`, `mesh_level_transform_basic`, `mesh_level_basic`,
+  `metadata_only` ou `not_available`.
 - `extraction_provider` : `groq`, `deterministic` ou `fallback`.
 - `llm_provider`, `llm_available`, `llm_fallback_used`, `llm_fallback_reason` :
   vérité GPT-OSS/fallback affichable.
 - `qa_score` : score entre 0 et 1.
+- `requirement_coverage_passed`, `requirement_coverage_ratio` : preuve que les
+  exigences critiques sont présentes dans `SceneSpec`.
+- `completion_certificate_status` : `issued` uniquement lorsque le résultat
+  terminal et les hashes des artefacts ont été vérifiés.
 - `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`,
   `rag_reranker_degraded_reason` : vérité reranker NVIDIA/passthrough.
 - `asset_import_summary` : résumé des imports GLB/fallback.
@@ -140,6 +158,11 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
+- `requirement_coverage_url`
+- `completion_certificate_url`
+- `requirement_coverage_passed`
+- `requirement_coverage_ratio`
+- `completion_certificate_status`
 - `rag_evidence_url`
 - `requirements_spec_url`
 - `extraction_report_url`
@@ -179,12 +202,15 @@ visible and ask the user to clean temporary artifacts before retrying.
 1. `GET /health`.
 2. `GET /studio/summary` pour backend, Blender, Groq, RAG NVIDIA, assets et warnings.
 3. `GET /assets/inventory` pour le drawer assets.
-4. `GET /document-packs/capabilities` pour configurer l'upload.
-5. `GET /designs` pour restaurer les designs locaux.
-6. `POST /designs` quand l'utilisateur envoie un prompt.
-7. Ouvrir `/designs/{workflow_id}/events/stream`.
-8. À l'événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
+4. `GET /assets/adaptation-capabilities` pour le catalogue déclaré.
+5. `GET /document-packs/capabilities` pour configurer l'upload.
+6. `GET /designs` pour restaurer les designs locaux.
+7. `POST /designs` quand l'utilisateur envoie un prompt.
+8. Ouvrir `/designs/{workflow_id}/events/stream`.
+9. À l'événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
    `/user-issues` et `/versions`.
+10. Charger `/designs/{id}/adaptation-capabilities` avant d'afficher les
+    possibilités d'édition du design actif.
 
 Le frontend doit rendre:
 

@@ -45,6 +45,12 @@ def load_rag_documents(project_root: Path) -> list[RagDocument]:
     documents.extend(
         _load_asset_manifest_documents(project_root, project_root / "assets" / "manifests")
     )
+    documents.extend(
+        _load_qualified_asset_library_documents(
+            project_root,
+            project_root / "assets" / "library" / "index" / "catalog.jsonl",
+        )
+    )
     return documents
 
 
@@ -117,6 +123,51 @@ def _asset_text(payload: dict) -> str:
             f"version: {payload.get('version', 'unknown')}",
         ]
     )
+
+
+def _load_qualified_asset_library_documents(
+    project_root: Path, catalog_path: Path
+) -> list[RagDocument]:
+    if not catalog_path.is_file():
+        return []
+    documents: list[RagDocument] = []
+    for line in catalog_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if not (
+            payload.get("generation_eligible") is True
+            and payload.get("qualification_status") == "validated"
+        ):
+            continue
+        relative_path = str(payload["relative_path"])
+        documents.append(
+            RagDocument(
+                doc_id=f"asset-library:{payload['file_id']}",
+                collection="asset_manifests",
+                text="\n".join(
+                    [
+                        f"asset library file: {relative_path}",
+                        f"category: {payload.get('category', 'unknown')}",
+                        f"dimension: {payload.get('claimed_dimension', 'unknown')}",
+                        f"format: {payload.get('extension', 'unknown')}",
+                    ]
+                ),
+                payload={
+                    "type": "qualified_asset_library_entry",
+                    "doc_type": "asset_library_entry",
+                    "source_path": _relative_source(project_root, catalog_path),
+                    "file_id": payload["file_id"],
+                    "category": payload.get("category"),
+                    "claimed_dimension": payload.get("claimed_dimension"),
+                    "extension": payload.get("extension"),
+                    "qualification_status": "validated",
+                    "generation_eligible": True,
+                    "planning_hints": {},
+                },
+            )
+        )
+    return documents
 
 
 def _markdown_chunks(text: str) -> list[str]:

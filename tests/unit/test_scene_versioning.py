@@ -1,10 +1,12 @@
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
 
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
 from core.services.event_log import EventLogService
-from core.services.scene_versioning import SceneVersioningService
+from core.services.scene_versioning import SceneVersioningService, _atomic_write_text
 
 
 @pytest.fixture
@@ -73,3 +75,75 @@ def test_event_log_emit_and_list(tmp_outputs):
     assert len(events) == 2
     assert events[0].event_type == "design_created"
     assert events[1].event_type == "blender_started"
+
+
+def test_atomic_version_write_never_leaves_temporary_files(tmp_outputs):
+    target = tmp_outputs / "active_version.json"
+
+    _atomic_write_text(target, '{"version_id":"v1"}')
+    _atomic_write_text(target, '{"version_id":"v2"}')
+
+    assert target.read_text(encoding="utf-8") == '{"version_id":"v2"}'
+    assert list(tmp_outputs.glob(".active_version.json.*.tmp")) == []
+
+
+def test_completed_version_commit_is_hash_bound_and_canonical(tmp_outputs, sample_scene):
+    svc = SceneVersioningService(tmp_outputs)
+    version = svc.save_version("wf_1", sample_scene, edit_description="verified", activate=False)
+    artifact_dir = svc.version_artifacts_dir("wf_1", version.version_id)
+    artifact_dir.mkdir(parents=True)
+    artifacts = []
+    for logical_name, file_name, content in (
+        ("glb", "design.glb", b"verified-glb"),
+        ("preview", "preview.png", b"verified-preview"),
+        ("metadata", "scene_metadata.json", b"verified-metadata"),
+        ("build_lock", "build.lock.json", b"verified-build-lock"),
+    ):
+        path = artifact_dir / file_name
+        path.write_bytes(content)
+        artifacts.append(
+            {
+                "logical_name": logical_name,
+                "file_name": file_name,
+                "size_bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }
+        )
+    (artifact_dir / "completion_certificate.json").write_text(
+        json.dumps({"status": "issued", "artifacts": artifacts}), encoding="utf-8"
+    )
+    (artifact_dir / "status.json").write_text(
+        json.dumps(
+            {
+                "workflow_id": "wf_1",
+                "version_id": version.version_id,
+                "active_version_id": version.version_id,
+                "status": "completed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    svc.update_version(
+        "wf_1",
+        version.version_id,
+        status="completed",
+        artifact_dir=str(artifact_dir),
+    )
+
+    committed = svc.commit_active_version("wf_1", version.version_id)
+
+    assert committed.version_id == version.version_id
+    assert svc.active_version_id("wf_1") == version.version_id
+    manifest = svc.active_design_manifest("wf_1")
+    assert manifest is not None
+    assert manifest["version_id"] == version.version_id
+    assert {item["logical_name"] for item in manifest["certified_artifacts"]} == {
+        "glb",
+        "preview",
+        "metadata",
+        "build_lock",
+    }
+
+    (artifact_dir / "design.glb").write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_ARTIFACT_HASH_MISMATCH"):
+        svc.commit_active_version("wf_1", version.version_id)

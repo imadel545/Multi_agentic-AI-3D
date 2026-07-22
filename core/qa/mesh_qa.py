@@ -32,6 +32,8 @@ SemanticInspectionMode = Literal[
 ]
 
 _PER_SECTOR_ROLES = {"antenna", "rru", "cable", "beam", "azimuth_arrow"}
+_PRIMARY_EQUIPMENT_ROLES = {"antenna", "rru", "gps", "power_cabinet"}
+_AABB_INTERFERENCE_EPSILON_M = 0.005
 _ROLE_ALIASES = {
     "antenna": "antenna",
     "antenna_panel": "antenna",
@@ -79,6 +81,12 @@ class _SemanticIndex:
         if not self.entities:
             return 0.0
         return self.extras_root_count / len(self.entities)
+
+
+@dataclass(frozen=True)
+class _SemanticEntityBounds:
+    entity: _SemanticEntity
+    bounds: BoundingBoxM
 
 
 def _read_glb_json(glb_path: Path) -> dict[str, Any] | None:
@@ -631,29 +639,23 @@ def _compute_glb_bounding_box(
             accessor_index = primitive.get("attributes", {}).get("POSITION")
             if not isinstance(accessor_index, int) or not 0 <= accessor_index < len(accessors):
                 continue
-            # Use accessor min/max when available (fast path)
             accessor = accessors[accessor_index]
             if not isinstance(accessor, dict):
                 continue
-            amin = accessor.get("min")
-            amax = accessor.get("max")
-            if amin and amax and len(amin) >= 3 and len(amax) >= 3:
-                for corner in _bounding_box_corners(amin, amax):
-                    wx, wy, wz = _apply_matrix(transform, corner)
-                    min_x, max_x = min(min_x, wx), max(max_x, wx)
-                    min_y, max_y = min(min_y, wy), max(max_y, wy)
-                    min_z, max_z = min(min_z, wz), max(max_z, wz)
-                    found = True
-            else:
-                positions = _read_accessor_floats(glb_path, payload, accessor_index)
-                if positions is None:
-                    continue
-                for v in positions:
-                    wx, wy, wz = _apply_matrix(transform, v)
-                    min_x, max_x = min(min_x, wx), max(max_x, wx)
-                    min_y, max_y = min(min_y, wy), max(max_y, wy)
-                    min_z, max_z = min(min_z, wz), max(max_z, wz)
-                    found = True
+            # Accessor min/max are producer claims, not independent geometry proof.
+            positions = _read_accessor_floats(glb_path, payload, accessor_index)
+            if positions is None or len(positions) != int(accessor.get("count") or 0):
+                continue
+            if not all(
+                all(math.isfinite(component) for component in vertex) for vertex in positions
+            ):
+                continue
+            for v in positions:
+                wx, wy, wz = _apply_matrix(transform, v)
+                min_x, max_x = min(min_x, wx), max(max_x, wx)
+                min_y, max_y = min(min_y, wy), max(max_y, wy)
+                min_z, max_z = min(min_z, wz), max(max_z, wz)
+                found = True
 
     if not found:
         return None
@@ -900,16 +902,36 @@ class MeshQA:
         transform_checks = _transform_checks(payload, scene, semantic_index)
         checks.extend(transform_checks["checks"])
         warnings.extend(transform_checks["warnings"])
-        mesh_level = (
-            "mesh_level_transform_basic"
-            if transform_checks["semantic_transform_checks_complete"]
-            else "mesh_level_basic"
+        spatial_checks = _primary_equipment_spatial_checks(
+            glb_path,
+            payload,
+            semantic_index,
         )
+        checks.extend(spatial_checks["checks"])
+        warnings.extend(spatial_checks["warnings"])
+        if (
+            transform_checks["semantic_transform_checks_complete"]
+            and spatial_checks["spatial_checks_complete"]
+        ):
+            mesh_level = "mesh_level_spatial_basic"
+        elif transform_checks["semantic_transform_checks_complete"]:
+            mesh_level = "mesh_level_transform_basic"
+        else:
+            mesh_level = "mesh_level_basic"
 
         limitations = [
-            "Mesh-level QA v1 does not perform collision detection.",
             "Mesh-level QA v1 does not validate RF propagation or structural wind/load.",
         ]
+        if spatial_checks["spatial_checks_complete"]:
+            limitations.append(
+                "mesh_level_spatial_basic screens primary-equipment interference with "
+                "world-space AABBs computed from real GLB vertices; it is not triangle-level "
+                "BVH collision, self-intersection, or engineering-clearance certification."
+            )
+        else:
+            limitations.append(
+                "Primary-equipment spatial bounds are incomplete; no interference claim is made."
+            )
         if transform_checks["semantic_transform_checks_complete"]:
             limitations.append(
                 "mesh_level_transform_basic verifies semantic-root transforms, per-sector HBA and "
@@ -941,8 +963,11 @@ class MeshQA:
                 {
                     "antenna_hba_transform_approx",
                     "antenna_azimuth_transform_approx",
+                    "primary_equipment_bounds_complete",
                 }
             )
+        if spatial_checks["spatial_checks_complete"]:
+            required_check_names.add("primary_equipment_aabb_interference_free")
         if scene.visual_elements.include_labels:
             required_check_names.add("label_transforms_present")
         if scene.tower.characteristics.foundation_type != "unknown":
@@ -991,9 +1016,118 @@ def _expected_label_count(scene: SceneSpec) -> int:
     if not scene.visual_elements.include_labels:
         return 0
     return (
-        len(scene.sectors)
+        sum(1 for sector in scene.sectors if sector.include_label)
         + int(scene.visual_elements.include_power_cabinet)
         + int(scene.visual_elements.include_gps_antenna)
+    )
+
+
+def _primary_equipment_spatial_checks(
+    glb_path: Path,
+    payload: dict[str, Any],
+    semantic_index: _SemanticIndex,
+) -> dict[str, Any]:
+    """Run a conservative broad-phase interference screen on primary equipment.
+
+    Bounds come from exported GLB POSITION bytes after world transforms. The
+    tower, foundation, cables, labels and visual helpers are intentionally
+    outside this gate because contact or overlap is expected for those roles.
+    The only allowed primary-equipment overlap is an antenna and its RRU on the
+    same sector.
+    """
+
+    equipment = [
+        entity for entity in semantic_index.entities if entity.role in _PRIMARY_EQUIPMENT_ROLES
+    ]
+    bounded: list[_SemanticEntityBounds] = []
+    missing: list[str] = []
+    non_semantic: list[str] = []
+    for entity in equipment:
+        if entity.evidence_source != "extras":
+            non_semantic.append(entity.identity)
+        bounds = _compute_glb_bounding_box(
+            glb_path,
+            payload,
+            node_indices=set(entity.node_indices),
+        )
+        if bounds is None:
+            missing.append(entity.identity)
+            continue
+        bounded.append(_SemanticEntityBounds(entity=entity, bounds=bounds))
+
+    complete = bool(equipment) and not missing and not non_semantic
+    checks = [
+        MeshCheckResult(
+            name="primary_equipment_bounds_complete",
+            passed=complete,
+            detail=(
+                f"expected={len(equipment)}; bounded={len(bounded)}; "
+                f"missing={missing}; non_semantic={non_semantic}"
+            ),
+        )
+    ]
+    warnings: list[str] = []
+    if not complete:
+        warnings.append("MESH_PRIMARY_EQUIPMENT_BOUNDS_INCOMPLETE")
+
+    interferences: list[str] = []
+    allowed_contacts: list[str] = []
+    for index, left in enumerate(bounded):
+        for right in bounded[index + 1 :]:
+            overlap = _aabb_overlap_depth(left.bounds, right.bounds)
+            if overlap is None:
+                continue
+            if _is_allowed_primary_equipment_contact(left.entity, right.entity):
+                allowed_contacts.append(f"{left.entity.identity}<->{right.entity.identity}")
+                continue
+            interferences.append(
+                f"{left.entity.identity}<->{right.entity.identity}:"
+                f"dx={overlap[0]:.3f}m,dy={overlap[1]:.3f}m,dz={overlap[2]:.3f}m"
+            )
+
+    interference_free = complete and not interferences
+    checks.append(
+        MeshCheckResult(
+            name="primary_equipment_aabb_interference_free",
+            passed=interference_free,
+            detail=(
+                f"interferences={interferences}; allowed_contacts={allowed_contacts}; "
+                f"epsilon={_AABB_INTERFERENCE_EPSILON_M:.3f}m"
+            ),
+        )
+    )
+    if complete and interferences:
+        warnings.append("MESH_PRIMARY_EQUIPMENT_AABB_INTERFERENCE_DETECTED")
+    return {
+        "checks": checks,
+        "warnings": warnings,
+        "spatial_checks_complete": complete,
+        "interferences": interferences,
+    }
+
+
+def _aabb_overlap_depth(
+    left: BoundingBoxM,
+    right: BoundingBoxM,
+) -> tuple[float, float, float] | None:
+    depths = (
+        min(left.max_x, right.max_x) - max(left.min_x, right.min_x),
+        min(left.max_y, right.max_y) - max(left.min_y, right.min_y),
+        min(left.max_z, right.max_z) - max(left.min_z, right.min_z),
+    )
+    if all(depth > _AABB_INTERFERENCE_EPSILON_M for depth in depths):
+        return depths
+    return None
+
+
+def _is_allowed_primary_equipment_contact(
+    left: _SemanticEntity,
+    right: _SemanticEntity,
+) -> bool:
+    return bool(
+        left.sector_id
+        and left.sector_id == right.sector_id
+        and {left.role, right.role} == {"antenna", "rru"}
     )
 
 

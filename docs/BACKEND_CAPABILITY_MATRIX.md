@@ -21,19 +21,23 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; l'index statique se resynchronise quand les docs/manifests changent; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py`, `/studio/summary` | NVIDIA API par défaut; passthrough seulement explicite ou dégradé visible; modèle local seulement si activé explicitement. |
 | Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
-| LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration` | Prompt, exigences validées et révisions entrent dans le graphe; patch edit/versioning restent service-level. |
+| LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration`, `SceneEditAgent` | Prompt, exigences validées, révisions et adaptation typée entrent dans des graphes checkpointés; versioning reste service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
-| Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; fallback Blender refusé par défaut côté qualité. |
 | Local CAD library | IMPLEMENTED_LIMITED | `/assets/library/summary`, `/assets/library/search`, `/assets/library/{file_id}/probe` | 11 974 fichiers, 11 531 contenus uniques, 443 doublons; schéma 1.1 relie 15 aperçus à 7 CAD. Recherche metadata-only; licences et conversion à qualifier; corpus brut hors Git. |
+| Asset adaptation profiles | IMPLEMENTED_LIMITED | `/assets/adaptation-capabilities`, `/designs/{id}/adaptation-capabilities`, `assets/capabilities` | Catalogue typé et borné; tower paramétrique, layout secteur et transforms accessoires opérationnels. Pas de retopologie GLB opaque ni matériau arbitraire. |
+| Blender generation | IMPLEMENTED_LIMITED | `core/services/blender_runner.py`, `apps/blender_worker` | Réel si Blender trouvé; factory-startup, staging unique par tentative et build lock hashé; fallback Blender refusé par défaut côté qualité. |
 | Missing asset fallback | IMPLEMENTED | `apps/blender_worker/generate_scene.py` | Tous les manifests tower disposent d'un GLB; fallback procédural réservé aux cas d'échec d'import. |
-| GLB structural QA | IMPLEMENTED_LIMITED | `core/qa/glb_inspector.py` | `glb_parse_structural`, pas validation mesh complète. |
-| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py`, `core/qa/mesh_qa.py` | `mesh_level_transform_basic` quand transforms GLB lisibles, sinon `mesh_level_basic`; toujours pas collision/RF/vendor-grade. |
+| GLB binary integrity QA | IMPLEMENTED_LIMITED | `core/qa/gltf_integrity.py`, `core/qa/glb_inspector.py` | Valide header/chunks, buffers, bufferViews, données `POSITION`, indices et couverture mesh sémantique; pas encore topologie/manifold/collision complète. |
+| Geometry QA | IMPLEMENTED_LIMITED | `core/qa/glb_geometry_validator.py`, `core/qa/mesh_qa.py` | `mesh_level_spatial_basic` quand transforms et bounds GLB sont complets, avec screening AABB des équipements primaires; sinon niveaux transform/basic. Pas de collision triangle/BVH, RF ou vendor-grade. |
+| Segment connectivity gate | IMPLEMENTED | `apps/blender_worker/parametric_builder.py`, `generate_scene.py` | Mesure les extrémités réelles des membres cylindriques avant export; hard-fail au-delà de 1 mm. |
+| Requirement coverage | IMPLEMENTED | `core/validation/requirement_coverage.py` | Prouve les mappings critiques `RequirementSpec -> SceneSpec`; déviation seulement avec décision appliquée et tracée. |
+| Completion certificate | IMPLEMENTED | `core/validation/completion_certificate.py`, `WorkflowService._enforce_completion_proof` | `completed` exige Blender réel, gates/QA valides et hashes GLB/preview/metadata/build lock; ce n'est pas une signature cryptographique externe. |
 | Preview QA | IMPLEMENTED_LIMITED | `core/qa/preview_inspector.py` | Pixel/framing basic: présence, occupation, centrage, clipping, contraste; pas jugement visuel sémantique. |
 | Repair loop | IMPLEMENTED_LIMITED | `core/orchestration/langgraph_orchestrator.py` | Répare certains défauts de SceneSpec; pas boucle autonome générale. |
 | Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles: `node_started`, résultat du nœud, artefacts prêts, QA, issues; runtime local-first. |
 | SSE | IMPLEMENTED | `/events/stream` | `push_sse` local-process: replay JSONL puis queue live jusqu'au terminal; pas encore broker durable/cancellation. |
-| Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur. |
-| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`, `npm run typecheck`, `npm run test`, `npm run build`, visual smoke required | Real-backend React/Three/Zod pieces exist, but the first dashboard-like kernel was rejected. Acceptance requires a chat-first, 3D-first studio smoke with visible GLB or honest preview fallback. |
+| Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur; activation canonique atomique par `active_design.json` après revalidation des hashes. |
+| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`; 85 Vitest tests; production build; 2026-07-20 visual smoke on real workflow `wf_3c86a159cd7b` | Chat-first/3D-first baseline verified with real GLB, camera fit and contextual agent/library drawers. Full acceptance still needs recorded mutation smokes for document-pack, edit and rollback paths. |
 
 ## Agent / Runtime Truth Matrix
 
@@ -51,11 +55,12 @@ prétend pas à une autonomie générale.
 | `select_assets` / `asset_fallback_handler` | LangGraph node + asset registry | `AssetRegistry`, manifests | Asset réel/import/fallback visible; `/assets/inventory` est typé. |
 | `validate_requirements` | LangGraph node + deterministic validators | `core/validation`, tower/RF validators | Validation métier contrôlée, pas décision libre LLM. |
 | `plan_scene` | LangGraph node + deterministic planner | `core/agents/scene_planner.py` | `SceneSpec` reste la source de vérité de génération. |
-| `validate_scene` / repair | LangGraph node + deterministic repair | `scene_repair_handler` | Répare certains défauts SceneSpec; pas boucle autonome générale. |
+| `validate_scene` / repair | LangGraph node + deterministic repair | `scene_repair_handler`, `requirement_coverage.py` | Répare certains défauts SceneSpec et bloque les exigences non couvertes; pas boucle autonome générale. |
 | `generate_blender` | LangGraph node + Blender subprocess service | `BlenderRunner`, `apps/blender_worker` | `real_blender` requis pour résultat product-grade; fallback signalé. |
-| `qa_generation` | LangGraph node + QA services | `glb_inspector`, `glb_geometry_validator`, `preview_inspector` | QA `mesh_level_transform_basic` ou `mesh_level_basic`; jamais "advanced geometry". |
+| `qa_generation` | LangGraph node + QA services | `glb_inspector`, `glb_geometry_validator`, `preview_inspector` | QA `mesh_level_spatial_basic`, transform ou basic selon les preuves disponibles; jamais une certification ingénierie avancée. |
+| `certify_completion` | LangGraph node + deterministic proof builder | `completion_certificate.py` | Émet ou rejette la preuve terminale; aucune auto-déclaration `completed` par le LLM. |
 | `artifact_ready` | Workflow service event | `WorkflowService._emit_result_product_events` | Artifacts publics par URL `/designs/{workflow_id}/artifacts/{name}`. |
-| `edit_patch_created` | Service-level LLM wrapper | `SceneEditAgent` | Edition par patch contrôlé de `SceneSpec`, pas génération libre de Blender. |
+| `discover_capabilities` → `execute_adaptation` | LangGraph + bounded GPT-OSS + deterministic tools | `SceneEditAgent`, `AdaptationCapabilityService`, `adaptation_plan.json` | Groq choisit seulement des capacités déclarées; validation locale avant mutation, puis Blender réel/QA. Aucun Python Blender LLM. |
 | versioning / rollback | Service-level filesystem | `SceneVersioningService` | Local-first, mono-utilisateur; pas broker durable. |
 
 ## Runtime Contract V1
@@ -71,9 +76,9 @@ prétend pas à une autonomie générale.
 ## Synthèse
 
 Le backend est riche et testable. Le contrat produit backend/frontend est
-consolidé. Le frontend sous `apps/frontend` est une base technique en rework
-produit, pas une Gate acceptée: il doit prouver une expérience chat-first et
-3D-first sans masquer les limites.
+consolidé. Le frontend sous `apps/frontend` a désormais une baseline produit
+chat-first et 3D-first vérifiée sur un GLB Blender réel. La Gate complète reste
+limitée tant que chaque mutation produit n'a pas son smoke enregistré.
 
 Le vocabulaire backend stable reste `/designs` et `workflow_id`. Les labels
 frontend "project", "run" et "scene plan" sont des mappings UI, pas de nouvelles

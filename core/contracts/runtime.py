@@ -26,6 +26,8 @@ class WorkflowTrace(StrictModel):
     glb_inspection: dict | None = None
     geometry_validation: dict | None = None
     preview_inspection: dict | None = None
+    requirement_coverage: dict | None = None
+    completion_certificate: dict | None = None
     metrics: dict[str, int | float | str | bool | None] = Field(default_factory=dict)
 
 

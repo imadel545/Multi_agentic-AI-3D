@@ -15,7 +15,11 @@ class RfEngineerAgent:
         errors: list[ValidationIssue] = []
         overlap_sectors: list[tuple[str, str]] = []
 
-        azimuths = sorted(requirements.azimuths_deg)
+        indexed_azimuths = sorted(
+            enumerate(requirements.azimuths_deg),
+            key=lambda item: item[1],
+        )
+        azimuths = [azimuth for _, azimuth in indexed_azimuths]
         sector_count = len(azimuths)
 
         # Azimuth spacing
@@ -52,7 +56,9 @@ class RfEngineerAgent:
                 if delta > 180:
                     delta = 360 - delta
                 if delta < 10.0:
-                    overlap_sectors.append((f"S{i + 1}", f"S{j + 1}"))
+                    original_i = indexed_azimuths[i][0]
+                    original_j = indexed_azimuths[j][0]
+                    overlap_sectors.append((f"S{original_i + 1}", f"S{original_j + 1}"))
 
         checks["no_overlap"] = not overlap_sectors
         if overlap_sectors:
@@ -88,6 +94,17 @@ class RfEngineerAgent:
         # Keep this bounded validator to syntax/range and expose RF propagation
         # as an explicit product limitation instead of generating a false alert.
         checks["beamwidth_value_valid"] = 0.0 < requirements.beamwidth_deg <= 180.0
+        if not checks["beamwidth_value_valid"]:
+            errors.append(
+                ValidationIssue(
+                    code="RF_BEAMWIDTH_INVALID",
+                    message=(
+                        f"Beamwidth {requirements.beamwidth_deg}° is outside the supported "
+                        "engineering range (0°, 180°]."
+                    ),
+                    severity="error",
+                )
+            )
 
         # Height vs tilt consistency
         checks["height_tilt_consistent"] = True

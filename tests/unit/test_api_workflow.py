@@ -634,6 +634,33 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
 
 
+def test_asset_adaptation_catalog_is_typed_and_not_shadowed() -> None:
+    client = TestClient(app)
+
+    response = client.get("/assets/adaptation-capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schema_version"] == "1.0.0"
+    assert len(payload["catalog_hash"]) == 64
+    profile_ids = {profile["profile_id"] for profile in payload["profiles"]}
+    assert {
+        "telecom_tower_parametric_v1",
+        "sector_antenna_pose_v1",
+        "accessory_transform_v1",
+        "scene_controls_v1",
+    } <= profile_ids
+
+
+def test_design_adaptation_capabilities_require_an_active_version() -> None:
+    client = TestClient(app)
+
+    response = client.get("/designs/wf_missing/adaptation-capabilities")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "active design version not found"
+
+
 def test_design_artifact_endpoint_serves_active_and_version_files(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -737,6 +764,9 @@ def test_event_stream_replays_complete_push_sse_events(tmp_path: Path) -> None:
 
         with client.stream("GET", f"/designs/{workflow_id}/events/stream") as stream:
             assert stream.status_code == 200
+            assert stream.headers["cache-control"] == "no-cache, no-transform"
+            assert stream.headers["connection"] == "keep-alive"
+            assert stream.headers["x-accel-buffering"] == "no"
             body = "".join(stream.iter_text())
 
         assert "event: node_started" in body
@@ -968,6 +998,19 @@ def test_completed_terminal_event_observes_persisted_completed_status(
 
     assert response["status"] == "completed"
     assert terminal_statuses == ["completed"]
+
+
+def test_completed_result_without_certificate_is_rejected() -> None:
+    result = SimpleNamespace(
+        status="completed",
+        requirements=None,
+        scene=None,
+        generation=None,
+        completion_certificate=None,
+    )
+
+    with pytest.raises(RuntimeError, match="COMPLETION_CERTIFICATE_INVALID"):
+        workflow_service._enforce_completion_proof(result)
 
 
 def test_failed_initial_version_is_persisted_but_never_activated(

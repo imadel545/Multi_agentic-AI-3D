@@ -39,7 +39,8 @@ def main() -> int:
     _configure_scene(bpy, scene)
     _create_ground_plane(bpy, scene)
     _create_tower(bpy, scene, procedural_objects, asset_imports, asset_warnings)
-    _create_height_marker(bpy, scene, procedural_objects)
+    if scene["visual_elements"].get("include_height_markers", False):
+        _create_height_marker(bpy, scene, procedural_objects)
     _create_sectors(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_power_cabinet", False):
         _create_power_cabinet(bpy, scene, procedural_objects, asset_imports, asset_warnings)
@@ -48,6 +49,7 @@ def main() -> int:
     if scene["visual_elements"].get("include_labels", False):
         _create_labels(bpy, scene, procedural_objects)
     camera_metadata = _create_camera_and_light(bpy, scene)
+    segment_connectivity = _validate_parametric_segment_connectivity(bpy)
 
     glb_path = output_dir / "design.glb"
     preview_path = output_dir / "preview.png"
@@ -66,6 +68,8 @@ def main() -> int:
         camera_metadata,
         asset_imports,
         bounding_box_m,
+        segment_connectivity,
+        _blender_runtime_metadata(bpy),
     )
     return 0
 
@@ -251,6 +255,8 @@ def _create_tower(
                 object_name=semantic_root,
                 generated_object_names=[semantic_root, *[obj.name for obj in created]],
             )
+    if characteristics.get("foundation_type") == "unknown":
+        asset_warnings.append("FOUNDATION_UNKNOWN_NO_GEOMETRY_GENERATED")
     _create_foundation(bpy, characteristics, procedural_objects)
     _create_tower_accessories(bpy, height, characteristics, procedural_objects)
 
@@ -280,6 +286,9 @@ def _create_semantic_group(
 ):
     root = bpy.data.objects.new(name, None)
     bpy.context.collection.objects.link(root)
+    # Flush all pending object transforms before preserving world matrices while parenting.
+    # Without this, Blender can expose a stale identity matrix for the last generated member.
+    bpy.context.view_layer.update()
     for obj in objects:
         world_matrix = obj.matrix_world.copy()
         obj.parent = root
@@ -654,7 +663,28 @@ def _create_sectors(
                 )
 
         if sector.get("include_cable"):
-            cable = _create_cable(bpy, sector_id, (x, y, z - 0.8), (0, 0, 0.5))
+            tower_entry_radius = max(tower_radius * 0.82, 0.18)
+            route_points = [
+                (x, y, z - 0.65),
+                (x * 0.92, y * 0.92, z - 1.0)
+                if sector.get("radio_asset_id")
+                else (
+                    math.sin(azimuth) * tower_entry_radius,
+                    math.cos(azimuth) * tower_entry_radius,
+                    z - 0.8,
+                ),
+                (
+                    math.sin(azimuth) * tower_entry_radius,
+                    math.cos(azimuth) * tower_entry_radius,
+                    max(z - 1.4, 0.8),
+                ),
+                (
+                    math.sin(azimuth) * tower_entry_radius,
+                    math.cos(azimuth) * tower_entry_radius,
+                    0.5,
+                ),
+            ]
+            cable = _create_cable(bpy, sector_id, route_points)
             _set_semantic_properties(
                 cable,
                 role="cable",
@@ -663,6 +693,13 @@ def _create_sectors(
                 properties={
                     "requested_azimuth_deg": azimuth_deg,
                     "requested_hba_m": z,
+                    "source_role": "antenna_port",
+                    "via_role": "radio_port" if sector.get("radio_asset_id") else "tower_entry",
+                    "target_role": "base_termination",
+                    "route_point_count": len(route_points),
+                    "route_topology": "antenna_to_radio_to_tower_base"
+                    if sector.get("radio_asset_id")
+                    else "antenna_to_tower_base",
                     **_classification_properties("parametric_generated"),
                 },
             )
@@ -802,19 +839,15 @@ def _antenna_geometry_family(scene: dict, sector: dict) -> str:
     return "panel"
 
 
-def _create_cable(
-    bpy, sector_id: str, start: tuple[float, float, float], end: tuple[float, float, float]
-) -> object:
+def _create_cable(bpy, sector_id: str, route_points: list[tuple[float, float, float]]) -> object:
     curve = bpy.data.curves.new(f"cable_{sector_id}", "CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 8
     curve.bevel_depth = 0.025
     spline = curve.splines.new("POLY")
-    spline.points.add(2)
-    mid = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2, start[2] - 2.0)
-    spline.points[0].co = (*start, 1)
-    spline.points[1].co = (*mid, 1)
-    spline.points[2].co = (*end, 1)
+    spline.points.add(len(route_points) - 1)
+    for point, coordinate in zip(spline.points, route_points, strict=True):
+        point.co = (*coordinate, 1)
     obj = bpy.data.objects.new(f"cable_{sector_id}", curve)
     bpy.context.collection.objects.link(obj)
     obj.data.materials.append(_material(bpy, "cable_sheath_black", (0.035, 0.045, 0.055, 1)))
@@ -845,8 +878,9 @@ def _create_beam(
     )
     material = _material(bpy, "beam_direction_blue", (0.05, 0.45, 1.0, 0.62))
     shaft = _create_cylinder_between(bpy, start, end, 0.035, f"sector_beam_{sector_id}", material)
-    # Cone head scaled by beamwidth (narrower beam = sharper cone)
-    cone_radius = max(0.08, 0.14 * (65.0 / max(beamwidth_deg, 10.0)))
+    # The visible aperture must widen monotonically with the requested HPBW.
+    half_angle = math.radians(min(max(beamwidth_deg, 1.0), 175.0) / 2.0)
+    cone_radius = min(0.55, max(0.08, 0.22 * math.tan(half_angle)))
     bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=cone_radius, depth=0.3, location=end)
     head = bpy.context.object
     head.name = f"sector_beam_head_{sector_id}"
@@ -887,8 +921,11 @@ def _create_azimuth_arrow(
     bpy.ops.mesh.primitive_cone_add(vertices=24, radius1=0.16, depth=0.35, location=end)
     head = bpy.context.object
     head.name = f"azimuth_arrow_head_{sector_id}"
-    head.rotation_euler[0] = math.radians(90)
-    head.rotation_euler[2] = -azimuth
+    head.rotation_euler = _direction_to_euler(
+        end[0] - start[0],
+        end[1] - start[1],
+        end[2] - start[2],
+    )
     head.data.materials.append(material)
     return _create_semantic_group(
         bpy,
@@ -940,6 +977,7 @@ def _create_power_cabinet(
             location=cabinet_location,
             rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
             dimensions=accessory.get("dimensions_m"),
+            placement_scale=tuple(accessory.get("scale") or [1.0, 1.0, 1.0]),
             asset_imports=asset_imports,
             warnings=asset_warnings,
             semantic_properties={"ground_datum_z": 0.0},
@@ -951,6 +989,11 @@ def _create_power_cabinet(
         name=cabinet_object_name,
         location=cabinet_location,
     )
+    if accessory:
+        cabinet.rotation_euler = _rotation_deg_to_rad(
+            accessory.get("rotation_deg") or [0.0, 0.0, 0.0]
+        )
+        cabinet.scale = tuple(accessory.get("scale") or [1.0, 1.0, 1.0])
     actual_strategy = "procedural_fallback" if import_attempted else str(strategy)
     actual_source = (
         "procedural_fallback"
@@ -1034,6 +1077,7 @@ def _create_gps_antenna(
             location=gps_location,
             rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
             dimensions=accessory.get("dimensions_m"),
+            placement_scale=tuple(accessory.get("scale") or [1.0, 1.0, 1.0]),
             asset_imports=asset_imports,
             warnings=asset_warnings,
             semantic_properties={"install_height_m": z},
@@ -1045,6 +1089,9 @@ def _create_gps_antenna(
         name=gps_object_name,
         location=gps_location,
     )
+    if accessory:
+        gps.rotation_euler = _rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0])
+        gps.scale = tuple(accessory.get("scale") or [1.0, 1.0, 1.0])
     actual_strategy = "procedural_fallback" if import_attempted else str(strategy)
     actual_source = (
         "procedural_fallback"
@@ -1092,6 +1139,8 @@ def _create_labels(bpy, scene: dict, procedural_objects: list[str]) -> None:
     characteristics = scene["tower"].get("characteristics", {})
     base_width = float(characteristics.get("base_width_m") or 4.0)
     for sector in scene["sectors"]:
+        if not sector.get("include_label", True):
+            continue
         azimuth_deg = float(sector["azimuth_deg"])
         azimuth = math.radians(azimuth_deg)
         z = float(sector["install_height_m"]) + 1.05
@@ -1272,6 +1321,8 @@ def _create_foundation(bpy, characteristics: dict, procedural_objects: list[str]
         )
         procedural_objects.append("foundation_pole_base")
         return
+    if foundation_type == "unknown":
+        return
     raise RuntimeError(f"Unsupported foundation_type for Blender generation: {foundation_type!r}")
 
 
@@ -1289,6 +1340,7 @@ def _try_import_glb_asset(
     rotation: tuple[float, float, float],
     rotation_mode: str = "XYZ",
     dimensions: dict | None = None,
+    placement_scale: tuple[float, float, float] = (1.0, 1.0, 1.0),
     asset_imports: list[dict],
     warnings: list[str],
     semantic_properties: dict | None = None,
@@ -1375,8 +1427,11 @@ def _try_import_glb_asset(
         scale_factors = tuple(
             target_size[index] / max(float(source_size[index]), 1e-6) for index in range(3)
         )
-        container.scale = scale_factors
         dimensions_checked = True
+    scale_factors = tuple(
+        float(scale_factors[index]) * float(placement_scale[index]) for index in range(3)
+    )
+    container.scale = scale_factors
     container.location = location
     if sector_pose is not None:
         parametric_builder.apply_sector_pose(
@@ -1663,7 +1718,8 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
         target_vector = Vector((0.0, 0.0, tower_height * 0.5))
         subject_size = Vector((base_width, base_width, tower_height))
     distance = max(34.0, subject_size.length * 1.45)
-    view_direction = Vector((0.62, -1.0, 0.28)).normalized()
+    camera_mode = str(scene.get("preview", {}).get("camera") or "isometric")
+    view_direction = Vector(_camera_view_direction(camera_mode)).normalized()
     camera_location_vector = target_vector + (view_direction * distance)
     target = tuple(float(value) for value in target_vector)
     camera_location = tuple(float(value) for value in camera_location_vector)
@@ -1696,7 +1752,11 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
         location=camera_location,
     )
     camera = bpy.context.object
-    camera.name = "camera_technical_three_quarter_full_tower"
+    camera.name = {
+        "isometric": "camera_technical_three_quarter_full_tower",
+        "front": "camera_technical_front_full_tower",
+        "top": "camera_technical_top_full_tower",
+    }[camera_mode]
     camera.data.type = "ORTHO"
     _point_object_at(camera, target)
     framing = _fit_orthographic_camera(bpy, camera, subject_corners, scene)
@@ -1704,6 +1764,7 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
     return {
         "camera": camera.name,
         "camera_type": "ORTHO",
+        "requested_camera": camera_mode,
         "camera_location": [round(float(value), 3) for value in camera.location],
         "target": [round(float(value), 3) for value in framing["target"]],
         "ortho_scale": round(float(camera.data.ortho_scale), 3),
@@ -1712,8 +1773,20 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
         "projected_subject_height_m": framing["projected_subject_height_m"],
         "frame_margin_ratio": framing["frame_margin_ratio"],
         "background": "dark_technical_studio",
-        "framing": "geometry_bounds_three_quarter",
+        "framing": {
+            "isometric": "geometry_bounds_three_quarter",
+            "front": "geometry_bounds_front",
+            "top": "geometry_bounds_top",
+        }[camera_mode],
     }
+
+
+def _camera_view_direction(camera_mode: str) -> tuple[float, float, float]:
+    return {
+        "isometric": (0.62, -1.0, 0.28),
+        "front": (0.0, -1.0, 0.04),
+        "top": (0.0, 0.0, 1.0),
+    }[camera_mode]
 
 
 def _subject_world_corners(bpy) -> list:
@@ -1842,19 +1915,15 @@ def _create_cylinder_between(
     name: str,
     material,
 ):
-    sx, sy, sz = start
-    ex, ey, ez = end
-    dx, dy, dz = ex - sx, ey - sy, ez - sz
-    length = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if length == 0:
-        return None
-    midpoint = ((sx + ex) / 2, (sy + ey) / 2, (sz + ez) / 2)
-    bpy.ops.mesh.primitive_cylinder_add(vertices=12, radius=radius, depth=length, location=midpoint)
-    obj = bpy.context.object
-    obj.name = name
-    obj.rotation_euler = _direction_to_euler(dx, dy, dz)
-    obj.data.materials.append(material)
-    return obj
+    return parametric_builder.create_cylinder_between(
+        bpy,
+        start,
+        end,
+        radius,
+        name,
+        material,
+        vertices=12,
+    )
 
 
 def _direction_to_euler(dx: float, dy: float, dz: float) -> tuple[float, float, float]:
@@ -1946,7 +2015,69 @@ def _write_non_blender_fallback(scene: dict, output_dir: Path) -> None:
         ],
         _fallback_camera_metadata(scene),
         _fallback_asset_import_records(scene),
+        segment_connectivity={
+            "status": "not_available",
+            "passed": False,
+            "evaluated_segment_count": 0,
+            "failed_segment_count": 0,
+            "maximum_endpoint_error_m": None,
+            "tolerance_m": 0.001,
+        },
     )
+
+
+def _validate_parametric_segment_connectivity(bpy, tolerance_m: float = 0.001) -> dict:
+    """Hard-fail when generated cylindrical members miss their requested endpoints."""
+
+    bpy.context.view_layer.update()
+    evaluated = 0
+    failures: list[dict] = []
+    maximum_error = 0.0
+    for obj in bpy.context.scene.objects:
+        if "segment_start_m" not in obj or "segment_end_m" not in obj:
+            continue
+        evaluated += 1
+        endpoint_errors = parametric_builder.measure_segment_endpoint_errors(obj)
+        if endpoint_errors is None:
+            failures.append({"object": obj.name, "reason": "endpoint_measurement_unavailable"})
+            continue
+        start_error, end_error = endpoint_errors
+        object_error = max(start_error, end_error)
+        maximum_error = max(maximum_error, object_error)
+        if object_error > tolerance_m:
+            failures.append(
+                {
+                    "object": obj.name,
+                    "start_error_m": round(start_error, 9),
+                    "end_error_m": round(end_error, 9),
+                    "requested_start_m": [
+                        round(float(value), 6) for value in obj["segment_start_m"]
+                    ],
+                    "requested_end_m": [round(float(value), 6) for value in obj["segment_end_m"]],
+                    "rotation_quaternion": [
+                        round(float(value), 6) for value in obj.rotation_quaternion
+                    ],
+                    "scale": [round(float(value), 6) for value in obj.scale],
+                }
+            )
+    report = {
+        "status": "passed" if not failures else "failed",
+        "passed": not failures,
+        "evaluated_segment_count": evaluated,
+        "failed_segment_count": len(failures),
+        "maximum_endpoint_error_m": round(maximum_error, 9),
+        "tolerance_m": tolerance_m,
+        "failures": failures,
+    }
+    if failures:
+        sample = "; ".join(
+            ",".join(f"{key}={value}" for key, value in failure.items()) for failure in failures[:5]
+        )
+        raise RuntimeError(
+            "PARAMETRIC_SEGMENT_CONNECTIVITY_FAILED: "
+            f"{len(failures)} segment(s), max_error_m={maximum_error:.9f}: {sample}"
+        )
+    return report
 
 
 def _compute_scene_bounding_box(bpy) -> dict:
@@ -1965,7 +2096,17 @@ def _compute_scene_bounding_box(bpy) -> dict:
             min_z, max_z = min(min_z, z), max(max_z, z)
             found = True
     if not found:
-        return {"min_x": 0.0, "min_y": 0.0, "min_z": 0.0, "max_x": 0.0, "max_y": 0.0, "max_z": 0.0}
+        return {
+            "min_x": 0.0,
+            "min_y": 0.0,
+            "min_z": 0.0,
+            "max_x": 0.0,
+            "max_y": 0.0,
+            "max_z": 0.0,
+            "width": 0.0,
+            "depth": 0.0,
+            "height": 0.0,
+        }
     return {
         "min_x": min_x,
         "min_y": min_y,
@@ -1973,6 +2114,9 @@ def _compute_scene_bounding_box(bpy) -> dict:
         "max_x": max_x,
         "max_y": max_y,
         "max_z": max_z,
+        "width": max_x - min_x,
+        "depth": max_y - min_y,
+        "height": max_z - min_z,
     }
 
 
@@ -1985,6 +2129,8 @@ def _write_metadata(
     camera_metadata: dict,
     asset_imports: list[dict] | None = None,
     bounding_box_m: dict | None = None,
+    segment_connectivity: dict | None = None,
+    blender_runtime: dict | None = None,
 ) -> None:
     asset_imports = asset_imports or _fallback_asset_import_records(scene)
     all_warnings = _unique_strings(
@@ -2017,6 +2163,16 @@ def _write_metadata(
         "visual_elements": scene.get("visual_elements", {}),
         "accessory_assets": scene.get("accessory_assets", []),
         "preview_camera": camera_metadata,
+        "segment_connectivity": segment_connectivity
+        or {
+            "status": "not_available",
+            "passed": False,
+            "evaluated_segment_count": 0,
+            "failed_segment_count": 0,
+            "maximum_endpoint_error_m": None,
+            "tolerance_m": 0.001,
+        },
+        "blender_runtime": blender_runtime,
         "warnings": all_warnings,
     }
     if bounding_box_m is not None:
@@ -2025,6 +2181,19 @@ def _write_metadata(
         json.dumps(payload, indent=2),
         encoding="utf-8",
     )
+
+
+def _blender_runtime_metadata(bpy) -> dict:
+    build_hash = getattr(bpy.app, "build_hash", b"")
+    if isinstance(build_hash, bytes):
+        build_hash = build_hash.decode("utf-8", errors="replace")
+    return {
+        "version": str(bpy.app.version_string),
+        "version_tuple": [int(value) for value in bpy.app.version],
+        "build_hash": str(build_hash),
+        "background": bool(bpy.app.background),
+        "factory_startup": True,
+    }
 
 
 def _assets_used(scene: dict) -> list[str]:
@@ -2203,6 +2372,7 @@ def _fallback_camera_metadata(scene: dict) -> dict:
     return {
         "camera": "not_rendered",
         "camera_type": "not_rendered",
+        "requested_camera": scene.get("preview", {}).get("camera", "isometric"),
         "target": [0.0, 0.0, round(tower_height * 0.52, 3)],
         "ortho_scale": round(max(tower_height * 1.28, 18.0), 3),
         "background": "not_rendered",

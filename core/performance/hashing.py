@@ -26,6 +26,22 @@ def asset_manifest_hash(manifests_dir: Path) -> str:
     return _hash_payload(entries)
 
 
+def qualified_asset_library_hash(catalog_path: Path) -> str:
+    if not catalog_path.is_file():
+        return _hash_payload([])
+    qualified = []
+    for line in catalog_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = json.loads(line)
+        if (
+            payload.get("generation_eligible") is True
+            and payload.get("qualification_status") == "validated"
+        ):
+            qualified.append(payload)
+    return _hash_payload(qualified)
+
+
 def knowledge_index_hash(project_root: Path) -> str:
     entries = []
     root = project_root / "data" / "knowledge"

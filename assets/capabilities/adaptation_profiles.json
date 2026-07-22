@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0.0",
+  "profiles": [
+    {
+      "profile_id": "telecom_tower_parametric_v1",
+      "representation": "parametric_scene",
+      "editable_parameters": [
+        {"parameter_id":"tower_height","label":"Hauteur du pylône","path_template":"/tower/height_m","value_type":"number","execution_tool":"parametric_rebuild","effect":"geometry","description":"Reconstruit le pylône depuis SceneSpec et recalcule sa géométrie.","unit":"m","minimum":3,"maximum":150},
+        {"parameter_id":"tower_structure","label":"Structure du pylône","path_template":"/tower/characteristics/structure","value_type":"string","execution_tool":"parametric_rebuild","effect":"geometry","description":"Change la famille structurelle générée.","allowed_values":["lattice","monopole","rooftop_mast","small_cell_pole"]},
+        {"parameter_id":"tower_leg_count","label":"Nombre de pieds","path_template":"/tower/characteristics/leg_count","value_type":"integer","execution_tool":"parametric_rebuild","effect":"geometry","description":"Reconstruit la structure avec le nombre de pieds demandé.","minimum":1,"maximum":4},
+        {"parameter_id":"tower_base_width","label":"Largeur de base","path_template":"/tower/characteristics/base_width_m","value_type":"number","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajuste l'emprise basse de la structure.","unit":"m","minimum":0.2,"maximum":30},
+        {"parameter_id":"tower_top_width","label":"Largeur au sommet","path_template":"/tower/characteristics/top_width_m","value_type":"number","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajuste la largeur supérieure de la structure.","unit":"m","minimum":0.1,"maximum":30},
+        {"parameter_id":"tower_foundation","label":"Type de fondation","path_template":"/tower/characteristics/foundation_type","value_type":"string","execution_tool":"parametric_rebuild","effect":"geometry","description":"Sélectionne le générateur de fondation supporté.","allowed_values":["concrete_pad","rooftop_anchored","pole_base","unknown"]},
+        {"parameter_id":"tower_platform_enabled","label":"Présence de plateforme","path_template":"/tower/characteristics/has_platform","value_type":"boolean","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajoute ou retire les plateformes générées."},
+        {"parameter_id":"tower_platform_count","label":"Nombre de plateformes","path_template":"/tower/characteristics/platform_count","value_type":"integer","execution_tool":"parametric_rebuild","effect":"geometry","description":"Définit le nombre de plateformes générées.","minimum":0,"maximum":12},
+        {"parameter_id":"tower_ladder","label":"Échelle","path_template":"/tower/characteristics/has_ladder","value_type":"boolean","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajoute ou retire l'échelle technique."},
+        {"parameter_id":"tower_lightning_rod","label":"Paratonnerre","path_template":"/tower/characteristics/has_lightning_rod","value_type":"boolean","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajoute ou retire le paratonnerre."},
+        {"parameter_id":"tower_aviation_light","label":"Balisage aérien","path_template":"/tower/characteristics/has_aviation_light","value_type":"boolean","execution_tool":"parametric_rebuild","effect":"geometry","description":"Ajoute ou retire le balisage aérien."},
+        {"parameter_id":"tower_material","label":"Matériau du pylône","path_template":"/tower/characteristics/material","value_type":"string","execution_tool":"parametric_rebuild","effect":"material","description":"Applique un matériau technique supporté par le générateur.","allowed_values":["galvanized_steel","painted_steel","concrete","unknown"]}
+      ],
+      "unsupported_operations": ["Déformation libre du maillage", "Modification structurelle certifiée", "Génération de Python Blender par LLM"]
+    },
+    {
+      "profile_id": "sector_antenna_pose_v1",
+      "representation": "semantic_glb",
+      "editable_parameters": [
+        {"parameter_id":"antenna_height","label":"Hauteur d'installation","path_template":"/sectors/{index}/install_height_m","value_type":"number","execution_tool":"sector_layout","effect":"placement","description":"Repositionne l'antenne sur le pylône.","unit":"m","minimum":0.2,"maximum":150},
+        {"parameter_id":"antenna_azimuth","label":"Azimut","path_template":"/sectors/{index}/azimuth_deg","value_type":"number","execution_tool":"sector_layout","effect":"rf","description":"Oriente le secteur selon l'azimut demandé.","unit":"deg","minimum":0,"maximum":359.999},
+        {"parameter_id":"antenna_mechanical_tilt","label":"Tilt mécanique","path_template":"/sectors/{index}/mechanical_tilt_deg","value_type":"number","execution_tool":"sector_layout","effect":"rf","description":"Incline physiquement l'antenne.","unit":"deg","minimum":-15,"maximum":30},
+        {"parameter_id":"antenna_electrical_tilt","label":"Tilt électrique","path_template":"/sectors/{index}/electrical_tilt_deg","value_type":"number","execution_tool":"sector_layout","effect":"rf","description":"Met à jour la valeur RF du tilt électrique.","unit":"deg","minimum":-15,"maximum":30},
+        {"parameter_id":"antenna_beamwidth","label":"Ouverture du faisceau","path_template":"/sectors/{index}/beamwidth_deg","value_type":"number","execution_tool":"sector_layout","effect":"rf","description":"Modifie l'ouverture du faisceau visualisé.","unit":"deg","minimum":0.1,"maximum":360},
+        {"parameter_id":"sector_cable","label":"Câble du secteur","path_template":"/sectors/{index}/include_cable","value_type":"boolean","execution_tool":"sector_layout","effect":"geometry","description":"Ajoute ou retire le chemin de câble généré."},
+        {"parameter_id":"sector_label","label":"Label du secteur","path_template":"/sectors/{index}/include_label","value_type":"boolean","execution_tool":"sector_layout","effect":"visibility","description":"Affiche ou masque le label technique."}
+      ],
+      "unsupported_operations": ["Redimensionnement non uniforme de l'antenne active", "Modification interne d'un maillage opaque"]
+    },
+    {
+      "profile_id": "accessory_transform_v1",
+      "representation": "semantic_glb",
+      "editable_parameters": [
+        {"parameter_id":"accessory_position","label":"Position de l'accessoire","path_template":"/accessory_assets/{index}/position","value_type":"vector3","execution_tool":"asset_transform","effect":"placement","description":"Déplace l'asset dans le repère métrique de la scène.","unit":"m"},
+        {"parameter_id":"accessory_rotation","label":"Rotation de l'accessoire","path_template":"/accessory_assets/{index}/rotation_deg","value_type":"vector3","execution_tool":"asset_transform","effect":"placement","description":"Tourne l'asset autour des axes XYZ.","unit":"deg"},
+        {"parameter_id":"accessory_scale","label":"Échelle de l'accessoire","path_template":"/accessory_assets/{index}/scale","value_type":"vector3","execution_tool":"asset_transform","effect":"geometry","description":"Applique une échelle positive XYZ à l'asset importé ou généré.","minimum":0.05,"maximum":20}
+      ],
+      "unsupported_operations": ["Remodelage topologique interne", "Changement de matériau arbitraire non déclaré"]
+    },
+    {
+      "profile_id": "reference_only_v1",
+      "representation": "reference_only",
+      "editable_parameters": [],
+      "unsupported_operations": ["Cet asset ne possède pas encore de paramètre d'édition autonome vérifié"]
+    },
+    {
+      "profile_id": "scene_controls_v1",
+      "representation": "scene_controls",
+      "editable_parameters": [
+        {"parameter_id":"show_beams","label":"Faisceaux","path_template":"/visual_elements/include_sector_beams","value_type":"boolean","execution_tool":"scene_visibility","effect":"visibility","description":"Affiche ou masque les volumes de couverture."},
+        {"parameter_id":"show_azimuths","label":"Flèches d'azimut","path_template":"/visual_elements/include_azimuth_arrows","value_type":"boolean","execution_tool":"scene_visibility","effect":"visibility","description":"Affiche ou masque les flèches d'azimut."},
+        {"parameter_id":"show_heights","label":"Repères de hauteur","path_template":"/visual_elements/include_height_markers","value_type":"boolean","execution_tool":"scene_visibility","effect":"visibility","description":"Affiche ou masque les repères de hauteur."},
+        {"parameter_id":"show_labels","label":"Labels","path_template":"/visual_elements/include_labels","value_type":"boolean","execution_tool":"scene_visibility","effect":"visibility","description":"Affiche ou masque les labels globaux."},
+        {"parameter_id":"show_cabinet","label":"Armoire énergie","path_template":"/visual_elements/include_power_cabinet","value_type":"boolean","execution_tool":"scene_visibility","effect":"geometry","description":"Ajoute ou retire l'armoire via la scène vérifiée."},
+        {"parameter_id":"show_gps","label":"Antenne GPS","path_template":"/visual_elements/include_gps_antenna","value_type":"boolean","execution_tool":"scene_visibility","effect":"geometry","description":"Ajoute ou retire l'antenne GPS via la scène vérifiée."}
+      ],
+      "unsupported_operations": []
+    }
+  ]
+}

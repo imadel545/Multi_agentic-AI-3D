@@ -28,5 +28,6 @@
   "normalized_by": "Codex Agent",
   "pivot_policy": "base_center_ground",
   "front_axis": "+Y",
-  "import_fallback_allowed": true
+  "import_fallback_allowed": true,
+  "adaptation_profile_id": "telecom_tower_parametric_v1"
 }

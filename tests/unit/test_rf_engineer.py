@@ -42,6 +42,12 @@ def test_rf_engineer_errors_on_overlap(agent, valid_requirements):
     assert any(e.code == "RF_SECTOR_OVERLAP" for e in report.errors)
 
 
+def test_rf_engineer_preserves_sector_identity_when_reporting_overlap(agent, valid_requirements):
+    req = valid_requirements.model_copy(update={"azimuths_deg": [120, 0, 5]})
+    report = agent.validate(req)
+    assert report.overlap_sectors == [("S2", "S3")]
+
+
 def test_rf_engineer_warns_on_high_tilt(agent, valid_requirements):
     req = valid_requirements.model_copy(update={"mechanical_tilt_deg": 20})
     report = agent.validate(req)
@@ -53,3 +59,11 @@ def test_rf_engineer_does_not_infer_coverage_from_sector_spacing(agent, valid_re
     report = agent.validate(req)
     assert report.checks["beamwidth_value_valid"] is True
     assert not any(w.code == "RF_BEAMWIDTH_NARROW" for w in report.warnings)
+
+
+def test_rf_engineer_rejects_beamwidth_above_supported_range(agent, valid_requirements):
+    req = valid_requirements.model_copy(update={"beamwidth_deg": 220})
+    report = agent.validate(req)
+    assert report.status == "failed"
+    assert report.checks["beamwidth_value_valid"] is False
+    assert any(error.code == "RF_BEAMWIDTH_INVALID" for error in report.errors)

@@ -17,6 +17,7 @@ from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
 from core.agents.tower_engineer import TowerEngineerAgent
 from core.contracts.assets import AssetManifest
+from core.contracts.completion import CompletionCertificate, RequirementCoverageReport
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
@@ -50,14 +51,24 @@ from core.rules import RuleEngine
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
 from core.validation import validate_scene_spec
+from core.validation.completion_certificate import build_completion_certificate
 from core.validation.quality_gates import (
     evaluate_post_blender_gate,
     evaluate_pre_blender_gate,
 )
+from core.validation.requirement_coverage import evaluate_requirement_coverage
 
 RuntimeEventSink = Callable[[str, str, dict], Any]
 _RUNTIME_EVENT_SINKS: dict[str, RuntimeEventSink] = {}
 _RUNTIME_EVENT_SINKS_LOCK = threading.Lock()
+
+
+def _initial_checkpoint_thread_id(workflow_id: str) -> str:
+    return f"{workflow_id}:initial"
+
+
+def _revision_checkpoint_thread_id(workflow_id: str, revision_id: str | None) -> str:
+    return f"{workflow_id}:revision:{revision_id or 'unknown'}"
 
 
 class WorkflowState(TypedDict, total=False):
@@ -89,6 +100,7 @@ class WorkflowState(TypedDict, total=False):
     requirement_report: ValidationReport
     scene: SceneSpec
     scene_report: ValidationReport
+    requirement_coverage: RequirementCoverageReport
     pre_blender_gate: QualityGateReport
     generation: GenerationResult
     glb_inspection: GlbInspectionReport
@@ -96,6 +108,7 @@ class WorkflowState(TypedDict, total=False):
     preview_inspection: PreviewInspectionReport
     qa_report: ValidationReport
     post_blender_gate: QualityGateReport
+    completion_certificate: CompletionCertificate
     quality_gate_reports: list[dict]
     requirements_hash: str
     scene_spec_hash: str
@@ -129,6 +142,8 @@ class OrchestratorResult:
     glb_inspection: GlbInspectionReport | None
     geometry_validation: GeometryValidationReport | None
     preview_inspection: PreviewInspectionReport | None
+    requirement_coverage: RequirementCoverageReport | None
+    completion_certificate: CompletionCertificate | None
     quality_gate_reports: list[QualityGateReport]
     generation: GenerationResult | None
     rag_context: list[dict]
@@ -216,7 +231,7 @@ class DesignOrchestrator:
         runtime_event_sink: RuntimeEventSink | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
-        config = {"configurable": {"thread_id": workflow_id}}
+        config = {"configurable": {"thread_id": _initial_checkpoint_thread_id(workflow_id)}}
         initial_state = {
             "workflow_id": workflow_id,
             "requirements_text": requirements_text,
@@ -273,7 +288,7 @@ class DesignOrchestrator:
         }
         state = self._invoke_graph(
             initial_state,
-            {"configurable": {"thread_id": workflow_id}},
+            {"configurable": {"thread_id": _initial_checkpoint_thread_id(workflow_id)}},
             runtime_event_sink,
         )
         state["total_duration_ms"] = _duration_ms(started)
@@ -323,7 +338,11 @@ class DesignOrchestrator:
         }
         state = self._invoke_graph(
             initial_state,
-            {"configurable": {"thread_id": workflow_id}},
+            {
+                "configurable": {
+                    "thread_id": _revision_checkpoint_thread_id(workflow_id, revision_id)
+                }
+            },
             runtime_event_sink,
         )
         state["total_duration_ms"] = _duration_ms(started)
@@ -396,6 +415,10 @@ class DesignOrchestrator:
         graph.add_node(
             "post_blender_gate",
             self._runtime_node("post_blender_gate", self._post_blender_gate),
+        )
+        graph.add_node(
+            "certify_completion",
+            self._runtime_node("certify_completion", self._certify_completion),
         )
         graph.add_node(
             "qa_failure_handler",
@@ -484,7 +507,15 @@ class DesignOrchestrator:
         graph.add_conditional_edges(
             "post_blender_gate",
             _post_blender_gate_route,
-            {"continue": terminal_node, "quality_gate_failed": "quality_gate_failure_handler"},
+            {
+                "continue": "certify_completion",
+                "quality_gate_failed": "quality_gate_failure_handler",
+            },
+        )
+        graph.add_conditional_edges(
+            "certify_completion",
+            _completion_certificate_route,
+            {"issued": terminal_node, "rejected": terminal_node},
         )
         graph.add_edge("qa_failure_handler", terminal_node)
         graph.add_edge("quality_gate_failure_handler", terminal_node)
@@ -1084,9 +1115,43 @@ class DesignOrchestrator:
     def _validate_scene(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         report = validate_scene_spec(state["scene"], self.registry.list_assets())
+        requirement_coverage = evaluate_requirement_coverage(
+            state["requirements"],
+            state["scene"],
+            state.get("rag_planning_resolution"),
+        )
+        if not requirement_coverage.passed:
+            coverage_errors = [
+                ValidationIssue(
+                    code="REQUIREMENT_NOT_COVERED",
+                    message=f"SceneSpec does not preserve requirement: {path}",
+                    severity="error",
+                )
+                for path in requirement_coverage.critical_errors
+            ]
+            report = report.model_copy(
+                update={
+                    "status": "failed",
+                    "checks": {
+                        **report.checks,
+                        "requirement_coverage_valid": False,
+                    },
+                    "errors": [*report.errors, *coverage_errors],
+                }
+            )
+        else:
+            report = report.model_copy(
+                update={
+                    "checks": {
+                        **report.checks,
+                        "requirement_coverage_valid": True,
+                    }
+                }
+            )
         merged = _merge_reports(state["scene"].scene_id, [state["requirement_report"], report])
         return {
             "scene_report": report,
+            "requirement_coverage": requirement_coverage,
             "report": merged,
             "trace": _trace(
                 state,
@@ -1110,6 +1175,7 @@ class DesignOrchestrator:
             all_assets=self.registry.list_assets(),
             repair_attempts=state.get("repair_attempts", 0),
             max_repair_attempts=state.get("max_repair_attempts", 2),
+            requirement_coverage=state.get("requirement_coverage"),
         )
         report = (
             state["report"]
@@ -1304,6 +1370,7 @@ class DesignOrchestrator:
         }
 
     def _post_blender_gate(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
         gate = evaluate_post_blender_gate(
             generation=state.get("generation"),
             qa_report=state.get("qa_report"),
@@ -1321,7 +1388,6 @@ class DesignOrchestrator:
                 gate,
             )
         )
-        started = time.perf_counter()
         return {
             "post_blender_gate": gate,
             "quality_gate_reports": [*state.get("quality_gate_reports", []), gate.model_dump()],
@@ -1335,6 +1401,59 @@ class DesignOrchestrator:
                 warnings=gate.warnings,
                 errors=gate.critical_errors,
                 route=None if gate.passed else "quality_gate_failed",
+            ),
+        }
+
+    def _certify_completion(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        certificate = build_completion_certificate(
+            workflow_id=state["workflow_id"],
+            requirements=state.get("requirements"),
+            scene=state.get("scene"),
+            requirement_coverage=state.get("requirement_coverage"),
+            generation=state.get("generation"),
+            qa_report=state.get("qa_report"),
+            glb_inspection=state.get("glb_inspection"),
+            geometry_validation=state.get("geometry_validation"),
+            preview_inspection=state.get("preview_inspection"),
+            pre_blender_gate=state.get("pre_blender_gate"),
+            post_blender_gate=state.get("post_blender_gate"),
+        )
+        report = state["report"]
+        if certificate.status == "rejected":
+            errors = [
+                ValidationIssue(
+                    code=f"COMPLETION_CERTIFICATE_{blocker.upper()}",
+                    message=f"Completion proof failed: {blocker}",
+                    severity="error",
+                )
+                for blocker in certificate.blockers
+            ]
+            checks = {
+                **report.checks,
+                **{
+                    f"completion_certificate_{name}": passed
+                    for name, passed in certificate.checks.items()
+                },
+            }
+            report = report.model_copy(
+                update={
+                    "status": "failed",
+                    "score": sum(checks.values()) / len(checks) if checks else 0.0,
+                    "checks": checks,
+                    "errors": [*report.errors, *errors],
+                }
+            )
+        return {
+            "completion_certificate": certificate,
+            "report": report,
+            "trace": _trace(
+                state,
+                "certify_completion",
+                certificate.status,
+                started,
+                status="passed" if certificate.status == "issued" else "failed",
+                errors=certificate.blockers,
             ),
         }
 
@@ -1740,10 +1859,11 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
     if scene.visual_elements.include_power_cabinet:
         cabinet = registry.select_asset("cabinet", scene.network_type, tower_type)
         accessories.append(
-            _accessory_from_asset(
+            _rebind_revision_accessory(
+                scene,
                 cabinet,
                 asset_type="cabinet",
-                position=[max(3.0, base_width * 1.2), 0.0, 0.0],
+                default_position=[max(3.0, base_width * 1.2), 0.0, 0.0],
             )
         )
     if scene.visual_elements.include_gps_antenna:
@@ -1753,10 +1873,11 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
             gps_height / max(scene.tower.height_m, 1e-6)
         )
         accessories.append(
-            _accessory_from_asset(
+            _rebind_revision_accessory(
+                scene,
                 gps,
                 asset_type="gps",
-                position=[0.0, tower_width / 2 + 0.1, gps_height],
+                default_position=[0.0, tower_width / 2 + 0.1, gps_height],
             )
         )
     accessories.extend(
@@ -1771,6 +1892,37 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
 
 def _tower_type_for_structure(structure: str) -> str:
     return "lattice_tower" if structure == "lattice" else structure
+
+
+def _rebind_revision_accessory(
+    scene: SceneSpec,
+    asset: AssetManifest,
+    *,
+    asset_type: str,
+    default_position: list[float],
+):
+    existing = next(
+        (item for item in scene.accessory_assets if item.asset_type == asset_type),
+        None,
+    )
+    rebound = _accessory_from_asset(
+        asset,
+        asset_type=asset_type,
+        position=default_position,
+    )
+    if existing is None:
+        return rebound
+    position = (
+        existing.position if existing.placement_policy == "user_defined" else default_position
+    )
+    return rebound.model_copy(
+        update={
+            "position": position,
+            "rotation_deg": existing.rotation_deg,
+            "scale": existing.scale,
+            "placement_policy": existing.placement_policy,
+        }
+    )
 
 
 def _accessory_from_asset(asset: AssetManifest, *, asset_type: str, position: list[float]):
@@ -1852,6 +2004,11 @@ def _pre_blender_gate_route(state: WorkflowState) -> str:
 
 def _post_blender_gate_route(state: WorkflowState) -> str:
     return "continue" if state["post_blender_gate"].passed else "quality_gate_failed"
+
+
+def _completion_certificate_route(state: WorkflowState) -> str:
+    certificate = state.get("completion_certificate")
+    return "issued" if certificate and certificate.status == "issued" else "rejected"
 
 
 def _qa_route(state: WorkflowState) -> str:
@@ -2012,6 +2169,7 @@ def _human_label_for_node(node: str) -> str:
         "blender_failure_handler": "Analyse d'échec Blender",
         "qa_generation": "Vérification géométrique",
         "post_blender_gate": "Contrôle final",
+        "certify_completion": "Certification des preuves",
         "qa_failure_handler": "Analyse d'échec QA",
         "quality_gate_failure_handler": "Blocage qualité",
         "memory_writeback": "Écriture mémoire",
@@ -2035,6 +2193,9 @@ def _progress_message_for_node(node: str) -> str:
         "generate_blender": "Blender génère le GLB, la preview et les métadonnées.",
         "qa_generation": "Le backend inspecte le GLB, la géométrie et la preview.",
         "post_blender_gate": "Le backend vérifie que le résultat est exploitable.",
+        "certify_completion": (
+            "Le backend recalcule les hashes et vérifie toutes les preuves avant de terminer."
+        ),
         "memory_writeback": "Le backend sauvegarde un résumé dans la mémoire locale.",
         "edit_prepare_revision": "Le backend prépare la scène modifiée avant régénération.",
     }.get(node, f"Étape en cours : {_human_label_for_node(node)}.")
@@ -2154,7 +2315,15 @@ def _merge_quality_gate_report(
 
 def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
     report = state.get("report")
-    status = "completed" if report and report.status in ("passed", "warning") else "failed"
+    certificate = state.get("completion_certificate")
+    status = (
+        "completed"
+        if report
+        and report.status in ("passed", "warning")
+        and certificate is not None
+        and certificate.status == "issued"
+        else "failed"
+    )
     metrics = _workflow_metrics(state, status)
     memory_recall = state.get("memory_recall")
     workflow_trace = WorkflowTrace(
@@ -2172,6 +2341,10 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         preview_inspection=state["preview_inspection"].model_dump()
         if state.get("preview_inspection")
         else None,
+        requirement_coverage=state["requirement_coverage"].model_dump()
+        if state.get("requirement_coverage")
+        else None,
+        completion_certificate=certificate.model_dump(mode="json") if certificate else None,
         metrics=metrics,
     )
     return OrchestratorResult(
@@ -2189,6 +2362,8 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         glb_inspection=state.get("glb_inspection"),
         geometry_validation=state.get("geometry_validation"),
         preview_inspection=state.get("preview_inspection"),
+        requirement_coverage=state.get("requirement_coverage"),
+        completion_certificate=certificate,
         generation=state.get("generation"),
         rag_context=state.get("rag_context", []),
         planning_decision=state.get("planning_decision"),
@@ -2214,6 +2389,8 @@ def _workflow_metrics(
     generation: GenerationResult | None = state.get("generation")
     qa_report: ValidationReport | None = state.get("qa_report")
     memory_recall = state.get("memory_recall") or {}
+    requirement_coverage = state.get("requirement_coverage")
+    completion_certificate = state.get("completion_certificate")
     trace = state.get("trace", [])
     artifact_size_bytes = 0
     metrics: dict[str, int | float | str | bool | None] = {
@@ -2250,6 +2427,18 @@ def _workflow_metrics(
         "qa_duration_ms": _duration_for_nodes(trace, {"qa_generation", "qa_failure_handler"}),
         "memory_duration_ms": _duration_for_nodes(trace, {"memory_recall", "memory_writeback"}),
         "qa_score": qa_report.score if qa_report else None,
+        "requirement_coverage_passed": requirement_coverage.passed
+        if requirement_coverage
+        else None,
+        "requirement_coverage_ratio": requirement_coverage.coverage_ratio
+        if requirement_coverage
+        else None,
+        "completion_certificate_status": completion_certificate.status
+        if completion_certificate
+        else None,
+        "completion_certificate_issued": bool(
+            completion_certificate and completion_certificate.status == "issued"
+        ),
         "generation_mode": generation.mode if generation else None,
         "generation_duration_ms": generation.duration_ms if generation else None,
         "blender_available": generation.blender_available if generation else None,

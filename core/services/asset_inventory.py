@@ -85,6 +85,7 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         "normalized_by": asset.normalized_by,
         "pivot_policy": asset.pivot_policy,
         "front_axis": asset.front_axis,
+        "adaptation_profile_id": asset.adaptation_profile_id,
         "status": asset.status,
         "compatible_networks": asset.compatible_networks,
         "compatible_tower_types": asset.compatible_tower_types,

@@ -5,10 +5,15 @@ frontend.
 
 ## Visible during frontend build
 
-- `apps/frontend` is a real-backend product rework in progress, not an accepted
-  frontend gate.
-- The first technical kernel was rejected as too dashboard-like; fixed topbar
-  badges, permanent tab grids, and raw JSON surfaces must not come back.
+- `apps/frontend` has a visually verified real-backend product baseline, but the
+  complete frontend gate is still limited: document-pack generation, edit,
+  rollback and degraded fallbacks need one recorded end-to-end acceptance pass.
+- The first technical kernel was rejected as too dashboard-like; permanent
+  stage grids, capability counters, raw workflow ids, and raw JSON surfaces must
+  not come back.
+- The Three.js/React Three Fiber viewer is already lazy-loaded, but its production
+  chunk is about 976 kB minified (267 kB gzip); deeper engine-level splitting is
+  still a performance task.
 - Old dashboard patterns remain rejected.
 - No `/projects` or `/runs` API is added in v1. The frontend maps its "run"
   concept to `workflow_id` and "scene plan" to `scene_spec`.
@@ -34,9 +39,12 @@ frontend.
 - LLM state is visible through `extraction_provider`, `llm_provider`,
   `llm_available`, `llm_fallback_used`, and `llm_fallback_reason`; fallback is
   acceptable only if the frontend displays it.
-- Agents are mostly deterministic functions or LLM wrappers.
-- Prompt workflows, document-pack generated requirements, and scene revisions enter the
-  compiled LangGraph graph; edit patch creation and version bookkeeping remain service-level.
+- Agents are typed deterministic specialists or bounded LLM wrappers; this is
+  not a free-form autonomous Blender coding system.
+- Prompt workflows, document-pack generated requirements, and scene revisions
+  enter the main compiled graph. Edit interpretation now enters a separate
+  checkpointed LangGraph adaptation graph; version bookkeeping remains
+  service-level.
 - No robust cancellation/retry manager; async execution uses local threads.
 
 ## RAG and memory
@@ -94,11 +102,30 @@ frontend.
   visible procedural geometry during a real Blender generation.
 - Geometry source of truth is `SceneSpec + parametric generator`; GLB is only
   the exported viewer result.
-- Mesh QA v1 is `mesh_level_transform_basic` when transforms are readable,
-  otherwise `mesh_level_basic`. It computes real bounding boxes from GLB
-  accessors and approximate HBA from node transforms when possible, but does
-  **not** verify exact antenna azimuth from vertices and does **not** perform
-  collision detection.
+- Mesh QA v1 is `mesh_level_spatial_basic` when semantic transforms and all
+  primary-equipment bounds are readable, `mesh_level_transform_basic` when only
+  transforms are complete, otherwise `mesh_level_basic`. It computes bounds
+  from real GLB `POSITION` bytes, verifies basic HBA/azimuth transforms and
+  rejects unexpected AABB overlap among antennas, RRUs, GPS and cabinets.
+  This is conservative broad-phase screening, not triangle-level BVH collision,
+  self-intersection, minimum-clearance engineering or exact panel-normal proof.
+- GLB integrity now validates actual binary accessor/index ranges and semantic
+  mesh coverage, but it does not yet prove manifold topology, self-intersection,
+  minimum steel clearance, weld/node engineering, or structural connectivity
+  beyond generated cylindrical endpoint alignment.
+- The completion certificate is a deterministic local integrity record with
+  SHA-256 hashes, not a signed third-party engineering approval.
+- Blender builds are reproducible at the recorded SceneSpec/worker/runtime
+  identity level, but cross-version bit-for-bit GLB reproducibility is not
+  claimed.
+- `SceneSpec` rejects non-identity tower transforms and `.gltf` export because
+  those paths are not operational. Accessory transforms, per-sector labels,
+  height markers and preview camera modes are operational.
+- Parametric tower rebuild, sector layout, scene composition, and declared
+  accessory transforms are operational. Imported opaque GLBs cannot yet be
+  retopologized, have arbitrary parts recolored, or expose Geometry Nodes
+  sockets unless a future verified capability profile declares and implements
+  those operations.
 - No material, RF, structural wind-load, or vendor-grade mesh dimension validation yet.
 - The tower validator uses height only as a conservative trigger for aviation-marking
   review. It does not determine whether lighting is legally required; national rules,
@@ -109,7 +136,7 @@ frontend.
 
 - WebSocket.
 - Queue/job manager.
-- Full LangGraph redesign.
+- Merging version bookkeeping into the adaptation graph.
 - Advanced mesh-level QA.
 - Production Docling.
-- Final polished frontend beyond the current product rework.
+- Full frontend mutation-flow acceptance and deeper 3D bundle optimization.

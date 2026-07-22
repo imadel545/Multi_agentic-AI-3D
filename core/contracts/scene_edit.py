@@ -14,56 +14,13 @@ class PatchOperation(StrictModel):
 
     @field_validator("path")
     @classmethod
-    def path_must_be_allowed(cls, value: str) -> str:
-        allowed_tower_characteristics = {
-            "structure",
-            "leg_count",
-            "base_width_m",
-            "top_width_m",
-            "foundation_type",
-            "has_platform",
-            "platform_count",
-            "has_ladder",
-            "has_lightning_rod",
-            "has_aviation_light",
-            "material",
-        }
-        allowed_sector_paths = {
-            "azimuth_deg",
-            "install_height_m",
-            "mechanical_tilt_deg",
-            "electrical_tilt_deg",
-            "beamwidth_deg",
-            "include_cable",
-            "include_label",
-        }
-        allowed_visual_paths = {
-            "include_sector_beams",
-            "include_azimuth_arrows",
-            "include_height_markers",
-            "include_labels",
-            "include_power_cabinet",
-            "include_gps_antenna",
-        }
-        if value == "/tower/height_m":
-            return value
-        if value.startswith("/tower/characteristics/"):
-            parts = value.split("/")
-            if len(parts) == 4 and parts[3] in allowed_tower_characteristics:
-                return value
-        if value.startswith("/sectors/"):
-            parts = value.split("/")
-            if (
-                len(parts) == 4
-                and (parts[2] == "*" or parts[2].isdigit())
-                and parts[3] in allowed_sector_paths
-            ):
-                return value
-        if value.startswith("/visual_elements/"):
-            parts = value.split("/")
-            if len(parts) == 3 and parts[2] in allowed_visual_paths:
-                return value
-        raise ValueError(f"Patch path not allowed: {value}")
+    def path_must_be_a_safe_pointer(cls, value: str) -> str:
+        parts = value.split("/")
+        if not value.startswith("/") or len(parts) < 3:
+            raise ValueError("Patch path must be an absolute JSON pointer")
+        if any(part in {"", ".", ".."} for part in parts[1:]):
+            raise ValueError("Patch path contains an invalid segment")
+        return value
 
 
 class ScenePatch(StrictModel):
@@ -72,6 +29,10 @@ class ScenePatch(StrictModel):
     edit_llm_provider: str | None = None
     edit_llm_fallback_used: bool = False
     edit_llm_fallback_reason: str | None = Field(default=None, max_length=160)
+    capability_catalog_hash: str | None = None
+    adaptation_tools: list[str] = Field(default_factory=list)
+    unsupported_requests: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
 
 
 class SceneEditResult(StrictModel):
