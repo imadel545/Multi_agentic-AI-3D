@@ -14,7 +14,7 @@ def test_document_pack_valid_dxf_extracts_layered_cad_evidence(tmp_path: Path) -
     doc.layers.add("ANTENNES")
     doc.modelspace().add_text(
         "Pylone treillis Hauteur pylone: 30m Azimuts: 0, 120, 240 "
-        "HBA: 24m, 24m, 24m Bandes: NR3500 5G",
+        "Fondation: massif beton HBA: 24m, 24m, 24m Bandes: NR3500 5G",
         dxfattribs={"layer": "ANTENNES"},
     )
     stream = StringIO()
@@ -98,6 +98,7 @@ def test_document_pack_groq_values_are_normalized_from_evidence(tmp_path: Path) 
                 "APD/current.txt": (
                     "Type pylone: pylone treillis\n"
                     "Hauteur pylone: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0,120,240\n"
                     "HBA: 24,24,24\n"
                     "Bandes NR700 NR3500 5G\n"

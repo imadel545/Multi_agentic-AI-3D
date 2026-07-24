@@ -55,7 +55,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   reranker status, and limitations.
 - Memory: local SQLite with writeback; optional Qdrant for some summaries.
 - Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
-  conflicts, corrections, QA.
+  conflicts, corrections, QA. A missing or tower-incompatible foundation blocks
+  generation before a workflow is created; the user must confirm a supported
+  foundation instead of receiving a predictably failed Blender workflow.
 - Blender: real generation when Blender is found; Blender fallback is rejected
   by default for quality (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
 
@@ -75,11 +77,19 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   the user can explicitly switch back to a new design.
 - The viewer loads only backend artifact URLs and must show either a visible GLB
   or an explicit backend preview/error fallback during smoke.
-- Visual/runtime smoke on 2026-07-20 restored `wf_3c86a159cd7b`, loaded its real
-  Blender GLB, proved visible rendering and camera fit, and exercised the
-  contextual agent drawer against real backend events. The broader frontend gate
-  still requires one recorded pass for every mutation flow listed in
-  `FRONTEND_ACCEPTANCE_CRITERIA.md`.
+- Visual/runtime smoke on 2026-07-24 restored `wf_3c86a159cd7b`, loaded its real
+  Blender GLB, proved visible rendering and camera fit, exercised the contextual
+  agent, QA, issue, artifact, version, and CAD-library drawers against real
+  backend responses, exposed no local filesystem path, and produced no browser
+  console error. The broader frontend gate still requires one recorded pass for
+  every mutation flow listed in `FRONTEND_ACCEPTANCE_CRITERIA.md`.
+- A second 2026-07-24 acceptance smoke proved real Groq
+  `openai/gpt-oss-120b` extraction, completed Blender/GLB generation,
+  checkpointed bounded edit, version creation, rollback, document-pack
+  ingestion, explicit foundation blocking/correction, and document-pack
+  generation. These mutations were verified at Product API level; the remaining
+  frontend limitation is replaying every mutation through browser controls in
+  one recorded session.
 - Old dashboard patterns remain rejected.
 
 ## Current assets
@@ -207,6 +217,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   version; an interrupted revision marks only its candidate version failed,
   restores the last completed active version, clears `active_operation`, and
   emits `edit_patch_rejected`.
+- LangGraph checkpoint threads are deleted after terminal workflows and bounded
+  at startup. SQLite checkpoint pages are compacted only when at least 64 MiB
+  and 25% of the file are reclaimable, preventing deleted graph state from
+  retaining unbounded disk space without vacuuming every startup.
 - Mutating generation endpoints enforce configurable free-space admission via
   `TELECOM_STUDIO_MIN_FREE_DISK_MB` (256 MB by default) and return HTTP 507
   before creating orphan state when local persistence is unsafe.

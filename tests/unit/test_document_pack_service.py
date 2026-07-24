@@ -58,19 +58,18 @@ def test_document_pack_does_not_invent_foundation_or_vendor_antenna(tmp_path: Pa
         )
     )
 
-    mapping = ProjectDesignSpecMapper().map_to_requirements(service.get_spec(summary.pack_id))
+    spec = service.get_spec(summary.pack_id)
+    mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
 
-    assert mapping.status == "mapped"
-    assert mapping.requirements is not None
-    assert mapping.requirements["tower_characteristics"]["foundation_type"] == "unknown"
-    warning_codes = {warning["code"] for warning in mapping.requirements["warnings"]}
-    assert "DOC_FOUNDATION_UNSPECIFIED_NO_GEOMETRY" in warning_codes
-    assert "DOC_GENERIC_ANTENNA_FAMILY_USED" in warning_codes
+    assert summary.can_generate_design is False
+    assert mapping.status == "blocked"
+    assert mapping.requirements is None
+    assert "foundation.foundation_type" in mapping.blocking_fields
     field_statuses = {
         item["project_field"]: item["status"] for item in mapping.mapping_loss_report["fields"]
     }
-    assert field_statuses["foundation.foundation_type"] == "fallback"
-    assert field_statuses["radio.antenna_model"] == "fallback"
+    assert field_statuses["foundation.foundation_type"] == "blocked_foundation"
+    assert field_statuses["radio.antenna_model"] == "missing"
 
 
 def test_document_pack_exposes_processing_capabilities_and_memory_summary(
@@ -114,6 +113,7 @@ def test_document_pack_missing_blocking_field_blocks_mapping_without_hallucinati
                     "Code site: IMD123\n"
                     "Type pylône: pylône treillis\n"
                     "Hauteur pylône: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0, 120, 240\n"
                 )
             }
@@ -231,6 +231,7 @@ def test_document_pack_maps_explicit_microwave_radio_without_5g_default(
                 "APD/microwave.txt": (
                     "Type pylône: pylône treillis\n"
                     "Hauteur pylône: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 45, 225\n"
                     "HBA: 25m, 25m\n"
                     "Bandes: MW\n"
@@ -259,6 +260,7 @@ def test_document_pack_blocks_non_uniform_sector_geometry_instead_of_flattening(
                 "APD/radio.txt": (
                     "Type pylône: pylône treillis\n"
                     "Hauteur pylône: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0, 120, 240\n"
                     "HBA: 24m, 23m, 24m\n"
                     "Mechanical tilt: 2, 3, 4\n"

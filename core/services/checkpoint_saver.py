@@ -61,6 +61,13 @@ class CheckpointRetentionResult:
     remaining_over_quota: int
 
 
+@dataclass(frozen=True)
+class CheckpointCompactionResult:
+    compacted: bool
+    reclaimable_bytes: int
+    reclaimed_bytes: int
+
+
 class SqliteCheckpointSaver(BaseCheckpointSaver):
     """Persistent local LangGraph saver with bounded SQLite operations.
 
@@ -470,6 +477,52 @@ class SqliteCheckpointSaver(BaseCheckpointSaver):
                 deleted_thread_ids=thread_ids,
                 remaining_over_quota=max(excess - len(thread_ids), 0),
             )
+
+    def compact_if_needed(
+        self,
+        *,
+        min_reclaim_bytes: int = 64 * 1024 * 1024,
+        min_free_ratio: float = 0.25,
+    ) -> CheckpointCompactionResult:
+        """Return deleted checkpoint pages to disk only after meaningful churn.
+
+        Thread deletion deliberately preserves complete LangGraph chains, but
+        SQLite keeps the released pages in its freelist. This bounded startup
+        maintenance avoids running ``VACUUM`` for small databases or ordinary
+        write churn while preventing a long-lived local studio from retaining
+        hundreds of megabytes of deleted checkpoint payloads.
+        """
+
+        if min_reclaim_bytes < 0:
+            raise ValueError("min_reclaim_bytes must be non-negative")
+        if not 0 <= min_free_ratio <= 1:
+            raise ValueError("min_free_ratio must be between 0 and 1")
+        with self._connect() as conn:
+            page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+            free_pages = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+            page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        reclaimable_bytes = free_pages * page_size
+        free_ratio = free_pages / page_count if page_count else 0.0
+        if reclaimable_bytes < min_reclaim_bytes or free_ratio < min_free_ratio:
+            return CheckpointCompactionResult(
+                compacted=False,
+                reclaimable_bytes=reclaimable_bytes,
+                reclaimed_bytes=0,
+            )
+
+        with self._connect() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        size_before = self.db_path.stat().st_size
+        with self._connect() as conn:
+            conn.execute("VACUUM")
+        with self._connect() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        size_after = self.db_path.stat().st_size
+        return CheckpointCompactionResult(
+            compacted=True,
+            reclaimable_bytes=reclaimable_bytes,
+            reclaimed_bytes=max(size_before - size_after, 0),
+        )
 
     def repair_orphan_writes(self, *, max_delete: int = 100) -> int:
         """Delete a bounded batch of legacy writes whose checkpoint no longer exists."""

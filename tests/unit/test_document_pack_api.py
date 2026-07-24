@@ -319,6 +319,7 @@ def _pack_zip() -> bytes:
                 "Code site: IMD123\n"
                 "Type pylône: pylône treillis\n"
                 "Hauteur pylône: 30m\n"
+                "Fondation: massif béton\n"
                 "Azimuts: 0, 120, 240\n"
                 "HBA: 24m, 24m, 24m\n"
                 "Bandes: NR700 NR3500 5G\n"
@@ -333,6 +334,12 @@ def _missing_hba_pack_zip() -> bytes:
     with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
         archive.writestr(
             "radio_plan.txt",
-            "Pylône treillis H=30m\nAzimuts: 0, 120, 240\nBandes: NR3500 5G\nRRU et câbles\n",
+            (
+                "Pylône treillis H=30m\n"
+                "Fondation: massif béton\n"
+                "Azimuts: 0, 120, 240\n"
+                "Bandes: NR3500 5G\n"
+                "RRU et câbles\n"
+            ),
         )
     return buffer.getvalue()

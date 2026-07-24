@@ -185,6 +185,7 @@ while True:
     )
     if checkpoint_retention.remaining_over_quota == 0:
         break
+checkpoint_compaction = checkpoint_saver.compact_if_needed()
 orchestrator = DesignOrchestrator(
     registry=registry,
     extractor=requirement_extractor,

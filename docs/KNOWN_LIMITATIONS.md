@@ -27,6 +27,10 @@ frontend.
 - The local thread executor has bounded admission but is not a durable job
   broker. Process shutdown and test harnesses must close the service lifespan;
   there is no cross-process ownership or recovery.
+- LangGraph checkpoint rows are bounded and terminal threads are removed.
+  Reclaimed SQLite pages are compacted only after significant churn (64 MiB and
+  25% free by default), so startup may briefly perform local maintenance after a
+  large development/test history.
 - Local storage admission requires at least 256 MB free by default
   (`TELECOM_STUDIO_MIN_FREE_DISK_MB`). Ignored workflow artifacts still need
   periodic cleanup; the guard prevents a new mutation but is not a retention
@@ -69,6 +73,9 @@ frontend.
 ## Documents
 
 - Document-pack is synchronous, 80 MB max.
+- Document-pack generation requires a foundation compatible with the confirmed
+  tower type. If evidence is missing, the pack is blocked until a user
+  correction supplies the value; the backend does not invent a concrete pad.
 - `/document-packs/capabilities` is honest and reports
   `document_pack_status=limited`.
 - OCR is limited and depends on installed Tesseract + languages.

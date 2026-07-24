@@ -17,6 +17,7 @@ from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
                 "notes/APD_inconnu.txt": (
                     "Support: pylône treillis\n"
                     "Hauteur totale: 30m\n"
+                    "Fondation: massif béton\n"
                     "Secteurs radio\n"
                     "Azimuts: 0, 120, 240\n"
                     "HBA: 24m, 24m, 24m\n"
@@ -48,6 +49,7 @@ from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
                 "operatorB/design_note.txt": (
                     "Type support: monotube\n"
                     "H=30m\n"
+                    "Fondation: pole base\n"
                     "AZ: 20, 140, 260\n"
                     "HMA: 25m, 25m, 25m\n"
                     "Bandes: NR3500 5G\n"
@@ -90,7 +92,8 @@ def test_irrelevant_admin_files_are_recorded_but_ignored(tmp_path: Path) -> None
                 "Admin/cerfa.txt": "Document administratif.",
                 "Photos/vue_site.jpg": b"\xff\xd8\xff\x00",
                 "Plan_radio.txt": (
-                    "Pylône treillis H=30m Azimuts: 0,120,240 HBA: 24m,24m,24m Bandes: NR3500 5G"
+                    "Pylône treillis H=30m Fondation: massif béton "
+                    "Azimuts: 0,120,240 HBA: 24m,24m,24m Bandes: NR3500 5G"
                 ),
             }
         )
@@ -120,6 +123,7 @@ def test_irrelevant_admin_values_cannot_pollute_design_requirements(tmp_path: Pa
                 "APD/plan_radio.txt": (
                     "Type pylone: pylone treillis\n"
                     "Hauteur pylone: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0,120,240\n"
                     "HBA: 24m,24m,24m\n"
                     "Bandes: NR3500 5G\n"
@@ -152,6 +156,7 @@ def test_document_pack_parses_comma_separated_azimuths_without_spaces(tmp_path: 
                 "APD/radio.txt": (
                     "Type pylone: pylone treillis\n"
                     "Hauteur pylone: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0,120,240\n"
                     "HBA: 24,24,24\n"
                     "Bandes NR700 NR3500 5G\n"
@@ -176,6 +181,7 @@ def test_document_pack_mapping_preserves_confirmed_accessories(tmp_path: Path) -
             {
                 "APD/accessoires.txt": (
                     "Pylône treillis H=30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0, 120, 240\n"
                     "HBA: 24m, 24m, 24m\n"
                     "Bandes NR700 NR3500 5G\n"
@@ -213,7 +219,7 @@ def test_document_pack_mapping_preserves_confirmed_mechanical_tilt(tmp_path: Pat
         _zip(
             {
                 "APD/tilt.txt": (
-                    "Pylône treillis H=30m\nAzimuts: 0, 120, 240\n"
+                    "Pylône treillis H=30m\nFondation: massif béton\nAzimuts: 0, 120, 240\n"
                     "HBA: 24m, 24m, 24m\nTilt: 5\nRET: 2\nBandes: NR3500 5G\n"
                 )
             }
@@ -246,6 +252,7 @@ def test_document_pack_mapping_respects_explicit_rru_false_correction(tmp_path: 
             {
                 "APD/radio.txt": (
                     "Pylône treillis H=30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0, 120, 240\n"
                     "HBA: 24m, 24m, 24m\n"
                     "Bandes: NR3500 5G\n"
@@ -337,6 +344,7 @@ def test_user_correction_resolves_missing_hba_and_enables_mapping(tmp_path: Path
             {
                 "radio_note.txt": (
                     "Type support: pylône treillis\nHauteur pylône: 30m\n"
+                    "Fondation: massif béton\n"
                     "Azimuts: 0, 120, 240\nBandes: NR3500 5G\n"
                 )
             }
@@ -369,6 +377,7 @@ def test_user_correction_resolves_conflicting_azimuths(tmp_path: Path) -> None:
             {
                 "APD_radio.txt": (
                     "Pylône treillis H=30m\nAzimuts: 0, 120, 240\n"
+                    "Fondation: massif béton\n"
                     "HBA: 24m, 24m, 24m\nBandes: NR3500 5G\n"
                 ),
                 "old_plan.txt": "AZ: 10, 130, 250\n",

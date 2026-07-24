@@ -359,6 +359,7 @@ def _mapping_loss_report(
             and _confirmed_field(spec, "foundation_spec", "foundation_type") is not None,
             fallback=requirements is not None
             and _confirmed_field(spec, "foundation_spec", "foundation_type") is None,
+            status_override=blocker_status.get("foundation.foundation_type"),
         ),
         _mapping_entry(
             spec,
@@ -488,6 +489,10 @@ def _mapping_reason(status: str) -> str:
             "Only part of the sectors have confirmed values; generation is blocked instead of "
             "inventing the remaining values."
         ),
+        "blocked_foundation": (
+            "The foundation is missing or incompatible with the tower type; generation is "
+            "blocked until a supported value is confirmed."
+        ),
     }.get(status, "Field is visible for frontend review.")
 
 
@@ -513,6 +518,7 @@ def _find_project_field(spec: ProjectDesignSpec, project_field: str):
         "site": spec.site_info,
         "coordinates": spec.coordinate_info,
         "grounding": spec.grounding_spec,
+        "foundation": spec.foundation_spec,
     }
     prefix, _, key = project_field.partition(".")
     return sections.get(prefix, {}).get(key)
@@ -572,6 +578,29 @@ def _representation_blockers(spec: ProjectDesignSpec) -> list[_MappingBlocker]:
                 "values": _band_values(spec),
             }
         )
+    tower_type_field = _confirmed_field(spec, "tower_spec", "tower_type")
+    if tower_type_field and isinstance(tower_type_field.value, str):
+        tower_type = tower_type_field.value
+        foundation_type = _foundation_type(spec)
+        allowed_foundations = {
+            "lattice_tower": {"concrete_pad"},
+            "monopole": {"concrete_pad", "pole_base"},
+            "rooftop_mast": {"rooftop_anchored"},
+            "small_cell_pole": {"concrete_pad", "pole_base"},
+        }.get(tower_type, set())
+        if foundation_type not in allowed_foundations:
+            blockers.append(
+                {
+                    "field": "foundation.foundation_type",
+                    "code": "FOUNDATION_UNSUPPORTED_OR_MISSING",
+                    "message": (
+                        "The foundation is missing or incompatible with the confirmed tower "
+                        "type. Generation is blocked until the user confirms a supported "
+                        "foundation."
+                    ),
+                    "values": [foundation_type] if foundation_type != "unknown" else [],
+                }
+            )
     hba_values, hba_confirmed_count = _sector_numeric_values(spec, "hba_m")
     if spec.radio_sectors:
         if hba_confirmed_count != len(spec.radio_sectors):
@@ -667,6 +696,8 @@ def _blocker_status(code: str) -> str:
         return "blocked_unknown_network"
     if code == "PARTIAL_SECTOR_VALUES":
         return "blocked_partial_sector_values"
+    if code == "FOUNDATION_UNSUPPORTED_OR_MISSING":
+        return "blocked_foundation"
     return "blocked_non_uniform"
 
 

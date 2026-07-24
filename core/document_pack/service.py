@@ -1174,6 +1174,8 @@ def _recommended_user_actions(
         actions.append(
             "Confirmer un type radio supporté (4G, 5G ou MW) avec une preuve documentaire."
         )
+    if "foundation.foundation_type" in mapping.blocking_fields:
+        actions.append("Confirmer une fondation compatible avec le support avant la génération 3D.")
     sector_fields = [
         field
         for field in mapping.blocking_fields

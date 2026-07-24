@@ -185,6 +185,44 @@ def test_thread_quota_deletes_bounded_oldest_complete_threads(tmp_path: Path) ->
     assert saver.integrity_report().ok
 
 
+def test_compaction_reclaims_deleted_checkpoint_pages(tmp_path: Path) -> None:
+    db = tmp_path / "checkpoints.db"
+    saver = SqliteCheckpointSaver(db)
+    payload = "x" * 200_000
+    for index in range(12):
+        saver.put(
+            _config("wf_compact"),
+            _checkpoint(f"chk_{index:03d}", value=f"{payload}{index}"),
+            {},
+            {},
+        )
+    size_before_delete = sum(
+        path.stat().st_size for path in (db, db.with_name(f"{db.name}-wal")) if path.exists()
+    )
+
+    saver.delete_thread("wf_compact")
+    result = saver.compact_if_needed(min_reclaim_bytes=1, min_free_ratio=0)
+
+    assert result.compacted is True
+    assert result.reclaimable_bytes > 0
+    assert result.reclaimed_bytes > 0
+    assert db.stat().st_size < size_before_delete
+    assert saver.integrity_report().ok
+
+
+def test_compaction_skips_small_freelist_and_validates_thresholds(tmp_path: Path) -> None:
+    saver = SqliteCheckpointSaver(tmp_path / "checkpoints.db")
+
+    result = saver.compact_if_needed(min_reclaim_bytes=1)
+
+    assert result.compacted is False
+    assert result.reclaimed_bytes == 0
+    with pytest.raises(ValueError, match="min_reclaim_bytes"):
+        saver.compact_if_needed(min_reclaim_bytes=-1)
+    with pytest.raises(ValueError, match="min_free_ratio"):
+        saver.compact_if_needed(min_free_ratio=1.1)
+
+
 def test_orphan_repair_is_bounded(tmp_path: Path) -> None:
     db = tmp_path / "checkpoints.db"
     saver = SqliteCheckpointSaver(db)

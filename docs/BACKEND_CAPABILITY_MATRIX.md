@@ -11,7 +11,7 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, viewer/QA bundle, actions disponibles, timeline lisible, progression `push_sse`. |
 | E2E product proof | IMPLEMENTED | `tests/e2e/test_telecom_generation_proof.py` | Basé sur `/designs` + `workflow_id`, sans `/projects` ni `/runs`. |
 | Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
-| Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py` | Synchrone, 80 Mo, extraction en mémoire. |
+| Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py`, `core/document_pack/mapper.py` | Synchrone, 80 Mo, extraction en mémoire; fondation absente/incompatible bloquée avant création du workflow et corrigeable avec provenance utilisateur. |
 | PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |
 | OCR | IMPLEMENTED_LIMITED | Tesseract + `pytesseract` | Limité à une sélection de pages; langues système requises. |
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
@@ -37,7 +37,8 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Events | IMPLEMENTED_LIMITED | `workflow_events.jsonl`, `/events` | Events par nœud disponibles: `node_started`, résultat du nœud, artefacts prêts, QA, issues; runtime local-first. |
 | SSE | IMPLEMENTED | `/events/stream` | `push_sse` local-process: replay JSONL puis queue live jusqu'au terminal; pas encore broker durable/cancellation. |
 | Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur; activation canonique atomique par `active_design.json` après revalidation des hashes. |
-| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`; 85 Vitest tests; production build; 2026-07-20 visual smoke on real workflow `wf_3c86a159cd7b` | Chat-first/3D-first baseline verified with real GLB, camera fit and contextual agent/library drawers. Full acceptance still needs recorded mutation smokes for document-pack, edit and rollback paths. |
+| LangGraph checkpoint storage | IMPLEMENTED_LIMITED | `core/services/checkpoint_saver.py`, `checkpoints.db` | SQLite local, threads terminaux supprimés, quota au démarrage et compactage conditionnel du freelist; pas de reprise distribuée ni broker durable. |
+| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`; 90 Vitest tests; production build; 2026-07-24 visual smoke on real workflow `wf_3c86a159cd7b` | Chat-first/3D-first baseline verified with real GLB, camera fit, contextual agent/QA/issues/artifact/version/library drawers, no local path leak, and no browser console error. Full acceptance still needs recorded mutation smokes for document-pack, edit and rollback paths. |
 
 ## Agent / Runtime Truth Matrix
 
