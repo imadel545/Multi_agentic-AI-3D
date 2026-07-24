@@ -1,5 +1,8 @@
 import {
+  AdaptationCapabilityCatalogSchema,
   AssetInventorySchema,
+  AssetLibrarySearchSchema,
+  AssetLibrarySummarySchema,
   CreateDesignResponseSchema,
   CurrentOperationSchema,
   DocumentPackCapabilitiesSchema,
@@ -16,6 +19,7 @@ import {
   HealthSchema,
   ParseRequirementsResponseSchema,
   RollbackVersionResponseSchema,
+  SceneAdaptationCapabilitiesSchema,
   StudioSummarySchema,
   TimelineSummarySchema,
   UserIssuesSchema,
@@ -24,7 +28,10 @@ import {
   WorkflowEventSchema,
   WorkflowStatusSchema,
   parseContract,
+  type AdaptationCapabilityCatalog,
   type AssetInventory,
+  type AssetLibrarySearch,
+  type AssetLibrarySummary,
   type CreateDesignResponse,
   type CurrentOperation,
   type DocumentPackCapabilities,
@@ -37,6 +44,7 @@ import {
   type PublicVersionInfo,
   type RequirementSpec,
   type RollbackVersionResponse,
+  type SceneAdaptationCapabilities,
   type StudioSummary,
   type TimelineSummary,
   type UserIssues,
@@ -103,6 +111,39 @@ export class TelecomStudioApi {
 
   async assetInventory(): Promise<AssetInventory> {
     return parseContract("AssetInventory", AssetInventorySchema, await this.getJson("/assets/inventory"));
+  }
+
+  async assetLibrarySummary(): Promise<AssetLibrarySummary> {
+    return parseContract(
+      "AssetLibrarySummary",
+      AssetLibrarySummarySchema,
+      await this.getJson("/assets/library/summary")
+    );
+  }
+
+  async searchAssetLibrary(query: string, limit = 12): Promise<AssetLibrarySearch> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    return parseContract(
+      "AssetLibrarySearch",
+      AssetLibrarySearchSchema,
+      await this.getJson(`/assets/library/search?${params.toString()}`)
+    );
+  }
+
+  async adaptationCapabilityCatalog(): Promise<AdaptationCapabilityCatalog> {
+    return parseContract(
+      "AdaptationCapabilityCatalog",
+      AdaptationCapabilityCatalogSchema,
+      await this.getJson("/assets/adaptation-capabilities")
+    );
+  }
+
+  async designAdaptationCapabilities(workflowId: string): Promise<SceneAdaptationCapabilities> {
+    return parseContract(
+      "SceneAdaptationCapabilities",
+      SceneAdaptationCapabilitiesSchema,
+      await this.getJson(`/designs/${encodeURIComponent(workflowId)}/adaptation-capabilities`)
+    );
   }
 
   async documentPackCapabilities(): Promise<DocumentPackCapabilities> {

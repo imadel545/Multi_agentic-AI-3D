@@ -16,11 +16,12 @@ import {
 } from "./api/client";
 import { normalizeWorkflowEvent, openWorkflowEventStream } from "./api/sse";
 import type {
-  AssetInventory,
   DocumentPackCapabilities,
   DocumentPackReview,
   DocumentPackSummary,
   Health,
+  AssetLibrarySearch,
+  AssetLibrarySummary,
   ParseRequirementsResponse,
   PublicVersionInfo,
   ViewerBundle,
@@ -28,7 +29,6 @@ import type {
   WorkflowStatus
 } from "./api/schemas";
 import {
-  AgentStageRail,
   BackendStatusBar,
   ChatCommandPanel,
   CurrentOperationStrip,
@@ -52,7 +52,12 @@ const TelecomGlbViewer = lazy(() =>
 export default function App() {
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState);
   const [health, setHealth] = useState<Health | null>(null);
-  const [inventory, setInventory] = useState<AssetInventory | null>(null);
+  const [assetLibrarySummary, setAssetLibrarySummary] =
+    useState<AssetLibrarySummary | null>(null);
+  const [assetLibrarySearch, setAssetLibrarySearch] =
+    useState<AssetLibrarySearch | null>(null);
+  const [assetLibrarySearchBusy, setAssetLibrarySearchBusy] = useState(false);
+  const [assetLibrarySearchError, setAssetLibrarySearchError] = useState<string | null>(null);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
   const [documentPackSummary, setDocumentPackSummary] = useState<DocumentPackSummary | null>(null);
@@ -67,7 +72,6 @@ export default function App() {
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [versions, setVersions] = useState<PublicVersionInfo[]>([]);
-  const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [revisionMessage, setRevisionMessage] = useState<string | null>(null);
   const [revisionBusy, setRevisionBusy] = useState(false);
@@ -115,21 +119,12 @@ export default function App() {
         }
       });
     void apiClient
-      .assetInventory()
-      .then((nextInventory) => {
-        if (!cancelled) {
-          setInventory(nextInventory);
-          dispatch({ type: "RESOURCE_RECOVERED", resource: "asset_inventory" });
-        }
+      .assetLibrarySummary()
+      .then((librarySummary) => {
+        if (!cancelled) setAssetLibrarySummary(librarySummary);
       })
-      .catch((error) => {
-        if (!cancelled) {
-          dispatch({
-            type: "RESOURCE_FAILED",
-            resource: "asset_inventory",
-            message: errorMessage(error)
-          });
-        }
+      .catch(() => {
+        if (!cancelled) setAssetLibrarySummary(null);
       });
     void apiClient
       .documentPackCapabilities()
@@ -152,6 +147,24 @@ export default function App() {
       cancelled = true;
     };
   }, [apiClient]);
+
+  const searchAssetLibrary = useCallback(
+    async (query: string) => {
+      const normalizedQuery = query.trim();
+      if (!normalizedQuery) return;
+      setAssetLibrarySearchBusy(true);
+      setAssetLibrarySearchError(null);
+      try {
+        setAssetLibrarySearch(await apiClient.searchAssetLibrary(normalizedQuery));
+      } catch (error) {
+        setAssetLibrarySearch(null);
+        setAssetLibrarySearchError(errorMessage(error));
+      } finally {
+        setAssetLibrarySearchBusy(false);
+      }
+    },
+    [apiClient]
+  );
 
   const loadLiveStatus = useCallback(
     async (workflowId: string) => {
@@ -180,7 +193,13 @@ export default function App() {
       dispatch({ type: "STATUS_LOADED", status });
       dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
 
-      const [operationResult, bundleResult, timelineResult, issuesResult, versionsResult] =
+      const [
+        operationResult,
+        bundleResult,
+        timelineResult,
+        issuesResult,
+        versionsResult
+      ] =
         await Promise.allSettled([
           apiClient.currentOperation(workflowId),
           apiClient.viewerBundle(workflowId),
@@ -221,23 +240,6 @@ export default function App() {
         (nextVersions) => setVersions(nextVersions),
         dispatch
       );
-
-      if (!bundle?.rag_evidence_url) {
-        setRagEvidence(null);
-        dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
-        return;
-      }
-      try {
-        setRagEvidence(await apiClient.artifactJson(bundle.rag_evidence_url));
-        dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
-      } catch (error) {
-        setRagEvidence(null);
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "rag_evidence",
-          message: errorMessage(error)
-        });
-      }
     },
     [apiClient]
   );
@@ -440,7 +442,6 @@ export default function App() {
       });
       setSubmittedRequirementsHash(requirementsAnalysis.requirements_hash);
       setVersions([]);
-      setRagEvidence(null);
       dispatch({ type: "DESIGN_CREATED", workflowId: created.workflow_id });
       const status = await loadLiveStatus(created.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -552,7 +553,6 @@ export default function App() {
       }
       setDocumentPackMessage("Workflow lancé depuis le pack documentaire.");
       setVersions([]);
-      setRagEvidence(null);
       dispatch({ type: "DESIGN_CREATED", workflowId: generated.workflow_id });
       const status = await loadLiveStatus(generated.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -735,30 +735,37 @@ export default function App() {
             revisionBusy={revisionBusy}
             revisionPrompt={revisionPrompt}
           />
-          <CurrentOperationStrip
-            notice={state.transportError ?? resourceNotice}
-            operation={state.currentOperation}
-            phase={state.phase}
-            runtimeMode={state.runtimeMode}
-          />
-          <AgentStageRail events={state.events} phase={state.phase} timeline={state.timeline} />
+          {state.phase === "submitting" ||
+          state.phase === "streaming" ||
+          state.phase === "running" ||
+          state.transportError ||
+          resourceNotice ? (
+            <CurrentOperationStrip
+              notice={state.transportError ?? resourceNotice}
+              operation={state.currentOperation}
+              phase={state.phase}
+              runtimeMode={state.runtimeMode}
+            />
+          ) : null}
         </aside>
         <section className="workbench" aria-label="Studio 3D">
           <Suspense fallback={<ViewerLoadingFallback />}>
             <TelecomGlbViewer bundle={state.viewerBundle} toAbsoluteUrl={toArtifactUrl} />
           </Suspense>
           <InspectorDock
+            assetLibrarySearch={assetLibrarySearch}
+            assetLibrarySearchBusy={assetLibrarySearchBusy}
+            assetLibrarySearchError={assetLibrarySearchError}
+            assetLibrarySummary={assetLibrarySummary}
             bundle={state.viewerBundle}
             canRollback={canRollbackVersions}
-            documentCapabilities={documentCapabilities}
             events={state.events}
-            evidence={ragEvidence}
-            inventory={inventory}
             issues={state.userIssues}
             summary={state.summary}
             timeline={state.timeline}
             toAbsoluteUrl={toArtifactUrl}
             onRollbackVersion={rollbackVersion}
+            onSearchAssetLibrary={searchAssetLibrary}
             rollbackBusyVersionId={rollbackBusyVersionId}
             versionMessage={versionMessage}
             versions={versions}

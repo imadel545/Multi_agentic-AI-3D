@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ContractValidationError,
+  AssetLibrarySearchSchema,
   DocumentPackFieldSchema,
   DocumentPackQASchema,
   ParseRequirementsResponseSchema,
+  SceneAdaptationCapabilitiesSchema,
   ViewerBundleSchema,
   WorkflowEventSchema,
   parseContract
@@ -16,6 +18,9 @@ const viewerBundlePayload = {
   mesh_qa_level: "mesh_level_transform_basic",
   mesh_qa_passed: true,
   qa_score: 0.91,
+  requirement_coverage_passed: true,
+  requirement_coverage_ratio: 1,
+  completion_certificate_status: "issued",
   primary_glb_url: "/designs/wf_123/artifacts/design.glb",
   preview_url: "/designs/wf_123/artifacts/preview.png",
   rag_context_count: 3,
@@ -32,6 +37,32 @@ const viewerBundlePayload = {
 };
 
 describe("frontend contract schemas", () => {
+  it("validates quarantined library search results and preview links", () => {
+    const parsed = parseContract("AssetLibrarySearch", AssetLibrarySearchSchema, {
+      query: "pylone 30m",
+      result_count: 1,
+      results: [{
+        file_id: "lib_tower",
+        relative_path: "3D/Pylone/Orange_Pylone_30m.dwg",
+        extension: "dwg",
+        size_bytes: 2048,
+        claimed_dimension: "3d",
+        category: "Pylone",
+        license_status: "unknown_requires_review",
+        qualification_status: "quarantined_unverified",
+        conversion_status: "not_attempted",
+        generation_eligible: false,
+        reference_preview_file_ids: ["lib_image"]
+      }],
+      selection_policy: "metadata_retrieval_only",
+      generation_eligible: false,
+      next_action: "Qualifier avant usage."
+    });
+
+    expect(parsed.results[0]?.generation_eligible).toBe(false);
+    expect(parsed.results[0]?.reference_preview_file_ids).toEqual(["lib_image"]);
+  });
+
   it("accepts real backend style viewer payloads", () => {
     const parsed = parseContract("ViewerBundle", ViewerBundleSchema, viewerBundlePayload);
 
@@ -168,5 +199,39 @@ describe("frontend contract schemas", () => {
     expect(field.severity).toBe("blocking");
     expect(qa.ready_to_generate).toBe(false);
     expect(qa.checks[0]?.passed).toBe(false);
+  });
+
+  it("validates resolved adaptation capabilities from the active SceneSpec", () => {
+    const parsed = parseContract(
+      "SceneAdaptationCapabilities",
+      SceneAdaptationCapabilitiesSchema,
+      {
+        scene_id: "wf_123",
+        catalog_version: "1.0.0",
+        catalog_hash: "a".repeat(64),
+        capabilities: [
+          {
+            capability_id: "accessory_1:accessory_scale",
+            asset_id: "GPS_ANTENNA_001",
+            profile_id: "accessory_transform_v1",
+            label: "Échelle de l'accessoire",
+            path: "/accessory_assets/0/scale",
+            value_type: "vector3",
+            execution_tool: "asset_transform",
+            effect: "geometry",
+            description: "Échelle XYZ vérifiée.",
+            minimum: 0.05,
+            maximum: 20,
+            allowed_values: [],
+            requires_regeneration: true
+          }
+        ],
+        unsupported_operations: ["Pas de retopologie libre"],
+        missing_profiles: []
+      }
+    );
+
+    expect(parsed.capabilities[0]?.execution_tool).toBe("asset_transform");
+    expect(parsed.missing_profiles).toHaveLength(0);
   });
 });

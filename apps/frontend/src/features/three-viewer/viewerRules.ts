@@ -57,9 +57,22 @@ export function viewerBadges(bundle: ViewerBundle | null): string[] {
     badges.push(bundle.generation_mode === "real_blender" ? "Blender réel" : `Mode ${bundle.generation_mode}`);
   }
   if (bundle.mesh_qa_level) {
-    badges.push(bundle.mesh_qa_level.includes("transform") ? "QA mesh de base" : bundle.mesh_qa_level);
+    if (bundle.mesh_qa_level.includes("spatial")) {
+      badges.push("QA spatiale contrôlée");
+    } else if (bundle.mesh_qa_level.includes("transform")) {
+      badges.push("QA transforms contrôlée");
+    } else {
+      badges.push(bundle.mesh_qa_level);
+    }
   }
   badges.push(bundle.mesh_qa_passed ? "QA validée" : "QA attention");
+  if (bundle.completion_certificate_status) {
+    badges.push(
+      bundle.completion_certificate_status === "issued"
+        ? "Intégrité vérifiée"
+        : "Preuve d’intégrité rejetée"
+    );
+  }
   if (bundle.llm_fallback_used) {
     badges.push("Fallback LLM");
   }

@@ -16,6 +16,9 @@ const bundle: ViewerBundle = {
   geometry_source: "scene_spec",
   mesh_qa_level: "mesh_level_basic",
   mesh_qa_passed: true,
+  requirement_coverage_passed: true,
+  requirement_coverage_ratio: 1,
+  completion_certificate_status: "issued",
   qa_score: 0.88,
   asset_import_summary: null,
   human_warnings_count: 0,
@@ -128,10 +131,20 @@ describe("viewer source rules", () => {
         "Blender réel",
         "mesh_level_basic",
         "QA attention",
+        "Intégrité vérifiée",
         "Fallback LLM",
         "RAG dégradé"
       ])
     );
+  });
+
+  it("uses a readable badge for spatial mesh QA", () => {
+    expect(
+      viewerBadges({
+        ...bundle,
+        mesh_qa_level: "mesh_level_spatial_basic"
+      })
+    ).toContain("QA spatiale contrôlée");
   });
 
   it("detects unavailable WebGL before mounting the Three.js canvas", () => {

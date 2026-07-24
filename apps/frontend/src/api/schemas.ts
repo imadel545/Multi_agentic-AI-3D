@@ -209,6 +209,10 @@ export const WorkflowStatusSchema = publicSchema(
     mesh_qa_passed: z.boolean().nullish(),
     blender_available: z.boolean().nullish(),
     qa_score: z.number().nullish(),
+    glb_binary_integrity_passed: z.boolean().nullish(),
+    requirement_coverage_passed: z.boolean().nullish(),
+    requirement_coverage_ratio: z.number().min(0).max(1).nullish(),
+    completion_certificate_status: z.enum(["issued", "rejected"]).nullish(),
     llm_provider: z.string().nullish(),
     llm_available: z.boolean().nullish(),
     llm_fallback_used: z.boolean().nullish(),
@@ -281,6 +285,11 @@ export const ViewerBundleSchema = publicSchema(
     qa_report_url: z.string().nullish(),
     generation_report_url: z.string().nullish(),
     geometry_validation_url: z.string().nullish(),
+    requirement_coverage_url: z.string().nullish(),
+    completion_certificate_url: z.string().nullish(),
+    requirement_coverage_passed: z.boolean().nullish(),
+    requirement_coverage_ratio: z.number().min(0).max(1).nullish(),
+    completion_certificate_status: z.enum(["issued", "rejected"]).nullish(),
     rag_evidence_url: z.string().nullish(),
     requirements_spec_url: z.string().nullish(),
     extraction_report_url: z.string().nullish(),
@@ -369,6 +378,94 @@ export const AssetInventorySchema = publicSchema(
     real_glb_asset_count: z.number(),
     entries: z.array(UnknownRecord).default([]),
     missing_files: z.array(UnknownRecord).default([])
+  })
+);
+
+export const AssetLibrarySummarySchema = publicSchema(
+  UnknownRecord.extend({
+    status: z.string(),
+    schema_version: z.string(),
+    catalog_available: z.boolean().default(false),
+    file_count: z.number().int().nonnegative().optional(),
+    unique_content_count: z.number().int().nonnegative().optional(),
+    duplicate_file_count: z.number().int().nonnegative().optional(),
+    generation_eligible_count: z.number().int().nonnegative().default(0),
+    cad_with_reference_preview_count: z.number().int().nonnegative().default(0),
+    reference_preview_link_count: z.number().int().nonnegative().default(0),
+    claimed_dimension_counts: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    extension_counts: z.record(z.string(), z.number().int().nonnegative()).optional(),
+    license_status: z.string().optional(),
+    dwg_probe_available: z.boolean().optional(),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
+export const AssetLibraryEntrySchema = publicSchema(
+  UnknownRecord.extend({
+    file_id: z.string(),
+    relative_path: z.string(),
+    extension: z.string(),
+    size_bytes: z.number().int().nonnegative(),
+    claimed_dimension: z.string(),
+    category: z.string(),
+    duplicate_of: z.string().nullish(),
+    license_status: z.string(),
+    qualification_status: z.string(),
+    conversion_status: z.string(),
+    generation_eligible: z.boolean().default(false),
+    reference_preview_file_ids: z.array(z.string()).default([]),
+    related_cad_file_ids: z.array(z.string()).default([]),
+    retrieval_score: z.number().optional()
+  })
+);
+
+export const AssetLibrarySearchSchema = publicSchema(
+  UnknownRecord.extend({
+    query: z.string(),
+    filters: z.record(z.string(), z.unknown()).default({}),
+    result_count: z.number().int().nonnegative(),
+    results: z.array(AssetLibraryEntrySchema).default([]),
+    selection_policy: z.string(),
+    generation_eligible: z.boolean().default(false),
+    next_action: z.string()
+  })
+);
+
+export const ResolvedAdaptationCapabilitySchema = publicSchema(
+  UnknownRecord.extend({
+    capability_id: z.string(),
+    asset_id: z.string().nullish(),
+    profile_id: z.string(),
+    label: z.string(),
+    path: z.string(),
+    value_type: z.string(),
+    execution_tool: z.string(),
+    effect: z.string(),
+    description: z.string(),
+    unit: z.string().nullish(),
+    minimum: z.number().nullish(),
+    maximum: z.number().nullish(),
+    allowed_values: z.array(z.union([z.string(), z.number(), z.boolean()])).default([]),
+    requires_regeneration: z.boolean().default(true)
+  })
+);
+
+export const SceneAdaptationCapabilitiesSchema = publicSchema(
+  UnknownRecord.extend({
+    scene_id: z.string(),
+    catalog_version: z.string(),
+    catalog_hash: z.string(),
+    capabilities: z.array(ResolvedAdaptationCapabilitySchema).default([]),
+    unsupported_operations: z.array(z.string()).default([]),
+    missing_profiles: z.array(z.string()).default([])
+  })
+);
+
+export const AdaptationCapabilityCatalogSchema = publicSchema(
+  UnknownRecord.extend({
+    schema_version: z.string(),
+    catalog_hash: z.string(),
+    profiles: z.array(UnknownRecord).default([])
   })
 );
 
@@ -628,6 +725,12 @@ export type CurrentOperation = z.infer<typeof CurrentOperationSchema>;
 export type UserIssues = z.infer<typeof UserIssuesSchema>;
 export type UserIssue = z.infer<typeof UserIssueSchema>;
 export type AssetInventory = z.infer<typeof AssetInventorySchema>;
+export type AssetLibrarySummary = z.infer<typeof AssetLibrarySummarySchema>;
+export type AssetLibraryEntry = z.infer<typeof AssetLibraryEntrySchema>;
+export type AssetLibrarySearch = z.infer<typeof AssetLibrarySearchSchema>;
+export type AdaptationCapabilityCatalog = z.infer<typeof AdaptationCapabilityCatalogSchema>;
+export type SceneAdaptationCapabilities = z.infer<typeof SceneAdaptationCapabilitiesSchema>;
+export type ResolvedAdaptationCapability = z.infer<typeof ResolvedAdaptationCapabilitySchema>;
 export type DocumentPackCapabilities = z.infer<typeof DocumentPackCapabilitiesSchema>;
 export type DocumentPackSummary = z.infer<typeof DocumentPackSummarySchema>;
 export type DocumentPackField = z.infer<typeof DocumentPackFieldSchema>;

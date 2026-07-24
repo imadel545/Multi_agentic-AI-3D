@@ -5,14 +5,17 @@ import {
   AgentStageRail,
   AgentTimeline,
   ArtifactsPanel,
+  AssetLibraryPanel,
   ChatCommandPanel,
   InspectorDock,
   IssuesPanel,
+  QaPanel,
   RagEvidencePanel,
   RuntimeCapabilitiesPanel,
   SummaryPanel,
   VersionSummary,
   humanRequirementWarning,
+  meshQaLevelLabel,
   summarizeTimelineRows,
   summarizeUserIssues
 } from "./StudioKernel";
@@ -130,6 +133,25 @@ const parsedRequirements = {
 afterEach(() => cleanup());
 
 describe("studio kernel components", () => {
+  it("translates spatial QA codes into operator language", () => {
+    expect(meshQaLevelLabel("mesh_level_spatial_basic")).toBe("QA spatiale AABB");
+    render(
+      <QaPanel
+        bundle={{
+          ...bundle,
+          mesh_qa_level: "mesh_level_spatial_basic",
+          mesh_qa_passed: true,
+          completion_certificate_status: "issued"
+        }}
+      />
+    );
+
+    expect(screen.getByText("QA spatiale AABB")).toBeInTheDocument();
+    expect(screen.getByText("interférences contrôlées")).toBeInTheDocument();
+    expect(screen.getByText("vérifiée localement")).toBeInTheDocument();
+    expect(screen.queryByText("mesh_level_spatial_basic")).not.toBeInTheDocument();
+  });
+
   it("requires real backend analysis before confirming the design", async () => {
     const onAnalyze = vi.fn();
     const onConfirm = vi.fn();
@@ -148,7 +170,8 @@ describe("studio kernel components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmer et générer" }));
 
     expect(onConfirm).toHaveBeenCalledOnce();
-    expect(screen.getByText(/groq:openai\/gpt-oss-120b/)).toBeInTheDocument();
+    expect(screen.getByText(/Source d’analyse : intelligence décisionnelle/)).toBeInTheDocument();
+    expect(screen.queryByText(/groq:openai\/gpt-oss-120b/)).not.toBeInTheDocument();
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
   });
 
@@ -204,18 +227,15 @@ describe("studio kernel components", () => {
     expect(screen.getByRole("button", { name: "Confirmer et générer" })).toBeEnabled();
   });
 
-  it("keeps the command field real and only injects an example when requested", () => {
-    const onPromptChange = vi.fn();
+  it("keeps the command field empty and requires an explicit user request", () => {
     render(
       <ChatCommandPanel
         {...commandDefaults}
-        onPromptChange={onPromptChange}
       />
     );
 
     expect(screen.getByLabelText("Design prompt")).toHaveValue("");
-    fireEvent.click(screen.getByRole("button", { name: "Exemple complet" }));
-    expect(onPromptChange).toHaveBeenCalledWith(expect.stringContaining("Créer un site 5G"));
+    expect(screen.getByRole("button", { name: "Analyser la demande" })).toBeDisabled();
   });
 
   it("shows a connected revision command only when edit is available", () => {
@@ -511,8 +531,53 @@ describe("studio kernel components", () => {
       }
     ]);
 
-    expect(summarized[0]?.title).toBe("Assets non vendor-grade: 2 éléments");
+    expect(summarized[0]?.title).toBe("Modèles non constructeur: 2 éléments");
+    expect(summarized[1]?.title).toBe("Beamwidth warning");
     expect(summarized).toHaveLength(2);
+  });
+
+  it("translates inferred radio, azimuth mismatch, and degraded RAG issues", () => {
+    const summarized = summarizeUserIssues([
+      {
+        title: "Mechanical tilt inferred as 3 degrees",
+        severity: "warning",
+        impact: "Mechanical tilt inferred as 3 degrees.",
+        recommended_action: "Review.",
+        technical_code: "RF_MECHANICAL_TILT_INFERRED"
+      },
+      {
+        title: "sector_count_azimuth_mismatch",
+        severity: "warning",
+        impact: "sector_count_azimuth_mismatch: 2 azimuths for 3 sectors",
+        recommended_action: "Review.",
+        technical_code: "SECTOR_COUNT_AZIMUTH_MISMATCH"
+      },
+      {
+        title: "Recherche RAG en mode dégradé",
+        severity: "warning",
+        impact: "Error code: 500",
+        recommended_action: "Check Qdrant.",
+        technical_code: "RAG_RERANKER_DEGRADED"
+      },
+      {
+        title: "Extraction déterministe",
+        severity: "warning",
+        impact: "Raison: deterministic_extraction_requested.",
+        recommended_action: "Configure GROQ_API_KEY.",
+        technical_code: "LLM_FALLBACK"
+      }
+    ]);
+
+    expect(summarized.map((issue) => issue.title)).toEqual([
+      "Inclinaison mécanique proposée",
+      "Azimuts complétés",
+      "Recherche documentaire temporairement dégradée",
+      "Compréhension en mode de secours"
+    ]);
+    expect(summarized.map((issue) => issue.impact).join(" ")).not.toContain("Error code");
+    expect(summarized.map((issue) => issue.impact).join(" ")).not.toContain(
+      "sector_count_azimuth_mismatch"
+    );
   });
 
   it("groups repeated asset timeline rows before the terminal workflow row", () => {
@@ -542,8 +607,22 @@ describe("studio kernel components", () => {
 
     expect(rows.map((row) => row.label)).toEqual([
       "Design prêt",
-      "Assets non vendor-grade: 2 éléments"
+      "Modèles non constructeur : 2 éléments"
     ]);
+  });
+
+  it("translates proof certification wording in the agent timeline", () => {
+    const rows = summarizeTimelineRows([
+      {
+        id: "proof",
+        label: "Certification des preuves",
+        message: "Étape terminée : Certification des preuves.",
+        phase: "workflow",
+        status: "completed"
+      }
+    ]);
+
+    expect(rows[0]?.label).toBe("Vérification des preuves");
   });
 
   it("does not leave unreported stages as pending after a completed workflow", () => {
@@ -723,7 +802,7 @@ describe("studio kernel components", () => {
     expect(screen.getByText("Aucun hint n’est prouvé comme appliqué au SceneSpec.")).toBeInTheDocument();
     expect(screen.getByText("include_labels")).toBeInTheDocument();
     expect(screen.getByText("scene_templates.md")).toBeInTheDocument();
-    expect(screen.getByText("Données RAG techniques")).toBeInTheDocument();
+    expect(screen.queryByText("Données RAG techniques")).not.toBeInTheDocument();
   });
 
   it("does not create a link for an unavailable artifact", () => {
@@ -765,12 +844,88 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/download_artifacts/)).toBeInTheDocument();
   });
 
+  it("presents the imported CAD library as quarantined product data", () => {
+    const onSearch = vi.fn();
+    render(
+      <AssetLibraryPanel
+        onSearch={onSearch}
+        summary={{
+          status: "catalogued_quarantined",
+          schema_version: "1.0.0",
+          catalog_available: true,
+          file_count: 11974,
+          unique_content_count: 11531,
+          duplicate_file_count: 443,
+          generation_eligible_count: 0,
+          cad_with_reference_preview_count: 7,
+          reference_preview_link_count: 15,
+          claimed_dimension_counts: { "2d": 8514, "3d": 2834 },
+          limitations: ["Licence à vérifier."]
+        }}
+      />
+    );
+
+    expect(screen.getByText(/11[\s ]974 fichiers catalogués/)).toBeInTheDocument();
+    expect(screen.getByText(/2\s834/)).toBeInTheDocument();
+    expect(screen.getByText("Qualification requise")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Rechercher un pylône/), {
+      target: { value: "pylône Orange 30 m" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Rechercher" }));
+    expect(onSearch).toHaveBeenCalledWith("pylône Orange 30 m");
+  });
+
+  it("shows real library results without offering unqualified Blender use", () => {
+    render(
+      <AssetLibraryPanel
+        search={{
+          query: "pylone 30m",
+          filters: {},
+          result_count: 1,
+          results: [{
+            file_id: "lib_tower",
+            relative_path: "3D/Pylone/Orange/Orange_Pylone_30m_Galva.dwg",
+            extension: "dwg",
+            size_bytes: 4096,
+            claimed_dimension: "3d",
+            category: "Pylone",
+            duplicate_of: null,
+            license_status: "unknown_requires_review",
+            qualification_status: "quarantined_unverified",
+            conversion_status: "not_attempted",
+            generation_eligible: false,
+            reference_preview_file_ids: ["lib_preview_1", "lib_preview_2"],
+            related_cad_file_ids: []
+          }],
+          selection_policy: "metadata_retrieval_only",
+          generation_eligible: false,
+          next_action: "Qualifier la licence, la géométrie et la conversion."
+        }}
+        summary={{
+          status: "catalogued_quarantined",
+          schema_version: "1.1.0",
+          catalog_available: true,
+          generation_eligible_count: 0,
+          cad_with_reference_preview_count: 7,
+          reference_preview_link_count: 15,
+          limitations: []
+        }}
+      />
+    );
+
+    expect(screen.getByText("Orange_Pylone_30m_Galva.dwg")).toBeInTheDocument();
+    expect(screen.getByText("En quarantaine")).toBeInTheDocument();
+    expect(screen.getByText("2 aperçus")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Blender|utiliser/i })).not.toBeInTheDocument();
+  });
+
   it("keeps inspector content behind contextual drawers", () => {
     render(
       <InspectorDock
         bundle={bundle}
         canRollback={false}
-        documentCapabilities={null}
         events={[
           {
             event_id: "evt_1",
@@ -794,14 +949,6 @@ describe("studio kernel components", () => {
             }
           }
         ]}
-        evidence={{
-          candidate_hint_fields: ["include_labels"],
-          contexts: [],
-          limitations: [],
-          rag_used_for_extraction: false,
-          rag_used_for_planning: true
-        }}
-        inventory={null}
         issues={null}
         summary={null}
         timeline={null}
@@ -816,9 +963,7 @@ describe("studio kernel components", () => {
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Résumé" }));
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    fireEvent.click(screen.getByRole("button", { name: /Progression/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
     expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Narration du workflow");
-    fireEvent.click(screen.getByRole("button", { name: /Contexte IA/ }));
-    expect(screen.getByLabelText("RAG evidence")).toHaveTextContent("include_labels");
   });
 });

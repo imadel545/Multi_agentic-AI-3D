@@ -254,6 +254,12 @@ export function isDegraded(
   if (source.mesh_qa_passed === false) {
     return true;
   }
+  if (source.requirement_coverage_passed === false) {
+    return true;
+  }
+  if (source.completion_certificate_status === "rejected") {
+    return true;
+  }
   if ("primary_glb_url" in source && !source.primary_glb_url) {
     return true;
   }

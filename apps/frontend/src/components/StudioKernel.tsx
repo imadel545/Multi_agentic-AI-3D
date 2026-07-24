@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import type {
+  AdaptationCapabilityCatalog,
+  AssetLibrarySearch,
+  AssetLibrarySummary,
   AssetInventory,
   CurrentOperation,
   DocumentPackCapabilities,
@@ -28,6 +31,7 @@ import type {
   Health,
   ParseRequirementsResponse,
   PublicVersionInfo,
+  SceneAdaptationCapabilities,
   StudioSummary,
   TimelineSummary,
   UserIssue,
@@ -62,12 +66,18 @@ export function BackendStatusBar({
       <div className="topbar-status" aria-label="Studio runtime status">
         <span className={health?.status === "ok" ? "runtime-presence ok" : "runtime-presence warn"}>
           <span aria-hidden="true" />
-          {health?.status === "ok" ? "Backend local connecté" : "Backend indisponible"}
+          {health?.status === "ok" ? "Studio local connecté" : "Studio indisponible"}
         </span>
-        {phase !== "idle" ? (
-          <span className="workflow-truth">
-            {phaseLabel(phase)} · {generationTruth(bundle)} · {qaTruth(bundle)}
+        {bundle?.generation_mode === "real_blender" ? (
+          <span className="topbar-proof"><Boxes size={14} aria-hidden="true" /> Blender réel</span>
+        ) : null}
+        {bundle ? (
+          <span className={bundle.mesh_qa_passed ? "topbar-proof ok" : "topbar-proof warn"}>
+            <CheckCircle2 size={14} aria-hidden="true" /> {bundle.mesh_qa_passed ? "QA validée" : "QA à vérifier"}
           </span>
+        ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
+        {bundle?.completion_certificate_status === "issued" ? (
+          <span className="topbar-proof"><ShieldAlert size={14} aria-hidden="true" /> Intégrité vérifiée</span>
         ) : null}
         {issueCount ? (
           <span className="topbar-issue-count">
@@ -136,36 +146,76 @@ export function ChatCommandPanel({
 }) {
   const disabled =
     submissionPending || phase === "submitting" || phase === "streaming" || phase === "running";
-  const examplePrompt =
-    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, boîte alimentation, dalle béton, GPS, labels, couleurs professionnelles et export GLB.";
+  const [commandMode, setCommandMode] = useState<"new" | "revision">(
+    canEdit ? "revision" : "new"
+  );
+  const previousCanEdit = useRef(canEdit);
+
+  useEffect(() => {
+    if (!canEdit && commandMode === "revision") {
+      setCommandMode("new");
+    }
+    if (canEdit && !previousCanEdit.current) {
+      setCommandMode("revision");
+    }
+    previousCanEdit.current = canEdit;
+  }, [canEdit, commandMode]);
+
+  const revisionMode = commandMode === "revision" && canEdit;
   return (
     <section className="command-center" aria-label="Conversation de commande">
       <div className="conversation-heading">
-        <span className="eyebrow">Commande intelligente</span>
-        <h1>Décris le site telecom</h1>
-        <p>
-          Le backend extrait le cahier de charge, construit un SceneSpec vérifiable,
-          puis génère un GLB Blender réel.
-        </p>
+        <span className="eyebrow">Conception assistée</span>
+        <h1>Concevoir le site telecom</h1>
       </div>
 
-      <textarea
-        aria-label="Design prompt"
-        placeholder="Ex: pylône treillis 30m, 3 secteurs à 24m, azimuts 0/120/240, RRU, câbles, GPS, dalle béton, labels..."
-        value={prompt}
-        onChange={(event) => onPromptChange(event.target.value)}
-        rows={4}
-      />
+      <div className="assistant-card conversation-message">
+        <RadioTower size={18} aria-hidden="true" />
+        <div>
+          <strong>{phase === "completed" ? "Le résultat est prêt à inspecter" : "Décrivez le résultat attendu"}</strong>
+          <p>
+            {phase === "completed"
+              ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
+              : "Les contraintes sont extraites puis confirmées avant toute génération Blender."}
+          </p>
+        </div>
+      </div>
 
-      <div className="command-actions">
-        <button className="ghost-action" disabled={disabled} onClick={() => onPromptChange(examplePrompt)} type="button">
-          Exemple complet
-        </button>
-        <button className={analysis ? "secondary-action" : "primary-action"} disabled={disabled || analysisBusy || !prompt.trim()} onClick={onAnalyze} type="button">
-          <Sparkles size={18} aria-hidden="true" />
-          {analysisBusy ? "Analyse backend..." : analysis ? "Réanalyser" : "Analyser la demande"}
+      {canEdit ? (
+        <div className="command-mode" role="group" aria-label="Type de commande">
+          <button className={!revisionMode ? "active" : ""} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
+          <button className={revisionMode ? "active" : ""} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
+        </div>
+      ) : null}
+
+      <div className="command-composer">
+        <textarea
+          aria-label={revisionMode ? "Revision prompt" : "Design prompt"}
+          placeholder={revisionMode
+            ? "Ex: augmente la hauteur à 35 m, ajoute une plateforme, corrige les labels…"
+            : "Ex: pylône treillis 30 m, 3 secteurs à 24 m, azimuts 0/120/240, RRU, câbles, GPS…"}
+          value={revisionMode ? revisionPrompt : prompt}
+          onChange={(event) => revisionMode
+            ? onRevisionPromptChange(event.target.value)
+            : onPromptChange(event.target.value)}
+          rows={4}
+        />
+        <button
+          aria-label={revisionMode ? "Appliquer la révision" : "Analyser la demande"}
+          className="composer-submit"
+          disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
+          onClick={revisionMode ? onRevisionSubmit : onAnalyze}
+          title={revisionMode ? "Appliquer la modification" : "Analyser les contraintes"}
+          type="button"
+        >
+          {revisionMode ? <Send size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
         </button>
       </div>
+      <p className="composer-hint">
+        {revisionMode
+          ? revisionBusy ? "Révision et validation en cours…" : "La modification passe par les outils bornés et la QA Blender."
+          : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "Vous confirmerez les paramètres extraits avant génération."}
+      </p>
 
       {analysis ? (
         <RequirementsUnderstanding
@@ -175,15 +225,7 @@ export function ChatCommandPanel({
           submitted={analysisSubmitted}
           submitting={disabled}
         />
-      ) : (
-        <div className="assistant-card">
-          <MessageSquareText size={18} aria-hidden="true" />
-          <div>
-            <strong>Première étape: comprendre</strong>
-            <p>L’assistant appelle le vrai extracteur backend avant toute génération Blender.</p>
-          </div>
-        </div>
-      )}
+      ) : null}
       {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
 
       <DocumentPackIntake
@@ -198,22 +240,7 @@ export function ChatCommandPanel({
         summary={documentPackSummary}
       />
 
-      {canEdit ? (
-        <div className="revision-box">
-          <span className="eyebrow">Modifier le design actif</span>
-          <textarea
-            aria-label="Revision prompt"
-            onChange={(event) => onRevisionPromptChange(event.target.value)}
-            placeholder="Ex: augmente la hauteur à 35m, ajoute une plateforme, corrige les labels..."
-            rows={4}
-            value={revisionPrompt}
-          />
-          <button className="secondary-action" disabled={disabled || revisionBusy || !revisionPrompt.trim()} onClick={onRevisionSubmit} type="button">
-            {revisionBusy ? "Révision et validation..." : "Appliquer la révision"}
-          </button>
-          {editMessage ? <p className="muted">{editMessage}</p> : null}
-        </div>
-      ) : null}
+      {editMessage ? <p className="muted command-feedback">{editMessage}</p> : null}
 
       {error ? (
         <p className="inline-alert">
@@ -242,20 +269,20 @@ function RequirementsUnderstanding({
     return (
       <div className="understanding-card">
         <strong>Demande non confirmable</strong>
-        <p>L’extracteur backend n’a pas produit de RequirementSpec valide.</p>
+        <p>La demande n’a pas pu être convertie en exigences exploitables.</p>
       </div>
     );
   }
   const warnings = uniqueRequirementWarnings([...analysis.warnings, ...requirements.warnings]);
   const confirmationLocked = submitted && !failedWorkflow;
   return (
-    <div className="understanding-card" aria-label="Compréhension backend">
+    <div className="understanding-card" aria-label="Compréhension de la demande">
       <span className="eyebrow">
         {confirmationLocked
           ? "Compréhension utilisée pour le design"
           : failedWorkflow && submitted
-            ? "Compréhension du workflow échoué"
-            : "Compréhension backend à confirmer"}
+            ? "Compréhension de la demande échouée"
+            : "Paramètres compris à confirmer"}
       </span>
       <strong>{requirements.network_type} · {humanTowerType(requirements.tower_type)}</strong>
       <div className="metric-grid">
@@ -268,7 +295,7 @@ function RequirementsUnderstanding({
         RRU {yesNo(requirements.include_rru)} · câbles {yesNo(requirements.include_cables)} · cabinet {yesNo(requirements.include_power_cabinet)} · GPS {yesNo(requirements.include_gps_antenna)} · labels {yesNo(requirements.include_labels)}
       </p>
       <small>
-        Extracteur: {analysis.provider ?? "inconnu"} · mode {analysis.extraction_provider ?? "inconnu"}
+        Source d’analyse : {analysisProviderLabel(analysis.provider, analysis.extraction_provider)}
       </small>
       {analysis.fallback_used ? (
         <p className="inline-alert">
@@ -456,7 +483,7 @@ function DocumentPackReviewPanel({
         <strong>Compréhension utilisée pour le design</strong>
         <small>
           {review.consolidatedSpec.source_mode === "groq" || review.consolidatedSpec.source_mode === "mixed"
-            ? `Extraction structurée ${review.consolidatedSpec.llm_provider ?? "LLM"}${review.consolidatedSpec.llm_fallback_used ? " avec repli signalé" : " validée"}.`
+            ? `Compréhension structurée${review.consolidatedSpec.llm_fallback_used ? " avec mode de secours signalé" : " validée"}.`
             : "Extraction déterministe; aucun raisonnement LLM n’est revendiqué."}
         </small>
         {criticalEvidence.length ? (
@@ -585,11 +612,11 @@ export function CurrentOperationStrip({
     <section className="operation-strip" aria-label="Opération courante">
       <Clock3 size={18} aria-hidden="true" />
       <div>
-        <strong>{operation?.human_label ?? operation?.current_operation ?? (running ? "Workflow en cours" : "Studio prêt")}</strong>
-        <span>{operation?.progress_message ?? "Les étapes backend apparaissent ici pendant la génération."}</span>
+        <strong>{operation?.human_label ?? operation?.current_operation ?? (running ? "Conception en cours" : "Studio prêt")}</strong>
+        <span>{operation?.progress_message ?? "Les étapes de conception apparaissent ici pendant la génération."}</span>
         {notice ? <small className="operation-notice" aria-live="polite">{notice}</small> : null}
       </div>
-      <StatusPill label={pollingFallback ? "Fallback polling" : "Runtime"} value={phaseLabel(phase)} tone={pollingFallback ? "warn" : "muted"} />
+      <StatusPill label={pollingFallback ? "Mode de secours" : "Temps réel"} value={phaseLabel(phase)} tone={pollingFallback ? "warn" : "muted"} />
     </section>
   );
 }
@@ -651,49 +678,53 @@ export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflow
               <span className={`timeline-dot ${row.status}`} />
               <div>
                 <strong>{row.label}</strong>
-                <p>{row.message}</p>
+                <p>{humanTimelineMessage(row.message)}</p>
                 <small>{humanPhase(row.phase)} · {stageStatusLabel(row.status)}</small>
               </div>
             </article>
           ))
         ) : (
-          <p className="muted">Les agents apparaîtront au démarrage du workflow backend.</p>
+          <p className="muted">Les spécialistes apparaîtront au démarrage de la conception.</p>
         )}
       </div>
     </section>
   );
 }
 
-type DrawerId = "summary" | "agents" | "qa" | "issues" | "artifacts" | "rag" | "runtime" | "versions";
+type DrawerId = "summary" | "agents" | "qa" | "issues" | "artifacts" | "library" | "rag" | "runtime" | "versions";
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
 export function InspectorDock({
+  assetLibrarySearch = null,
+  assetLibrarySearchBusy = false,
+  assetLibrarySearchError = null,
+  assetLibrarySummary = null,
   bundle,
   canRollback,
-  documentCapabilities,
   events,
-  evidence,
-  inventory,
   issues,
   summary,
   timeline,
   toAbsoluteUrl,
   onRollbackVersion,
+  onSearchAssetLibrary,
   rollbackBusyVersionId,
   versionMessage,
   versions
 }: {
+  assetLibrarySearch?: AssetLibrarySearch | null;
+  assetLibrarySearchBusy?: boolean;
+  assetLibrarySearchError?: string | null;
+  assetLibrarySummary?: AssetLibrarySummary | null;
   bundle: ViewerBundle | null;
   canRollback: boolean;
-  documentCapabilities: DocumentPackCapabilities | null;
   events: NormalizedWorkflowEvent[];
-  evidence: unknown | null;
-  inventory: AssetInventory | null;
   issues: UserIssues | null;
   summary: StudioSummary | null;
   timeline: TimelineSummary | null;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
   onRollbackVersion: (versionId: string) => void;
+  onSearchAssetLibrary?: (query: string) => void | Promise<void>;
   rollbackBusyVersionId: string | null;
   versionMessage: string | null;
   versions: PublicVersionInfo[];
@@ -704,11 +735,11 @@ export function InspectorDock({
   const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
   const drawers: DrawerDefinition[] = [];
   if (bundle) drawers.push({ id: "summary", label: "Résumé", icon: <CheckCircle2 size={16} /> });
-  if (events.length || timeline) drawers.push({ id: "agents", label: "Progression", icon: <Sparkles size={16} /> });
-  if (bundle) drawers.push({ id: "qa", label: "QA", badge: qaTruth(bundle), icon: <ShieldAlert size={16} /> });
-  if (issueCount) drawers.push({ id: "issues", label: "Warnings", badge: String(issueCount), icon: <AlertTriangle size={16} /> });
-  if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Artefacts", badge: String(bundle.viewer_artifacts.length), icon: <FileArchive size={16} /> });
-  if (evidence || bundle?.rag_context_count) drawers.push({ id: "rag", label: "Contexte IA", badge: bundle?.rag_reranker_degraded_reason ? "dégradé" : undefined, icon: <Cpu size={16} /> });
+  if (events.length || timeline) drawers.push({ id: "agents", label: "Agents", icon: <Sparkles size={16} /> });
+  if (bundle) drawers.push({ id: "qa", label: "QA", badge: bundle.mesh_qa_passed ? "validée" : "à revoir", icon: <ShieldAlert size={16} /> });
+  if (issueCount) drawers.push({ id: "issues", label: "Alertes", badge: String(issueCount), icon: <AlertTriangle size={16} /> });
+  if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
+  if (assetLibrarySummary?.catalog_available) drawers.push({ id: "library", label: "Bibliothèque", icon: <Boxes size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -764,13 +795,13 @@ export function InspectorDock({
           {activeDrawer === "qa" ? <QaPanel bundle={bundle} /> : null}
           {activeDrawer === "issues" ? <IssuesPanel issues={issues} /> : null}
           {activeDrawer === "artifacts" ? <ArtifactsPanel bundle={bundle} toAbsoluteUrl={toAbsoluteUrl} /> : null}
-          {activeDrawer === "rag" ? <RagEvidencePanel bundle={bundle} evidence={evidence} /> : null}
-          {activeDrawer === "runtime" ? (
-            <RuntimeCapabilitiesPanel
-              bundle={bundle}
-              documentCapabilities={documentCapabilities}
-              inventory={inventory}
-              summary={summary}
+          {activeDrawer === "library" ? (
+            <AssetLibraryPanel
+              busy={assetLibrarySearchBusy}
+              error={assetLibrarySearchError}
+              onSearch={onSearchAssetLibrary}
+              search={assetLibrarySearch}
+              summary={assetLibrarySummary}
             />
           ) : null}
           {activeDrawer === "versions" ? (
@@ -809,20 +840,20 @@ export function SummaryPanel({
         <p>{nextUserAction(bundle, issueCount)}</p>
       </div>
       <div className="metric-grid">
-        <Metric label="Workflow" value={bundle?.status ?? "pas lancé"} />
+        <Metric label="Conception" value={workflowStatusLabel(bundle?.status)} />
         <Metric label="Génération" value={generationTruth(bundle)} />
         <Metric label="QA" value={qaTruth(bundle)} />
         <Metric label="Version" value={activeVersion} />
       </div>
-      <List title="Signaux produit" items={summarySignals(bundle, issueCount)} empty="Aucun signal produit chargé." />
+      <List title="État des livrables" items={summarySignals(bundle, issueCount)} empty="Aucun livrable chargé." />
       <List
-        title="Capacités backend"
+        title="Services de conception"
         items={[
-          `Assets: ${summary?.asset_inventory_status ?? "unknown"}`,
-          `RAG: ${summary?.rag_status ?? "unknown"}`,
-          `Reranker: ${summary?.rag_reranker_status ?? "unknown"}`
+          `Composants 3D : ${serviceStatusLabel(summary?.asset_inventory_status)}`,
+          `Contexte documentaire : ${serviceStatusLabel(summary?.rag_status)}`,
+          `Classement des références : ${serviceStatusLabel(summary?.rag_reranker_status)}`
         ]}
-        empty="Résumé backend indisponible."
+        empty="État des services indisponible."
       />
     </section>
   );
@@ -838,13 +869,29 @@ export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
         <>
           <div className="metric-grid">
             <Metric label="Score" value={formatScore(bundle.qa_score)} />
-            <Metric label="Niveau mesh" value={bundle.mesh_qa_level ?? "unknown"} />
-            <Metric label="Géométrie" value={passed ? "validée de base" : "attention"} />
+            <Metric label="Niveau mesh" value={meshQaLevelLabel(bundle.mesh_qa_level)} />
+            <Metric
+              label="Géométrie"
+              value={
+                passed && bundle.mesh_qa_level === "mesh_level_spatial_basic"
+                  ? "interférences contrôlées"
+                  : passed
+                    ? "validée de base"
+                    : "attention"
+              }
+            />
             <Metric label="Mode" value={generationTruth(bundle)} />
+            <Metric
+              label="Exigences"
+              value={bundle.requirement_coverage_passed ? "couvertes" : "attention"}
+            />
+            <Metric
+              label="Preuve d’intégrité"
+              value={completionCertificateLabel(bundle.completion_certificate_status)}
+            />
           </div>
           <List title="Échecs QA" items={stringArray(qa["checks_failed"])} empty="Aucun échec QA remonté." />
           <List title="Ce que la QA ne garantit pas" items={bundle.limitations} empty="Aucune limitation remontée." />
-          <DeveloperDetails payload={qa} label="Données QA techniques" />
         </>
       ) : (
         <p className="muted">La QA apparaîtra après un viewer bundle réel.</p>
@@ -856,8 +903,8 @@ export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
 export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
   const summarizedIssues = summarizeUserIssues(issues?.human_readable_issues ?? []);
   return (
-    <section className="drawer-section" aria-label="Warnings utilisateur">
-      <PanelTitle icon={<AlertTriangle size={17} />} title="Warnings compréhensibles" />
+    <section className="drawer-section" aria-label="Alertes utilisateur">
+      <PanelTitle icon={<AlertTriangle size={17} />} title="Alertes à examiner" />
       {summarizedIssues.length ? (
         <div className="issue-list">
           {summarizedIssues.map((issue, index) => (
@@ -869,7 +916,7 @@ export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
           ))}
         </div>
       ) : (
-        <p className="muted">Aucun warning utilisateur chargé.</p>
+        <p className="muted">Aucune alerte à examiner.</p>
       )}
     </section>
   );
@@ -883,8 +930,8 @@ export function ArtifactsPanel({
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 }) {
   return (
-    <section className="drawer-section" aria-label="Artefacts">
-      <PanelTitle icon={<FileArchive size={17} />} title="Artefacts vérifiables" />
+    <section className="drawer-section" aria-label="Livrables">
+      <PanelTitle icon={<FileArchive size={17} />} title="Livrables vérifiables" />
       {bundle ? (
         <div className="artifact-list">
           {bundle.viewer_artifacts.map((artifact) => {
@@ -892,7 +939,7 @@ export function ArtifactsPanel({
             const content = (
               <>
                 <span>{artifactLabel(artifact.name)}</span>
-                <small>{url ? artifact.content_type : "absent"}</small>
+                <small>{url ? artifactKindLabel(artifact.content_type) : "Indisponible"}</small>
                 <ChevronRight size={15} aria-hidden="true" />
               </>
             );
@@ -922,6 +969,100 @@ export function ArtifactsPanel({
       )}
     </section>
   );
+}
+
+export function AssetLibraryPanel({
+  busy = false,
+  error = null,
+  onSearch,
+  search = null,
+  summary
+}: {
+  busy?: boolean;
+  error?: string | null;
+  onSearch?: (query: string) => void | Promise<void>;
+  search?: AssetLibrarySearch | null;
+  summary: AssetLibrarySummary | null;
+}) {
+  const [query, setQuery] = useState("");
+  const dimensions = summary?.claimed_dimension_counts ?? {};
+  const submitSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (query.trim() && onSearch) void onSearch(query.trim());
+  };
+  return (
+    <section className="drawer-section" aria-label="Bibliothèque de designs">
+      <PanelTitle icon={<Boxes size={17} />} title="Bibliothèque CAD telecom" />
+      {summary ? (
+        <>
+          <div className="summary-card">
+            <strong>{formatInteger(summary.file_count ?? 0)} fichiers catalogués</strong>
+            <p>
+              Chaque fichier est recherché par contenu et provenance. Aucun brut n'est utilisé
+              dans Blender avant qualification et conversion contrôlée.
+            </p>
+          </div>
+          <div className="metric-grid">
+            <Metric label="Contenus uniques" value={formatInteger(summary.unique_content_count ?? 0)} />
+            <Metric label="Classés 3D" value={formatInteger(dimensions["3d"] ?? 0)} />
+            <Metric label="Classés 2D" value={formatInteger(dimensions["2d"] ?? 0)} />
+            <Metric label="Prêts pour Blender" value={formatInteger(summary.generation_eligible_count)} />
+            <Metric label="CAD avec aperçu" value={formatInteger(summary.cad_with_reference_preview_count)} />
+          </div>
+          <form className="library-search" onSubmit={submitSearch}>
+            <label htmlFor="asset-library-query">Rechercher un pylône, équipement ou dimension</label>
+            <div className="library-search-row">
+              <input
+                id="asset-library-query"
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Ex. pylône Orange 30 m"
+                type="search"
+                value={query}
+              />
+              <button disabled={busy || !query.trim() || !onSearch} type="submit">
+                {busy ? "Recherche…" : "Rechercher"}
+              </button>
+            </div>
+          </form>
+          {error ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> Recherche indisponible : {error}</p> : null}
+          {search ? (
+            <div className="library-results" aria-live="polite">
+              <div className="library-results-heading">
+                <strong>{formatInteger(search.result_count)} résultat{search.result_count > 1 ? "s" : ""}</strong>
+                <small>Aucun résultat n'est sélectionné automatiquement.</small>
+              </div>
+              {search.results.length ? search.results.map((entry) => (
+                <article className="library-result-card" key={entry.file_id}>
+                  <div>
+                    <strong>{libraryFileName(entry.relative_path)}</strong>
+                    <small>{entry.category} · {entry.claimed_dimension.toUpperCase()} · {entry.extension.toUpperCase()}</small>
+                  </div>
+                  <p>{entry.relative_path}</p>
+                  <div className="library-result-meta">
+                    <span>{entry.generation_eligible ? "Qualifié pour génération" : "En quarantaine"}</span>
+                    <span>{entry.reference_preview_file_ids.length} aperçu{entry.reference_preview_file_ids.length > 1 ? "s" : ""}</span>
+                  </div>
+                </article>
+              )) : <p className="muted">Aucun fichier du catalogue ne correspond à cette recherche.</p>}
+              <p className="library-next-action">{search.next_action}</p>
+            </div>
+          ) : null}
+          <div className="summary-card warning-card">
+            <strong>Qualification requise</strong>
+            <p>
+              Les licences sont à vérifier et les solides DWG ACIS exigent une passerelle CAD
+              avant maillage. Cette quarantaine protège les designs produits.
+            </p>
+          </div>
+          <List title="Limites actuelles" items={summary.limitations} empty="Aucune limitation remontée." />
+        </>
+      ) : <p className="muted">La bibliothèque locale n'est pas cataloguée.</p>}
+    </section>
+  );
+}
+
+function libraryFileName(relativePath: string): string {
+  return relativePath.split("/").pop() ?? relativePath;
 }
 
 export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | null; evidence: unknown | null }) {
@@ -967,7 +1108,6 @@ export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | 
             )}
           </div>
           <List title="Limites RAG" items={summary.limitations} empty="Aucune limite RAG remontée." />
-          <DeveloperDetails payload={evidence} label="Données RAG techniques" />
         </>
       ) : (
         <p className="muted">Aucune preuve RAG chargée; le frontend n’en invente pas.</p>
@@ -977,11 +1117,15 @@ export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | 
 }
 
 export function RuntimeCapabilitiesPanel({
+  adaptationCapabilities = null,
+  adaptationCatalog = null,
   summary,
   bundle,
   inventory,
   documentCapabilities
 }: {
+  adaptationCapabilities?: SceneAdaptationCapabilities | null;
+  adaptationCatalog?: AdaptationCapabilityCatalog | null;
   summary: StudioSummary | null;
   bundle: ViewerBundle | null;
   inventory: AssetInventory | null;
@@ -994,10 +1138,31 @@ export function RuntimeCapabilitiesPanel({
       <PanelTitle icon={<Boxes size={17} />} title="Capacités réelles" />
       <div className="metric-grid">
         <Metric label="Assets" value={inventory?.status ?? "unknown"} />
+        <Metric
+          label="Paramètres 3D actifs"
+          value={String(adaptationCapabilities?.capabilities.length ?? 0)}
+        />
+        <Metric
+          label="Profils d’adaptation"
+          value={String(adaptationCatalog?.profiles.length ?? 0)}
+        />
         <Metric label="Documents" value={documentCapabilities?.document_pack_status ?? "unknown"} />
         <Metric label="Download" value={showDownload ? "supporté" : "non supporté"} />
         <Metric label="WebSocket" value={truth(!unsupported.some((item) => item.action === "websocket_runtime"))} />
       </div>
+      <List
+        title="Modifications vérifiées du design actif"
+        items={(adaptationCapabilities?.capabilities ?? []).map(
+          (capability) =>
+            `${capability.label} · ${humanAdaptationTool(capability.execution_tool)}`
+        )}
+        empty="Aucun design actif: les paramètres seront résolus après génération."
+      />
+      <List
+        title="Limites d’adaptation"
+        items={adaptationCapabilities?.unsupported_operations ?? []}
+        empty="Aucune limite supplémentaire déclarée."
+      />
       <List
         title="Actions non supportées"
         items={unsupported.map((item) => `${item.action}: ${item.reason ?? item.future_requirement ?? ""}`)}
@@ -1103,15 +1268,21 @@ export function summarizeTimelineRows(rows: TimelineDisplayRow[]): TimelineDispl
       }
       continue;
     }
-    visibleRows.push(row);
+    visibleRows.push({
+      ...row,
+      label:
+        row.label === "Certification des preuves"
+          ? "Vérification des preuves"
+          : row.label
+    });
   }
 
   const groupedRows: TimelineDisplayRow[] = [];
   if (grouped.nonVendorGrade) {
     groupedRows.push({
       id: "grouped-non-vendor-grade-assets",
-      label: `Assets non vendor-grade: ${grouped.nonVendorGrade} éléments`,
-      message: "Le design utilise des assets réels/importés mais pas constructeur. Détails dans Warnings.",
+      label: `Modèles non constructeur : ${grouped.nonVendorGrade} éléments`,
+      message: "Le design utilise des modèles réels ou importés, sans garantie constructeur. Consultez les alertes.",
       phase: "issues",
       status: "completed"
     });
@@ -1119,8 +1290,8 @@ export function summarizeTimelineRows(rows: TimelineDisplayRow[]): TimelineDispl
   if (grouped.attribution) {
     groupedRows.push({
       id: "grouped-attribution-assets",
-      label: `Attributions requises: ${grouped.attribution} élément${grouped.attribution > 1 ? "s" : ""}`,
-      message: "Des assets imposent une attribution de licence. Détails dans Warnings.",
+      label: `Attributions requises : ${grouped.attribution} élément${grouped.attribution > 1 ? "s" : ""}`,
+      message: "Certains modèles imposent une attribution de licence. Consultez les alertes.",
       phase: "issues",
       status: "completed"
     });
@@ -1128,8 +1299,8 @@ export function summarizeTimelineRows(rows: TimelineDisplayRow[]): TimelineDispl
   if (grouped.otherAsset) {
     groupedRows.push({
       id: "grouped-other-assets",
-      label: `Warnings assets: ${grouped.otherAsset} élément${grouped.otherAsset > 1 ? "s" : ""}`,
-      message: "Des avertissements assets sont disponibles dans Warnings.",
+      label: `Autres alertes de modèles : ${grouped.otherAsset} élément${grouped.otherAsset > 1 ? "s" : ""}`,
+      message: "D’autres avertissements sur les modèles sont disponibles dans les alertes.",
       phase: "issues",
       status: "completed"
     });
@@ -1272,7 +1443,7 @@ export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
     const text = `${issue.title} ${issue.impact} ${issue.recommended_action} ${issue.technical_code ?? ""}`;
     const normalized = text.toUpperCase();
     if (!isAssetIssueText(text)) {
-      visible.push(issue);
+      visible.push(humanizeUserIssue(issue));
       continue;
     }
     if (normalized.includes("ATTRIBUTION_REQUIRED")) {
@@ -1287,10 +1458,10 @@ export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
   const grouped: UserIssue[] = [];
   if (groups.nonVendorGrade) {
     grouped.push({
-      title: `Assets non vendor-grade: ${groups.nonVendorGrade} éléments`,
+      title: `Modèles non constructeur: ${groups.nonVendorGrade} éléments`,
       severity: "warning",
       impact: "La scène peut être inspectée, mais certains modèles ne sont pas des assets constructeur.",
-      recommended_action: "Afficher cette limite à l’utilisateur et ne pas promettre une fidélité vendor-grade.",
+      recommended_action: "Ne promettez pas une fidélité exacte à un catalogue constructeur.",
       technical_code: "ASSET_NON_VENDOR_GRADE_GROUP"
     });
   }
@@ -1305,7 +1476,7 @@ export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
   }
   if (groups.otherAsset) {
     grouped.push({
-      title: `Autres warnings assets: ${groups.otherAsset}`,
+      title: `Autres alertes de modèles: ${groups.otherAsset}`,
       severity: "warning",
       impact: "Des limites assets sont remontées par le backend.",
       recommended_action: "Inspecter les détails dans les artefacts et rapports backend.",
@@ -1313,6 +1484,78 @@ export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
     });
   }
   return [...grouped, ...visible];
+}
+
+function humanizeUserIssue(issue: UserIssue): UserIssue {
+  const text = `${issue.title} ${issue.impact} ${issue.technical_code ?? ""}`;
+  const normalized = text.toLowerCase();
+  const inferredValue = text.match(/inferred as ([\d.]+) degrees?/i)?.[1];
+  if (normalized.includes("mechanical tilt inferred")) {
+    return {
+      ...issue,
+      title: "Inclinaison mécanique proposée",
+      impact: `Une inclinaison mécanique de ${inferredValue ?? "3"}° a été proposée faute de valeur explicite.`,
+      recommended_action: "Confirmez cette valeur avec le cahier de charge radio."
+    };
+  }
+  if (normalized.includes("electrical tilt inferred")) {
+    return {
+      ...issue,
+      title: "Inclinaison électrique proposée",
+      impact: `Une inclinaison électrique de ${inferredValue ?? "0"}° a été proposée faute de valeur explicite.`,
+      recommended_action: "Confirmez cette valeur avec le cahier de charge radio."
+    };
+  }
+  if (normalized.includes("beamwidth inferred")) {
+    return {
+      ...issue,
+      title: "Ouverture d’antenne proposée",
+      impact: `Une ouverture de ${inferredValue ?? "65"}° a été proposée faute de valeur explicite.`,
+      recommended_action: "Vérifiez cette ouverture pour chaque secteur radio."
+    };
+  }
+  if (normalized.includes("sector_count_azimuth_mismatch")) {
+    return {
+      ...issue,
+      title: "Azimuts complétés",
+      impact: "Le nombre d’azimuts fourni ne couvrait pas tous les secteurs; le backend a complété la répartition.",
+      recommended_action: "Confirmez les azimuts affichés avant utilisation technique."
+    };
+  }
+  if (
+    normalized.includes("rag") &&
+    (normalized.includes("degrad") || normalized.includes("dégrad"))
+  ) {
+    return {
+      ...issue,
+      title: "Recherche documentaire temporairement dégradée",
+      impact: "Le classement secondaire des sources n’a pas répondu; l’ordre de recherche initial a été conservé.",
+      recommended_action: "Le design reste inspectable, mais vérifiez les sources dans le panneau RAG."
+    };
+  }
+  if (
+    normalized.includes("extraction déterministe") ||
+    normalized.includes("deterministic_extraction_requested")
+  ) {
+    return {
+      ...issue,
+      title: "Compréhension en mode de secours",
+      impact: "La demande a été structurée avec des règles déterministes, sans décision du modèle Groq.",
+      recommended_action: "Vérifiez les paramètres compris avant de modifier ou livrer le design."
+    };
+  }
+  if (
+    normalized.includes("qa spatiale") ||
+    normalized.includes("mesh_level_spatial_basic")
+  ) {
+    return {
+      ...issue,
+      title: "Contrôle géométrique borné",
+      impact: "Les positions et recouvrements généraux sont contrôlés, mais pas les collisions détaillées entre triangles.",
+      recommended_action: "Effectuez une revue technique complémentaire avant validation d’ingénierie."
+    };
+  }
+  return issue;
 }
 
 function isAssetIssueText(text: string): boolean {
@@ -1368,6 +1611,15 @@ function humanTowerType(towerType: string): string {
     rooftop_mast: "mât toiture",
     small_cell_pole: "support small cell"
   }[towerType] ?? towerType.replaceAll("_", " ");
+}
+
+function humanAdaptationTool(tool: string): string {
+  return {
+    parametric_rebuild: "reconstruction paramétrique Blender",
+    sector_layout: "placement radio contrôlé",
+    asset_transform: "transformation d’asset",
+    scene_visibility: "composition de scène"
+  }[tool] ?? "outil backend déclaré";
 }
 
 function yesNo(value: boolean): string {
@@ -1431,16 +1683,16 @@ function nextUserAction(bundle: ViewerBundle | null, issueCount: number): string
     return "Décrivez un site telecom ou chargez un ZIP documentaire.";
   }
   if (bundle.status === "failed") {
-    return "Lire les warnings, corriger la demande, puis relancer.";
+    return "Lire les alertes, corriger la demande, puis relancer.";
   }
   if (bundle.generation_mode !== "real_blender") {
     return "Utiliser la preview seulement comme fallback; corriger Blender avant validation.";
   }
   if (bundle.mesh_qa_passed === false) {
-    return "Inspecter la QA et les warnings avant de considérer le GLB exploitable.";
+    return "Inspecter la QA et les alertes avant de considérer le GLB exploitable.";
   }
   if (issueCount > 0) {
-    return "Inspecter le modèle 3D, puis lire les limites regroupées dans Warnings.";
+    return "Inspecter le modèle 3D, puis lire les limites regroupées dans les alertes.";
   }
   return "Inspecter le GLB et télécharger les artefacts nécessaires.";
 }
@@ -1453,7 +1705,7 @@ function summarySignals(bundle: ViewerBundle | null, issueCount: number): string
   const signals = [
     `GLB: ${failed ? "absent car workflow échoué" : bundle.primary_glb_url ? "disponible" : "manquant"}`,
     `Preview: ${failed ? "absente car workflow échoué" : bundle.preview_url ? "disponible" : "manquante"}`,
-    `Mesh QA: ${bundle.mesh_qa_level ?? "unknown"}`,
+    `Mesh QA: ${meshQaLevelLabel(bundle.mesh_qa_level)}`,
     `Warnings utilisateur: ${issueCount}`
   ];
   if (bundle.llm_fallback_used) {
@@ -1463,6 +1715,58 @@ function summarySignals(bundle: ViewerBundle | null, issueCount: number): string
     signals.push(`Reranker RAG dégradé: ${bundle.rag_reranker_degraded_reason}`);
   }
   return signals;
+}
+
+function analysisProviderLabel(provider?: string | null, extractionProvider?: string | null): string {
+  const normalized = `${provider ?? ""} ${extractionProvider ?? ""}`.toLowerCase();
+  if (normalized.includes("groq") || normalized.includes("gpt")) return "intelligence décisionnelle";
+  if (normalized.includes("fallback") || normalized.includes("determin")) return "mode de secours contrôlé";
+  return "analyse structurée";
+}
+
+function workflowStatusLabel(status?: string | null): string {
+  const labels: Record<string, string> = {
+    completed: "terminée",
+    failed: "échouée",
+    running: "en cours",
+    pending: "en attente"
+  };
+  return status ? labels[status] ?? "état disponible" : "pas lancée";
+}
+
+function serviceStatusLabel(status?: string | null): string {
+  const normalized = status?.toLowerCase() ?? "";
+  if (["ok", "ready", "available", "enabled", "ready_for_import"].some((value) => normalized.includes(value))) {
+    return "disponible";
+  }
+  if (["degraded", "limited", "fallback", "passthrough"].some((value) => normalized.includes(value))) {
+    return "disponible avec limites";
+  }
+  if (["unavailable", "disabled", "error", "missing"].some((value) => normalized.includes(value))) {
+    return "indisponible";
+  }
+  return "état non confirmé";
+}
+
+export function meshQaLevelLabel(level: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    mesh_level_spatial_basic: "QA spatiale AABB",
+    mesh_level_transform_basic: "Transforms 3D contrôlées",
+    mesh_level_basic: "Géométrie de base",
+    metadata_only: "Métadonnées seulement",
+    not_available: "Non disponible"
+  };
+  return level ? (labels[level] ?? "Niveau non reconnu") : "Non disponible";
+}
+
+function completionCertificateLabel(status: string | null | undefined): string {
+  if (status === "issued") {
+    return "vérifiée localement";
+  }
+  if (status === "rejected") {
+    return "rejeté";
+  }
+  return "absent";
 }
 
 function summarizeRagEvidence(evidence: unknown) {
@@ -1540,17 +1844,12 @@ function List({ title, items, empty }: { title: string; items: string[]; empty: 
   );
 }
 
-function DeveloperDetails({ payload, label }: { payload: unknown; label: string }) {
-  return (
-    <details className="developer-details">
-      <summary>{label}</summary>
-      <pre>{JSON.stringify(payload, null, 2)}</pre>
-    </details>
-  );
-}
-
 function formatScore(value: number | null | undefined): string {
   return typeof value === "number" ? `${Math.round(value * 100)}%` : "unknown";
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("fr-FR").format(value);
 }
 
 function stringArray(value: unknown): string[] {
@@ -1627,21 +1926,68 @@ function stageStatusLabel(status: string): string {
 
 function humanPhase(phase: string | null | undefined): string {
   if (!phase) {
-    return "workflow";
+    return "orchestration";
   }
-  return phase.replaceAll("_", " ");
+  return {
+    workflow: "orchestration",
+    quality_gate: "contrôle final",
+    memory: "mémoire",
+    viewer: "visualisation 3D",
+    issues: "alertes",
+    qa: "qualité"
+  }[phase] ?? phase.replaceAll("_", " ");
+}
+
+function humanTimelineMessage(message: string): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("certification des preuves")) {
+    return message.replace("Certification des preuves", "Vérification des preuves");
+  }
+  const mechanicalTilt = message.match(/mechanical tilt inferred as ([\d.]+) degrees?/i);
+  if (mechanicalTilt) {
+    return `Inclinaison mécanique proposée à ${mechanicalTilt[1]}°. Vérifiez-la dans les alertes.`;
+  }
+  const electricalTilt = message.match(/electrical tilt inferred as ([\d.]+) degrees?/i);
+  if (electricalTilt) {
+    return `Inclinaison électrique proposée à ${electricalTilt[1]}°. Vérifiez-la dans les alertes.`;
+  }
+  const beamwidth = message.match(/beamwidth inferred as ([\d.]+) degrees?/i);
+  if (beamwidth) {
+    return `Ouverture d’antenne proposée à ${beamwidth[1]}°. Vérifiez-la dans les alertes.`;
+  }
+  if (normalized.includes("sector_count_azimuth_mismatch")) {
+    return "Les azimuts ont été complétés pour correspondre au nombre de secteurs demandé.";
+  }
+  if (normalized.includes("platforms recommended")) {
+    return "Une plateforme est recommandée pour la sécurité sur ce pylône.";
+  }
+  return message.replaceAll("Warnings", "les alertes");
 }
 
 function artifactLabel(name: string): string {
   const labels: Record<string, string> = {
     "design.glb": "Modèle 3D GLB",
-    "preview.png": "Preview backend",
-    "scene_spec.json": "SceneSpec",
+    "preview.png": "Aperçu de contrôle",
+    "scene_metadata.json": "Métadonnées de la scène",
+    "requirements_spec.json": "Exigences consolidées",
+    "extraction_report.json": "Rapport de compréhension",
+    "scene_spec.json": "Plan de scène vérifiable",
     "qa_report.json": "Rapport QA",
     "generation_report.json": "Rapport génération",
-    "rag_evidence.json": "Preuves RAG",
+    "rag_evidence.json": "Preuves du contexte IA",
+    "planning_decision.json": "Décisions de planification",
     "geometry_validation.json": "Validation géométrie",
+    "requirement_coverage.json": "Couverture des exigences",
+    "completion_certificate.json": "Preuve locale de complétion",
     "technical_report.md": "Rapport technique"
   };
   return labels[name] ?? name;
+}
+
+function artifactKindLabel(contentType: string): string {
+  if (contentType === "model/gltf-binary") return "Modèle 3D";
+  if (contentType.startsWith("image/")) return "Image de contrôle";
+  if (contentType === "text/markdown") return "Rapport lisible";
+  if (contentType === "application/json") return "Données vérifiables";
+  return "Livrable";
 }

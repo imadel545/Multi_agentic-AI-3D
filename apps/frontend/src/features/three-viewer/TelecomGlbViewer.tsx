@@ -36,7 +36,9 @@ type ViewerHealth =
 
 export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProps) {
   const source = resolveViewerSource(bundle, toAbsoluteUrl);
-  const badges = viewerBadges(bundle);
+  const badges = viewerBadges(bundle).filter((badge) =>
+    badge.includes("Fallback") || badge.includes("dégradé") || badge.includes("attention") || badge.includes("rejetée")
+  );
   const [resetKey, setResetKey] = useState(0);
   const [objectSummary, setObjectSummary] = useState<ModelObjectSummary | null>(null);
   const [viewerHealth, setViewerHealth] = useState<ViewerHealth>("idle");
@@ -57,7 +59,6 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
         <div>
           <span className="eyebrow">Viewer 3D</span>
           <h2>{bundle ? "Design 3D telecom" : "En attente d'un design"}</h2>
-          {bundle ? <small>{bundle.workflow_id}</small> : null}
         </div>
         <div className="badge-row">
           <button
@@ -275,7 +276,8 @@ function GlbObjectSummary({
   }
   const rows = Object.entries(summary.roles).filter(([, count]) => count > 0);
   return (
-    <div className="viewer-object-summary" aria-label="GLB object summary">
+    <details className="viewer-object-summary" aria-label="GLB object summary">
+      <summary>
       <strong>
         <Layers3 size={14} aria-hidden="true" /> Scène GLB réelle
       </strong>
@@ -284,6 +286,7 @@ function GlbObjectSummary({
           ? `${summary.semanticEntityCount} équipements vérifiables dans ${summary.totalNamedObjects} nœuds GLB`
           : `${summary.totalNamedObjects} nœuds GLB · comptage hérité par nom`} · {viewerHealthLabel(health)}
       </small>
+      </summary>
       <div>
         {rows.map(([role, count]) => (
           <span key={role}>
@@ -291,7 +294,7 @@ function GlbObjectSummary({
           </span>
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 

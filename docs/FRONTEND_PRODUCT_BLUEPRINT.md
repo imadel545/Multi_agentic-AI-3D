@@ -61,10 +61,14 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 
 ## Statut
 
-- Le kernel dashboard précédent est rejeté; les briques API/Zod/SSE/Three
-  réutilisables restent en rework.
+- Le kernel dashboard précédent reste rejeté. La baseline active utilise un
+  compositeur unifié, un viewer dominant et des drawers métier à la demande.
 - Les endpoints produit backend sont prêts pour une construction frontend:
   `push_sse`, current operation, timeline lisible, viewer bundle, user issues,
   edit/version/rollback, document-pack capabilities.
-- Le frontend chat-first / 3D-first est en cours et doit encore passer le smoke
-  produit complet avant acceptation.
+- Le smoke visuel/runtime du 2026-07-24 est passé sur un GLB Blender réel avec
+  drawers agentique, QA, alertes, livrables et bibliothèque branchés au backend.
+  Le smoke Product API couvre aussi génération Groq/Blender, édition,
+  version/rollback et document-pack avec correction bloquante. Le replay de
+  toutes ces mutations depuis les contrôles navigateur reste nécessaire avant
+  l'acceptation frontend finale.

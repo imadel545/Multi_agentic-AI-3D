@@ -50,8 +50,8 @@ export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): Cam
     10
   );
   const radius = Math.max(height, horizontal);
-  const distance = fitDistance * 1.18;
-  const direction = new Vector3(0.72, 0.42, 0.88).normalize();
+  const distance = fitDistance * 1.08;
+  const direction = new Vector3(0.68, 0.28, 0.88).normalize();
   const target = new Vector3(center.x, box.min.y + height * 0.52, center.z);
   const position = target.clone().add(direction.multiplyScalar(distance));
 

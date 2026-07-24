@@ -11,6 +11,66 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}) {
 }
 
 describe("TelecomStudioApi", () => {
+  it("loads the real quarantined asset-library summary", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        status: "catalogued_quarantined",
+        schema_version: "1.0.0",
+        catalog_available: true,
+        file_count: 11974,
+        generation_eligible_count: 0,
+        limitations: ["Licence à vérifier."]
+      })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const result = await client.assetLibrarySummary();
+
+    expect(result.catalog_available).toBe(true);
+    expect(result.generation_eligible_count).toBe(0);
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/assets/library/summary", "http://127.0.0.1:8000")
+    );
+  });
+
+  it("searches the real asset-library catalog with an encoded query", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        query: "pylône Orange 30 m",
+        filters: {},
+        result_count: 1,
+        results: [{
+          file_id: "lib_tower",
+          relative_path: "3D/Pylone/Orange/Orange_Pylone_30m_Galva.dwg",
+          extension: "dwg",
+          size_bytes: 1024,
+          claimed_dimension: "3d",
+          category: "Pylone",
+          duplicate_of: null,
+          license_status: "unknown_requires_review",
+          qualification_status: "quarantined_unverified",
+          conversion_status: "not_attempted",
+          generation_eligible: false,
+          reference_preview_file_ids: ["lib_preview"]
+        }],
+        selection_policy: "metadata_retrieval_only",
+        generation_eligible: false,
+        next_action: "Qualifier la licence et la géométrie."
+      })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const result = await client.searchAssetLibrary("pylône Orange 30 m");
+
+    expect(result.results[0]?.reference_preview_file_ids).toEqual(["lib_preview"]);
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL(
+        "/assets/library/search?q=pyl%C3%B4ne+Orange+30+m&limit=12",
+        "http://127.0.0.1:8000"
+      )
+    );
+  });
+
   it("posts designs to the existing /designs contract", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ workflow_id: "wf_1", status: "pending" }));
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
