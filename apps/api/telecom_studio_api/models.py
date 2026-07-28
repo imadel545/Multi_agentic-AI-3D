@@ -25,6 +25,15 @@ class CreateDesignRequest(BaseModel):
             raise ValueError(
                 "confirmed_requirements and confirmed_requirements_hash must be provided together"
             )
+        if (
+            self.confirmed_requirements is not None
+            and self.confirmed_requirements.requires_confirmation
+        ):
+            fields = ", ".join(self.confirmed_requirements.confirmation_fields)
+            raise ValueError(
+                "confirmed_requirements contains unresolved input conflicts"
+                + (f": {fields}" if fields else "")
+            )
         return self
 
 
@@ -542,6 +551,8 @@ class StudioSummary(BaseModel):
     rag_reranker_provider: str | None = None
     rag_reranker_model: str | None = None
     rag_reranker_degraded_reason: str | None = None
+    rag_operational_status: str | None = None
+    rag_last_operation: str | None = None
     rag_reindex_url: str | None = None
     memory_status: str | None = None
     memory_backend: str | None = None
@@ -549,6 +560,8 @@ class StudioSummary(BaseModel):
     design_memory_count: int = 0
     document_pack_memory_count: int = 0
     document_pack_issue_memory_count: int = 0
+    memory_vector_status: str | None = None
+    memory_vector_errors: list[str] = Field(default_factory=list)
     runtime_capabilities: RuntimeCapabilities | None = None
     unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     warnings: list[UserIssue] = Field(default_factory=list)

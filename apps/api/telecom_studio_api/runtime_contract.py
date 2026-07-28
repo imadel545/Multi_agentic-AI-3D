@@ -175,9 +175,12 @@ def memory_status(memory_service: Any | None) -> dict[str, Any]:
             "design_memory_count": 0,
             "document_pack_memory_count": 0,
             "document_pack_issue_memory_count": 0,
+            "memory_vector_status": "disabled",
+            "memory_vector_errors": [],
         }
     try:
         stats = memory_service.stats()
+        index_health = memory_service.index_health()
     except Exception as exc:  # pragma: no cover - defensive status surface
         return {
             "memory_status": f"degraded:{type(exc).__name__}",
@@ -186,12 +189,29 @@ def memory_status(memory_service: Any | None) -> dict[str, Any]:
             "design_memory_count": 0,
             "document_pack_memory_count": 0,
             "document_pack_issue_memory_count": 0,
+            "memory_vector_status": f"degraded:{type(exc).__name__}",
+            "memory_vector_errors": [],
         }
+    latest = index_health.get("latest_index_result") or {}
+    compatibility = index_health.get("vector_compatibility") or {}
+    latest_status = str(latest.get("status") or "not_indexed")
+    index_failed = latest_status == "failed"
+    migration_pending = bool(compatibility.get("degraded"))
+    vector_status = "failed" if index_failed else str(compatibility.get("status") or latest_status)
+    vector_errors = ["vector_index_write_failed"] if latest.get("errors") else []
+    if index_failed:
+        status = "degraded:vector_index"
+    elif migration_pending:
+        status = "degraded:vector_migration_pending"
+    else:
+        status = "available"
     return {
-        "memory_status": "available",
+        "memory_status": status,
         "memory_backend": "sqlite",
         "workflow_memory_count": int(stats.get("workflow_memory_count") or 0),
         "design_memory_count": int(stats.get("design_memory_count") or 0),
         "document_pack_memory_count": int(stats.get("document_pack_memory_count") or 0),
         "document_pack_issue_memory_count": int(stats.get("document_pack_issue_memory_count") or 0),
+        "memory_vector_status": vector_status,
+        "memory_vector_errors": vector_errors,
     }

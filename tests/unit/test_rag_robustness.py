@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from qdrant_client.models import Distance, VectorParams
 
 from core.rag.embeddings import NvidiaEmbeddingProvider
 from core.rag.models import RagDocument, RagSearchResult
@@ -48,6 +49,70 @@ def _result(index: int, text: str | None = None) -> RagSearchResult:
         text=text if text is not None else f"passage {index}",
         payload={},
     )
+
+
+def test_runtime_memory_dimension_migration_is_versioned_and_non_destructive(
+    tmp_path: Path,
+) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    service.client.create_collection(
+        collection_name="design_memory",
+        vectors_config=VectorParams(size=4, distance=Distance.COSINE),
+    )
+
+    service.upsert_runtime_document(
+        collection="design_memory",
+        doc_id="memory:design:wf_new",
+        text="design 5G quatre secteurs",
+        payload={"workflow_id": "wf_new"},
+    )
+
+    compatibility = service.runtime_collection_compatibility()
+    active = compatibility["collections"]["design_memory"]["active_collection"]
+    assert active == "design_memory__test_batched_d8"
+    assert service.client.collection_exists("design_memory")
+    assert service.client.get_collection("design_memory").config.params.vectors.size == 4
+    assert service.client.get_collection(active).config.params.vectors.size == 8
+    assert compatibility["status"] == "compatible"
+    results = service.search(
+        "quatre secteurs",
+        collection="design_memory",
+        limit=1,
+    )
+    assert [result.doc_id for result in results] == ["memory:design:wf_new"]
+    service.close()
+
+
+def test_rag_health_records_real_embedding_failure(tmp_path: Path) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    provider.fail_batch = True
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    assert service.health_snapshot()["status"] == "unverified"
+
+    with pytest.raises(RuntimeError, match="simulated embedding failure"):
+        service.upsert_runtime_document(
+            collection="design_memory",
+            doc_id="memory:design:failed",
+            text="failure",
+            payload={},
+        )
+
+    health = service.health_snapshot()
+    assert health["status"] == "failed"
+    assert health["operation"] == "runtime_upsert:design_memory"
+    assert "simulated embedding failure" in str(health["error"])
+    service.close()
 
 
 def test_nvidia_embedding_constructor_is_network_free_and_batches(monkeypatch) -> None:

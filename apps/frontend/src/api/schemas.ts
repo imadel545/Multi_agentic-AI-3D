@@ -103,6 +103,46 @@ const TowerCharacteristicsSchema = UnknownRecord.extend({
   material: z.string().nullish()
 });
 
+const RequirementCandidateEvidenceSchema = UnknownRecord.extend({
+  value: z.unknown(),
+  source: z.enum([
+    "user_text",
+    "llm",
+    "deterministic",
+    "default",
+    "document",
+    "user_confirmation",
+    "repair"
+  ]),
+  source_text: z.string().nullish(),
+  mechanism: z.string(),
+  confidence: z.number().min(0).max(1),
+  selected: z.boolean().default(false),
+  rationale: z.string().nullish()
+});
+
+const RequirementFieldEvidenceSchema = UnknownRecord.extend({
+  field: z.string(),
+  selected_value: z.unknown(),
+  selected_source: RequirementCandidateEvidenceSchema.shape.source,
+  confidence: z.number().min(0).max(1),
+  explicit: z.boolean(),
+  defaulted: z.boolean(),
+  candidates: z.array(RequirementCandidateEvidenceSchema).default([]),
+  conflict: z.boolean().default(false),
+  requires_confirmation: z.boolean().default(false),
+  rationale: z.string()
+});
+
+const RequirementConflictSchema = UnknownRecord.extend({
+  field: z.string(),
+  candidate_values: z.array(z.unknown()).min(2),
+  source_texts: z.array(z.string()).default([]),
+  reason: z.string(),
+  resolved: z.boolean().default(false),
+  resolution: z.string().nullish()
+});
+
 export const RequirementSpecSchema = publicSchema(
   UnknownRecord.extend({
     network_type: z.string(),
@@ -125,7 +165,12 @@ export const RequirementSpecSchema = publicSchema(
     include_gps_antenna: z.boolean(),
     detail_level: z.string(),
     warnings: z.array(RequirementWarningSchema).default([]),
-    repair_events: z.array(UnknownRecord).default([])
+    repair_events: z.array(UnknownRecord).default([]),
+    field_evidence: z.record(z.string(), RequirementFieldEvidenceSchema).default({}),
+    conflicts: z.array(RequirementConflictSchema).default([]),
+    assumptions: z.array(z.string()).default([]),
+    requires_confirmation: z.boolean().default(false),
+    confirmation_fields: z.array(z.string()).default([])
   })
 );
 
@@ -495,6 +540,7 @@ export const DocumentPackSummarySchema = publicSchema(
     document_count: z.number().default(0),
     high_priority_count: z.number().default(0),
     missing_blocking_count: z.number().default(0),
+    blocking_fields: z.array(z.string()).default([]),
     conflict_count: z.number().default(0),
     can_generate_design: z.boolean().default(false),
     qa_score: z.number().nullish(),

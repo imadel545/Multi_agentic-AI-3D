@@ -38,7 +38,13 @@ frontend.
 
 ## Backend and agents
 
-- Deterministic extraction is fragile on complex requirements.
+- Deterministic extraction now preserves typed evidence for every field and
+  handles numeric/word sector lists in French and English, contradictions, and
+  explicit late corrections. It remains rule-based and cannot understand every
+  free-form telecom brief.
+- Unresolved explicit contradictions block generation and require the user to
+  correct the prompt; GPT-OSS may propose a candidate but cannot silently become
+  the authority over conflicting source evidence.
 - Groq improves extraction only when a real key is configured.
 - LLM state is visible through `extraction_provider`, `llm_provider`,
   `llm_available`, `llm_fallback_used`, and `llm_fallback_reason`; fallback is
@@ -54,13 +60,18 @@ frontend.
 ## RAG and memory
 
 - NVIDIA API `baai/bge-m3` is the product provider.
+- A configured provider is reported as `configured_unverified` until a real
+  operation succeeds. The local 2026-07-28 probe returned NVIDIA HTTP 500; this
+  environment is therefore not currently proven operational even though the
+  key and model are configured.
 - The product path does not silently load a local embedding model. Deterministic
   hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
   hash is not production quality.
 - Static RAG docs/manifests are checked against a persisted index identity and
-  reindexed automatically when they change. Runtime memory collections remain
-  local-first and can still require operational cleanup if Qdrant storage is
-  corrupted or locked by another process.
+  reindexed automatically when they change. Runtime memory collections with a
+  legacy vector dimension are never reused silently: old collections are
+  preserved and new writes use a provider/dimension-versioned collection.
+  `/studio/summary` exposes migration/degradation state.
 - Reranker product path is NVIDIA API, but it is fail-open. If unavailable,
   vector order is used and `rag_reranker_degraded_reason` must be displayed.
   Local reranker is an explicit developer override, not product default.

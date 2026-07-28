@@ -30,6 +30,8 @@ class MemoryService:
         self.db_path = db_path
         self.rag_service = rag_service
         self._last_index_result = threading.local()
+        self._index_result_lock = threading.Lock()
+        self._latest_index_result = MemoryIndexResult(status="not_indexed")
         self.last_index_result = MemoryIndexResult(status="not_indexed")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -45,6 +47,19 @@ class MemoryService:
     @last_index_result.setter
     def last_index_result(self, value: MemoryIndexResult) -> None:
         self._last_index_result.value = value
+        with self._index_result_lock:
+            self._latest_index_result = value
+
+    def index_health(self) -> dict:
+        with self._index_result_lock:
+            latest = self._latest_index_result.model_copy(deep=True)
+        compatibility = None
+        if self.rag_service is not None:
+            compatibility = self.rag_service.runtime_collection_compatibility()
+        return {
+            "latest_index_result": latest.model_dump(),
+            "vector_compatibility": compatibility,
+        }
 
     def recall(self, requirements: RequirementSpec, limit: int = 5) -> MemoryRecallResult:
         with self._connect() as conn:

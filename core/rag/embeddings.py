@@ -205,6 +205,7 @@ def build_embedding_provider(
     model_name: str,
     *,
     api_key: str | None = None,
+    strict_quality: bool | None = None,
 ) -> EmbeddingProvider:
     """Build the embedding provider.
 
@@ -240,7 +241,8 @@ def build_embedding_provider(
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
             return provider
         except Exception as exc:
-            if _strict_quality_mode():
+            strict = _strict_quality_mode() if strict_quality is None else strict_quality
+            if strict:
                 raise
             logger.warning(
                 "NVIDIA API embedding provider failed (%s). Falling back to deterministic hash "

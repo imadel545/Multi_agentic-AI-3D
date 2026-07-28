@@ -44,6 +44,7 @@ def test_memory_index_diagnostics_are_isolated_per_thread(tmp_path: Path) -> Non
     assert all(not thread.is_alive() for thread in threads)
     assert observed == {"first": "first", "second": "second"}
     assert service.last_index_result.status == "not_indexed"
+    assert service.index_health()["latest_index_result"]["status"] in {"first", "second"}
 
 
 def test_memory_writeback(tmp_path: Path) -> None:

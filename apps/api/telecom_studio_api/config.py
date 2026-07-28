@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     checkpoint_retention_threads: int = Field(default=16, ge=0, le=4096)
     embedding_provider: str = "nvidia"
     embedding_model: str = "baai/bge-m3"
+    embedding_strict_quality: bool = False
     nvidia_api_key: str | None = Field(default=None, repr=False)
     reranker_provider: str = "nvidia"
     reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2"

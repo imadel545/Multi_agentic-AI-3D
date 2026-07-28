@@ -85,6 +85,8 @@ class ProductService:
             "rag_reranker_provider": rag["reranker_provider"],
             "rag_reranker_model": rag["reranker_model"],
             "rag_reranker_degraded_reason": rag["reranker_degraded_reason"],
+            "rag_operational_status": rag["operational_status"],
+            "rag_last_operation": rag["last_operation"],
             "rag_reindex_url": "/rag/reindex",
             **memory,
             "runtime_capabilities": runtime_capabilities(),
@@ -383,7 +385,10 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "reranker_provider": None,
             "reranker_model": None,
             "reranker_degraded_reason": None,
+            "operational_status": "disabled",
+            "last_operation": None,
         }
+    health = rag_service.health_snapshot()
     provider = getattr(getattr(rag_service, "embedding_provider", None), "name", None)
     if not provider:
         return {
@@ -395,9 +400,18 @@ def _rag_summary(rag_service: Any | None) -> dict:
             "reranker_provider": _rag_reranker_provider(rag_service),
             "reranker_model": _rag_reranker_model(rag_service),
             "reranker_degraded_reason": _rag_reranker_degraded_reason(rag_service),
+            "operational_status": str(health.get("status") or "unknown"),
+            "last_operation": health.get("operation"),
         }
     provider_name = str(provider)
-    if provider_name.startswith("nvidia:"):
+    operational_status = str(health.get("status") or "unverified")
+    if operational_status == "failed":
+        status = "configured_but_last_operation_failed"
+        degraded = True
+    elif operational_status != "operational":
+        status = "configured_unverified"
+        degraded = True
+    elif provider_name.startswith("nvidia:"):
         status = "primary_nvidia_bge_m3"
         degraded = False
     elif provider_name.startswith("sentence-transformers:"):
@@ -418,6 +432,8 @@ def _rag_summary(rag_service: Any | None) -> dict:
         "reranker_provider": _rag_reranker_provider(rag_service),
         "reranker_model": _rag_reranker_model(rag_service),
         "reranker_degraded_reason": _rag_reranker_degraded_reason(rag_service),
+        "operational_status": operational_status,
+        "last_operation": health.get("operation"),
     }
 
 
@@ -1507,15 +1523,38 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
         )
     if rag and rag.get("degraded"):
         status = str(rag.get("status") or "unknown")
+        if status == "configured_unverified":
+            title = "RAG configuré mais non vérifié"
+            impact = (
+                "La configuration NVIDIA est présente, mais aucune opération réelle réussie "
+                "ne prouve encore la disponibilité de la recherche."
+            )
+            recommended_action = (
+                "Lancer une recherche de contrôle ou /rag/reindex et vérifier le résultat."
+            )
+        elif status == "configured_but_last_operation_failed":
+            title = "RAG indisponible lors du dernier appel"
+            impact = (
+                "La dernière opération d'embedding ou de recherche a échoué; le contexte RAG "
+                "n'est pas utilisable pour cette opération."
+            )
+            recommended_action = (
+                "Vérifier la disponibilité du fournisseur NVIDIA, puis relancer une recherche "
+                "de contrôle avant de réindexer."
+            )
+        else:
+            title = "RAG en mode dégradé"
+            impact = "La recherche de contexte n'utilise pas l'API NVIDIA BGE-M3 primaire."
+            recommended_action = (
+                "Vérifier le fournisseur d'embeddings configuré. Le mode déterministe reste "
+                "réservé aux tests et au bootstrap."
+            )
         warnings.append(
             {
-                "title": "RAG en mode dégradé",
+                "title": title,
                 "severity": "warning",
-                "impact": ("La recherche de contexte n'utilise pas l'API NVIDIA BGE-M3 primaire."),
-                "recommended_action": (
-                    "Configurer NVIDIA_API_KEY puis relancer /rag/reindex. Utilisez le mode "
-                    "déterministe uniquement pour les tests/bootstrap."
-                ),
+                "impact": impact,
+                "recommended_action": recommended_action,
                 "technical_code": f"STUDIO_RAG_DEGRADED:{status}",
             }
         )

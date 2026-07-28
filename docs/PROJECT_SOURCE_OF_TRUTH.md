@@ -35,6 +35,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   remains service-level.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
+- `RequirementSpec` carries typed field evidence, candidate values, assumptions,
+  conflicts, and confirmation fields. Explicit unresolved contradictions block
+  `POST /designs`; a late value is accepted automatically only when the prompt
+  marks it as an explicit correction.
 - GPT-OSS is the bounded decision layer for ambiguous extraction, controlled
   RAG candidate arbitration, and edit-patch interpretation. It may revise a
   typed proposal, but it cannot bypass `RequirementSpec`, `SceneSpec`, telecom
@@ -45,6 +49,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `llm_fallback_reason`; the frontend must display fallback/degraded status
   instead of guessing.
 - Primary RAG: NVIDIA API `baai/bge-m3`.
+- Provider configuration is not runtime proof. `/studio/summary` reports
+  `configured_unverified` until a real embedding/search succeeds,
+  `primary_nvidia_bge_m3` only after success, and
+  `configured_but_last_operation_failed` after an operational failure.
 - RAG fallback policy: no automatic local embedding model in the product path.
   Deterministic hash is allowed only for tests/bootstrap or explicit degraded
   mode; it is not product-quality retrieval.
@@ -54,10 +62,14 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `/viewer-bundle`; it lists retrieved sources, controlled candidate hints,
   reranker status, and limitations.
 - Memory: local SQLite with writeback; optional Qdrant for some summaries.
+  Incompatible legacy runtime collections are preserved and new vectors are
+  routed to provider/dimension-versioned collections.
 - Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
   conflicts, corrections, QA. A missing or tower-incompatible foundation blocks
   generation before a workflow is created; the user must confirm a supported
-  foundation instead of receiving a predictably failed Blender workflow.
+  foundation instead of receiving a predictably failed Blender workflow. The
+  summary, QA response, generation gate, and correction UI consume the same
+  blocking-field list.
 - Blender: real generation when Blender is found; Blender fallback is rejected
   by default for quality (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
 

@@ -5,6 +5,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
+from apps.api.telecom_studio_api.product import _studio_warnings
+from apps.api.telecom_studio_api.runtime_contract import memory_status
 
 
 def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
@@ -36,6 +38,8 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["rag_embedding_provider"]
         assert summary["rag_status"] in {
             "primary_nvidia_bge_m3",
+            "configured_unverified",
+            "configured_but_last_operation_failed",
             "local_sentence_transformers_explicit",
             "deterministic_hash_fallback",
             "custom_provider",
@@ -58,17 +62,87 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         }
         assert "rag_reranker_model" in summary
         assert "rag_reranker_degraded_reason" in summary
+        assert summary["rag_operational_status"] in {
+            "unverified",
+            "operational",
+            "failed",
+        }
+        assert "rag_last_operation" in summary
         assert summary["rag_reindex_url"] == "/rag/reindex"
         assert summary["memory_status"] in {"available", "disabled"} or summary[
             "memory_status"
         ].startswith("degraded:")
         assert isinstance(summary["workflow_memory_count"], int)
+        assert "memory_vector_status" in summary
+        assert isinstance(summary["memory_vector_errors"], list)
         assert summary["runtime_capabilities"]["streaming_transport"] == "push_sse"
         assert summary["runtime_capabilities"]["websocket_runtime"] is False
         assert any(action["action"] == "cancel" for action in summary["unsupported_actions"])
         assert isinstance(summary["warnings"], list)
     finally:
         workflow_service.outputs_dir = original_outputs
+
+
+class _MemoryStatusProbe:
+    def __init__(self, latest: dict, compatibility: dict) -> None:
+        self.latest = latest
+        self.compatibility = compatibility
+
+    def stats(self) -> dict:
+        return {}
+
+    def index_health(self) -> dict:
+        return {
+            "latest_index_result": self.latest,
+            "vector_compatibility": self.compatibility,
+        }
+
+
+def test_memory_status_distinguishes_migration_from_index_failure() -> None:
+    migration = memory_status(
+        _MemoryStatusProbe(
+            {"status": "not_indexed", "errors": []},
+            {"status": "migration_pending", "degraded": True},
+        )
+    )
+    assert migration["memory_status"] == "degraded:vector_migration_pending"
+    assert migration["memory_vector_status"] == "migration_pending"
+    assert migration["memory_vector_errors"] == []
+
+    failure = memory_status(
+        _MemoryStatusProbe(
+            {"status": "failed", "errors": ["provider_failure"]},
+            {"status": "compatible", "degraded": False},
+        )
+    )
+    assert failure["memory_status"] == "degraded:vector_index"
+    assert failure["memory_vector_status"] == "failed"
+    assert failure["memory_vector_errors"] == ["vector_index_write_failed"]
+
+
+def test_studio_warnings_distinguish_unverified_and_failed_rag() -> None:
+    inventory = {"entries": [], "missing_file_count": 0}
+    unverified = _studio_warnings(
+        inventory,
+        {
+            "degraded": True,
+            "status": "configured_unverified",
+            "reranker_degraded_reason": None,
+        },
+    )
+    assert unverified[0]["title"] == "RAG configuré mais non vérifié"
+    assert "recherche de contrôle" in unverified[0]["recommended_action"]
+
+    failed = _studio_warnings(
+        inventory,
+        {
+            "degraded": True,
+            "status": "configured_but_last_operation_failed",
+            "reranker_degraded_reason": None,
+        },
+    )
+    assert failed[0]["title"] == "RAG indisponible lors du dernier appel"
+    assert "Configurer NVIDIA_API_KEY" not in failed[0]["recommended_action"]
 
 
 def test_user_summary_returns_human_readable_issues(tmp_path: Path) -> None:

@@ -177,6 +177,28 @@ def test_groq_client_cannot_forge_default_warning_authority(monkeypatch) -> None
     assert not any(warning.code == "DEFAULT_BEAMWIDTH_USED" for warning in spec.warnings)
 
 
+def test_groq_client_does_not_publish_free_form_llm_warning_text(monkeypatch) -> None:
+    def post(url, headers, json, timeout):
+        payload = json_module.loads(_requirements_content())
+        payload["warnings"] = [
+            {
+                "code": "MODEL_CONFLICT_COMMENT",
+                "message": "Raw model warning that must not reach the product UI.",
+            }
+        ]
+        return _response(url, json_module.dumps(payload))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    spec = GroqStructuredClient(api_key="test-key").extract_requirements(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°.",
+        "high",
+    )
+
+    assert all("Raw model warning" not in warning.message for warning in spec.warnings)
+    assert not any(warning.code == "MODEL_CONFLICT_COMMENT" for warning in spec.warnings)
+
+
 def _response(url: str, content: str) -> httpx.Response:
     return httpx.Response(
         200,

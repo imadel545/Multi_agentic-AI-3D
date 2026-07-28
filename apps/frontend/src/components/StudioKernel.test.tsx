@@ -119,7 +119,12 @@ const parsedRequirements = {
     include_gps_antenna: true,
     detail_level: "high",
     warnings: [],
-    repair_events: []
+    repair_events: [],
+    field_evidence: {},
+    conflicts: [],
+    assumptions: [],
+    requires_confirmation: false,
+    confirmation_fields: []
   },
   requirements_hash: "a".repeat(64),
   warnings: [],
@@ -190,6 +195,44 @@ describe("studio kernel components", () => {
     expect(screen.queryByRole("button", { name: "Confirmer et générer" })).not.toBeInTheDocument();
   });
 
+  it("blocks generation and explains unresolved requirement conflicts", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={{
+          ...parsedRequirements,
+          requirements: {
+            ...parsedRequirements.requirements,
+            requires_confirmation: true,
+            confirmation_fields: ["tower_height_m"],
+            conflicts: [
+              {
+                field: "tower_height_m",
+                candidate_values: [30, 42],
+                source_texts: ["pylône de 30 m", "pylône de 42 m"],
+                reason: "Plusieurs valeurs explicites incompatibles ont été détectées.",
+                resolved: false,
+                resolution: null
+              }
+            ]
+          }
+        }}
+        onConfirm={onConfirm}
+        prompt="pylône 30 m puis 42 m"
+      />
+    );
+
+    const confirm = screen.getByRole("button", { name: "Confirmer et générer" });
+    expect(confirm).toBeDisabled();
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Confirmation impossible tant que les contradictions ne sont pas corrigées"
+    );
+    expect(screen.getByText(/Champs à préciser : hauteur du pylône/)).toBeInTheDocument();
+  });
+
   it("translates extraction safeguards into product language", () => {
     expect(
       humanRequirementWarning({
@@ -223,7 +266,12 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText(/Fallback utilisé: Groq timeout/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /L’analyse intelligente n’a pas répondu à temps; une extraction déterministe vérifiable a été utilisée/
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Groq timeout")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Confirmer et générer" })).toBeEnabled();
   });
 
@@ -269,6 +317,7 @@ describe("studio kernel components", () => {
             document_count: 2,
             high_priority_count: 1,
             missing_blocking_count: 1,
+            blocking_fields: ["radio.hba_m"],
             conflict_count: 0,
             can_generate_design: false,
             qa_score: 0.7,
@@ -383,6 +432,7 @@ describe("studio kernel components", () => {
           document_count: 2,
           high_priority_count: 1,
           missing_blocking_count: 1,
+          blocking_fields: ["radio.hba_m"],
           conflict_count: 0,
           can_generate_design: false,
           qa_score: 0.7,

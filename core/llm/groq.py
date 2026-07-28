@@ -5,7 +5,10 @@ import httpx
 from pydantic import ValidationError
 
 from core.contracts.common import WarningItem
-from core.contracts.requirements import RequirementSpec
+from core.contracts.requirements import (
+    RequirementCandidateEvidence,
+    RequirementSpec,
+)
 from core.contracts.tower import TowerCharacteristics
 from core.services.requirement_parser import parse_requirements_text
 
@@ -228,6 +231,7 @@ class GroqStructuredClient:
         raw, repaired_fields = _normalize_known_aliases(raw)
         raw, missing_fields = _restore_missing_baseline_fields(raw, baseline)
         repaired_fields.extend(missing_fields)
+        llm_candidate = dict(raw)
         raw, protected_fields = _protect_explicit_source_fields(
             raw,
             baseline,
@@ -246,6 +250,7 @@ class GroqStructuredClient:
             baseline,
             repaired_fields=repaired_fields,
             protected_fields=protected_fields,
+            llm_candidate=llm_candidate,
         )
 
     def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -324,6 +329,11 @@ def _protect_explicit_source_fields(
     for field, terms in _EXPLICIT_TEXT_TERMS_BY_FIELD.items():
         if any(term in normalized_text for term in terms):
             protected.add(field)
+    for field, evidence in baseline.field_evidence.items():
+        if evidence.explicit and not evidence.requires_confirmation:
+            protected.add(field)
+        elif evidence.defaulted:
+            protected.discard(field)
     if "network_type" in protected:
         protected.add("antenna_type")
     if "tower_type" in protected:
@@ -410,15 +420,12 @@ def _finalize_requirements(
     *,
     repaired_fields: list[str],
     protected_fields: list[str],
+    llm_candidate: dict[str, Any],
 ) -> RequirementSpec:
-    # LLM-authored DEFAULT_* warnings are authority-bearing: RAG uses them to
-    # decide whether a field may be changed. Only the deterministic baseline is
-    # allowed to issue those codes. LLM_* codes are likewise emitted locally.
-    warnings = [
-        warning
-        for warning in requirements.warnings
-        if not warning.code.startswith(("DEFAULT_", "LLM_"))
-    ]
+    # LLM-authored warning text is neither an authority signal nor a safe
+    # product message. Only deterministic baseline warnings and locally emitted
+    # LLM safeguard codes may cross the public contract.
+    warnings: list[WarningItem] = []
     for warning in baseline.warnings:
         fields = _BASELINE_WARNING_FIELDS.get(warning.code, ())
         if fields and not all(
@@ -438,7 +445,71 @@ def _finalize_requirements(
             continue
         seen.add(identity)
         unique.append(warning)
-    return requirements.model_copy(update={"warnings": unique})
+    return _merge_llm_provenance(
+        requirements.model_copy(update={"warnings": unique}),
+        baseline,
+        llm_candidate,
+    )
+
+
+def _merge_llm_provenance(
+    requirements: RequirementSpec,
+    baseline: RequirementSpec,
+    llm_candidate: dict[str, Any],
+) -> RequirementSpec:
+    field_evidence = dict(baseline.field_evidence)
+    for field, evidence in baseline.field_evidence.items():
+        if field not in llm_candidate or not hasattr(requirements, field):
+            continue
+        llm_value = llm_candidate[field]
+        selected_value = getattr(requirements, field)
+        if hasattr(selected_value, "model_dump"):
+            selected_value = selected_value.model_dump()
+        selected = llm_value == selected_value
+        candidates = [
+            candidate.model_copy(update={"selected": False if selected else candidate.selected})
+            for candidate in evidence.candidates
+        ]
+        candidates.append(
+            RequirementCandidateEvidence(
+                value=llm_value,
+                source="llm",
+                mechanism="groq_structured_extraction",
+                confidence=0.78,
+                selected=selected,
+                rationale=(
+                    "Valeur structurée proposée par Groq."
+                    if selected
+                    else "Proposition Groq rejetée par la provenance explicite ou la validation."
+                ),
+            )
+        )
+        if selected and llm_value != evidence.selected_value:
+            field_evidence[field] = evidence.model_copy(
+                update={
+                    "selected_value": llm_value,
+                    "selected_source": "llm",
+                    "confidence": 0.78,
+                    "explicit": False,
+                    "defaulted": False,
+                    "candidates": candidates,
+                    "rationale": (
+                        "Valeur Groq retenue car le texte ne contenait pas de valeur "
+                        "explicite contradictoire."
+                    ),
+                }
+            )
+        else:
+            field_evidence[field] = evidence.model_copy(update={"candidates": candidates})
+    return requirements.model_copy(
+        update={
+            "field_evidence": field_evidence,
+            "conflicts": baseline.conflicts,
+            "assumptions": baseline.assumptions,
+            "requires_confirmation": baseline.requires_confirmation,
+            "confirmation_fields": baseline.confirmation_fields,
+        }
+    )
 
 
 def _repaired_warning(repaired_fields: list[str]) -> WarningItem:

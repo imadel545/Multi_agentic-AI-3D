@@ -121,6 +121,7 @@ rag_embedding_provider = build_embedding_provider(
     settings.embedding_provider,
     settings.embedding_model,
     api_key=settings.resolved_nvidia_api_key,
+    strict_quality=settings.embedding_strict_quality,
 )
 rag_reranker = build_reranker(
     settings.reranker_model,

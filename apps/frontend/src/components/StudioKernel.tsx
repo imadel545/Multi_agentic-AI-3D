@@ -275,6 +275,11 @@ function RequirementsUnderstanding({
   }
   const warnings = uniqueRequirementWarnings([...analysis.warnings, ...requirements.warnings]);
   const confirmationLocked = submitted && !failedWorkflow;
+  const unresolvedConflicts = (requirements.conflicts ?? []).filter(
+    (conflict) => !conflict.resolved
+  );
+  const confirmationBlocked =
+    Boolean(requirements.requires_confirmation) || unresolvedConflicts.length > 0;
   return (
     <div className="understanding-card" aria-label="Compréhension de la demande">
       <span className="eyebrow">
@@ -299,7 +304,9 @@ function RequirementsUnderstanding({
       </small>
       {analysis.fallback_used ? (
         <p className="inline-alert">
-          <AlertTriangle size={15} aria-hidden="true" /> Fallback utilisé: {analysis.llm_fallback_reason ?? "raison non fournie"}
+          <AlertTriangle size={15} aria-hidden="true" /> {humanExtractionFallback(
+            analysis.llm_fallback_reason
+          )}
         </p>
       ) : null}
       {warnings.length ? (
@@ -312,9 +319,30 @@ function RequirementsUnderstanding({
       {analysis.errors.length ? (
         <List
           title="Incidents d’extraction signalés"
-          items={analysis.errors.map((item) => item.message)}
+          items={analysis.errors.map(humanExtractionError)}
           empty="Aucun incident."
         />
+      ) : null}
+      {confirmationBlocked ? (
+        <div className="inline-alert" role="alert">
+          <AlertTriangle size={15} aria-hidden="true" />
+          <div>
+            <strong>Confirmation impossible tant que les contradictions ne sont pas corrigées.</strong>
+            <ul>
+              {unresolvedConflicts.map((conflict, index) => (
+                <li key={`${conflict.field}-${index}`}>
+                  {humanRequirementField(conflict.field)} : {conflict.reason}
+                </li>
+              ))}
+            </ul>
+            {(requirements.confirmation_fields ?? []).length ? (
+              <small>
+                Champs à préciser :{" "}
+                {(requirements.confirmation_fields ?? []).map(humanRequirementField).join(", ")}
+              </small>
+            ) : null}
+          </div>
+        </div>
       ) : null}
       {confirmationLocked ? (
         <p className="confirmation-complete" role="status">
@@ -323,7 +351,7 @@ function RequirementsUnderstanding({
       ) : (
         <button
           className="primary-action"
-          disabled={submitting}
+          disabled={submitting || confirmationBlocked}
           onClick={onConfirm}
           type="button"
         >
@@ -438,10 +466,16 @@ function DocumentPackReviewPanel({
   const correctionFields = [...review.conflicts, ...review.missingFields].filter(
     (field, index, items) => items.findIndex((candidate) => candidate.field === field.field) === index
   );
+  const correctionFieldNames = Array.from(
+    new Set([
+      ...correctionFields.map((candidate) => candidate.field),
+      ...review.qa.blocking_issues
+    ])
+  );
   const [field, setField] = useState("");
   const [value, setValue] = useState("");
   const [reason, setReason] = useState("");
-  const selectedField = field || correctionFields[0]?.field || "";
+  const selectedField = field || correctionFieldNames[0] || "";
   const failedChecks = review.qa.checks.filter((check) => !check.passed);
   const usedDocuments = review.documents.filter((document) => document.used_for_design);
   const ignoredDocuments = review.documents.filter((document) => !document.used_for_design);
@@ -542,13 +576,13 @@ function DocumentPackReviewPanel({
           </ul>
         </details>
       ) : null}
-      {correctionFields.length ? (
+      {correctionFieldNames.length ? (
         <form className="revision-box" onSubmit={submitCorrection}>
           <label>
             Champ
             <select aria-label="Champ documentaire à corriger" onChange={(event) => setField(event.target.value)} value={selectedField}>
-              {correctionFields.map((item) => (
-                <option key={item.field} value={item.field}>{humanDocumentField(item.field)}</option>
+              {correctionFieldNames.map((name) => (
+                <option key={name} value={name}>{humanDocumentField(name)}</option>
               ))}
             </select>
           </label>
@@ -1602,6 +1636,40 @@ export function humanRequirementWarning(warning: { code: string; message: string
     return "Le système a sécurisé une proposition du LLM. Vérifiez les paramètres affichés avant génération.";
   }
   return warning.message;
+}
+
+function humanExtractionFallback(reason: string | null | undefined): string {
+  const normalized = (reason ?? "").toLowerCase();
+  if (normalized.includes("requested")) {
+    return "L’analyse déterministe a été demandée explicitement; vérifiez les hypothèses affichées.";
+  }
+  if (normalized.includes("timeout")) {
+    return "L’analyse intelligente n’a pas répondu à temps; une extraction déterministe vérifiable a été utilisée.";
+  }
+  if (normalized.includes("unavailable") || normalized.includes("disabled")) {
+    return "L’analyse intelligente n’est pas disponible; une extraction déterministe vérifiable a été utilisée.";
+  }
+  return "L’analyse intelligente n’a pas abouti; une extraction déterministe vérifiable a été utilisée.";
+}
+
+function humanExtractionError(error: { code: string; message: string }): string {
+  const normalized = `${error.code} ${error.message}`.toLowerCase();
+  if (normalized.includes("timeout")) {
+    return "Le service d’analyse intelligente n’a pas répondu dans le délai prévu.";
+  }
+  return "Le service d’analyse intelligente n’a pas pu valider cette extraction.";
+}
+
+function humanRequirementField(field: string): string {
+  return (
+    {
+      tower_height_m: "hauteur du pylône",
+      sector_count: "nombre de secteurs",
+      antenna_install_height_m: "hauteur d’installation des antennes",
+      azimuths_deg: "azimuts",
+      "sector_count/azimuths_deg": "nombre de secteurs et azimuts"
+    }[field] ?? field.replaceAll("_", " ")
+  );
 }
 
 function humanTowerType(towerType: string): string {

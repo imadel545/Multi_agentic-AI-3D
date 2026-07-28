@@ -114,7 +114,7 @@ export function openWorkflowEventStream(
       ) {
         callbacks.onError(
           new Error(
-            `SSE event gap detected (${lastSequence} -> ${normalized.sequence}); polling reconciliation is active.`
+            "Une interruption du flux temps réel a été détectée; la synchronisation de secours est active."
           )
         );
       }
@@ -146,7 +146,9 @@ export function openWorkflowEventStream(
       return;
     }
     consecutiveErrors += 1;
-    callbacks.onError(new Error("SSE stream failed; polling fallback is active."));
+    callbacks.onError(
+      new Error("Le flux temps réel est momentanément indisponible; le suivi de secours est actif.")
+    );
     if (consecutiveErrors >= 3) {
       closed = true;
       source.close();

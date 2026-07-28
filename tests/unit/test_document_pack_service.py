@@ -62,6 +62,8 @@ def test_document_pack_does_not_invent_foundation_or_vendor_antenna(tmp_path: Pa
     mapping = ProjectDesignSpecMapper().map_to_requirements(spec)
 
     assert summary.can_generate_design is False
+    assert summary.missing_blocking_count >= 1
+    assert "foundation.foundation_type" in summary.blocking_fields
     assert mapping.status == "blocked"
     assert mapping.requirements is None
     assert "foundation.foundation_type" in mapping.blocking_fields
@@ -70,6 +72,9 @@ def test_document_pack_does_not_invent_foundation_or_vendor_antenna(tmp_path: Pa
     }
     assert field_statuses["foundation.foundation_type"] == "blocked_foundation"
     assert field_statuses["radio.antenna_model"] == "missing"
+    persisted_summary = service.get_summary(summary.pack_id)
+    assert persisted_summary["missing_blocking_count"] >= 1
+    assert "foundation.foundation_type" in persisted_summary["blocking_fields"]
 
 
 def test_document_pack_exposes_processing_capabilities_and_memory_summary(

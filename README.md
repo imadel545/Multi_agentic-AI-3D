@@ -11,7 +11,9 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 ## What it does
 
 - Takes a technical brief or a document pack (ZIP with PDF/DXF/images) as input.
-- Extracts structured requirements (`RequirementSpec`) or a provenance-backed design spec (`ProjectDesignSpec`).
+- Extracts structured requirements (`RequirementSpec`) with typed field evidence,
+  assumptions and conflict gates, or a provenance-backed design spec
+  (`ProjectDesignSpec`).
 - Plans a controlled 3D scene (`SceneSpec`).
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.

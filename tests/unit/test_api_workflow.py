@@ -482,6 +482,44 @@ def test_create_design_uses_exact_confirmed_requirements(monkeypatch) -> None:
     assert rejected.status_code == 422
 
 
+def test_create_design_rejects_unresolved_requirement_conflicts(monkeypatch) -> None:
+    requirements = workflow_service.parse_requirements(
+        "Créer un pylône de 30 m puis un pylône de 42 m avec 3 secteurs. Azimuts 0, 120, 240.",
+        detail_level="high",
+        use_llm=False,
+    )["requirements"]
+    assert requirements["requires_confirmation"] is True
+    called = False
+
+    def _unexpected_create(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("generation must not start for unresolved input")
+
+    monkeypatch.setattr(
+        workflow_service,
+        "create_design_from_requirements",
+        _unexpected_create,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/designs",
+        json={
+            "requirements_text": "Demande contradictoire.",
+            "confirmed_requirements": requirements,
+            "confirmed_requirements_hash": requirements_hash(
+                RequirementSpec.model_validate(requirements)
+            ),
+            "options": {"detail_level": "high"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "unresolved input conflicts" in response.text
+    assert called is False
+
+
 def test_startup_reconciliation_terminates_only_interrupted_workflows(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path

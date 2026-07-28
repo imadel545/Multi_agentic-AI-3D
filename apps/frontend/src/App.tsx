@@ -419,6 +419,12 @@ export default function App() {
       setAnalysisError("Analysez puis confirmez la demande actuelle avant de générer le design.");
       return;
     }
+    if (requirementsAnalysis.requirements.requires_confirmation) {
+      setAnalysisError(
+        "La demande contient des valeurs contradictoires. Corrigez les champs signalés puis relancez l’analyse."
+      );
+      return;
+    }
     if (
       submittedRequirementsHash === requirementsAnalysis.requirements_hash &&
       state.phase !== "failed"
@@ -587,7 +593,8 @@ export default function App() {
           runtimeMode = "sse";
         }
       } catch (error) {
-        streamNotice = `Streaming live indisponible: ${errorMessage(error)}`;
+        streamNotice =
+          "Le suivi temps réel n’a pas pu reprendre; la synchronisation de secours reste active.";
         setRevisionMessage(streamNotice);
       }
       dispatch({ type: "REVISION_STARTED", runtimeMode });
@@ -595,7 +602,14 @@ export default function App() {
         edit_prompt: revisionPrompt
       });
       setRevisionMessage(
-        [result.message ?? `Édition ${result.status}`, streamNotice].filter(Boolean).join(" · ")
+        [
+          result.status === "applied"
+            ? "Modification appliquée et revalidée."
+            : "La modification n’a pas été appliquée; consultez les alertes de validation.",
+          streamNotice
+        ]
+          .filter(Boolean)
+          .join(" · ")
       );
       if (result.status !== "applied") {
         dispatch({
@@ -605,6 +619,9 @@ export default function App() {
         return;
       }
       setRevisionPrompt("");
+      setRequirementsAnalysis(null);
+      setAnalyzedPrompt(null);
+      setSubmittedRequirementsHash(null);
       await loadTerminalBundle(workflowId);
     } catch (error) {
       setRevisionMessage(errorMessage(error));

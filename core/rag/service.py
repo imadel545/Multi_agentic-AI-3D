@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -109,6 +110,11 @@ class RagService:
         self._reranker_lock = threading.Lock()
         self._cache_lock = threading.Lock()
         self._runtime_collection_lock = threading.Lock()
+        self._health_lock = threading.Lock()
+        self._last_operation_status = "unverified"
+        self._last_operation: str | None = None
+        self._last_error: str | None = None
+        self._last_success_at: float | None = None
         self._reindex_lock = threading.Lock()
         self._reindex_flight: _ReindexFlight | None = None
         self._collection_condition = threading.Condition()
@@ -166,12 +172,14 @@ class RagService:
         try:
             report = self._reindex_once()
         except BaseException as exc:
+            self._record_failure("reindex", exc)
             flight.error = exc
             flight.completed.set()
             raise
 
         flight.report = report
         flight.completed.set()
+        self._record_success("reindex")
         return report
 
     def _reindex_once(self) -> RagIndexReport:
@@ -244,8 +252,12 @@ class RagService:
         collection: str | None = None,
         filters: dict[str, str | int | float | bool | None] | None = None,
     ) -> list[RagSearchResult]:
-        if collection not in RUNTIME_MEMORY_COLLECTIONS:
-            self._ensure_static_index_current()
+        try:
+            if collection not in RUNTIME_MEMORY_COLLECTIONS:
+                self._ensure_static_index_current()
+        except Exception as exc:
+            self._record_failure("search:index", exc)
+            raise
         collections = [collection] if collection else RAG_COLLECTIONS
         cacheable = collection not in RUNTIME_MEMORY_COLLECTIONS
         query_hash = ""
@@ -263,13 +275,19 @@ class RagService:
             if cached is not None:
                 self._restore_rerank_diagnostics(cached.diagnostics)
                 return cached.results
-        vector = _embed_query(self.embedding_provider, query)
+        try:
+            vector = _embed_query(self.embedding_provider, query)
+        except Exception as exc:
+            self._record_failure("search:embedding", exc)
+            raise
         query_tokens = _tokenize(query)
         results: list[RagSearchResult] = []
         static_collections = [name for name in collections if name in RAG_COLLECTIONS]
         with self._static_collection_snapshot(static_collections) as physical_names:
             for collection_name in collections:
                 physical_name = physical_names.get(collection_name, collection_name)
+                if collection_name in RUNTIME_MEMORY_COLLECTIONS:
+                    physical_name = self._runtime_collection_name(collection_name)
                 if not self.client.collection_exists(physical_name):
                     continue
                 try:
@@ -282,6 +300,7 @@ class RagService:
                     )
                 except ValueError as exc:
                     if _is_vector_dimension_mismatch(exc):
+                        self._record_failure("search:qdrant", exc)
                         raise RagIndexCompatibilityError(
                             "RAG index vector dimension is incompatible with the active "
                             f"embedding provider ({self.embedding_provider.name}, "
@@ -309,6 +328,7 @@ class RagService:
                     query_hash,
                     _CachedRagSearch(results=reranked, diagnostics=diagnostics),
                 )
+        self._record_success("search")
         return reranked
 
     def cache_stats(self) -> dict[str, int]:
@@ -334,27 +354,97 @@ class RagService:
     ) -> None:
         if collection not in RUNTIME_MEMORY_COLLECTIONS:
             raise ValueError(f"unsupported runtime collection: {collection}")
-        with self._runtime_collection_lock:
-            if not self.client.collection_exists(collection):
-                self.client.create_collection(
-                    collection_name=collection,
-                    vectors_config=VectorParams(
-                        size=self.embedding_provider.dimensions,
-                        distance=Distance.COSINE,
-                    ),
-                )
-        document = RagDocument(
-            doc_id=doc_id,
-            collection=collection,
-            text=text,
-            payload=payload,
-        )
-        with self._cache_lock:
-            self.query_cache.clear()
-        self.client.upsert(
-            collection_name=collection,
-            points=[self._point_for_document(document)],
-        )
+        physical_collection = self._runtime_collection_name(collection)
+        try:
+            with self._runtime_collection_lock:
+                if not self.client.collection_exists(physical_collection):
+                    self.client.create_collection(
+                        collection_name=physical_collection,
+                        vectors_config=VectorParams(
+                            size=self.embedding_provider.dimensions,
+                            distance=Distance.COSINE,
+                        ),
+                    )
+            document = RagDocument(
+                doc_id=doc_id,
+                collection=collection,
+                text=text,
+                payload=payload,
+            )
+            with self._cache_lock:
+                self.query_cache.clear()
+            self.client.upsert(
+                collection_name=physical_collection,
+                points=[self._point_for_document(document)],
+            )
+        except Exception as exc:
+            self._record_failure(f"runtime_upsert:{collection}", exc)
+            raise
+        self._record_success(f"runtime_upsert:{collection}")
+
+    def health_snapshot(self) -> dict[str, object]:
+        with self._health_lock:
+            return {
+                "status": self._last_operation_status,
+                "operation": self._last_operation,
+                "error": self._last_error,
+                "last_success_at": self._last_success_at,
+                "embedding_provider": self.embedding_provider.name,
+                "embedding_dimensions": self.embedding_provider.dimensions,
+            }
+
+    def runtime_collection_compatibility(self) -> dict[str, object]:
+        collections: dict[str, dict[str, object]] = {}
+        degraded = False
+        for logical_name in RUNTIME_MEMORY_COLLECTIONS:
+            active_name = self._runtime_collection_name(logical_name)
+            active_exists = self.client.collection_exists(active_name)
+            legacy_dimensions = self._collection_vector_size(logical_name)
+            legacy_incompatible = (
+                legacy_dimensions is not None
+                and legacy_dimensions != self.embedding_provider.dimensions
+            )
+            degraded = degraded or legacy_incompatible and not active_exists
+            collections[logical_name] = {
+                "active_collection": active_name,
+                "active_exists": active_exists,
+                "expected_dimensions": self.embedding_provider.dimensions,
+                "legacy_dimensions": legacy_dimensions,
+                "legacy_incompatible": legacy_incompatible,
+                "legacy_preserved": legacy_incompatible,
+            }
+        return {
+            "status": "migration_pending" if degraded else "compatible",
+            "degraded": degraded,
+            "collections": collections,
+        }
+
+    def _runtime_collection_name(self, collection: str) -> str:
+        current_dimensions = self._collection_vector_size(collection)
+        if current_dimensions in {None, self.embedding_provider.dimensions}:
+            return collection
+        provider_slug = re.sub(r"[^a-z0-9]+", "_", self.embedding_provider.name.lower()).strip("_")
+        return f"{collection}__{provider_slug}_d{self.embedding_provider.dimensions}"
+
+    def _collection_vector_size(self, collection: str) -> int | None:
+        if not self.client.collection_exists(collection):
+            return None
+        vectors = self.client.get_collection(collection).config.params.vectors
+        size = getattr(vectors, "size", None)
+        return int(size) if isinstance(size, int) else None
+
+    def _record_success(self, operation: str) -> None:
+        with self._health_lock:
+            self._last_operation_status = "operational"
+            self._last_operation = operation
+            self._last_error = None
+            self._last_success_at = time.time()
+
+    def _record_failure(self, operation: str, error: BaseException) -> None:
+        with self._health_lock:
+            self._last_operation_status = "failed"
+            self._last_operation = operation
+            self._last_error = f"{type(error).__name__}: {error}"
 
     @property
     def last_rerank_diagnostics(self) -> RerankDiagnostics | None:

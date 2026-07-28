@@ -1,8 +1,64 @@
+from typing import Any, Literal
+
 from pydantic import Field, field_validator, model_validator
 
 from core.contracts.common import DetailLevel, NetworkType, StrictModel, WarningItem
 from core.contracts.repair import RepairEvent
 from core.contracts.tower import TowerCharacteristics
+
+RequirementEvidenceSource = Literal[
+    "user_text",
+    "llm",
+    "deterministic",
+    "default",
+    "document",
+    "user_confirmation",
+    "repair",
+]
+
+
+class RequirementCandidateEvidence(StrictModel):
+    value: Any
+    source: RequirementEvidenceSource
+    source_text: str | None = None
+    mechanism: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+    span_start: int | None = Field(default=None, ge=0)
+    span_end: int | None = Field(default=None, ge=0)
+    selected: bool = False
+    rationale: str | None = None
+
+    @model_validator(mode="after")
+    def validate_span(self) -> "RequirementCandidateEvidence":
+        if (
+            self.span_start is not None
+            and self.span_end is not None
+            and self.span_end < self.span_start
+        ):
+            raise ValueError("span_end cannot be lower than span_start")
+        return self
+
+
+class RequirementFieldEvidence(StrictModel):
+    field: str = Field(min_length=1)
+    selected_value: Any
+    selected_source: RequirementEvidenceSource
+    confidence: float = Field(ge=0, le=1)
+    explicit: bool
+    defaulted: bool
+    candidates: list[RequirementCandidateEvidence] = Field(default_factory=list)
+    conflict: bool = False
+    requires_confirmation: bool = False
+    rationale: str = Field(min_length=1)
+
+
+class RequirementConflict(StrictModel):
+    field: str = Field(min_length=1)
+    candidate_values: list[Any] = Field(min_length=2)
+    source_texts: list[str] = Field(default_factory=list)
+    reason: str = Field(min_length=1)
+    resolved: bool = False
+    resolution: str | None = None
 
 
 class RequirementSpec(StrictModel):
@@ -36,6 +92,11 @@ class RequirementSpec(StrictModel):
     detail_level: DetailLevel = "high"
     warnings: list[WarningItem] = Field(default_factory=list)
     repair_events: list[RepairEvent] = Field(default_factory=list)
+    field_evidence: dict[str, RequirementFieldEvidence] = Field(default_factory=dict)
+    conflicts: list[RequirementConflict] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    requires_confirmation: bool = False
+    confirmation_fields: list[str] = Field(default_factory=list)
 
     @field_validator("azimuths_deg")
     @classmethod

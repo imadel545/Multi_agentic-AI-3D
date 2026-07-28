@@ -195,6 +195,21 @@ def test_auto_embedding_provider_can_bootstrap_with_hash(monkeypatch) -> None:
     assert isinstance(provider, HashEmbeddingProvider)
 
 
+def test_auto_embedding_provider_honors_explicit_strict_quality(monkeypatch) -> None:
+    class FailingNvidiaProvider:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("nvidia unavailable")
+
+    monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", FailingNvidiaProvider)
+
+    with pytest.raises(RuntimeError, match="nvidia unavailable"):
+        build_embedding_provider(
+            "auto",
+            "baai/bge-m3",
+            strict_quality=True,
+        )
+
+
 def test_reranker_defaults_to_passthrough() -> None:
     assert isinstance(build_reranker(), PassthroughReranker)
 

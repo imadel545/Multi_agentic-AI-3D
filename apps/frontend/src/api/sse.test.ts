@@ -78,7 +78,9 @@ describe("SSE adapter", () => {
     const source = FakeEventSource.instances.at(-1)!;
     source.onerror?.();
 
-    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("polling") }));
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("suivi de secours") })
+    );
     expect(source.closed).toBe(false);
     source.onerror?.();
     source.onerror?.();

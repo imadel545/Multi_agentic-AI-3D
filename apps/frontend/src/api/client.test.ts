@@ -160,7 +160,12 @@ describe("TelecomStudioApi", () => {
       include_gps_antenna: true,
       detail_level: "high",
       warnings: [],
-      repair_events: []
+      repair_events: [],
+      field_evidence: {},
+      conflicts: [],
+      assumptions: [],
+      requires_confirmation: false,
+      confirmation_fields: []
     };
 
     await client.createDesign({

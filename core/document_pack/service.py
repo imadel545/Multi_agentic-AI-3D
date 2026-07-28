@@ -362,7 +362,12 @@ class DocumentPackService:
         persisted = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
         qa_report, _mapping, ready = _evaluate_generation_readiness(self.get_spec(pack_id))
         return persisted.model_copy(
-            update={"can_generate_design": ready, "qa_score": qa_report.score}
+            update={
+                "can_generate_design": ready,
+                "qa_score": qa_report.score,
+                "missing_blocking_count": len(qa_report.blocking_issues),
+                "blocking_fields": qa_report.blocking_issues,
+            }
         ).model_dump()
 
     def get_documents(self, pack_id: str) -> list[dict]:
@@ -546,14 +551,14 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
     cad_status: dict[str, int] = {}
     for document in spec.document_references:
         cad_status[document.cad_status] = cad_status.get(document.cad_status, 0) + 1
-    blocking = [field for field in spec.missing_fields if field.severity == "blocking"]
     qa, _mapping, ready = _evaluate_generation_readiness(spec)
     return DocumentPackSummary(
         pack_id=spec.pack_id,
         status="processed",
         document_count=len(spec.document_references),
         high_priority_count=sum(1 for doc in spec.document_references if doc.priority == "high"),
-        missing_blocking_count=len(blocking),
+        missing_blocking_count=len(qa.blocking_issues),
+        blocking_fields=qa.blocking_issues,
         conflict_count=len(spec.conflicts),
         can_generate_design=ready,
         cad_status=cad_status,

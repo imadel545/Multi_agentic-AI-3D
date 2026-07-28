@@ -14,8 +14,14 @@ TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
 TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
 ```
 
-If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` cannot reach NVIDIA or lacks a
-key, startup should fail instead of silently degrading.
+If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` lacks a key, startup fails instead
+of silently degrading. Network reachability is established only by the first
+real index/search/write operation and its failure is exposed explicitly.
+
+Construction of the provider is network-free and therefore is not an
+operational health proof. `/studio/summary` reports `configured_unverified`
+until a real index/search/write succeeds, and
+`configured_but_last_operation_failed` after a real provider failure.
 
 ## Non-Product Modes
 
@@ -79,6 +85,10 @@ RAG retrieval are separate surfaces.
   `input_type=query`. The embedding profile is part of index identity so an old
   index is rebuilt instead of mixed silently.
 - Runtime collections: design memory, error memory, document-pack memory.
+- Runtime collection dimensions are checked before use. If a legacy collection
+  is incompatible, it is preserved and new writes are routed to a
+  provider/dimension-versioned physical collection. SQLite remains the durable
+  local memory source during this migration.
 - Rebuild after provider/dimension/knowledge changes with `POST /rag/reindex`.
 
 ## What Can Influence SceneSpec
@@ -125,6 +135,9 @@ the design.
 - RAG does not yet run conflict resolution against document-pack evidence.
 - Reranker is fail-open: if NVIDIA reranking fails, retrieval still returns
   vector-ranked results and the degraded status is visible.
+- Embedding retrieval is not fail-open as a product-quality success: a provider
+  HTTP error is recorded as failed and RAG remains advisory/unavailable for that
+  operation.
 - No hybrid sparse/BM25 engine beyond the current lexical boost.
 
 ## Quality Bar Before Calling RAG Advanced

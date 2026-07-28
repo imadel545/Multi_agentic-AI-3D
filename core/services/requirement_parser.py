@@ -4,6 +4,11 @@ from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
 from core.contracts.tower import TowerCharacteristics
 from core.repair import repair_requirement_candidate
+from core.services.requirement_provenance import (
+    align_evidence_with_repaired_values,
+    complete_requirement_evidence,
+    resolve_critical_requirements,
+)
 
 TOWER_SYNONYMS = {
     "treillis": "lattice_tower",
@@ -22,6 +27,7 @@ def parse_requirements_text(
     """Deterministic baseline parser; LLM extraction will replace this behind the same contract."""
     text = requirements_text.lower()
     warnings: list[WarningItem] = []
+    critical = resolve_critical_requirements(requirements_text)
 
     network_type = _extract_network_type(text)
     if (
@@ -43,7 +49,8 @@ def parse_requirements_text(
             WarningItem(code="DEFAULT_TOWER_USED", message="Tower type inferred as lattice_tower.")
         )
 
-    tower_height_m, tower_height_explicit = _extract_tower_height(text, default=30.0)
+    tower_height_m = critical.values["tower_height_m"]
+    tower_height_explicit = critical.explicit["tower_height_m"]
     if not tower_height_explicit:
         warnings.append(
             WarningItem(code="DEFAULT_TOWER_HEIGHT_USED", message="Tower height inferred as 30m.")
@@ -55,16 +62,14 @@ def parse_requirements_text(
         warnings,
     )
 
-    sector_count = _extract_sector_count(text)
-    if sector_count is None:
-        sector_count = 3
+    sector_count = critical.values["sector_count"]
+    if not critical.explicit["sector_count"]:
         warnings.append(
             WarningItem(code="DEFAULT_SECTOR_COUNT_USED", message="Sector count inferred as 3.")
         )
 
-    install_height, install_height_explicit = _extract_install_height(
-        text, default=min(24.0, tower_height_m)
-    )
+    install_height = critical.values["antenna_install_height_m"]
+    install_height_explicit = critical.explicit["antenna_install_height_m"]
     if not install_height_explicit:
         warnings.append(
             WarningItem(
@@ -73,10 +78,8 @@ def parse_requirements_text(
             )
         )
 
-    azimuths = _extract_azimuths(text)
-    if not azimuths:
-        step = 360 / sector_count
-        azimuths = [round(step * index, 3) for index in range(sector_count)]
+    azimuths = critical.values["azimuths_deg"]
+    if not critical.explicit["azimuths_deg"]:
         warnings.append(
             WarningItem(
                 code="DEFAULT_AZIMUTHS_USED",
@@ -192,6 +195,11 @@ def parse_requirements_text(
         "detail_level": detail_level
         or ("high" if "élevé" in text or "eleve" in text else "medium"),
         "warnings": warnings,
+        "field_evidence": critical.field_evidence,
+        "conflicts": critical.conflicts,
+        "assumptions": critical.assumptions,
+        "requires_confirmation": critical.requires_confirmation,
+        "confirmation_fields": critical.confirmation_fields,
     }
     repaired, repair_report = repair_requirement_candidate(candidate)
     repaired["warnings"] = [
@@ -206,6 +214,25 @@ def parse_requirements_text(
         ],
     ]
     repaired["repair_events"] = repair_report.events
+    repaired_evidence = align_evidence_with_repaired_values(
+        critical.field_evidence,
+        repaired,
+    )
+    if critical.requires_confirmation:
+        repaired["warnings"].append(
+            WarningItem(
+                code="INPUT_CONFIRMATION_REQUIRED",
+                message=(
+                    "Des valeurs explicites sont contradictoires ou impossibles; "
+                    "confirmez les champs signalés avant la génération."
+                ),
+            )
+        )
+    repaired["field_evidence"] = complete_requirement_evidence(
+        selected_values=repaired,
+        warnings=repaired["warnings"],
+        existing=repaired_evidence,
+    )
     return RequirementSpec(**repaired)
 
 

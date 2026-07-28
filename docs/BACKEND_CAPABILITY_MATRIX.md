@@ -10,17 +10,17 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | Backend API | IMPLEMENTED | `apps/api/telecom_studio_api/main.py` | Local-first, mono-utilisateur. |
 | Product API | IMPLEMENTED | `/studio/summary`, `/user-summary`, `/viewer-bundle`, `/timeline-summary`, `/current-operation`, `/user-issues` | Frontend-safe: warnings humains, artifact URLs, viewer/QA bundle, actions disponibles, timeline lisible, progression `push_sse`. |
 | E2E product proof | IMPLEMENTED | `tests/e2e/test_telecom_generation_proof.py` | Basé sur `/designs` + `workflow_id`, sans `/projects` ni `/runs`. |
-| Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/llm/groq.py` | Groq si clé présente; regex fallback explicite sinon. |
-| Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py`, `core/document_pack/mapper.py` | Synchrone, 80 Mo, extraction en mémoire; fondation absente/incompatible bloquée avant création du workflow et corrigeable avec provenance utilisateur. |
+| Requirement extraction | IMPLEMENTED_LIMITED | `core/services/requirement_parser.py`, `core/services/requirement_provenance.py`, `core/llm/groq.py` | Groq si clé présente; fallback déterministe explicite. Provenance/candidats/conflits typés par champ; contradiction non résolue bloquée avant `/designs`. |
+| Document pack ZIP | IMPLEMENTED_LIMITED | `core/document_pack/service.py`, `core/document_pack/mapper.py` | Synchrone, 80 Mo, extraction en mémoire; fondation absente/incompatible partagée par résumé, QA, gate et formulaire de correction. |
 | PDF text/table extraction | IMPLEMENTED_LIMITED | `core/document_pack/text_extractor.py` | Layout/table semantics faibles. |
 | OCR | IMPLEMENTED_LIMITED | Tesseract + `pytesseract` | Limité à une sélection de pages; langues système requises. |
 | Docling | IMPORT_ONLY | `core/document_pack/tooling.py` | Import détecté seulement; pas conversion active par défaut. |
 | DXF | IMPLEMENTED_LIMITED | `core/document_pack/cad.py` | Texte/couches; pas vraie géométrie CAD. |
 | DWG library inventory/probe | IMPLEMENTED_LIMITED | `core/services/asset_library.py`, `/assets/library/*`, LibreDWG `dwgread` | Hash, déduplication, métadonnées et types d'entités; aucune tessellation ACIS revendiquée. |
 | DWG 3D conversion | UNSUPPORTED_WITHOUT_TOOL | Route de conversion reportée par le probe; détection import-only dans `core/document_pack/tooling.py` | Les `3DSOLID` exigent une passerelle B-Rep/ACIS contrôlée. `dwgread` et ODA Drawings Explorer ne sont pas déclarés convertisseurs; 0 fichier brut est éligible à Blender. |
-| RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json` | NVIDIA API `baai/bge-m3` est le chemin produit; l'index statique se resynchronise quand les docs/manifests changent; `rag_evidence` expose sources, hints contrôlés et limites; hash déterministe uniquement test/bootstrap explicite. |
+| RAG | IMPLEMENTED_LIMITED | `core/rag`, `rag_evidence.json`, `/studio/summary` | NVIDIA API `baai/bge-m3` est le chemin produit; santé `configured_unverified`/`operational`/`failed` fondée sur une vraie opération; index statique atomique; hash déterministe uniquement test/bootstrap explicite. |
 | Reranker | IMPLEMENTED_LIMITED | `core/rag/reranker.py`, `/studio/summary` | NVIDIA API par défaut; passthrough seulement explicite ou dégradé visible; modèle local seulement si activé explicitement. |
-| Memory | IMPLEMENTED_LIMITED | `core/memory` | SQLite writeback; recall encore peu sémantique. |
+| Memory | IMPLEMENTED_LIMITED | `core/memory`, collections Qdrant versionnées | SQLite writeback; recall encore peu sémantique. Les collections d'une ancienne dimension sont conservées et les nouvelles écritures sont routées vers une collection provider/dimension compatible; état visible dans `/studio/summary`. |
 | LangGraph orchestration | IMPLEMENTED_LIMITED | `core/orchestration`, `SceneEditAgent` | Prompt, exigences validées, révisions et adaptation typée entrent dans des graphes checkpointés; versioning reste service-level. |
 | Asset inventory | IMPLEMENTED | `/assets/inventory`, `core/services/asset_inventory.py` | 12 manifests, 12 GLB, 0 fichier manquant, `ready_for_import`. |
 | Local CAD library | IMPLEMENTED_LIMITED | `/assets/library/summary`, `/assets/library/search`, `/assets/library/{file_id}/probe` | 11 974 fichiers, 11 531 contenus uniques, 443 doublons; schéma 1.1 relie 15 aperçus à 7 CAD. Recherche metadata-only; licences et conversion à qualifier; corpus brut hors Git. |
@@ -38,7 +38,7 @@ Cette matrice est la classification active; les anciens rapports readiness ont
 | SSE | IMPLEMENTED | `/events/stream` | `push_sse` local-process: replay JSONL puis queue live jusqu'au terminal; pas encore broker durable/cancellation. |
 | Versioning / rollback | IMPLEMENTED | `core/services/scene_versioning.py` | Local filesystem, mono-utilisateur; activation canonique atomique par `active_design.json` après revalidation des hashes. |
 | LangGraph checkpoint storage | IMPLEMENTED_LIMITED | `core/services/checkpoint_saver.py`, `checkpoints.db` | SQLite local, threads terminaux supprimés, quota au démarrage et compactage conditionnel du freelist; pas de reprise distribuée ni broker durable. |
-| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`; 90 Vitest tests; production build; 2026-07-24 visual smoke on real workflow `wf_3c86a159cd7b` | Chat-first/3D-first baseline verified with real GLB, camera fit, contextual agent/QA/issues/artifact/version/library drawers, no local path leak, and no browser console error. Full acceptance still needs recorded mutation smokes for document-pack, edit and rollback paths. |
+| Frontend product rework | IMPLEMENTED_LIMITED | `apps/frontend`; Vitest + production build; 2026-07-24 visual smoke on real workflow `wf_3c86a159cd7b` | Chat-first/3D-first baseline; contradiction d'entrée bloquée, fallback/transport humanisés, fondation documentaire corrigeable. Full acceptance exige encore un smoke visuel enregistré de ces mutations. |
 
 ## Agent / Runtime Truth Matrix
 

@@ -177,6 +177,7 @@ class DocumentPackSummary(StrictModel):
     document_count: int = Field(ge=0)
     high_priority_count: int = Field(ge=0)
     missing_blocking_count: int = Field(ge=0)
+    blocking_fields: list[str] = Field(default_factory=list)
     conflict_count: int = Field(ge=0)
     can_generate_design: bool
     cad_status: dict[str, int] = Field(default_factory=dict)

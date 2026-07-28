@@ -130,10 +130,21 @@ restent internes au backend.
 - `warnings`
 - `rag_embedding_provider`, `rag_status`, `rag_degraded`, `rag_reranker`,
   `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`,
-  `rag_reranker_degraded_reason`, `rag_reindex_url`
+  `rag_reranker_degraded_reason`, `rag_operational_status`,
+  `rag_last_operation`, `rag_reindex_url`
 - `memory_status`, `memory_backend`, `workflow_memory_count`,
-  `design_memory_count`, `document_pack_memory_count`
+  `design_memory_count`, `document_pack_memory_count`,
+  `memory_vector_status`, `memory_vector_errors`
 - `runtime_capabilities`, `unsupported_actions`
+
+`POST /requirements/parse` retourne un `RequirementSpec` avec
+`field_evidence`, `conflicts`, `assumptions`, `requires_confirmation` et
+`confirmation_fields`. `POST /designs` rejette un `confirmed_requirements`
+encore marqué `requires_confirmation=true`.
+
+Le résumé document-pack expose `blocking_fields`; son compteur de champs
+bloquants, le rapport QA, le gate de génération et le formulaire de correction
+doivent rester cohérents.
 
 Mutating generation routes can return HTTP `507` when local storage is below
 the configured safe threshold. The frontend must keep the current valid design
