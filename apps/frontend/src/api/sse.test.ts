@@ -78,13 +78,32 @@ describe("SSE adapter", () => {
     const source = FakeEventSource.instances.at(-1)!;
     source.onerror?.();
 
-    expect(onError).toHaveBeenCalledWith(
-      expect.objectContaining({ message: expect.stringContaining("suivi de secours") })
-    );
+    expect(onError).toHaveBeenCalledWith("connection_lost");
     expect(source.closed).toBe(false);
     source.onerror?.();
     source.onerror?.();
     expect(source.closed).toBe(true);
+  });
+
+  it("reports a typed sequence gap without exposing transport copy", () => {
+    const onError = vi.fn();
+    openWorkflowEventStream(
+      "http://127.0.0.1:8000/designs/wf_1/events/stream",
+      { onError, onEvent: vi.fn(), onTerminal: vi.fn() },
+      FakeEventSource as unknown as new (url: string) => EventSource
+    );
+    const source = FakeEventSource.instances.at(-1)!;
+    for (const sequence of [4, 6]) {
+      source.emit("node_completed", {
+        event_id: `evt_${sequence}`,
+        sequence,
+        event_type: "node_completed",
+        workflow_id: "wf_1",
+        timestamp: "2026-07-15T10:00:00Z",
+        payload: {}
+      });
+    }
+    expect(onError).toHaveBeenCalledWith("sequence_gap");
   });
 
   it("treats an applied edit as a terminal revision event", () => {

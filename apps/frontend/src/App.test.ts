@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ApiClientError } from "./api/client";
 import type { WorkflowStatus } from "./api/schemas";
 import {
   documentPackFilesSizeError,
@@ -6,7 +7,8 @@ import {
   latestEventCursor,
   needsPolling,
   parseCorrectionValue,
-  selectWorkflowToRestore
+  selectWorkflowToRestore,
+  userFacingError
 } from "./App";
 
 function workflow(
@@ -103,5 +105,24 @@ describe("frontend runtime selection", () => {
         capabilities
       )
     ).toBeNull();
+  });
+
+  it("maps backend edit failures to product language without leaking internals", () => {
+    const internal = new ApiClientError(
+      500,
+      "/designs/wf_1/edit",
+      "RuntimeError: blender subprocess exited with code 139"
+    );
+    const message = userFacingError(internal, "edit");
+
+    expect(message).toBe("La modification du design a rencontré un problème interne. Réessayez.");
+    expect(message).not.toContain("RuntimeError");
+    expect(message).not.toContain("139");
+  });
+
+  it("gives an actionable message for local storage pressure", () => {
+    expect(
+      userFacingError(new ApiClientError(507, "/designs", "free disk 10MB"), "generation")
+    ).toContain("Libérez de la place");
   });
 });

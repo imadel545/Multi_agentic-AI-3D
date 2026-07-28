@@ -154,6 +154,14 @@ Le résumé document-pack expose `blocking_fields`; son compteur de champs
 bloquants, le rapport QA, le gate de génération et le formulaire de correction
 doivent rester cohérents.
 
+Pour restaurer une revue documentaire après rechargement, le frontend peut
+conserver uniquement un pointeur versionné `{version, packId}` dans le stockage
+local. Le contenu du pack, ses conflits, ses champs manquants, sa QA, ses
+documents, extractions, provenances, étapes de traitement et sa spec consolidée
+doivent être relus depuis `/document-packs/{pack_id}/*`. Le stockage navigateur
+n'est jamais une source de vérité documentaire et son indisponibilité ne doit
+pas interrompre le studio.
+
 Mutating generation routes can return HTTP `507` when local storage is below
 the configured safe threshold. The frontend must keep the current valid design
 visible and ask the user to clean temporary artifacts before retrying.

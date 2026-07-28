@@ -10,6 +10,7 @@ import {
   type Dispatch
 } from "react";
 import {
+  ApiClientError,
   api,
   TelecomStudioApi,
   type DocumentPackCorrectionPayload
@@ -41,6 +42,11 @@ import {
   type WorkflowMachineAction,
   type WorkflowPhase
 } from "./state/workflowMachine";
+import {
+  clearDocumentPackSession,
+  readDocumentPackSession,
+  writeDocumentPackSession
+} from "./state/documentPackSession";
 
 const ActivePromptDetail = "high" as const;
 const TelecomGlbViewer = lazy(() =>
@@ -82,6 +88,7 @@ export default function App() {
   const streamCursorRef = useRef<string | null>(null);
   const submissionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
+  const restoredDocumentPackRef = useRef(false);
   const resourceNotice = useMemo(
     () => firstResourceNotice(state.resourceErrors),
     [state.resourceErrors]
@@ -99,7 +106,9 @@ export default function App() {
         if (!cancelled) setHealth(nextHealth);
       })
       .catch((error) => {
-        if (!cancelled) dispatch({ type: "REQUEST_FAILED", message: errorMessage(error) });
+        if (!cancelled) {
+          dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "connection") });
+        }
       });
     void apiClient
       .studioSummary()
@@ -114,7 +123,7 @@ export default function App() {
           dispatch({
             type: "RESOURCE_FAILED",
             resource: "studio_summary",
-            message: errorMessage(error)
+            message: userFacingError(error, "resource")
           });
         }
       });
@@ -139,7 +148,7 @@ export default function App() {
           dispatch({
             type: "RESOURCE_FAILED",
             resource: "document_capabilities",
-            message: errorMessage(error)
+            message: userFacingError(error, "resource")
           });
         }
       });
@@ -158,7 +167,7 @@ export default function App() {
         setAssetLibrarySearch(await apiClient.searchAssetLibrary(normalizedQuery));
       } catch (error) {
         setAssetLibrarySearch(null);
-        setAssetLibrarySearchError(errorMessage(error));
+        setAssetLibrarySearchError(userFacingError(error, "assets"));
       } finally {
         setAssetLibrarySearchBusy(false);
       }
@@ -179,7 +188,7 @@ export default function App() {
         dispatch({
           type: "RESOURCE_FAILED",
           resource: "current_operation",
-          message: errorMessage(error)
+          message: userFacingError(error, "resource")
         });
       }
       return status;
@@ -198,14 +207,16 @@ export default function App() {
         bundleResult,
         timelineResult,
         issuesResult,
-        versionsResult
+        versionsResult,
+        summaryResult
       ] =
         await Promise.allSettled([
           apiClient.currentOperation(workflowId),
           apiClient.viewerBundle(workflowId),
           apiClient.timelineSummary(workflowId),
           apiClient.userIssues(workflowId),
-          apiClient.versions(workflowId)
+          apiClient.versions(workflowId),
+          apiClient.studioSummary()
         ]);
 
       applyResourceResult(
@@ -214,8 +225,6 @@ export default function App() {
         (operation) => dispatch({ type: "CURRENT_OPERATION_LOADED", currentOperation: operation }),
         dispatch
       );
-      const bundle: ViewerBundle | null =
-        bundleResult.status === "fulfilled" ? bundleResult.value : null;
       applyResourceResult(
         bundleResult,
         "viewer_bundle",
@@ -240,6 +249,12 @@ export default function App() {
         (nextVersions) => setVersions(nextVersions),
         dispatch
       );
+      applyResourceResult(
+        summaryResult,
+        "studio_summary",
+        (summary) => dispatch({ type: "BOOTSTRAP_LOADED", summary }),
+        dispatch
+      );
     },
     [apiClient]
   );
@@ -256,11 +271,11 @@ export default function App() {
               dispatch({
                 type: "RESOURCE_FAILED",
                 resource: "terminal_bundle",
-                message: errorMessage(error)
+                message: userFacingError(error, "resource")
               });
             });
           },
-          onError: (error) => dispatch({ type: "SSE_FAILED", message: error.message }),
+          onError: (reason) => dispatch({ type: "SSE_FAILED", reason }),
           onRecovered: () => dispatch({ type: "SSE_RECOVERED" })
         }
       );
@@ -279,7 +294,7 @@ export default function App() {
         dispatch({
           type: "RESOURCE_FAILED",
           resource: "workflow_status",
-          message: errorMessage(error)
+          message: userFacingError(error, "resource")
         });
         return;
       }
@@ -346,7 +361,7 @@ export default function App() {
               dispatch({
                 type: "RESOURCE_FAILED",
                 resource: "workflow_status",
-                message: errorMessage(error)
+                message: userFacingError(error, "resource")
               });
             });
         } else {
@@ -354,7 +369,7 @@ export default function App() {
             dispatch({
               type: "RESOURCE_FAILED",
               resource: "terminal_bundle",
-              message: errorMessage(error)
+              message: userFacingError(error, "resource")
             });
           });
         }
@@ -372,10 +387,48 @@ export default function App() {
       const review = await apiClient.documentPackReview(packId);
       setDocumentPackReview(review);
       setDocumentPackSummary(review.summary);
+      const storage = documentPackBrowserStorage();
+      if (storage) writeDocumentPackSession(storage, review.summary.pack_id);
       return review;
     },
     [apiClient]
   );
+
+  useEffect(() => {
+    if (restoredDocumentPackRef.current) return;
+    restoredDocumentPackRef.current = true;
+    const storage = documentPackBrowserStorage();
+    const packId = storage ? readDocumentPackSession(storage) : null;
+    if (!packId) return;
+    let cancelled = false;
+    setDocumentPackBusy(true);
+    void loadDocumentPackReview(packId)
+      .then((review) => {
+        if (!cancelled) {
+          setDocumentPackMessage(
+            review.summary.can_generate_design
+              ? "Revue documentaire restaurée; le pack est prêt à générer."
+              : "Revue documentaire restaurée; des points restent à confirmer."
+          );
+        }
+      })
+      .catch(() => {
+        if (storage) clearDocumentPackSession(storage);
+        if (!cancelled) {
+          setDocumentPackSummary(null);
+          setDocumentPackReview(null);
+          setDocumentPackMessage(
+            "La revue documentaire précédente n’est plus disponible. Importez de nouveau les pièces."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDocumentPackBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadDocumentPackReview]);
 
   const analyzePrompt = useCallback(async () => {
     if (!state.prompt.trim()) {
@@ -399,7 +452,7 @@ export default function App() {
     } catch (error) {
       setRequirementsAnalysis(null);
       setAnalyzedPrompt(null);
-      setAnalysisError(errorMessage(error));
+      setAnalysisError(userFacingError(error, "analysis"));
     } finally {
       setAnalysisBusy(false);
     }
@@ -454,7 +507,7 @@ export default function App() {
         await loadTerminalBundle(created.workflow_id);
       }
     } catch (error) {
-      dispatch({ type: "REQUEST_FAILED", message: errorMessage(error) });
+      dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "generation") });
     } finally {
       submissionInFlightRef.current = false;
     }
@@ -498,7 +551,7 @@ export default function App() {
         );
         return true;
       } catch (error) {
-        setDocumentPackMessage(errorMessage(error));
+        setDocumentPackMessage(userFacingError(error, "documents"));
         return false;
       } finally {
         setDocumentPackBusy(false);
@@ -533,7 +586,11 @@ export default function App() {
             : "Correction enregistrée. D’autres points restent à vérifier."
         );
       } catch (error) {
-        setDocumentPackMessage(errorMessage(error));
+        setDocumentPackMessage(
+          isSafeCorrectionError(error)
+            ? error.message
+            : userFacingError(error, "documents")
+        );
       } finally {
         setDocumentCorrectionBusy(false);
       }
@@ -567,8 +624,9 @@ export default function App() {
         await loadTerminalBundle(generated.workflow_id);
       }
     } catch (error) {
-      dispatch({ type: "REQUEST_FAILED", message: errorMessage(error) });
-      setDocumentPackMessage(errorMessage(error));
+      const message = userFacingError(error, "documents");
+      dispatch({ type: "REQUEST_FAILED", message });
+      setDocumentPackMessage(message);
     } finally {
       setDocumentPackBusy(false);
     }
@@ -626,7 +684,7 @@ export default function App() {
       setSubmittedRequirementsHash(null);
       await loadTerminalBundle(workflowId);
     } catch (error) {
-      setRevisionMessage(errorMessage(error));
+      setRevisionMessage(userFacingError(error, "edit"));
     } finally {
       setRevisionBusy(false);
     }
@@ -653,7 +711,9 @@ export default function App() {
           streamCursorRef.current = cursor;
           runtimeMode = cursor ? "sse" : "polling";
         } catch (error) {
-          setVersionMessage(`Streaming live indisponible: ${errorMessage(error)}`);
+          setVersionMessage(
+            "Le suivi direct n’est pas disponible; la restauration reste synchronisée."
+          );
         }
         dispatch({
           type: "REVISION_STARTED",
@@ -663,7 +723,7 @@ export default function App() {
         setVersionMessage(result.message);
         await loadTerminalBundle(state.workflowId);
       } catch (error) {
-        setVersionMessage(errorMessage(error));
+        setVersionMessage(userFacingError(error, "rollback"));
       } finally {
         setRollbackBusyVersionId(null);
       }
@@ -816,8 +876,55 @@ export function needsPolling(phase: WorkflowPhase, runtimeMode: string): boolean
   return runtimeMode === "polling" && (phase === "running" || phase === "streaming");
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+type UserActionContext =
+  | "analysis"
+  | "assets"
+  | "connection"
+  | "documents"
+  | "edit"
+  | "generation"
+  | "resource"
+  | "rollback";
+
+export function userFacingError(error: unknown, context: UserActionContext): string {
+  const action = {
+    analysis: "L’analyse de la demande",
+    assets: "La recherche de composants",
+    connection: "La connexion au studio",
+    documents: "L’analyse documentaire",
+    edit: "La modification du design",
+    generation: "La génération du design",
+    resource: "Une information secondaire",
+    rollback: "La restauration de version"
+  }[context];
+  if (error instanceof ApiClientError) {
+    if (error.status === 0) return `${action} ne peut pas joindre le studio local.`;
+    if (error.status === 404) return `${action} n’est plus disponible pour cet élément.`;
+    if (error.status === 409) return `${action} doit être resynchronisée avant de continuer.`;
+    if (error.status === 422) return `${action} nécessite des informations à corriger.`;
+    if (error.status === 429) return "Le studio termine déjà une opération. Réessayez ensuite.";
+    if (error.status === 507) {
+      return "L’espace disque local est insuffisant. Libérez de la place avant de réessayer.";
+    }
+    if (error.status >= 500) return `${action} a rencontré un problème interne. Réessayez.`;
+  }
+  return `${action} n’a pas abouti. Réessayez ou rechargez l’état vérifié.`;
+}
+
+function isSafeCorrectionError(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith("La valeur de correction") ||
+      error.message.startsWith("Type de correction"))
+  );
+}
+
+function documentPackBrowserStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export function selectWorkflowToRestore(designs: WorkflowStatus[]): WorkflowStatus | null {
@@ -954,11 +1061,11 @@ function applyResourceResult<T>(
   send({
     type: "RESOURCE_FAILED",
     resource,
-    message: errorMessage(result.reason)
+    message: userFacingError(result.reason, "resource")
   });
 }
 
 function firstResourceNotice(errors: Record<string, string>): string | null {
   const first = Object.entries(errors)[0];
-  return first ? `Donnée secondaire indisponible (${first[0]}): ${first[1]}` : null;
+  return first ? first[1] : null;
 }

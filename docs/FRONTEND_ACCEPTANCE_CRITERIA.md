@@ -3,14 +3,18 @@
 Critères obligatoires pour accepter le futur frontend.  
 Si un critère échoue, le frontend n'est pas accepté.
 
-Dernier audit ciblé: 2026-07-24. La baseline visuelle réelle est validée; les
+Dernier audit ciblé: 2026-07-28. La baseline visuelle réelle est validée; les
 cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
 Le smoke Product API du 2026-07-24 couvre génération Groq/Blender, édition,
 version, rollback, upload ZIP, blocage/correction de fondation et génération
 depuis document-pack. Les cases de mutation restent ouvertes tant que ces mêmes
-actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
+actions ne sont pas toutes rejouées depuis les contrôles du navigateur. Le
+smoke navigateur du 2026-07-28 prouve l'upload direct, la revue des champs avec
+provenance et la restauration du même `pack_id` après rechargement. Les données
+du pack sont relues depuis le backend; seul un pointeur local versionné est
+conservé par l'interface.
 
 ---
 
@@ -36,7 +40,7 @@ actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
 - [x] Une dropzone claire accepte plusieurs fichiers directs ou un ZIP, affiche
   la file d'attente, permet le retrait individuel et applique les limites
   exposées par le backend.
-- [ ] L'état du document pack (conflits, champs manquants) est visible sans JSON brut.
+- [x] L'état du document pack (conflits, champs manquants) est visible sans JSON brut.
 
 ## 5. Pas de panneaux vides
 
@@ -66,7 +70,7 @@ actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
 ## 10. Fonctions testées
 
 - [ ] Generate design from prompt.
-- [ ] Upload document pack.
+- [x] Upload document pack.
 - [ ] Generate from document pack.
 - [ ] Edit design by prompt.
 - [ ] Version rollback.
@@ -75,7 +79,7 @@ actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
 ## 11. Qualité technique
 
 - [x] `npm run typecheck` passe (via `npm run build`).
-- [x] `npm run test` passe (93 tests).
+- [x] `npm run test` passe (101 tests, 11 fichiers).
 - [x] `npm run build` passe.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
 

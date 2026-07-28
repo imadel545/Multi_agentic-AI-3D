@@ -202,12 +202,14 @@ describe("workflow reducer", () => {
   it("activates polling mode when SSE fails", () => {
     const state = workflowReducer(
       { ...initialWorkflowState, phase: "streaming", workflowId: "wf_1" },
-      { type: "SSE_FAILED", message: "stream failed" }
+      { type: "SSE_FAILED", reason: "connection_lost" }
     );
 
     expect(state.runtimeMode).toBe("polling");
     expect(state.phase).toBe("running");
-    expect(state.transportError).toBe("stream failed");
+    expect(state.transportError).toBe(
+      "La connexion en direct est interrompue. Le suivi continue automatiquement."
+    );
   });
 
   it("keeps secondary resource failures separate from workflow truth", () => {

@@ -26,9 +26,14 @@ type EventSourceConstructor = new (url: string) => EventSource;
 export type StreamCallbacks = {
   onEvent: (event: NormalizedWorkflowEvent) => void;
   onTerminal: (event: NormalizedWorkflowEvent) => void;
-  onError: (error: Error) => void;
+  onError: (reason: StreamFailureReason) => void;
   onRecovered?: () => void;
 };
+
+export type StreamFailureReason =
+  | "sequence_gap"
+  | "connection_lost"
+  | "invalid_event";
 
 const TerminalEventTypes = new Set([
   "workflow_completed",
@@ -112,11 +117,7 @@ export function openWorkflowEventStream(
         lastSequence != null &&
         normalized.sequence > lastSequence + 1
       ) {
-        callbacks.onError(
-          new Error(
-            "Une interruption du flux temps réel a été détectée; la synchronisation de secours est active."
-          )
-        );
+        callbacks.onError("sequence_gap");
       }
       if (normalized.sequence != null) {
         lastSequence = Math.max(lastSequence ?? 0, normalized.sequence);
@@ -127,8 +128,8 @@ export function openWorkflowEventStream(
         closed = true;
         source.close();
       }
-    } catch (error) {
-      callbacks.onError(error instanceof Error ? error : new Error(String(error)));
+    } catch {
+      callbacks.onError("invalid_event");
     }
   };
 
@@ -146,9 +147,7 @@ export function openWorkflowEventStream(
       return;
     }
     consecutiveErrors += 1;
-    callbacks.onError(
-      new Error("Le flux temps réel est momentanément indisponible; le suivi de secours est actif.")
-    );
+    callbacks.onError("connection_lost");
     if (consecutiveErrors >= 3) {
       closed = true;
       source.close();

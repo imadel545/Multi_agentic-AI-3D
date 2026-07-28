@@ -6,7 +6,7 @@ import type {
   ViewerBundle,
   WorkflowStatus
 } from "../api/schemas";
-import type { NormalizedWorkflowEvent } from "../api/sse";
+import type { NormalizedWorkflowEvent, StreamFailureReason } from "../api/sse";
 
 export type WorkflowPhase =
   | "idle"
@@ -54,7 +54,7 @@ export type WorkflowMachineAction =
   | { type: "WORKFLOW_RESTORED"; status: WorkflowStatus }
   | { type: "REVISION_STARTED"; runtimeMode: Exclude<RuntimeMode, "idle"> }
   | { type: "EVENT_RECEIVED"; event: NormalizedWorkflowEvent }
-  | { type: "SSE_FAILED"; message: string }
+  | { type: "SSE_FAILED"; reason: StreamFailureReason }
   | { type: "SSE_RECOVERED" }
   | { type: "STATUS_LOADED"; status: WorkflowStatus }
   | { type: "CURRENT_OPERATION_LOADED"; currentOperation: CurrentOperation }
@@ -177,7 +177,7 @@ export function workflowReducer(
         ...state,
         runtimeMode: "polling",
         phase: isTerminalPhase(state.phase) ? state.phase : state.phase === "idle" ? "idle" : "running",
-        transportError: action.message
+        transportError: transportFailureNotice(action.reason)
       };
     case "SSE_RECOVERED":
       return {
@@ -363,4 +363,14 @@ function withoutResource(errors: ResourceErrorMap, resource: string): ResourceEr
   const next = { ...errors };
   delete next[resource];
   return next;
+}
+
+function transportFailureNotice(reason: StreamFailureReason): string {
+  if (reason === "sequence_gap") {
+    return "Certaines étapes sont en cours de resynchronisation. Le design reste suivi.";
+  }
+  if (reason === "invalid_event") {
+    return "Une mise à jour n’a pas pu être interprétée. L’état vérifié est rechargé.";
+  }
+  return "La connexion en direct est interrompue. Le suivi continue automatiquement.";
 }
