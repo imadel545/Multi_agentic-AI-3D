@@ -22,5 +22,17 @@
   "pivot_policy": "base_center_mount",
   "front_axis": "+Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "accessory_transform_v1"
+  "adaptation_profile_id": "accessory_transform_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["imported_glb_exact"],
+    "verified_file_sha256": "5e57fd83d6c0b4996d8fc4f9016f39ac34c5c8347204fdee7114858785338616",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": true,
+    "pivot_verified": true,
+    "orientation_verified": true,
+    "qualification_method": "Blender 5.1 import probe plus GLB binary integrity inspection",
+    "limitations": ["Internal generic geometry; not vendor-grade."]
+  }
 }

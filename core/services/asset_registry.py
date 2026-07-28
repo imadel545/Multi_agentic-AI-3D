@@ -29,7 +29,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == "tower"
-            and asset.is_validated
+            and asset.is_generation_eligible
             and network_type in asset.compatible_networks
             and tower_type in asset.compatible_tower_types
         ]
@@ -50,7 +50,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == "tower"
-            and asset.is_validated
+            and asset.is_generation_eligible
             and network_type in asset.compatible_networks
         ]
         if not candidates:
@@ -89,7 +89,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == asset_type
-            and asset.is_validated
+            and asset.is_generation_eligible
             and network_type in asset.compatible_networks
             and (
                 not tower_type
@@ -111,7 +111,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == asset_type
-            and asset.is_validated
+            and asset.is_generation_eligible
             and network_type in asset.compatible_networks
             and (
                 not tower_type
@@ -124,7 +124,7 @@ class AssetRegistry:
                 asset
                 for asset in self.list_assets()
                 if asset.type == asset_type
-                and asset.is_validated
+                and asset.is_generation_eligible
                 and network_type in asset.compatible_networks
             ]
         if not candidates:
@@ -141,6 +141,8 @@ class AssetRegistry:
         for manifest_path in sorted(self.manifests_dir.glob("*.json")):
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             asset = AssetManifest.model_validate(payload)
+            if asset.asset_id in assets:
+                raise ValueError(f"duplicate asset_id in manifests: {asset.asset_id}")
             assets[asset.asset_id] = asset
         self._assets = assets
         self._manifest_hash = current_hash

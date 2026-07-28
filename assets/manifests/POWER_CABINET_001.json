@@ -5,7 +5,7 @@
   "height_m": 1.6,
   "dimensions_m": {
     "width": 1.0,
-    "depth": 0.45,
+    "depth": 0.48,
     "height": 1.6
   },
   "compatible_networks": ["4G", "5G"],
@@ -22,5 +22,17 @@
   "pivot_policy": "base_center_ground",
   "front_axis": "-Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "accessory_transform_v1"
+  "adaptation_profile_id": "accessory_transform_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["imported_glb_exact"],
+    "verified_file_sha256": "5c536cb8fbbad178f377e6d65c3f20c259975f2ed6efb14907e8685a4eeaad85",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": true,
+    "pivot_verified": true,
+    "orientation_verified": true,
+    "qualification_method": "Blender 5.1 import probe plus GLB binary integrity inspection",
+    "limitations": ["Internal generic geometry; not vendor-grade."]
+  }
 }

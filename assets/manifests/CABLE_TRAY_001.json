@@ -22,5 +22,17 @@
   "pivot_policy": "center_mount",
   "front_axis": "+X",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "reference_only_v1"
+  "adaptation_profile_id": "reference_only_v1",
+  "qualification": {
+    "status": "reference_only",
+    "allowed_generation_modes": [],
+    "verified_file_sha256": "8ede9863ae55f69adb791c1d2ce953bb5683c01e094e71351b4dcf51f645db22",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": false,
+    "pivot_verified": false,
+    "orientation_verified": false,
+    "qualification_method": "GLB binary integrity inspection only",
+    "limitations": ["No route/connectors contract; cables remain generated from SceneSpec route points."]
+  }
 }

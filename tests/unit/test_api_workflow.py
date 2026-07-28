@@ -666,10 +666,14 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     payload = response.json()
     assert "asset_count" in payload
     assert "procedural_generation_required" in payload
-    assert payload["status"] == "ready_for_import"
+    assert payload["status"] == "qualified_mixed_catalog"
     assert payload["real_glb_asset_count"] == 12
-    assert all(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
-    assert any(entry["asset_import_mode"] == "imported_glb" for entry in payload["entries"])
+    assert payload["import_qualified_glb_count"] == 4
+    assert payload["generation_eligible_asset_count"] == 10
+    assert payload["reference_only_asset_count"] == 2
+    assert any(entry["asset_import_mode"] == "imported_glb_exact" for entry in payload["entries"])
+    assert any(entry["asset_import_mode"] == "parametric_generated" for entry in payload["entries"])
+    assert any(entry["asset_import_mode"] == "reference_only" for entry in payload["entries"])
 
 
 def test_asset_adaptation_catalog_is_typed_and_not_shadowed() -> None:

@@ -29,5 +29,16 @@
   "pivot_policy": "base_center_ground",
   "front_axis": "+Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "telecom_tower_parametric_v1"
+  "adaptation_profile_id": "telecom_tower_parametric_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["parametric_generated"],
+    "units": "meters",
+    "mesh_integrity_verified": false,
+    "dimensions_verified": true,
+    "pivot_verified": false,
+    "orientation_verified": false,
+    "qualification_method": "SceneSpec-driven parametric tower profile",
+    "limitations": ["The companion CC-BY GLB is reference-only; tower geometry is generated parametrically."]
+  }
 }

@@ -157,6 +157,14 @@ frontend.
   review. It does not determine whether lighting is legally required; national rules,
   obstacle location and the competent aviation authority remain authoritative.
 - Internal/CC-BY assets are not vendor-grade.
+- The curated manifest catalog is intentionally mixed: 4 GLBs are qualified
+  for exact import, 6 component/tower profiles are qualified for controlled
+  parametric generation, and 2 GLBs are reference-only. The 5G panel and RRU
+  companion GLBs have not passed orientation qualification and are therefore
+  never imported by the product path.
+- Asset qualification proves file identity, basic mesh integrity, declared
+  dimensions, pivot and orientation for the authorized use. It does not prove
+  vendor identity, RF performance, structural capacity or fabrication fitness.
 
 ## Can wait
 

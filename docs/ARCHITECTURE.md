@@ -79,7 +79,9 @@ active SceneSpec + prompt
 - Events are frontend-readable and `/events/stream` is `push_sse` local-process, but there is
   no broker, cancellation manager, or durable resume yet.
 - Asset import fallback can still create procedural geometry if an import fails, but the active
-  inventory has 12 manifests, 12 GLB files, and 0 missing files.
+  inventory has 12 manifests and 12 GLB files: 10 manifests are
+  generation-eligible, 4 authorize exact hash-pinned GLB import, and 2 remain
+  reference-only.
 - The separate 11,974-file CAD library is not part of that active inventory.
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,

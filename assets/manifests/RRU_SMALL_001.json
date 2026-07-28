@@ -22,5 +22,16 @@
   "pivot_policy": "center_mount",
   "front_axis": "+Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "reference_only_v1"
+  "adaptation_profile_id": "reference_only_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["parametric_generated"],
+    "units": "meters",
+    "mesh_integrity_verified": false,
+    "dimensions_verified": true,
+    "pivot_verified": false,
+    "orientation_verified": false,
+    "qualification_method": "SceneSpec-driven parametric component profile",
+    "limitations": ["Companion GLB orientation is not qualified; Blender must generate this component parametrically.", "Internal generic geometry; not vendor-grade."]
+  }
 }

@@ -17,6 +17,11 @@ class RuntimeAssetMetadata(StrictModel):
     normalized_by: str | None = None
     pivot_policy: str | None = None
     front_axis: str | None = None
+    qualification_status: str | None = None
+    allowed_generation_modes: list[str] = Field(default_factory=list)
+    verified_file_sha256: str | None = None
+    qualification_method: str | None = None
+    qualification_limitations: list[str] = Field(default_factory=list)
 
 
 class SceneAssetPlacement(StrictModel):
@@ -63,6 +68,7 @@ class SectorSpec(StrictModel):
     antenna_import_fallback_allowed: bool = True
     antenna_generation_strategy: GenerationStrategy = "internal_project_generated"
     antenna_geometry_source: GeometrySource = "unknown"
+    antenna_generation_reason: str = "asset policy not resolved"
     radio_asset_id: str | None = None
     radio_asset_file: str | None = None
     radio_asset_source: str | None = None
@@ -70,6 +76,7 @@ class SectorSpec(StrictModel):
     radio_import_fallback_allowed: bool = True
     radio_generation_strategy: GenerationStrategy = "internal_project_generated"
     radio_geometry_source: GeometrySource = "unknown"
+    radio_generation_reason: str = "asset policy not resolved"
     install_height_m: float = Field(gt=0)
     azimuth_deg: float = Field(ge=0, lt=360)
     mechanical_tilt_deg: float = Field(default=3.0, ge=-15, le=30)
@@ -95,6 +102,7 @@ class SceneAccessoryPlacement(StrictModel):
     scale: list[float] = Field(default_factory=lambda: [1.0, 1.0, 1.0], min_length=3, max_length=3)
     generation_strategy: GenerationStrategy = "internal_project_generated"
     geometry_source: GeometrySource = "unknown"
+    generation_reason: str = "asset policy not resolved"
     placement_policy: Literal["derived_default", "user_defined"] = "derived_default"
 
     @field_validator("scale")

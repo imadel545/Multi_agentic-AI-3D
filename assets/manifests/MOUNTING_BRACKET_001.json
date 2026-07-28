@@ -22,5 +22,17 @@
   "pivot_policy": "center_mount",
   "front_axis": "+X",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "reference_only_v1"
+  "adaptation_profile_id": "reference_only_v1",
+  "qualification": {
+    "status": "reference_only",
+    "allowed_generation_modes": [],
+    "verified_file_sha256": "a1fe35d6c7ab1652cc8bfbc15c3118b956115d3dfd4a3946cfdc9897de1640b3",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": false,
+    "pivot_verified": false,
+    "orientation_verified": false,
+    "qualification_method": "GLB binary integrity inspection only",
+    "limitations": ["No typed connector or placement contract; the worker generates brackets procedurally."]
+  }
 }

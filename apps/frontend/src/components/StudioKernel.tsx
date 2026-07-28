@@ -716,6 +716,7 @@ type DrawerId = "summary" | "agents" | "qa" | "issues" | "artifacts" | "library"
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
 export function InspectorDock({
+  assetInventory = null,
   assetLibrarySearch = null,
   assetLibrarySearchBusy = false,
   assetLibrarySearchError = null,
@@ -733,6 +734,7 @@ export function InspectorDock({
   versionMessage,
   versions
 }: {
+  assetInventory?: AssetInventory | null;
   assetLibrarySearch?: AssetLibrarySearch | null;
   assetLibrarySearchBusy?: boolean;
   assetLibrarySearchError?: string | null;
@@ -820,6 +822,7 @@ export function InspectorDock({
             <AssetLibraryPanel
               busy={assetLibrarySearchBusy}
               error={assetLibrarySearchError}
+              inventory={assetInventory}
               onSearch={onSearchAssetLibrary}
               search={assetLibrarySearch}
               summary={assetLibrarySummary}
@@ -995,25 +998,69 @@ export function ArtifactsPanel({
 export function AssetLibraryPanel({
   busy = false,
   error = null,
+  inventory = null,
   onSearch,
   search = null,
   summary
 }: {
   busy?: boolean;
   error?: string | null;
+  inventory?: AssetInventory | null;
   onSearch?: (query: string) => void | Promise<void>;
   search?: AssetLibrarySearch | null;
   summary: AssetLibrarySummary | null;
 }) {
   const [query, setQuery] = useState("");
   const dimensions = summary?.claimed_dimension_counts ?? {};
+  const qualifiedAssets = (inventory?.entries ?? []).filter(
+    (entry) => entry.generation_eligible
+  );
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (query.trim() && onSearch) void onSearch(query.trim());
   };
   return (
     <section className="drawer-section" aria-label="Bibliothèque de designs">
-      <PanelTitle icon={<Boxes size={17} />} title="Bibliothèque CAD telecom" />
+      <PanelTitle icon={<Boxes size={17} />} title="Bibliothèque telecom" />
+      {inventory ? (
+        <>
+          <div className="summary-card">
+            <strong>
+              {formatInteger(inventory.generation_eligible_asset_count)} composants exploitables
+            </strong>
+            <p>
+              {formatInteger(inventory.import_qualified_glb_count)} meshes sont autorisés pour
+              import exact; les autres suivent un profil paramétrique contrôlé.
+            </p>
+          </div>
+          <div className="metric-grid">
+            <Metric label="GLB présents" value={formatInteger(inventory.real_glb_asset_count)} />
+            <Metric label="GLB qualifiés" value={formatInteger(inventory.import_qualified_glb_count)} />
+            <Metric
+              label="Profils exploitables"
+              value={formatInteger(inventory.generation_eligible_asset_count)}
+            />
+            <Metric label="Référence seule" value={formatInteger(inventory.reference_only_asset_count)} />
+          </div>
+          <div className="library-results">
+            <div className="library-results-heading">
+              <strong>Composants 3D contrôlés</strong>
+              <small>Le mode d’utilisation vient du manifest, pas du nom du fichier.</small>
+            </div>
+            {qualifiedAssets.map((entry) => (
+              <article className="library-result-card" key={entry.asset_id}>
+                <div>
+                  <strong>{humanAssetId(entry.asset_id)}</strong>
+                  <small>
+                    {humanAssetType(entry.type)} · {humanAssetMode(entry.allowed_generation_modes)}
+                  </small>
+                </div>
+                <p>{assetQualificationMessage(entry.allowed_generation_modes, entry.source)}</p>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : null}
       {summary ? (
         <>
           <div className="summary-card">
@@ -1084,6 +1131,38 @@ export function AssetLibraryPanel({
 
 function libraryFileName(relativePath: string): string {
   return relativePath.split("/").pop() ?? relativePath;
+}
+
+function humanAssetId(assetId: string): string {
+  return assetId.toLowerCase().replaceAll("_", " ");
+}
+
+function humanAssetType(assetType: string): string {
+  return (
+    {
+      antenna: "Antenne",
+      cabinet: "Armoire",
+      gps: "GPS",
+      radio: "Radio",
+      tower: "Support"
+    } as Record<string, string>
+  )[assetType] ?? "Composant";
+}
+
+function humanAssetMode(modes: string[]): string {
+  if (modes.includes("imported_glb_exact")) return "mesh vérifié";
+  if (modes.includes("parametric_generated")) return "génération paramétrique";
+  return "référence uniquement";
+}
+
+function assetQualificationMessage(modes: string[], source: string | null | undefined): string {
+  const origin = source?.startsWith("internal")
+    ? "Géométrie générique interne, sans revendication constructeur."
+    : "Provenance et attribution conservées dans le manifest.";
+  if (modes.includes("imported_glb_exact")) {
+    return `Fichier, dimensions, pivot et orientation vérifiés. ${origin}`;
+  }
+  return `Dimensions pilotées par SceneSpec et générateur borné. ${origin}`;
 }
 
 export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | null; evidence: unknown | null }) {

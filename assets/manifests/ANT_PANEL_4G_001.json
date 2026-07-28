@@ -5,7 +5,7 @@
   "height_m": 1.4,
   "dimensions_m": {
     "width": 0.42,
-    "depth": 0.16,
+    "depth": 0.169,
     "height": 1.4
   },
   "compatible_networks": ["4G"],
@@ -22,5 +22,17 @@
   "pivot_policy": "center_mount",
   "front_axis": "+Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "sector_antenna_pose_v1"
+  "adaptation_profile_id": "sector_antenna_pose_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["imported_glb_exact"],
+    "verified_file_sha256": "69e47528cf61f08c9338d3e4a0288771d73c7c77f5cec6c2745b2bac8c790e3a",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": true,
+    "pivot_verified": true,
+    "orientation_verified": true,
+    "qualification_method": "Blender 5.1 import probe plus GLB binary integrity inspection",
+    "limitations": ["Internal generic geometry; not vendor-grade."]
+  }
 }

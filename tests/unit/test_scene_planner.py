@@ -1,5 +1,5 @@
 from core.agents.scene_planner import ScenePlanner
-from core.contracts.assets import AssetManifest, DimensionsM
+from core.contracts.assets import AssetManifest, AssetQualification, DimensionsM
 from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
 
@@ -178,6 +178,40 @@ def test_scene_planner_carries_explicit_requirement_accessories() -> None:
     assert placements["cabinet"].position[2] == 0.0
     assert placements["gps"].position[2] == 29.5
     assert placements["gps"].position[1] < 1.0
+
+
+def test_scene_planner_uses_only_manifest_authorized_generation_modes() -> None:
+    import_qualification = AssetQualification(
+        status="qualified_for_generation",
+        allowed_generation_modes=["imported_glb_exact"],
+        verified_file_sha256="a" * 64,
+        mesh_integrity_verified=True,
+        dimensions_verified=True,
+        pivot_verified=True,
+        orientation_verified=True,
+        qualification_method="test qualification",
+    )
+    parametric_qualification = AssetQualification(
+        status="qualified_for_generation",
+        allowed_generation_modes=["parametric_generated"],
+        dimensions_verified=True,
+        qualification_method="test parametric profile",
+    )
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_asset_policy",
+        requirements=_requirements().model_copy(update={"include_gps_antenna": True}),
+        tower=_tower().model_copy(update={"qualification": parametric_qualification}),
+        antenna=_antenna().model_copy(update={"qualification": import_qualification}),
+        radio=_radio().model_copy(update={"qualification": parametric_qualification}),
+        accessory_assets=[_gps().model_copy(update={"qualification": import_qualification})],
+    )
+
+    assert scene.tower.generation_strategy == "parametric_generated"
+    assert scene.sectors[0].antenna_generation_strategy == "imported_glb_exact"
+    assert scene.sectors[0].antenna_geometry_source == "imported_glb_exact"
+    assert scene.sectors[0].radio_generation_strategy == "internal_project_generated"
+    assert scene.accessory_assets[0].generation_strategy == "imported_glb_exact"
+    assert scene.sectors[0].antenna_asset_metadata.verified_file_sha256 == "a" * 64
 
 
 def test_scene_planner_resolves_optional_tower_widths_into_scene_spec() -> None:

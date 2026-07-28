@@ -206,13 +206,13 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert metadata["visual_elements"]["include_power_cabinet"] is True
     assert metadata["mechanical_tilts_deg"] == [5, 5, 5]
     assert metadata["asset_import_summary"]["asset_count"] == 9
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 1
-    assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 1
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 2
+    assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["parametric_generated_count"] == 1
     assert metadata["asset_import_summary"]["internal_project_generated_count"] == 6
     records = {record["asset_id"]: record for record in metadata["asset_imports"]}
     assert records["GPS_ANTENNA_001"]["import_mode"] == "imported_glb"
-    assert records["POWER_CABINET_001"]["import_mode"] == "stretched_imported_glb"
+    assert records["POWER_CABINET_001"]["import_mode"] == "imported_glb"
     assert records["TOWER_LATTICE_30M"]["import_mode"] == "parametric_generated"
     assert records["ANT_PANEL_5G_001"]["import_mode"] == "internal_project_generated"
     assert records["GPS_ANTENNA_001"]["asset_import_success"] is True
@@ -236,6 +236,77 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert glb_report.checks["has_labels"] is True
     assert geometry_report.checks["label_count_valid"] is True
     assert geometry_report.object_counts["label"] >= 5
+
+
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is not available",
+)
+def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Path) -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    requirements = parse_requirements_text(
+        "Créer un site 4G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°. Ajouter RRU, câbles, GPS, armoire énergie."
+    ).model_copy(
+        update={
+            "include_gps_antenna": True,
+            "include_power_cabinet": True,
+        }
+    )
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    accessories = [
+        registry.select_asset("gps", requirements.network_type, requirements.tower_type),
+        registry.select_asset("cabinet", requirements.network_type, requirements.tower_type),
+    ]
+    scene = ScenePlanner().build_scene_spec(
+        "wf_qualified_asset_assembly",
+        requirements,
+        tower,
+        antenna,
+        radio,
+        accessory_assets=accessories,
+    )
+
+    result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
+
+    assert result.status == "generated"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 5
+    assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 3
+    qualified_imports = [
+        record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
+    ]
+    assert {record["asset_id"] for record in qualified_imports} == {
+        "ANT_PANEL_4G_001",
+        "GPS_ANTENNA_001",
+        "POWER_CABINET_001",
+    }
+    assert all(
+        record["asset_metadata"]["qualification_status"] == "qualified_for_generation"
+        for record in qualified_imports
+    )
+    assert all(record["asset_metadata"]["verified_file_sha256"] for record in qualified_imports)
+    glb_report = GLBInspector().inspect(
+        Path(result.artifacts["glb"]),
+        scene,
+        Path(result.artifacts["metadata"]),
+    )
+    geometry_report = GLBGeometryValidator().validate(
+        scene,
+        glb_report,
+        Path(result.artifacts["metadata"]),
+        Path(result.artifacts["glb"]),
+    )
+    assert glb_report.structural_qa_passed is True
+    assert geometry_report.status == "passed"
 
 
 @pytest.mark.skipif(
@@ -336,7 +407,7 @@ def test_blender_runner_generates_supported_foundation_assemblies(
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
     reason="Blender executable is not available",
 )
-def test_blender_runner_generates_real_microwave_dishes_not_panels(tmp_path: Path) -> None:
+def test_blender_runner_imports_qualified_microwave_dishes_not_panels(tmp_path: Path) -> None:
     registry = AssetRegistry(Path("assets/manifests"))
     requirements = parse_requirements_text(
         "Créer un lien MW sur pylône treillis 30m avec 2 secteurs à 22m. "
@@ -355,6 +426,11 @@ def test_blender_runner_generates_real_microwave_dishes_not_panels(tmp_path: Pat
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
     assert result.status == "generated"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    import_summary = metadata["asset_import_summary"]
+    assert import_summary["imported_glb_count"] == 2
+    assert import_summary["stretched_imported_glb_count"] == 0
+    assert import_summary["procedural_fallback_count"] == 0
     glb_payload = _read_glb_json(Path(result.artifacts["glb"]))
     semantic_roots = [
         node
@@ -364,9 +440,8 @@ def test_blender_runner_generates_real_microwave_dishes_not_panels(tmp_path: Pat
     ]
     assert len(semantic_roots) == 2
     assert {node["extras"]["geometry_family"] for node in semantic_roots} == {"microwave_dish"}
+    assert all(node.get("children") for node in semantic_roots)
     node_names = {node.get("name", "") for node in glb_payload.get("nodes", [])}
-    assert any(name.endswith("_surface") for name in node_names)
-    assert any(name.endswith("_feed") for name in node_names)
     assert not any("panel" in name.lower() for name in node_names)
 
 

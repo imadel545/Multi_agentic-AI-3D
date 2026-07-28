@@ -22,5 +22,17 @@
   "pivot_policy": "center_mount",
   "front_axis": "+Y",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "sector_antenna_pose_v1"
+  "adaptation_profile_id": "sector_antenna_pose_v1",
+  "qualification": {
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["imported_glb_exact"],
+    "verified_file_sha256": "e3af93b55c314485442b5b2ebff6846f75db597eb27b001a107c8c7c3e4d6bcf",
+    "units": "meters",
+    "mesh_integrity_verified": true,
+    "dimensions_verified": true,
+    "pivot_verified": true,
+    "orientation_verified": true,
+    "qualification_method": "Blender 5.1 import probe plus GLB binary integrity inspection",
+    "limitations": ["Internal generic geometry; not vendor-grade."]
+  }
 }

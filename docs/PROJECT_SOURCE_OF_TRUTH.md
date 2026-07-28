@@ -111,13 +111,24 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - 12 manifests.
 - 12 GLB files present.
 - 0 tower without a local GLB.
-- Expected `/assets/inventory` status: `ready_for_import`.
+- Expected `/assets/inventory` status: `qualified_mixed_catalog`.
+- 10 manifests are generation-eligible: 4 authorize an exact GLB import and 6
+  authorize SceneSpec-driven parametric generation. The bracket and cable-tray
+  GLBs remain `reference_only` until typed connector/route contracts exist.
+- Exact import authorization is fail-closed: the manifest pins SHA-256, units,
+  dimensions, pivot, orientation and mesh-integrity review. A changed file is
+  rejected and the controlled fallback is reported.
 - The three historically missing towers (monopole, rooftop, small-cell) are now
   internal project generated assets produced with Blender.
 - Current assets are internal/CC-BY and not vendor-grade.
-- Towers are generated parametrically by default. GLB import happens only when
-  the resolver explicitly selects `imported_glb_exact` or
-  `internal_project_generated`.
+- Towers are generated parametrically by default. In the product planning path,
+  GLB import happens only when the manifest authorizes and the planner selects
+  `imported_glb_exact`.
+- The scene planner now stamps the manifest-authorized generation mode and
+  reason into `SceneSpec`. A 4G scene can therefore assemble qualified panel,
+  GPS and power-cabinet GLBs while keeping the tower and RRU parametric. The 5G
+  panel and RRU companion GLBs are not imported because their orientation is
+  not qualified; this prevents silent non-uniform distortion.
 - Every manifest references an explicit adaptation profile. The versioned
   catalog under `assets/capabilities/adaptation_profiles.json` declares the
   editable parameter, JSON pointer, value type, bounds, effect, and execution

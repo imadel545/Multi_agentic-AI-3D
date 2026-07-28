@@ -319,6 +319,16 @@ class AssetInventoryEntry(BaseModel):
     dimensions_m: dict[str, Any] | None = None
     asset_dimensions_checked: bool = False
     adaptation_profile_id: str | None = None
+    qualification_status: str
+    generation_eligible: bool
+    allowed_generation_modes: list[str] = Field(default_factory=list)
+    qualification_method: str | None = None
+    qualification_limitations: list[str] = Field(default_factory=list)
+    verified_file_sha256: str | None = None
+    qualified_file_hash_matches: bool | None = None
+    mesh_integrity_verified: bool = False
+    pivot_verified: bool = False
+    orientation_verified: bool = False
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -331,7 +341,12 @@ class AssetInventoryResponse(BaseModel):
     missing_file_count: int
     real_glb_asset_count: int
     import_ready_asset_count: int
+    import_qualified_glb_count: int
+    generation_eligible_asset_count: int
+    reference_only_asset_count: int
+    qualified_integrity_failure_count: int
     procedural_fallback_count: int
+    parametric_generation_count: int
     procedural_generation_required: bool
     entries: list[AssetInventoryEntry]
     missing_files: list[AssetInventoryEntry] = Field(default_factory=list)
@@ -553,6 +568,8 @@ class StudioSummary(BaseModel):
     asset_inventory_status: str
     asset_count: int = 0
     real_glb_asset_count: int = 0
+    generation_eligible_asset_count: int = 0
+    reference_only_asset_count: int = 0
     missing_file_count: int = 0
     blender_available: bool | None = None
     groq_available: bool | None = None

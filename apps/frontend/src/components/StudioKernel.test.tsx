@@ -901,6 +901,27 @@ describe("studio kernel components", () => {
     const onSearch = vi.fn();
     render(
       <AssetLibraryPanel
+        inventory={{
+          status: "qualified_mixed_catalog",
+          asset_count: 12,
+          missing_file_count: 0,
+          real_glb_asset_count: 12,
+          import_qualified_glb_count: 4,
+          generation_eligible_asset_count: 10,
+          reference_only_asset_count: 2,
+          qualified_integrity_failure_count: 0,
+          entries: [{
+            asset_id: "ANT_PANEL_4G_001",
+            type: "antenna",
+            source: "internal_cleaned",
+            generation_eligible: true,
+            qualification_status: "qualified_for_generation",
+            allowed_generation_modes: ["imported_glb_exact"],
+            qualification_limitations: ["Géométrie interne générique."],
+            qualified_file_hash_matches: true
+          }],
+          missing_files: []
+        }}
         onSearch={onSearch}
         summary={{
           status: "catalogued_quarantined",
@@ -919,6 +940,9 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.getByText(/11[\s ]974 fichiers catalogués/)).toBeInTheDocument();
+    expect(screen.getByText(/10 composants exploitables/)).toBeInTheDocument();
+    expect(screen.getByText(/ant panel 4g 001/)).toBeInTheDocument();
+    expect(screen.getByText(/mesh vérifié/)).toBeInTheDocument();
     expect(screen.getByText(/2\s834/)).toBeInTheDocument();
     expect(screen.getByText("Qualification requise")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();

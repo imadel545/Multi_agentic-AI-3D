@@ -59,6 +59,9 @@ class ScenePlanner:
                 antenna_asset_source=antenna.source,
                 antenna_asset_metadata=_runtime_asset_metadata(antenna),
                 antenna_import_fallback_allowed=antenna.import_fallback_allowed,
+                antenna_generation_strategy=_component_generation_strategy(antenna),
+                antenna_geometry_source=_component_geometry_source(antenna),
+                antenna_generation_reason=_component_generation_reason(antenna),
                 radio_asset_id=radio.asset_id if radio else None,
                 radio_asset_file=radio.file if radio else None,
                 radio_asset_source=radio.source if radio else None,
@@ -66,6 +69,13 @@ class ScenePlanner:
                 if radio
                 else RuntimeAssetMetadata(),
                 radio_import_fallback_allowed=radio.import_fallback_allowed if radio else True,
+                radio_generation_strategy=_component_generation_strategy(radio)
+                if radio
+                else "procedural_fallback",
+                radio_geometry_source=_component_geometry_source(radio) if radio else "degraded",
+                radio_generation_reason=_component_generation_reason(radio)
+                if radio
+                else "no radio requested",
                 install_height_m=install_height,
                 azimuth_deg=azimuth,
                 mechanical_tilt_deg=requirements.mechanical_tilt_deg,
@@ -91,6 +101,13 @@ class ScenePlanner:
                 position=[0.0, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],
+                generation_strategy="parametric_generated",
+                geometry_source="parametric_generated",
+                generation_reason=(
+                    "qualified SceneSpec-driven parametric tower profile"
+                    if tower.allows_generation_mode("parametric_generated")
+                    else "tower import is not authorized; using controlled parametric generation"
+                ),
                 height_m=requirements.tower_height_m,
                 characteristics=tower_characteristics,
             ),
@@ -114,6 +131,11 @@ def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
         normalized_by=asset.normalized_by,
         pivot_policy=asset.pivot_policy,
         front_axis=asset.front_axis,
+        qualification_status=asset.qualification.status,
+        allowed_generation_modes=list(asset.qualification.allowed_generation_modes),
+        verified_file_sha256=asset.qualification.verified_file_sha256,
+        qualification_method=asset.qualification.qualification_method,
+        qualification_limitations=list(asset.qualification.limitations),
     )
 
 
@@ -179,7 +201,35 @@ def _accessory_placement(
         dimensions_m=asset.dimensions_m,
         position=position,
         rotation_deg=rotation_deg,
+        generation_strategy=_component_generation_strategy(asset),
+        geometry_source=_component_geometry_source(asset),
+        generation_reason=_component_generation_reason(asset),
     )
+
+
+def _component_generation_strategy(asset: AssetManifest):
+    if asset.allows_generation_mode("imported_glb_exact"):
+        return "imported_glb_exact"
+    if asset.allows_generation_mode("parametric_generated"):
+        return "internal_project_generated"
+    return "procedural_fallback"
+
+
+def _component_geometry_source(asset: AssetManifest):
+    strategy = _component_generation_strategy(asset)
+    if strategy == "imported_glb_exact":
+        return "imported_glb_exact"
+    if strategy == "internal_project_generated":
+        return "internal_project_generated"
+    return "degraded"
+
+
+def _component_generation_reason(asset: AssetManifest) -> str:
+    if asset.allows_generation_mode("imported_glb_exact"):
+        return "qualified exact GLB import authorized by pinned asset manifest"
+    if asset.allows_generation_mode("parametric_generated"):
+        return "qualified SceneSpec-driven parametric component profile"
+    return "asset is not qualified for generation; controlled procedural fallback required"
 
 
 def _resolved_tower_characteristics(

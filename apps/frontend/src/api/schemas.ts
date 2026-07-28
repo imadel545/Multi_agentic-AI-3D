@@ -215,6 +215,10 @@ export const StudioSummarySchema = publicSchema(
     designs: z.array(UnknownRecord).default([]),
     total_designs: z.number().default(0),
     asset_inventory_status: z.string().nullish(),
+    asset_count: z.number().int().nonnegative().default(0),
+    real_glb_asset_count: z.number().int().nonnegative().default(0),
+    generation_eligible_asset_count: z.number().int().nonnegative().default(0),
+    reference_only_asset_count: z.number().int().nonnegative().default(0),
     blender_available: z.boolean().nullish(),
     groq_available: z.boolean().nullish(),
     llm_available: z.boolean().nullish(),
@@ -415,13 +419,30 @@ export const UserIssuesSchema = publicSchema(
   })
 );
 
+export const QualifiedAssetInventoryEntrySchema = publicSchema(
+  UnknownRecord.extend({
+    asset_id: z.string(),
+    type: z.string(),
+    source: z.string().nullish(),
+    generation_eligible: z.boolean().default(false),
+    qualification_status: z.string(),
+    allowed_generation_modes: z.array(z.string()).default([]),
+    qualification_limitations: z.array(z.string()).default([]),
+    qualified_file_hash_matches: z.boolean().nullish()
+  })
+);
+
 export const AssetInventorySchema = publicSchema(
   UnknownRecord.extend({
     status: z.string(),
     asset_count: z.number(),
     missing_file_count: z.number(),
     real_glb_asset_count: z.number(),
-    entries: z.array(UnknownRecord).default([]),
+    import_qualified_glb_count: z.number().int().nonnegative().default(0),
+    generation_eligible_asset_count: z.number().int().nonnegative().default(0),
+    reference_only_asset_count: z.number().int().nonnegative().default(0),
+    qualified_integrity_failure_count: z.number().int().nonnegative().default(0),
+    entries: z.array(QualifiedAssetInventoryEntrySchema).default([]),
     missing_files: z.array(UnknownRecord).default([])
   })
 );

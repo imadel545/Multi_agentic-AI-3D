@@ -61,64 +61,36 @@ class ParametricModelResolver:
                 warnings,
             )
 
-        if requested is not None and asset.dimensions_m is not None:
-            exact = self._dimensions_match(requested, asset.dimensions_m)
-            if exact and asset.source in {"cc_by", "vendor_supplied", "vendor_expected"}:
+        if asset.allows_generation_mode("imported_glb_exact"):
+            exact = (
+                requested is not None
+                and asset.dimensions_m is not None
+                and self._dimensions_match(requested, asset.dimensions_m)
+            )
+            if exact:
                 return (
                     "imported_glb_exact",
                     "imported_glb_exact",
-                    f"exact validated GLB available for {placement.asset_id}",
+                    f"qualified exact GLB authorized for {placement.asset_id}",
                     warnings,
                 )
-            if not exact:
-                warnings.append(
-                    f"REQUESTED_TOWER_DIMENSIONS_DIFFER_FROM_ASSET:{placement.asset_id}"
-                )
-                # Even if an asset exists, do not stretch it: generate parametrically.
-                reason = (
-                    f"asset {placement.asset_id} dimensions do not match request; "
-                    "generating parametrically"
-                )
-                return (
-                    "parametric_generated",
-                    "parametric_generated",
-                    reason,
-                    warnings,
-                )
-
-        # Internal generated/cleaned/test assets: keep as internal_project_generated
-        # unless dimensions mismatch, in which case parametric is preferred.
-        if asset.source in {
-            "internal_project_generated",
-            "internal_cleaned",
-            "internal_test_minimal",
-        }:
-            if requested is not None and asset.dimensions_m is not None:
-                if not self._dimensions_match(requested, asset.dimensions_m):
-                    warnings.append(
-                        f"INTERNAL_TOWER_ASSET_DIMENSIONS_MISMATCH:{placement.asset_id}"
-                    )
-                    return (
-                        "parametric_generated",
-                        "parametric_generated",
-                        (
-                            f"internal asset {placement.asset_id} does not match requested "
-                            "dimensions; generating parametrically"
-                        ),
-                        warnings,
-                    )
-            return (
-                "internal_project_generated",
-                "internal_project_generated",
-                f"using internal project generated asset {placement.asset_id}",
-                warnings,
+            warnings.append(
+                f"REQUESTED_TOWER_DIMENSIONS_DIFFER_FROM_QUALIFIED_ASSET:{placement.asset_id}"
             )
 
-        # Fallback for any other case: generate parametrically.
+        if not asset.is_generation_eligible:
+            warnings.append(f"TOWER_ASSET_NOT_GENERATION_QUALIFIED:{placement.asset_id}")
+
+        # Tower geometry remains SceneSpec-driven. A companion GLB is never
+        # imported merely because it exists or has a trusted-looking source.
         return (
             "parametric_generated",
             "parametric_generated",
-            f"generating tower {placement.asset_id} parametrically from SceneSpec",
+            (
+                f"qualified parametric tower profile {placement.asset_id}"
+                if asset.allows_generation_mode("parametric_generated")
+                else f"controlled SceneSpec-driven tower generation for {placement.asset_id}"
+            ),
             warnings,
         )
 
@@ -158,19 +130,16 @@ class ParametricModelResolver:
                 warnings,
             )
 
-        if requested is not None and asset.dimensions_m is not None:
-            if self._dimensions_match(requested, asset.dimensions_m):
-                if asset.source in {"cc_by", "vendor_supplied", "vendor_expected"}:
-                    return (
-                        "imported_glb_exact",
-                        "imported_glb_exact",
-                        f"exact validated {component} GLB {asset_id}",
-                        warnings,
-                    )
+        if asset.allows_generation_mode("imported_glb_exact"):
+            if (
+                requested is not None
+                and asset.dimensions_m is not None
+                and self._dimensions_match(requested, asset.dimensions_m)
+            ):
                 return (
-                    "internal_project_generated",
-                    "internal_project_generated",
-                    f"exact internal {component} GLB {asset_id}",
+                    "imported_glb_exact",
+                    "imported_glb_exact",
+                    f"qualified exact {component} GLB {asset_id}",
                     warnings,
                 )
             warnings.append(f"{component.upper()}_DIMENSIONS_MISMATCH:{asset_id}")
@@ -181,22 +150,19 @@ class ParametricModelResolver:
                 warnings,
             )
 
-        if asset.source in {
-            "internal_project_generated",
-            "internal_cleaned",
-            "internal_test_minimal",
-        }:
+        if asset.allows_generation_mode("parametric_generated"):
             return (
                 "internal_project_generated",
                 "internal_project_generated",
-                f"using internal {component} asset {asset_id}",
+                f"qualified SceneSpec-driven {component} profile {asset_id}",
                 warnings,
             )
 
+        warnings.append(f"{component.upper()}_ASSET_NOT_GENERATION_QUALIFIED:{asset_id}")
         return (
-            "imported_glb_exact",
-            "imported_glb_exact",
-            f"using {component} asset {asset_id} without dimension verification",
+            "procedural_fallback",
+            "degraded",
+            f"{component} asset {asset_id} is not qualified; using procedural fallback",
             warnings,
         )
 
@@ -214,19 +180,16 @@ class ParametricModelResolver:
                 warnings,
             )
 
-        if placement.dimensions_m is not None and asset.dimensions_m is not None:
-            if self._dimensions_match(placement.dimensions_m, asset.dimensions_m):
-                if asset.source in {"cc_by", "vendor_supplied", "vendor_expected"}:
-                    return (
-                        "imported_glb_exact",
-                        "imported_glb_exact",
-                        f"exact validated accessory GLB {placement.asset_id}",
-                        warnings,
-                    )
+        if asset.allows_generation_mode("imported_glb_exact"):
+            if (
+                placement.dimensions_m is not None
+                and asset.dimensions_m is not None
+                and self._dimensions_match(placement.dimensions_m, asset.dimensions_m)
+            ):
                 return (
-                    "internal_project_generated",
-                    "internal_project_generated",
-                    f"exact internal accessory GLB {placement.asset_id}",
+                    "imported_glb_exact",
+                    "imported_glb_exact",
+                    f"qualified exact accessory GLB {placement.asset_id}",
                     warnings,
                 )
             warnings.append(f"ACCESSORY_DIMENSIONS_MISMATCH:{placement.asset_id}")
@@ -237,22 +200,19 @@ class ParametricModelResolver:
                 warnings,
             )
 
-        if asset.source in {
-            "internal_project_generated",
-            "internal_cleaned",
-            "internal_test_minimal",
-        }:
+        if asset.allows_generation_mode("parametric_generated"):
             return (
                 "internal_project_generated",
                 "internal_project_generated",
-                f"using internal accessory {placement.asset_id}",
+                f"qualified SceneSpec-driven accessory profile {placement.asset_id}",
                 warnings,
             )
 
+        warnings.append(f"ACCESSORY_ASSET_NOT_GENERATION_QUALIFIED:{placement.asset_id}")
         return (
-            "imported_glb_exact",
-            "imported_glb_exact",
-            f"using accessory {placement.asset_id} without dimension verification",
+            "procedural_fallback",
+            "degraded",
+            f"accessory {placement.asset_id} is not qualified; using procedural fallback",
             warnings,
         )
 
@@ -294,8 +254,10 @@ def resolve_scene_strategies(scene: SceneSpec, registry: AssetRegistry | None = 
                 update={
                     "antenna_generation_strategy": ant_strategy,
                     "antenna_geometry_source": ant_source,
+                    "antenna_generation_reason": ant_reason,
                     "radio_generation_strategy": radio_strategy,
                     "radio_geometry_source": radio_source,
+                    "radio_generation_reason": radio_reason,
                 }
             )
         )
@@ -308,6 +270,7 @@ def resolve_scene_strategies(scene: SceneSpec, registry: AssetRegistry | None = 
                 update={
                     "generation_strategy": acc_strategy,
                     "geometry_source": acc_source,
+                    "generation_reason": acc_reason,
                 }
             )
         )

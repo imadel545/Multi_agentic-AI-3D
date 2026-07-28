@@ -8,6 +8,7 @@ The script is intentionally SceneSpec-driven. It does not execute LLM-generated 
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import sys
@@ -1369,6 +1370,16 @@ def _try_import_glb_asset(
             fallback_allowed=fallback_allowed,
         )
 
+    expected_sha256 = str((asset_metadata or {}).get("verified_file_sha256") or "")
+    if expected_sha256 and _sha256_file(path) != expected_sha256:
+        return _record_asset_import_fallback(
+            record,
+            asset_imports,
+            warnings,
+            "ASSET_QUALIFIED_HASH_MISMATCH",
+            fallback_allowed=fallback_allowed,
+        )
+
     before_names = {obj.name for obj in bpy.data.objects}
     try:
         bpy.ops.import_scene.gltf(filepath=str(path))
@@ -1519,6 +1530,14 @@ def _resolve_asset_path(asset_file: str | None) -> Path | None:
     if path.is_absolute():
         return path
     return Path.cwd() / path
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _base_asset_import_record(

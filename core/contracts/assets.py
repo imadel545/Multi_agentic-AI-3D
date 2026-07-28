@@ -23,6 +23,58 @@ class MountZone(StrictModel):
         return self
 
 
+AssetQualificationStatus = Literal[
+    "qualified_for_generation",
+    "reference_only",
+    "quarantined_unverified",
+]
+AssetGenerationMode = Literal[
+    "parametric_generated",
+    "imported_glb_exact",
+]
+
+
+class AssetQualification(StrictModel):
+    """Auditable authorization for using an asset in the generation path.
+
+    File presence is deliberately insufficient. Exact GLB import requires a
+    pinned file hash plus verified mesh integrity, dimensions, pivot and
+    orientation. Parametric templates remain useful without authorizing their
+    companion GLB for import.
+    """
+
+    status: AssetQualificationStatus = "quarantined_unverified"
+    allowed_generation_modes: list[AssetGenerationMode] = Field(default_factory=list)
+    verified_file_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    units: Literal["meters"] = "meters"
+    mesh_integrity_verified: bool = False
+    dimensions_verified: bool = False
+    pivot_verified: bool = False
+    orientation_verified: bool = False
+    qualification_method: str | None = None
+    limitations: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_import_authorization(self) -> "AssetQualification":
+        if len(self.allowed_generation_modes) != len(set(self.allowed_generation_modes)):
+            raise ValueError("allowed_generation_modes must be unique")
+        if self.status != "qualified_for_generation" and self.allowed_generation_modes:
+            raise ValueError("only qualified assets may declare generation modes")
+        if "imported_glb_exact" in self.allowed_generation_modes:
+            required_checks = (
+                self.verified_file_sha256,
+                self.mesh_integrity_verified,
+                self.dimensions_verified,
+                self.pivot_verified,
+                self.orientation_verified,
+            )
+            if not all(required_checks):
+                raise ValueError(
+                    "imported_glb_exact requires a pinned hash and all geometry checks"
+                )
+        return self
+
+
 class AssetManifest(StrictModel):
     asset_id: str = Field(min_length=1)
     type: AssetType
@@ -54,7 +106,15 @@ class AssetManifest(StrictModel):
     front_axis: str | None = None
     import_fallback_allowed: bool = True
     adaptation_profile_id: str | None = Field(default=None, min_length=1)
+    qualification: AssetQualification = Field(default_factory=AssetQualification)
 
     @property
     def is_validated(self) -> bool:
         return self.status == "validated"
+
+    @property
+    def is_generation_eligible(self) -> bool:
+        return self.is_validated and self.qualification.status == "qualified_for_generation"
+
+    def allows_generation_mode(self, mode: AssetGenerationMode) -> bool:
+        return self.is_generation_eligible and mode in self.qualification.allowed_generation_modes

@@ -21,6 +21,7 @@ import type {
   DocumentPackReview,
   DocumentPackSummary,
   Health,
+  AssetInventory,
   AssetLibrarySearch,
   AssetLibrarySummary,
   ParseRequirementsResponse,
@@ -60,6 +61,7 @@ export default function App() {
   const [health, setHealth] = useState<Health | null>(null);
   const [assetLibrarySummary, setAssetLibrarySummary] =
     useState<AssetLibrarySummary | null>(null);
+  const [assetInventory, setAssetInventory] = useState<AssetInventory | null>(null);
   const [assetLibrarySearch, setAssetLibrarySearch] =
     useState<AssetLibrarySearch | null>(null);
   const [assetLibrarySearchBusy, setAssetLibrarySearchBusy] = useState(false);
@@ -134,6 +136,14 @@ export default function App() {
       })
       .catch(() => {
         if (!cancelled) setAssetLibrarySummary(null);
+      });
+    void apiClient
+      .assetInventory()
+      .then((inventory) => {
+        if (!cancelled) setAssetInventory(inventory);
+      })
+      .catch(() => {
+        if (!cancelled) setAssetInventory(null);
       });
     void apiClient
       .documentPackCapabilities()
@@ -832,6 +842,7 @@ export default function App() {
             <TelecomGlbViewer bundle={state.viewerBundle} toAbsoluteUrl={toArtifactUrl} />
           </Suspense>
           <InspectorDock
+            assetInventory={assetInventory}
             assetLibrarySearch={assetLibrarySearch}
             assetLibrarySearchBusy={assetLibrarySearchBusy}
             assetLibrarySearchError={assetLibrarySearchError}

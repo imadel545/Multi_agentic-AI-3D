@@ -59,7 +59,7 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
     assets_by_id = {asset.asset_id: asset for asset in assets}
     checks = {
         "tower_asset_valid": scene.tower.asset_id in assets_by_id
-        and assets_by_id[scene.tower.asset_id].is_validated,
+        and assets_by_id[scene.tower.asset_id].is_generation_eligible,
         "tower_height_valid": scene.tower.height_m > 0,
         "tower_characteristics_valid": bool(scene.tower.characteristics.structure),
         "sector_count_valid": len(scene.sectors) > 0,
@@ -68,15 +68,21 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
         ),
         "azimuths_valid": all(0 <= sector.azimuth_deg < 360 for sector in scene.sectors),
         "sector_asset_valid": all(
-            sector.antenna_asset_id in assets_by_id for sector in scene.sectors
+            sector.antenna_asset_id in assets_by_id
+            and assets_by_id[sector.antenna_asset_id].is_generation_eligible
+            for sector in scene.sectors
         ),
         "radio_asset_valid": all(
-            sector.radio_asset_id is None or sector.radio_asset_id in assets_by_id
+            sector.radio_asset_id is None
+            or (
+                sector.radio_asset_id in assets_by_id
+                and assets_by_id[sector.radio_asset_id].is_generation_eligible
+            )
             for sector in scene.sectors
         ),
         "accessory_assets_valid": all(
             accessory.asset_id in assets_by_id
-            and assets_by_id[accessory.asset_id].is_validated
+            and assets_by_id[accessory.asset_id].is_generation_eligible
             and assets_by_id[accessory.asset_id].type == accessory.asset_type
             for accessory in scene.accessory_assets
         ),

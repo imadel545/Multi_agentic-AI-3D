@@ -125,6 +125,15 @@ restent internes au backend.
 - `asset_inventory_status`
 - `asset_count`
 - `real_glb_asset_count`
+- `import_qualified_glb_count`
+- `generation_eligible_asset_count`
+- `reference_only_asset_count`
+- `qualified_integrity_failure_count`
+
+Chaque entrée expose aussi `qualification_status`, `generation_eligible`,
+`allowed_generation_modes`, `qualification_method`, les limites de
+qualification et le résultat du contrôle du hash. La présence d'un `.glb` ne
+signifie donc plus qu'il est automatiquement utilisable par Blender.
 - `missing_file_count`
 - `blender_available`
 - `groq_available`

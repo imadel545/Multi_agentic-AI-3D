@@ -73,6 +73,10 @@ class ProductService:
             "asset_inventory_status": inventory_status,
             "asset_count": int(inventory.get("asset_count") or 0),
             "real_glb_asset_count": int(inventory.get("real_glb_asset_count") or 0),
+            "generation_eligible_asset_count": int(
+                inventory.get("generation_eligible_asset_count") or 0
+            ),
+            "reference_only_asset_count": int(inventory.get("reference_only_asset_count") or 0),
             "missing_file_count": int(inventory.get("missing_file_count") or 0),
             "blender_available": blender_available,
             "groq_available": groq_available,
@@ -770,7 +774,20 @@ def _asset_quality_summary(status: dict) -> str | None:
             f"{fallback_count} asset(s) en fallback procédural, "
             f"{missing_count} fichier(s) GLB manquant(s), {internal_count} asset(s) interne(s)."
         )
-    return f"{len(asset_imports)} asset(s) importé(s) correctement."
+    imported_count = sum(
+        1
+        for asset in asset_imports
+        if asset.get("import_mode") in {"imported_glb", "stretched_imported_glb"}
+    )
+    parametric_count = sum(
+        1
+        for asset in asset_imports
+        if asset.get("import_mode") in {"parametric_generated", "internal_project_generated"}
+    )
+    return (
+        f"{imported_count} mesh(es) GLB importé(s), "
+        f"{parametric_count} composant(s) généré(s) par profil contrôlé."
+    )
 
 
 def _collect_limitations(status: dict) -> list[str]:
@@ -1497,16 +1514,16 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
             }
         )
     entries = inventory.get("entries", [])
-    if entries and not any(entry.get("asset_import_mode") == "imported_glb" for entry in entries):
+    if entries and int(inventory.get("generation_eligible_asset_count") or 0) == 0:
         warnings.append(
             {
-                "title": "Aucun asset GLB prêt",
+                "title": "Aucun composant 3D qualifié",
                 "severity": "error",
-                "impact": "La génération 3D ne peut pas utiliser d'assets réels.",
+                "impact": "La génération 3D ne dispose d'aucun profil d'asset autorisé.",
                 "recommended_action": (
-                    "Vérifiez les manifests et les fichiers GLB sous assets/manifests."
+                    "Vérifiez les qualifications, manifests et fichiers sous assets/."
                 ),
-                "technical_code": "STUDIO_NO_GLB_READY_ASSETS",
+                "technical_code": "STUDIO_NO_QUALIFIED_ASSETS",
             }
         )
     missing_count = int(inventory.get("missing_file_count") or 0)
