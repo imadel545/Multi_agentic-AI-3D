@@ -7,7 +7,7 @@ from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 
 
-def test_scene_repair_antenna_height_success(tmp_path: Path) -> None:
+def test_incoherent_antenna_height_requires_confirmation_before_scene(tmp_path: Path) -> None:
     result = _run_prompt(
         tmp_path,
         (
@@ -19,25 +19,28 @@ def test_scene_repair_antenna_height_success(tmp_path: Path) -> None:
     assert result.status == "failed"
     assert result.requirements is not None
     assert result.requirements.antenna_install_height_m == 27
-    assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_ANTENNA_HEIGHT"]
-    assert "scene_repair_handler" in [entry["node"] for entry in result.trace]
-    assert result.generation is not None
-    assert result.generation.mode == "fallback_no_blender"
+    assert result.requirements.requires_confirmation is True
+    assert result.scene is None
+    assert result.generation is None
+    assert [error.code for error in result.report.errors] == ["INPUT_CONFIRMATION_REQUIRED"]
 
 
-def test_scene_repair_azimuth_normalization_success(tmp_path: Path) -> None:
+def test_invalid_explicit_azimuth_is_traceably_normalized_before_scene(tmp_path: Path) -> None:
     result = _run_prompt(
         tmp_path,
         "Créer un site 5G sur pylône treillis 30m. Installer 1 secteur à 24m. Azimuts : 370°.",
     )
 
     assert result.status == "failed"
+    assert result.requirements is not None
+    assert result.requirements.azimuths_deg == [10]
+    assert result.requirements.repair_events[0].before == {"azimuths_deg": [370.0]}
+    assert result.requirements.repair_events[0].after == {"azimuths_deg": [10.0]}
     assert result.scene is not None
     assert result.scene.sectors[0].azimuth_deg == 10
-    assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_AZIMUTH_NORMALIZED"]
 
 
-def test_scene_repair_sector_count_success_or_explicit_fail(tmp_path: Path) -> None:
+def test_sector_azimuth_mismatch_requires_confirmation_before_scene(tmp_path: Path) -> None:
     result = _run_prompt(
         tmp_path,
         (
@@ -47,9 +50,11 @@ def test_scene_repair_sector_count_success_or_explicit_fail(tmp_path: Path) -> N
     )
 
     assert result.status == "failed"
-    assert result.scene is not None
-    assert [sector.azimuth_deg for sector in result.scene.sectors] == [0, 120, 240]
-    assert _repair_codes(result) == ["SCENE_SPEC_REPAIRED_SECTOR_COUNT"]
+    assert result.requirements is not None
+    assert result.requirements.requires_confirmation is True
+    assert result.scene is None
+    assert result.generation is None
+    assert [error.code for error in result.report.errors] == ["INPUT_CONFIRMATION_REQUIRED"]
 
 
 def test_scene_repair_exhausts_attempts_without_blender(tmp_path: Path) -> None:
@@ -103,15 +108,6 @@ def _run_prompt(tmp_path: Path, prompt: str):
         output_dir=tmp_path / "outputs",
         use_llm=False,
     )
-
-
-def _repair_codes(result) -> list[str]:
-    return [
-        event["warning_code"]
-        for route in result.route_history
-        for event in route.get("events", [])
-        if event.get("handler") == "scene_repair_handler"
-    ]
 
 
 class BrokenScenePlanner:

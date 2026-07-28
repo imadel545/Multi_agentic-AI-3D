@@ -55,6 +55,9 @@ memory_writeback
 ## Vérité runtime
 
 - `DesignOrchestrator.run()` utilise le workflow principal depuis texte libre.
+- `extract_requirements` route immédiatement vers `rule_violation_handler`
+  lorsque `RequirementSpec.requires_confirmation=true`; aucun RAG, asset,
+  `SceneSpec` ou Blender n'est exécuté sur une contradiction non confirmée.
 - `run_requirements()` entre dans le graphe avec `entry_mode=validated_requirements`.
 - `run_scene_revision()` entre dans le graphe avec `entry_mode=scene_revision`.
 - `retrieve_rag_context` utilise le texte original enrichi par le

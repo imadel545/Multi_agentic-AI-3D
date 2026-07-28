@@ -18,7 +18,7 @@ PROMPT_5G = (
 )
 
 
-def test_agentic_route_repair_then_success(tmp_path: Path) -> None:
+def test_agentic_route_blocks_unconfirmed_input_before_planning(tmp_path: Path) -> None:
     orchestrator = _orchestrator()
 
     result = orchestrator.run(
@@ -35,12 +35,12 @@ def test_agentic_route_repair_then_success(tmp_path: Path) -> None:
     nodes = [entry["node"] for entry in result.trace]
     assert result.status == "failed"
     assert result.requirements is not None
+    assert result.requirements.requires_confirmation is True
     assert result.requirements.azimuths_deg == [0.0, 120.0, 240.0]
-    assert result.generation is not None
-    assert result.generation.mode == "fallback_no_blender"
-    assert nodes.index("scene_repair_handler") < nodes.index("pre_blender_gate")
-    assert nodes.index("pre_blender_gate") < nodes.index("generate_blender")
-    assert any(event["route"] == "scene_repair" for event in result.route_history)
+    assert result.scene is None
+    assert result.generation is None
+    assert nodes == ["extract_requirements", "rule_violation_handler"]
+    assert [error.code for error in result.report.errors] == ["INPUT_CONFIRMATION_REQUIRED"]
 
 
 def test_agentic_route_unrepairable_failure(tmp_path: Path) -> None:
@@ -114,7 +114,7 @@ def test_memory_writeback_after_success(tmp_path: Path) -> None:
     assert nodes.index("post_blender_gate") < nodes.index("memory_writeback")
 
 
-def test_route_history_contains_decisions(tmp_path: Path) -> None:
+def test_route_history_contains_input_blocking_decision(tmp_path: Path) -> None:
     result = _orchestrator().run(
         workflow_id="wf_route_history",
         requirements_text=(
@@ -127,8 +127,7 @@ def test_route_history_contains_decisions(tmp_path: Path) -> None:
     )
 
     routes = [event["route"] for event in result.route_history]
-    assert "scene_repair" in routes
-    assert "blender_failure" in routes
+    assert routes == ["rule_violation"]
     assert all(
         {"handler", "route", "attempt", "events"} <= event.keys() for event in result.route_history
     )

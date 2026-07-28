@@ -480,8 +480,7 @@ def _sector_count_candidates(text: str, normalized: str) -> list[RequirementCand
     for match in re.finditer(rf"\b({NUMBER_TOKEN})\s+sect(?:eurs?|ors?)\b", normalized):
         token = match.group(1)
         value = int(token) if token.isdigit() else NUMBER_WORDS[token]
-        if 1 <= value <= 12:
-            candidates.append(_candidate(text, match, value, "sector_count_phrase"))
+        candidates.append(_candidate(text, match, value, "sector_count_phrase"))
     return candidates
 
 
@@ -524,7 +523,6 @@ def _azimuth_candidates(text: str, normalized: str) -> list[RequirementCandidate
             end = match.end() + boundary.start()
         block = normalized[match.end() : end]
         values = [float(value.replace(",", ".")) for value in re.findall(r"\d+(?:[.,]\d+)?", block)]
-        values = [value for value in values if 0 <= value < 360]
         if not values:
             continue
         absolute_match = _AbsoluteMatch(match.start(), end)

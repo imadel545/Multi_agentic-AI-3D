@@ -684,9 +684,42 @@ class DesignOrchestrator:
                     errors=["EXTRACTION_FAILED"],
                 ),
             }
+        requirements = extraction.requirements
+        if requirements.requires_confirmation:
+            fields = ", ".join(requirements.confirmation_fields) or "champs contradictoires"
+            report = _failed_report(
+                design_id=state["workflow_id"],
+                code="INPUT_CONFIRMATION_REQUIRED",
+                message=(
+                    f"La génération est bloquée tant que l'utilisateur n'a pas confirmé: {fields}."
+                ),
+            )
+            return {
+                "requirements": requirements,
+                "requirements_hash": requirements_hash(requirements),
+                "asset_manifest_hash": self.registry.manifest_hash,
+                "knowledge_index_hash": (
+                    knowledge_index_hash(self.rag_service.project_root)
+                    if self.rag_service is not None
+                    else ""
+                ),
+                "extraction_provider": extraction.provider,
+                "extraction_fallback_used": extraction.fallback_used,
+                "extraction_error": extraction.error,
+                "requirement_report": report,
+                "report": report,
+                "trace": _trace(
+                    state,
+                    "extract_requirements",
+                    "confirmation_required",
+                    started,
+                    status="failed",
+                    errors=["INPUT_CONFIRMATION_REQUIRED"],
+                ),
+            }
         return {
-            "requirements": extraction.requirements,
-            "requirements_hash": requirements_hash(extraction.requirements),
+            "requirements": requirements,
+            "requirements_hash": requirements_hash(requirements),
             "asset_manifest_hash": self.registry.manifest_hash,
             "knowledge_index_hash": knowledge_index_hash(self.rag_service.project_root)
             if self.rag_service is not None
