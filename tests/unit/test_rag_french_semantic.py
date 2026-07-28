@@ -19,7 +19,7 @@ def test_french_query_finds_lattice_tower_assets_without_network(tmp_path: Path)
 
     assert results
     # Project documents/manifests carry enough French telecom vocabulary for a
-    # deterministic unit test. BGE-M3 quality belongs to an explicit live test.
+    # deterministic unit test. Provider quality belongs to an explicit live test.
     assert any(
         "treillis" in result.text.lower()
         or result.payload.get("asset_id") == "TOWER_LATTICE_30M"
@@ -28,9 +28,14 @@ def test_french_query_finds_lattice_tower_assets_without_network(tmp_path: Path)
     )
 
 
-def test_embedding_provider_is_nvidia_bge_m3_without_network() -> None:
-    provider = NvidiaEmbeddingProvider(DEFAULT_MODEL, api_key="unit-test-key")
+def test_embedding_provider_is_nvidia_nemotron_1024_without_network() -> None:
+    provider = NvidiaEmbeddingProvider(
+        DEFAULT_MODEL,
+        api_key="unit-test-key",
+        dimensions=1024,
+    )
 
     assert "nvidia" in provider.name
-    assert "bge-m3" in provider.name
+    assert "llama-nemotron-embed-1b-v2" in provider.name
     assert provider.dimensions == 1024
+    assert provider.request_dimensions == 1024

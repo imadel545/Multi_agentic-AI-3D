@@ -30,7 +30,8 @@ class Settings(BaseSettings):
     min_free_disk_mb: int = Field(default=256, ge=64, le=16_384)
     checkpoint_retention_threads: int = Field(default=16, ge=0, le=4096)
     embedding_provider: str = "nvidia"
-    embedding_model: str = "baai/bge-m3"
+    embedding_model: str = "nvidia/llama-nemotron-embed-1b-v2"
+    embedding_dimensions: int = Field(default=1024, ge=128, le=4096)
     embedding_strict_quality: bool = False
     nvidia_api_key: str | None = Field(default=None, repr=False)
     reranker_provider: str = "nvidia"

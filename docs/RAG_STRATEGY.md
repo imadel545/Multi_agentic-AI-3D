@@ -5,18 +5,26 @@ generation source of truth remains `RequirementSpec -> SceneSpec -> Blender`.
 
 ## Product Provider
 
-- Product embedding provider: NVIDIA API `baai/bge-m3`.
+- Product embedding provider: NVIDIA API
+  `nvidia/llama-nemotron-embed-1b-v2`, requested at 1024 dimensions.
 - Configure with `NVIDIA_API_KEY` or `TELECOM_STUDIO_NVIDIA_API_KEY`.
 - Default API config:
 
 ```text
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
-TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
+TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-1b-v2
+TELECOM_STUDIO_EMBEDDING_DIMENSIONS=1024
 ```
 
 If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` lacks a key, startup fails instead
 of silently degrading. Network reachability is established only by the first
 real index/search/write operation and its failure is exposed explicitly.
+
+The 2026-07-28 live probe proved that the local NVIDIA key is valid:
+`GET /v1/models` returned 200 and listed `baai/bge-m3`. BGE-M3 itself returned
+500 for both scalar and batched requests. The selected Nemotron model returned
+200 and a 1024-dimensional vector with the same key. This distinguishes a
+model-serving incident from an authentication failure.
 
 Construction of the provider is network-free and therefore is not an
 operational health proof. `/studio/summary` reports `configured_unverified`
@@ -61,7 +69,7 @@ and `/viewer-bundle`.
 ```text
 Requirement extraction
 -> structured RAG query from RequirementSpec + original text
--> NVIDIA BGE-M3 query embedding against passage-embedded controlled corpus
+-> NVIDIA Nemotron query embedding against passage-embedded controlled corpus
 -> Qdrant search over knowledge files and asset manifests
 -> NVIDIA reranker
 -> bounded GPT-OSS decision over validated candidate hints
@@ -144,7 +152,8 @@ the design.
 
 RAG can be called advanced only after:
 
-- NVIDIA BGE-M3 retrieval is verified with French telecom queries.
+- The configured NVIDIA embedding model is verified with French telecom
+  queries and a measured retrieval evaluation, not only a successful API call.
 - Chunks are source-specific and not giant whole-doc blobs.
 - Retrieved contexts include citations/provenance safe for frontend display.
 - Scene changes caused by RAG are explainable through structured hints.

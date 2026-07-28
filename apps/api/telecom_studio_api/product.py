@@ -412,7 +412,7 @@ def _rag_summary(rag_service: Any | None) -> dict:
         status = "configured_unverified"
         degraded = True
     elif provider_name.startswith("nvidia:"):
-        status = "primary_nvidia_bge_m3"
+        status = "primary_nvidia_embedding"
         degraded = False
     elif provider_name.startswith("sentence-transformers:"):
         status = "local_sentence_transformers_explicit"
@@ -1544,7 +1544,7 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
             )
         else:
             title = "RAG en mode dégradé"
-            impact = "La recherche de contexte n'utilise pas l'API NVIDIA BGE-M3 primaire."
+            impact = "La recherche de contexte n'utilise pas le modèle NVIDIA primaire."
             recommended_action = (
                 "Vérifier le fournisseur d'embeddings configuré. Le mode déterministe reste "
                 "réservé aux tests et au bootstrap."

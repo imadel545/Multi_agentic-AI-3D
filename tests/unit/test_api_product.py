@@ -37,7 +37,7 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert isinstance(summary["llm_available"], bool)
         assert summary["rag_embedding_provider"]
         assert summary["rag_status"] in {
-            "primary_nvidia_bge_m3",
+            "primary_nvidia_embedding",
             "configured_unverified",
             "configured_but_last_operation_failed",
             "local_sentence_transformers_explicit",

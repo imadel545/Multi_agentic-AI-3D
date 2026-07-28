@@ -59,11 +59,13 @@ frontend.
 
 ## RAG and memory
 
-- NVIDIA API `baai/bge-m3` is the product provider.
+- NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024 dimensions is the
+  product provider. `baai/bge-m3` remains supported as an explicit model choice.
 - A configured provider is reported as `configured_unverified` until a real
-  operation succeeds. The local 2026-07-28 probe returned NVIDIA HTTP 500; this
-  environment is therefore not currently proven operational even though the
-  key and model are configured.
+  operation succeeds. On 2026-07-28, the key authenticated successfully and
+  listed `baai/bge-m3`, but that model returned HTTP 500 for both scalar and
+  batched embedding calls. The configured Nemotron replacement returned a real
+  1024D embedding with the same key.
 - The product path does not silently load a local embedding model. Deterministic
   hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
   hash is not production quality.

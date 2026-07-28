@@ -138,6 +138,7 @@ def test_nvidia_embedding_constructor_is_network_free_and_batches(monkeypatch) -
 
     provider = NvidiaEmbeddingProvider(
         api_key="nvidia-test",
+        dimensions=1024,
         timeout_s=7.0,
         max_retries=1,
         batch_size=2,
@@ -159,6 +160,7 @@ def test_nvidia_embedding_constructor_is_network_free_and_batches(monkeypatch) -
         "passage",
         "query",
     ]
+    assert [call["dimensions"] for call in create_calls] == [1024, 1024, 1024]
 
 
 def test_rag_service_uses_passage_embeddings_for_index_and_query_embedding_for_search(

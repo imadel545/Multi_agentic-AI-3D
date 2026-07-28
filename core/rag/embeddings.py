@@ -1,6 +1,6 @@
 """Embedding providers.
 
-Primary: NVIDIA API for BAAI/bge-m3 (fast, no local GPU/VRAM needed).
+Primary: NVIDIA API for a configured multilingual retrieval model.
 Emergency fallback: deterministic hash embedding for tests and bootstrap only.
 
 The product path is API-first. Local sentence-transformers is only an explicit
@@ -20,7 +20,7 @@ from core.rag.text import normalized_tokens
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "baai/bge-m3"
+DEFAULT_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_TIMEOUT_S = 8.0
 DEFAULT_NVIDIA_MAX_RETRIES = 1
@@ -31,6 +31,8 @@ NVIDIA_INPUT_PROFILE = "query_passage_v1"
 # Keeping them local prevents a network probe during application import/startup.
 NVIDIA_MODEL_DIMENSIONS = {
     "baai/bge-m3": 1024,
+    "nvidia/nv-embedqa-e5-v5": 1024,
+    "nvidia/llama-nemotron-embed-1b-v2": 2048,
 }
 
 
@@ -99,7 +101,8 @@ class NvidiaEmbeddingProvider:
         )
         if not self.api_key:
             raise RuntimeError("NVIDIA API key is required")
-        resolved_dimensions = dimensions or NVIDIA_MODEL_DIMENSIONS.get(model_name)
+        native_dimensions = NVIDIA_MODEL_DIMENSIONS.get(model_name)
+        resolved_dimensions = dimensions or native_dimensions
         if resolved_dimensions is None:
             raise RuntimeError(
                 f"Embedding dimensions are unknown for NVIDIA model {model_name!r}; "
@@ -120,6 +123,11 @@ class NvidiaEmbeddingProvider:
         )
         self.name = f"nvidia:{model_name}"
         self.dimensions = resolved_dimensions
+        self.request_dimensions = (
+            resolved_dimensions
+            if dimensions is not None and resolved_dimensions != native_dimensions
+            else None
+        )
         self.batch_size = batch_size
         self.input_profile = NVIDIA_INPUT_PROFILE
 
@@ -147,11 +155,16 @@ class NvidiaEmbeddingProvider:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
             batch = list(texts[start : start + self.batch_size])
+            request: dict[str, object] = {
+                "input": batch,
+                "model": self.model_name,
+                "encoding_format": "float",
+                "extra_body": {"input_type": input_type, "truncate": "NONE"},
+            }
+            if self.request_dimensions is not None:
+                request["dimensions"] = self.request_dimensions
             response = self.client.embeddings.create(
-                input=batch,
-                model=self.model_name,
-                encoding_format="float",
-                extra_body={"input_type": input_type, "truncate": "NONE"},
+                **request,
             )
             ordered = sorted(response.data, key=lambda item: getattr(item, "index", 0))
             batch_vectors = [list(item.embedding) for item in ordered]
@@ -205,6 +218,7 @@ def build_embedding_provider(
     model_name: str,
     *,
     api_key: str | None = None,
+    dimensions: int | None = None,
     strict_quality: bool | None = None,
 ) -> EmbeddingProvider:
     """Build the embedding provider.
@@ -222,11 +236,15 @@ def build_embedding_provider(
 
     if provider_name in {"deterministic", "hash", "hashing"}:
         logger.info("Using deterministic hash embedding as requested: %s", requested)
-        return HashEmbeddingProvider()
+        return HashEmbeddingProvider(dimensions=dimensions or 1024)
 
     if provider_name == "nvidia":
         try:
-            provider = NvidiaEmbeddingProvider(model_name, api_key=api_key)
+            provider = NvidiaEmbeddingProvider(
+                model_name,
+                api_key=api_key,
+                dimensions=dimensions,
+            )
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
             return provider
         except Exception as exc:
@@ -237,7 +255,11 @@ def build_embedding_provider(
             ) from exc
     if provider_name == "auto":
         try:
-            provider = NvidiaEmbeddingProvider(model_name, api_key=api_key)
+            provider = NvidiaEmbeddingProvider(
+                model_name,
+                api_key=api_key,
+                dimensions=dimensions,
+            )
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
             return provider
         except Exception as exc:
