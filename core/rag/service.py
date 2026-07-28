@@ -18,6 +18,7 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
+    FilterSelector,
     MatchAny,
     MatchValue,
     PointStruct,
@@ -55,6 +56,7 @@ RUNTIME_MEMORY_COLLECTIONS = [
 ]
 
 STATIC_INDEX_STATE_FILENAME = "qdrant_static_index_state.json"
+RUNTIME_INDEX_STATE_FILENAME = "qdrant_runtime_memory_state.json"
 _INDEX_BUILD_MARKER = "__build_"
 _POINT_UPSERT_BATCH_SIZE = 128
 _OBSOLETE_COLLECTION_WAIT_S = 2.0
@@ -110,6 +112,7 @@ class RagService:
         self._reranker_lock = threading.Lock()
         self._cache_lock = threading.Lock()
         self._runtime_collection_lock = threading.Lock()
+        self._runtime_reindex_lock = threading.Lock()
         self._health_lock = threading.Lock()
         self._last_operation_status = "unverified"
         self._last_operation: str | None = None
@@ -283,11 +286,15 @@ class RagService:
         query_tokens = _tokenize(query)
         results: list[RagSearchResult] = []
         static_collections = [name for name in collections if name in RAG_COLLECTIONS]
-        with self._static_collection_snapshot(static_collections) as physical_names:
+        runtime_collections = [name for name in collections if name in RUNTIME_MEMORY_COLLECTIONS]
+        with (
+            self._static_collection_snapshot(static_collections) as physical_names,
+            self._runtime_collection_snapshot(runtime_collections) as runtime_names,
+        ):
             for collection_name in collections:
                 physical_name = physical_names.get(collection_name, collection_name)
                 if collection_name in RUNTIME_MEMORY_COLLECTIONS:
-                    physical_name = self._runtime_collection_name(collection_name)
+                    physical_name = runtime_names[collection_name]
                 if not self.client.collection_exists(physical_name):
                     continue
                 try:
@@ -382,6 +389,161 @@ class RagService:
             raise
         self._record_success(f"runtime_upsert:{collection}")
 
+    def replace_runtime_documents(
+        self,
+        *,
+        collection: str,
+        owner_filters: dict[str, str | int | float | bool | None],
+        documents: Sequence[RagDocument],
+    ) -> int:
+        """Replace one logical owner's derived vectors without touching SQLite truth."""
+        if collection not in RUNTIME_MEMORY_COLLECTIONS:
+            raise ValueError(f"unsupported runtime collection: {collection}")
+        if any(document.collection != collection for document in documents):
+            raise ValueError("runtime replacement documents must use the requested collection")
+        physical_collection = self._runtime_collection_name(collection)
+        try:
+            points = self._points_for_documents(documents)
+            with self._runtime_collection_lock:
+                if not self.client.collection_exists(physical_collection):
+                    self.client.create_collection(
+                        collection_name=physical_collection,
+                        vectors_config=VectorParams(
+                            size=self.embedding_provider.dimensions,
+                            distance=Distance.COSINE,
+                        ),
+                    )
+                owner_filter = _build_filter(owner_filters)
+                if owner_filter is None:
+                    raise ValueError("runtime replacement requires at least one owner filter")
+                self.client.delete(
+                    collection_name=physical_collection,
+                    points_selector=FilterSelector(filter=owner_filter),
+                    wait=True,
+                )
+                if points:
+                    self.client.upsert(
+                        collection_name=physical_collection,
+                        points=points,
+                        wait=True,
+                    )
+            with self._cache_lock:
+                self.query_cache.clear()
+        except Exception as exc:
+            self._record_failure(f"runtime_replace:{collection}", exc)
+            raise
+        self._record_success(f"runtime_replace:{collection}")
+        return len(points)
+
+    def reindex_runtime_documents(
+        self,
+        documents_by_collection: dict[str, Sequence[RagDocument]],
+        *,
+        source_fingerprint: str,
+    ) -> RagIndexReport:
+        """Atomically publish a compact vector projection rebuilt from SQLite."""
+        if set(documents_by_collection) != set(RUNTIME_MEMORY_COLLECTIONS):
+            raise ValueError("runtime reindex requires every runtime memory collection")
+        if not source_fingerprint:
+            raise ValueError("runtime reindex requires a source fingerprint")
+        with self._runtime_reindex_lock:
+            return self._reindex_runtime_documents_once(
+                documents_by_collection,
+                source_fingerprint=source_fingerprint,
+            )
+
+    def _reindex_runtime_documents_once(
+        self,
+        documents_by_collection: dict[str, Sequence[RagDocument]],
+        *,
+        source_fingerprint: str,
+    ) -> RagIndexReport:
+        identity = self._runtime_index_identity()
+        build_id = uuid.uuid4().hex[:16]
+        staged = {
+            collection: (
+                f"{self._runtime_collection_base_name(collection)}{_INDEX_BUILD_MARKER}{build_id}"
+            )
+            for collection in RUNTIME_MEMORY_COLLECTIONS
+        }
+        indexed_counts: dict[str, int] = {}
+        created: list[str] = []
+        try:
+            for collection in RUNTIME_MEMORY_COLLECTIONS:
+                documents = list(documents_by_collection[collection])
+                if any(document.collection != collection for document in documents):
+                    raise ValueError(
+                        f"runtime documents for {collection} contain another logical collection"
+                    )
+                physical_name = staged[collection]
+                self._create_collection(physical_name)
+                created.append(physical_name)
+                points = self._points_for_documents(documents)
+                for point_batch in _batches(points, _POINT_UPSERT_BATCH_SIZE):
+                    self.client.upsert(
+                        collection_name=physical_name,
+                        points=point_batch,
+                        wait=True,
+                    )
+                indexed_counts[collection] = len(documents)
+
+            if self._runtime_index_identity() != identity:
+                raise RuntimeError("Embedding configuration changed during runtime memory reindex")
+            old_state = self._read_runtime_index_state()
+            old_physical = set(_runtime_physical_collection_map(old_state).values())
+            old_obsolete = set(_runtime_obsolete_collections(old_state))
+            new_physical = set(staged.values())
+            obsolete = sorted((old_physical | old_obsolete) - new_physical)
+            self._write_runtime_index_state(
+                indexed_counts=indexed_counts,
+                physical_collections=staged,
+                source_fingerprint=source_fingerprint,
+                index_identity=identity,
+                obsolete_collections=obsolete,
+            )
+        except Exception as exc:
+            self._delete_collections(created)
+            self._record_failure("runtime_reindex", exc)
+            raise
+        with self._cache_lock:
+            self.query_cache.clear()
+        self._cleanup_obsolete_runtime_collections(
+            indexed_counts=indexed_counts,
+            physical_collections=staged,
+            source_fingerprint=source_fingerprint,
+            index_identity=identity,
+        )
+        self._record_success("runtime_reindex")
+        return RagIndexReport(
+            status="indexed",
+            collections=indexed_counts,
+            total_documents=sum(indexed_counts.values()),
+            embedding_provider=self.embedding_provider.name,
+        )
+
+    def update_runtime_source_fingerprint(self, source_fingerprint: str) -> bool:
+        """Advance sync proof after a successful incremental SQLite/Qdrant write."""
+        state = self._read_runtime_index_state()
+        identity = self._runtime_index_identity()
+        if not _runtime_index_matches(state, identity):
+            return False
+        mapping = _runtime_physical_collection_map(state)
+        counts = state.get("indexed_counts") if state else None
+        if set(mapping) != set(RUNTIME_MEMORY_COLLECTIONS) or not isinstance(counts, dict):
+            return False
+        indexed_counts = {
+            name: int(self.client.get_collection(mapping[name]).points_count or 0)
+            for name in RUNTIME_MEMORY_COLLECTIONS
+        }
+        self._write_runtime_index_state(
+            indexed_counts=indexed_counts,
+            physical_collections=mapping,
+            source_fingerprint=source_fingerprint,
+            index_identity=identity,
+            obsolete_collections=_runtime_obsolete_collections(state),
+        )
+        return True
+
     def health_snapshot(self) -> dict[str, object]:
         with self._health_lock:
             return {
@@ -393,7 +555,19 @@ class RagService:
                 "embedding_dimensions": self.embedding_provider.dimensions,
             }
 
-    def runtime_collection_compatibility(self) -> dict[str, object]:
+    def runtime_collection_compatibility(
+        self,
+        *,
+        source_fingerprint: str | None = None,
+        source_has_data: bool = True,
+    ) -> dict[str, object]:
+        state = self._read_runtime_index_state()
+        identity = self._runtime_index_identity()
+        identity_current = _runtime_index_matches(state, identity)
+        state_fingerprint = state.get("source_fingerprint") if state else None
+        source_current = source_fingerprint is None or (
+            identity_current and state_fingerprint == source_fingerprint
+        )
         collections: dict[str, dict[str, object]] = {}
         degraded = False
         for logical_name in RUNTIME_MEMORY_COLLECTIONS:
@@ -404,27 +578,158 @@ class RagService:
                 legacy_dimensions is not None
                 and legacy_dimensions != self.embedding_provider.dimensions
             )
-            degraded = degraded or legacy_incompatible and not active_exists
+            if source_fingerprint is None:
+                migration_required = legacy_dimensions is not None and not active_exists
+            else:
+                migration_required = source_has_data and (not active_exists or not source_current)
+            degraded = degraded or migration_required
             collections[logical_name] = {
                 "active_collection": active_name,
                 "active_exists": active_exists,
                 "expected_dimensions": self.embedding_provider.dimensions,
                 "legacy_dimensions": legacy_dimensions,
                 "legacy_incompatible": legacy_incompatible,
-                "legacy_preserved": legacy_incompatible,
+                "legacy_preserved": legacy_dimensions is not None,
+                "migration_required": migration_required,
             }
         return {
             "status": "migration_pending" if degraded else "compatible",
             "degraded": degraded,
+            "identity_current": identity_current,
+            "source_current": source_current,
+            "source_fingerprint": state_fingerprint,
             "collections": collections,
         }
 
     def _runtime_collection_name(self, collection: str) -> str:
-        current_dimensions = self._collection_vector_size(collection)
-        if current_dimensions in {None, self.embedding_provider.dimensions}:
-            return collection
+        state = self._read_runtime_index_state()
+        if _runtime_index_matches(state, self._runtime_index_identity()):
+            physical = _runtime_physical_collection_map(state).get(collection)
+            if physical:
+                return physical
+        return self._runtime_collection_base_name(collection)
+
+    def _runtime_collection_base_name(self, collection: str) -> str:
         provider_slug = re.sub(r"[^a-z0-9]+", "_", self.embedding_provider.name.lower()).strip("_")
         return f"{collection}__{provider_slug}_d{self.embedding_provider.dimensions}"
+
+    def _runtime_index_identity(self) -> dict[str, object]:
+        return {
+            "embedding_provider": self.embedding_provider.name,
+            "embedding_dimensions": self.embedding_provider.dimensions,
+            "embedding_input_profile": getattr(
+                self.embedding_provider,
+                "input_profile",
+                "legacy_generic_v1",
+            ),
+            "collections": RUNTIME_MEMORY_COLLECTIONS,
+        }
+
+    def _runtime_index_state_path(self) -> Path:
+        return self.qdrant_path / RUNTIME_INDEX_STATE_FILENAME
+
+    def _read_runtime_index_state(self) -> dict | None:
+        path = self._runtime_index_state_path()
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _write_runtime_index_state(
+        self,
+        *,
+        indexed_counts: dict[str, int],
+        physical_collections: dict[str, str],
+        source_fingerprint: str,
+        index_identity: dict[str, object],
+        obsolete_collections: Sequence[str],
+    ) -> None:
+        path = self._runtime_index_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = index_identity | {
+            "indexed_counts": indexed_counts,
+            "physical_collections": physical_collections,
+            "source_fingerprint": source_fingerprint,
+            "indexed_at": int(time.time()),
+            "obsolete_collections": list(obsolete_collections),
+        }
+        temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, path)
+            _fsync_directory(path.parent)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    @contextmanager
+    def _runtime_collection_snapshot(
+        self,
+        collections: Sequence[str],
+    ) -> Iterator[dict[str, str]]:
+        with self._collection_condition:
+            state = self._read_runtime_index_state()
+            active = (
+                _runtime_physical_collection_map(state)
+                if _runtime_index_matches(state, self._runtime_index_identity())
+                else {}
+            )
+            snapshot = {
+                collection: active.get(
+                    collection,
+                    self._runtime_collection_base_name(collection),
+                )
+                for collection in collections
+            }
+            for physical_name in set(snapshot.values()):
+                self._collection_readers[physical_name] += 1
+        try:
+            yield snapshot
+        finally:
+            with self._collection_condition:
+                for physical_name in set(snapshot.values()):
+                    self._collection_readers[physical_name] -= 1
+                    if self._collection_readers[physical_name] <= 0:
+                        self._collection_readers.pop(physical_name, None)
+                self._collection_condition.notify_all()
+
+    def _cleanup_obsolete_runtime_collections(
+        self,
+        *,
+        indexed_counts: dict[str, int],
+        physical_collections: dict[str, str],
+        source_fingerprint: str,
+        index_identity: dict[str, object],
+    ) -> None:
+        state = self._read_runtime_index_state()
+        obsolete = set(_runtime_obsolete_collections(state))
+        deadline = time.monotonic() + _OBSOLETE_COLLECTION_WAIT_S
+        with self._collection_condition:
+            while any(self._collection_readers.get(name, 0) for name in obsolete):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._collection_condition.wait(timeout=remaining)
+            safe_to_delete = {
+                name for name in obsolete if not self._collection_readers.get(name, 0)
+            }
+        failed = self._delete_collections(sorted(safe_to_delete))
+        remaining_obsolete = sorted((obsolete - safe_to_delete) | failed)
+        try:
+            self._write_runtime_index_state(
+                indexed_counts=indexed_counts,
+                physical_collections=physical_collections,
+                source_fingerprint=source_fingerprint,
+                index_identity=index_identity,
+                obsolete_collections=remaining_obsolete,
+            )
+        except OSError as exc:
+            logger.warning("Could not persist runtime memory cleanup state: %s", exc)
 
     def _collection_vector_size(self, collection: str) -> int | None:
         if not self.client.collection_exists(collection):
@@ -716,6 +1021,28 @@ def _physical_collection_map(state: dict | None) -> dict[str, str]:
     }
 
 
+def _runtime_physical_collection_map(state: dict | None) -> dict[str, str]:
+    if not state:
+        return {}
+    value = state.get("physical_collections")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(logical): str(physical)
+        for logical, physical in value.items()
+        if logical in RUNTIME_MEMORY_COLLECTIONS and isinstance(physical, str) and physical
+    }
+
+
+def _runtime_obsolete_collections(state: dict | None) -> list[str]:
+    if not state:
+        return []
+    value = state.get("obsolete_collections")
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item]
+
+
 def _obsolete_collections(state: dict | None) -> list[str]:
     if not state:
         return []
@@ -743,6 +1070,12 @@ def _stable_point_id(doc_id: str) -> int:
 
 
 def _static_index_matches(current: dict | None, expected: dict) -> bool:
+    if not current:
+        return False
+    return all(current.get(key) == value for key, value in expected.items())
+
+
+def _runtime_index_matches(current: dict | None, expected: dict[str, object]) -> bool:
     if not current:
         return False
     return all(current.get(key) == value for key, value in expected.items())

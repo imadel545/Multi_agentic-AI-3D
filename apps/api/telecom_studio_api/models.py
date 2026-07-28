@@ -149,6 +149,20 @@ class RagSearchResponse(BaseModel):
     results: list[dict]
 
 
+class MemoryVectorReindexResponse(BaseModel):
+    status: str
+    collections: dict[str, int]
+    total_documents: int = Field(ge=0)
+    embedding_provider: str
+    embedding_dimensions: int = Field(gt=0)
+    source_counts: dict[str, int]
+    candidate_counts: dict[str, int]
+    compacted_points: int = Field(ge=0)
+    source_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+    sqlite_preserved: bool
+    legacy_collections_preserved: bool
+
+
 class EditDesignRequest(BaseModel):
     edit_prompt: str = Field(min_length=1, max_length=1000)
 
@@ -562,6 +576,7 @@ class StudioSummary(BaseModel):
     document_pack_issue_memory_count: int = 0
     memory_vector_status: str | None = None
     memory_vector_errors: list[str] = Field(default_factory=list)
+    memory_vector_reindex_url: str | None = None
     runtime_capabilities: RuntimeCapabilities | None = None
     unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     warnings: list[UserIssue] = Field(default_factory=list)

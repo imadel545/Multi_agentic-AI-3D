@@ -195,7 +195,7 @@ def memory_status(memory_service: Any | None) -> dict[str, Any]:
     latest = index_health.get("latest_index_result") or {}
     compatibility = index_health.get("vector_compatibility") or {}
     latest_status = str(latest.get("status") or "not_indexed")
-    index_failed = latest_status == "failed"
+    index_failed = latest_status in {"failed", "partial"}
     migration_pending = bool(compatibility.get("degraded"))
     vector_status = "failed" if index_failed else str(compatibility.get("status") or latest_status)
     vector_errors = ["vector_index_write_failed"] if latest.get("errors") else []

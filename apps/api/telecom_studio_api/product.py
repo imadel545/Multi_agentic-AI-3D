@@ -88,6 +88,7 @@ class ProductService:
             "rag_operational_status": rag["operational_status"],
             "rag_last_operation": rag["last_operation"],
             "rag_reindex_url": "/rag/reindex",
+            "memory_vector_reindex_url": "/memory/vector/reindex",
             **memory,
             "runtime_capabilities": runtime_capabilities(),
             "unsupported_actions": unsupported_actions(),

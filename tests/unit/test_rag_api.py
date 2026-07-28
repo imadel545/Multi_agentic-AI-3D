@@ -95,3 +95,37 @@ def test_rag_api_sanitizes_legacy_absolute_source_paths(monkeypatch) -> None:
     result = response.json()["results"][0]
     assert result["payload"]["source_path"] == "docs/RAG_STRATEGY.md"
     assert "/Users/" not in str(result)
+
+
+def test_memory_vector_reindex_api_exposes_compaction_proof(monkeypatch) -> None:
+    report = {
+        "status": "indexed",
+        "collections": {
+            "design_memory": 2,
+            "error_memory": 3,
+            "document_pack_memory": 1,
+        },
+        "total_documents": 6,
+        "embedding_provider": "nvidia:test-model",
+        "embedding_dimensions": 1024,
+        "source_counts": {
+            "design_memory": 20,
+            "error_memory": 30,
+            "document_pack_memory": 1,
+        },
+        "candidate_counts": {
+            "design_memory": 2,
+            "error_memory": 3,
+            "document_pack_memory": 1,
+        },
+        "compacted_points": 45,
+        "source_fingerprint": "a" * 64,
+        "sqlite_preserved": True,
+        "legacy_collections_preserved": True,
+    }
+    monkeypatch.setattr(api_main.memory_service, "reindex_vector_memory", lambda: report)
+
+    response = TestClient(api_main.app).post("/memory/vector/reindex")
+
+    assert response.status_code == 200
+    assert response.json() == report

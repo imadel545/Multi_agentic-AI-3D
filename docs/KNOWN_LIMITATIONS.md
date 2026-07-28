@@ -70,14 +70,20 @@ frontend.
   hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
   hash is not production quality.
 - Static RAG docs/manifests are checked against a persisted index identity and
-  reindexed automatically when they change. Runtime memory collections with a
-  legacy vector dimension are never reused silently: old collections are
-  preserved and new writes use a provider/dimension-versioned collection.
+  reindexed automatically when they change. Runtime memory uses SQLite as its
+  canonical store. `POST /memory/vector/reindex` rebuilds a compact Qdrant
+  projection atomically, keyed by provider, model, input profile and dimension;
+  legacy collections are preserved. Repeated validated designs and issue rows
+  are compacted into technical signatures/patterns before embedding. A failed
+  rebuild leaves the previously published vector index active, and
   `/studio/summary` exposes migration/degradation state.
 - Reranker product path is NVIDIA API, but it is fail-open. If unavailable,
   vector order is used and `rag_reranker_degraded_reason` must be displayed.
   Local reranker is an explicit developer override, not product default.
-- Memory is still limited, with incomplete semantic recall.
+- Memory is still limited: workflow recall is predominantly deterministic SQL
+  matching. The compact Qdrant projection is operational for explicit semantic
+  search and future bounded recall, but it is not yet allowed to mutate
+  `RequirementSpec` or `SceneSpec` directly.
 - `rag_context_count > 0` does not mean the 3D plan changed. In v1, only
   structured, whitelisted `payload.planning_hints` can affect planning; RAG is
   not used for RequirementSpec extraction. Use `rag_evidence.json` for sources

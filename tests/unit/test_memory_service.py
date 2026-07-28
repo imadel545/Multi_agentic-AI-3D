@@ -4,6 +4,8 @@ import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from qdrant_client.models import Distance, VectorParams
+
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.memory import MemoryIndexResult
 from core.contracts.requirements import RequirementSpec
@@ -251,6 +253,64 @@ def test_failed_workflow_is_diagnostic_only_and_issues_are_deduplicated(tmp_path
     assert service.stats()["error_memory_count"] == 1
     assert service.last_index_result.indexed_collections["design_memory"] == 0
     assert service.last_index_result.indexed_collections["error_memory"] == 1
+
+
+def test_vector_memory_reindex_compacts_sqlite_and_preserves_legacy_collections(
+    tmp_path: Path,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    rag_service.client.create_collection(
+        collection_name="design_memory",
+        vectors_config=VectorParams(size=384, distance=Distance.COSINE),
+    )
+    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    for workflow_id in ("wf_pattern_first", "wf_pattern_second"):
+        requirements, scene, report, _ = _memory_inputs(workflow_id)
+        service.write_workflow_summary(
+            workflow_id=workflow_id,
+            requirements=requirements,
+            scene=scene,
+            report=report.model_copy(update={"warnings": []}),
+            generation=_real_generation(),
+            scene_spec_path=tmp_path / f"{workflow_id}_scene.json",
+            validation_report_path=tmp_path / f"{workflow_id}_validation.json",
+        )
+
+    first = service.reindex_vector_memory()
+
+    assert first["status"] == "indexed"
+    assert first["source_counts"] == {
+        "design_memory": 2,
+        "error_memory": 0,
+        "document_pack_memory": 0,
+    }
+    assert first["candidate_counts"] == {
+        "design_memory": 1,
+        "error_memory": 0,
+        "document_pack_memory": 0,
+    }
+    assert first["compacted_points"] == 1
+    assert rag_service.client.collection_exists("design_memory")
+    compatibility = service.index_health()["vector_compatibility"]
+    assert compatibility["status"] == "compatible"
+    active = compatibility["collections"]["design_memory"]["active_collection"]
+    results = rag_service.search("pylône 5G trois secteurs", collection="design_memory")
+    assert results[0].payload["doc_type"] == "design_memory_pattern"
+    assert results[0].payload["occurrence_count"] == 2
+
+    second = service.reindex_vector_memory()
+    new_active = service.index_health()["vector_compatibility"]["collections"]["design_memory"][
+        "active_collection"
+    ]
+    assert second["candidate_counts"] == first["candidate_counts"]
+    assert new_active != active
+    assert not rag_service.client.collection_exists(active)
+    assert rag_service.client.collection_exists("design_memory")
+    rag_service.close()
 
 
 def _memory_inputs(

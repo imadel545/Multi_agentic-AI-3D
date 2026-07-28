@@ -23,6 +23,7 @@ from apps.api.telecom_studio_api.models import (
     DocumentPackGenerateDesignResponse,
     EditDesignRequest,
     EditDesignResponse,
+    MemoryVectorReindexResponse,
     ParseRequirementsRequest,
     ParseRequirementsResponse,
     PublicVersionInfo,
@@ -812,6 +813,11 @@ def generate_design_from_document_pack(pack_id: str) -> dict:
 @app.get("/memory/stats")
 def memory_stats() -> dict:
     return memory_service.stats()
+
+
+@app.post("/memory/vector/reindex", response_model=MemoryVectorReindexResponse)
+def memory_vector_reindex() -> dict:
+    return memory_service.reindex_vector_memory()
 
 
 @app.post("/rag/reindex")

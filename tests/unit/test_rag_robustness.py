@@ -89,6 +89,84 @@ def test_runtime_memory_dimension_migration_is_versioned_and_non_destructive(
     service.close()
 
 
+def test_runtime_memory_identity_includes_provider_when_dimensions_match(tmp_path: Path) -> None:
+    first_provider = _SwitchableEmbeddingProvider()
+    first_provider.name = "provider:first"
+    first = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=first_provider,
+        reranker_provider_name="passthrough",
+    )
+    first.upsert_runtime_document(
+        collection="design_memory",
+        doc_id="memory:design:first",
+        text="first provider",
+        payload={},
+    )
+    first_collection = first._runtime_collection_name("design_memory")
+    first.close()
+
+    second_provider = _SwitchableEmbeddingProvider()
+    second_provider.name = "provider:second"
+    second = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=second_provider,
+        reranker_provider_name="passthrough",
+    )
+    second.upsert_runtime_document(
+        collection="design_memory",
+        doc_id="memory:design:second",
+        text="second provider",
+        payload={},
+    )
+    second_collection = second._runtime_collection_name("design_memory")
+
+    assert first_collection != second_collection
+    assert second.client.collection_exists(first_collection)
+    assert second.client.collection_exists(second_collection)
+    second.close()
+
+
+def test_runtime_reindex_failure_keeps_last_published_index(tmp_path: Path) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    documents = {
+        "design_memory": [
+            RagDocument(
+                doc_id="memory:design:stable",
+                collection="design_memory",
+                text="stable design",
+                payload={},
+            )
+        ],
+        "error_memory": [],
+        "document_pack_memory": [],
+    }
+    service.reindex_runtime_documents(documents, source_fingerprint="first")
+    state_before = service._read_runtime_index_state()
+    assert state_before is not None
+    active_before = state_before["physical_collections"]["design_memory"]
+
+    provider.fail_batch = True
+    with pytest.raises(RuntimeError, match="simulated embedding failure"):
+        service.reindex_runtime_documents(documents, source_fingerprint="second")
+
+    assert service._read_runtime_index_state() == state_before
+    assert service.client.collection_exists(active_before)
+    assert [
+        result.doc_id
+        for result in service.search("stable design", collection="design_memory", limit=1)
+    ] == ["memory:design:stable"]
+    service.close()
+
+
 def test_rag_health_records_real_embedding_failure(tmp_path: Path) -> None:
     provider = _SwitchableEmbeddingProvider()
     provider.fail_batch = True

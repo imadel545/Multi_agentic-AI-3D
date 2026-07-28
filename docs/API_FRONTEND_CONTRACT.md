@@ -136,8 +136,14 @@ restent internes au backend.
   `rag_last_operation`, `rag_reindex_url`
 - `memory_status`, `memory_backend`, `workflow_memory_count`,
   `design_memory_count`, `document_pack_memory_count`,
-  `memory_vector_status`, `memory_vector_errors`
+  `memory_vector_status`, `memory_vector_errors`, `memory_vector_reindex_url`
 - `runtime_capabilities`, `unsupported_actions`
+
+`POST /memory/vector/reindex` reconstruit uniquement la projection Qdrant à
+partir de SQLite. La réponse typée expose les volumes source, les candidats
+après compaction, le provider/dimension, le fingerprint source et confirme que
+SQLite et les collections legacy sont préservés. Cette route de maintenance ne
+crée ni `project`, ni `run`, ni nouvelle source d'état produit.
 
 `POST /requirements/parse` retourne un `RequirementSpec` avec
 `field_evidence`, `conflicts`, `assumptions`, `requires_confirmation` et
