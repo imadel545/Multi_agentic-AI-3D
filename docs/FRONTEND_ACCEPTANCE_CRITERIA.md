@@ -33,8 +33,9 @@ actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
 
 ## 4. Document dropzone
 
-- [ ] Une dropzone claire accepte le ZIP produit; elle explique que PDF, PNG et
-  DXF doivent être contenus dans ce pack avec les limites backend affichées.
+- [x] Une dropzone claire accepte plusieurs fichiers directs ou un ZIP, affiche
+  la file d'attente, permet le retrait individuel et applique les limites
+  exposées par le backend.
 - [ ] L'état du document pack (conflits, champs manquants) est visible sans JSON brut.
 
 ## 5. Pas de panneaux vides
@@ -74,7 +75,7 @@ actions ne sont pas toutes rejouées depuis les contrôles du navigateur.
 ## 11. Qualité technique
 
 - [x] `npm run typecheck` passe (via `npm run build`).
-- [x] `npm run test` passe (90 tests).
+- [x] `npm run test` passe (93 tests).
 - [x] `npm run build` passe.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
 

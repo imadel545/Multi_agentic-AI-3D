@@ -10,7 +10,8 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 
 ## What it does
 
-- Takes a technical brief or a document pack (ZIP with PDF/DXF/images) as input.
+- Takes a technical brief, several direct technical files, or a ZIP document
+  pack (PDF/DXF/images/tables) as input.
 - Extracts structured requirements (`RequirementSpec`) with typed field evidence,
   assumptions and conflict gates, or a provenance-backed design spec
   (`ProjectDesignSpec`).
@@ -77,7 +78,8 @@ The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to fo
 
 ### Product intelligence: NVIDIA RAG embeddings
 
-Product RAG uses NVIDIA API `baai/bge-m3`. Product reranking uses the NVIDIA
+Product RAG uses NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024
+dimensions. Product reranking uses the NVIDIA
 reranker configured by `TELECOM_STUDIO_RERANKER_MODEL`; if the reranker is not
 available, the API exposes a degraded passthrough status instead of pretending
 reranking happened.
@@ -86,7 +88,8 @@ reranking happened.
 NVIDIA_API_KEY=...
 # or TELECOM_STUDIO_NVIDIA_API_KEY=...
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
-TELECOM_STUDIO_EMBEDDING_MODEL=baai/bge-m3
+TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-1b-v2
+TELECOM_STUDIO_EMBEDDING_DIMENSIONS=1024
 TELECOM_STUDIO_RERANKER_PROVIDER=nvidia
 TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
 ```
@@ -121,7 +124,7 @@ Backend:
 requirements_text or document pack
 → LangGraph orchestrator
 → Groq structured RequirementSpec or deterministic fallback
-→ NVIDIA BGE-M3 query/passage embeddings + Qdrant retrieval
+→ NVIDIA Nemotron multilingual query/passage embeddings + Qdrant retrieval
 → NVIDIA reranking + bounded GPT-OSS planning decision
 → SQLite memory recall
 → asset registry
@@ -146,7 +149,7 @@ requirements_text or document pack
 - `docs/FRONTEND_ACCEPTANCE_CRITERIA.md` — criteria to accept a future frontend.
 - `docs/KNOWN_LIMITATIONS.md` — honest limitations.
 - `docs/API_FRONTEND_CONTRACT.md` — product API contract for the frontend.
-- `docs/RAG_STRATEGY.md` — NVIDIA BGE-M3 RAG strategy and limitations.
+- `docs/RAG_STRATEGY.md` — NVIDIA multilingual retrieval strategy and limitations.
 - `docs/ARCHITECTURE.md` — backend flow and module boundaries.
 - `docs/QA_STRATEGY.md` — honest QA levels and limits.
 - `docs/LANGGRAPH_WORKFLOW.md` — orchestration/runtime truth.

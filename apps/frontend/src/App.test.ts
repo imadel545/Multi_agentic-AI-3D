@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowStatus } from "./api/schemas";
 import {
+  documentPackFilesSizeError,
   documentPackSizeError,
   latestEventCursor,
   needsPolling,
@@ -75,12 +76,32 @@ describe("frontend runtime selection", () => {
       supported_upload_format: "zip",
       supported_extensions: [".pdf"],
       limitations: [],
-      limits: { max_zip_size_mb: 10 },
+      limits: {
+        max_zip_size_mb: 10,
+        max_member_size_mb: 5,
+        max_member_count: 2,
+        max_uncompressed_size_mb: 8
+      },
       truth: {},
       capabilities: {}
     };
 
     expect(documentPackSizeError({ size: 11 * 1024 * 1024 }, capabilities)).toContain("10 Mo");
     expect(documentPackSizeError({ size: 10 * 1024 * 1024 }, capabilities)).toBeNull();
+    expect(
+      documentPackFilesSizeError(
+        [{ name: "large.pdf", size: 6 * 1024 * 1024 }],
+        capabilities
+      )
+    ).toContain("large.pdf");
+    expect(
+      documentPackFilesSizeError(
+        [
+          { name: "one.pdf", size: 4 * 1024 * 1024 },
+          { name: "two.jpg", size: 4 * 1024 * 1024 }
+        ],
+        capabilities
+      )
+    ).toBeNull();
   });
 });

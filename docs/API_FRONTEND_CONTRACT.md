@@ -45,7 +45,7 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles. |
 | `GET` | `/assets/library/search?q=...` | Recherche metadata-only consommée par le drawer Bibliothèque; expose quarantaine et liens d'aperçus, sans bouton de sélection Blender tant que `generation_eligible=false`. |
 | `POST` | `/assets/library/{file_id}/probe` | Probe isolé du format/entités et route de conversion requise; ne promeut pas le fichier. |
-| `POST` | `/document-packs` | Uploader un ZIP. |
+| `POST` | `/document-packs` | Uploader un ZIP brut ou plusieurs fichiers via `multipart/form-data`. |
 | `GET` | `/document-packs/{pack_id}` | Résumé du pack. |
 | `GET` | `/document-packs/{pack_id}/consolidated-spec` | Spec consolidée. |
 | `GET` | `/document-packs/{pack_id}/qa` | QA du pack. |
@@ -113,7 +113,9 @@ restent internes au backend.
 
 - `events/stream` est du `push_sse` local-process, pas un broker durable
   multi-processus.
-- L'upload document pack est synchrone et limité à 80 Mo.
+- L'upload document pack est synchrone. Un ZIP compressé est limité à 80 Mo;
+  les fichiers directs sont limités à 256 pièces, 15 Mo par pièce, 200 Mo
+  non compressés et 80 Mo après assemblage ZIP interne contrôlé.
 - Les endpoints produit sont une couche de présentation au-dessus des données techniques ; ils ne remplacent pas la validation backend.
 
 ## Champs Product API critiques
@@ -313,11 +315,13 @@ de chaque version sont des URLs versionnées.
 `/document-packs/capabilities` expose:
 
 - `document_pack_status=limited`
-- `supported_upload_format=zip`
+- `supported_upload_format=zip_or_multiple_files`
 - `supported_inputs`
 - `supported_extensions`
 - `limits.max_zip_size_mb=80`
 - `limits.max_member_size_mb=15`
+- `limits.max_member_count=256`
+- `limits.max_uncompressed_size_mb=200`
 - `max_size`
 - `available_tools`
 - `disabled_tools`

@@ -157,6 +157,50 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         document_pack_service.groq_extractor.enabled = original_groq_enabled
 
 
+def test_document_pack_accepts_multiple_direct_files(tmp_path: Path) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    original_groq_enabled = document_pack_service.groq_extractor.enabled
+    document_pack_service.outputs_dir = tmp_path
+    document_pack_service.groq_extractor.enabled = False
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/document-packs",
+            files=[
+                (
+                    "files",
+                    (
+                        "APD_radio.txt",
+                        (
+                            b"Type pylone: pylone treillis\\nHauteur pylone: 30m\\n"
+                            b"Azimuts: 0, 120, 240\\nHBA: 24m, 24m, 24m\\n"
+                        ),
+                        "text/plain",
+                    ),
+                ),
+                (
+                    "files",
+                    ("fondation.txt", b"Fondation: concrete_pad\\n", "text/plain"),
+                ),
+            ],
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["document_count"] == 2
+        documents = client.get(f"/document-packs/{payload['pack_id']}/documents").json()
+        assert {document["filename"] for document in documents} == {
+            "APD_radio.txt",
+            "fondation.txt",
+        }
+        capabilities = client.get("/document-packs/capabilities").json()
+        assert capabilities["supported_upload_format"] == "zip_or_multiple_files"
+        assert capabilities["supported_inputs"]["upload"] == "zip_or_multiple_files"
+    finally:
+        document_pack_service.outputs_dir = original_outputs
+        document_pack_service.groq_extractor.enabled = original_groq_enabled
+
+
 def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
     tmp_path: Path,
     monkeypatch,

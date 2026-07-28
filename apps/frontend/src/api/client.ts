@@ -162,15 +162,27 @@ export class TelecomStudioApi {
     );
   }
 
-  async createDocumentPack(file: File): Promise<DocumentPackSummary> {
-    assertZipDocumentPack(file);
+  async createDocumentPack(files: File[]): Promise<DocumentPackSummary> {
+    assertDocumentPackFiles(files);
+    if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
+      const file = files[0];
+      return parseContract(
+        "DocumentPackSummary",
+        DocumentPackSummarySchema,
+        await this.postBinary("/document-packs", file, {
+          "content-type": "application/zip",
+          "x-filename": file.name
+        })
+      );
+    }
+    const form = new FormData();
+    for (const file of files) {
+      form.append("files", file, file.name);
+    }
     return parseContract(
       "DocumentPackSummary",
       DocumentPackSummarySchema,
-      await this.postBinary("/document-packs", file, {
-        "content-type": "application/zip",
-        "x-filename": file.name
-      })
+      await this.postBinary("/document-packs", form)
     );
   }
 
@@ -372,7 +384,7 @@ export class TelecomStudioApi {
   private async postBinary(
     endpoint: string,
     body: BodyInit,
-    headers: Record<string, string>
+    headers: Record<string, string> = {}
   ): Promise<unknown> {
     const response = await this.fetcher(new URL(endpoint, this.baseUrl), {
       method: "POST",
@@ -416,4 +428,21 @@ export function assertZipDocumentPack(file: File): void {
     "/document-packs",
     "Le backend accepte uniquement une archive ZIP. Regroupez les PDF, images, DXF ou autres fichiers dans un ZIP avant l’envoi."
   );
+}
+
+export function assertDocumentPackFiles(files: File[]): void {
+  if (!files.length) {
+    throw new ApiClientError(0, "/document-packs", "Ajoutez au moins une pièce technique.");
+  }
+  const zipCount = files.filter((file) => file.name.toLowerCase().endsWith(".zip")).length;
+  if (zipCount && files.length !== 1) {
+    throw new ApiClientError(
+      0,
+      "/document-packs",
+      "Un ZIP doit être envoyé seul; ne mélangez pas une archive et des fichiers directs."
+    );
+  }
+  if (zipCount === 1) {
+    assertZipDocumentPack(files[0]);
+  }
 }

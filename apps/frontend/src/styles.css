@@ -442,18 +442,25 @@ a:focus-visible {
   padding: 0 10px 10px;
 }
 
+.document-intake-copy {
+  display: grid;
+  gap: 4px;
+}
+
 .file-drop {
   position: relative;
   min-height: 42px;
   border: 1px dashed #9ab7b3;
   border-radius: 8px;
-  display: inline-flex;
+  display: grid;
   align-items: center;
   justify-content: center;
   gap: 8px;
   color: var(--accent-strong);
   background: #f4fbf9;
   cursor: pointer;
+  padding: 12px;
+  text-align: center;
 }
 
 .file-drop input {
@@ -467,6 +474,85 @@ a:focus-visible {
 .file-drop:focus-within {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.file-drop.dragging {
+  border-color: var(--accent);
+  background: #e8f6f2;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.file-drop small {
+  color: var(--muted);
+}
+
+.document-composer,
+.document-file-queue {
+  display: grid;
+  gap: 8px;
+}
+
+.document-file-queue {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.document-file-queue > div {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.document-file-queue ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.document-file-queue li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 6px 7px;
+  border-radius: 6px;
+  background: var(--surface-soft);
+}
+
+.document-file-queue li > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.document-file-queue li > span > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-file-queue li button {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.document-file-queue li button:hover {
+  background: #f3e9e8;
+  color: var(--danger);
 }
 
 .pack-summary {

@@ -37,8 +37,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   explicit deterministic extraction.
 - `RequirementSpec` carries typed field evidence, candidate values, assumptions,
   conflicts, and confirmation fields. Explicit unresolved contradictions block
-  `POST /designs`; a late value is accepted automatically only when the prompt
-  marks it as an explicit correction.
+  the natural-language graph before RAG, asset selection, `SceneSpec`, and
+  Blender; a late value is accepted automatically only when the prompt marks it
+  as an explicit correction.
 - GPT-OSS is the bounded decision layer for ambiguous extraction, controlled
   RAG candidate arbitration, and edit-patch interpretation. It may revise a
   typed proposal, but it cannot bypass `RequirementSpec`, `SceneSpec`, telecom
@@ -48,10 +49,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `llm_provider`, `llm_available`, `llm_fallback_used`, and
   `llm_fallback_reason`; the frontend must display fallback/degraded status
   instead of guessing.
-- Primary RAG: NVIDIA API `baai/bge-m3`.
+- Primary RAG: NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024 dimensions.
 - Provider configuration is not runtime proof. `/studio/summary` reports
   `configured_unverified` until a real embedding/search succeeds,
-  `primary_nvidia_bge_m3` only after success, and
+  `primary_nvidia_embedding` only after success, and
   `configured_but_last_operation_failed` after an operational failure.
 - RAG fallback policy: no automatic local embedding model in the product path.
   Deterministic hash is allowed only for tests/bootstrap or explicit degraded
@@ -64,8 +65,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Memory: local SQLite with writeback; optional Qdrant for some summaries.
   Incompatible legacy runtime collections are preserved and new vectors are
   routed to provider/dimension-versioned collections.
-- Document-pack: synchronous ZIP, limited PDF/OCR/DXF extraction, consolidation,
-  conflicts, corrections, QA. A missing or tower-incompatible foundation blocks
+- Document-pack: synchronous direct multi-file or ZIP intake with bounded
+  archive assembly, limited PDF/OCR/DXF extraction, consolidation, conflicts,
+  corrections, and QA. A missing or tower-incompatible foundation blocks
   generation before a workflow is created; the user must confirm a supported
   foundation instead of receiving a predictably failed Blender workflow. The
   summary, QA response, generation gate, and correction UI consume the same

@@ -478,17 +478,17 @@ export default function App() {
   }, []);
 
   const uploadDocumentPack = useCallback(
-    async (file: File) => {
-      const sizeError = documentPackSizeError(file, documentCapabilities);
+    async (files: File[]) => {
+      const sizeError = documentPackFilesSizeError(files, documentCapabilities);
       if (sizeError) {
         setDocumentPackMessage(sizeError);
-        return;
+        return false;
       }
       setDocumentPackBusy(true);
       setDocumentPackMessage(null);
       setDocumentPackReview(null);
       try {
-        const summary = await apiClient.createDocumentPack(file);
+        const summary = await apiClient.createDocumentPack(files);
         setDocumentPackSummary(summary);
         const review = await loadDocumentPackReview(summary.pack_id);
         setDocumentPackMessage(
@@ -496,8 +496,10 @@ export default function App() {
             ? "Pack analysé: génération possible."
             : "Pack analysé: corrigez les champs bloquants avant génération."
         );
+        return true;
       } catch (error) {
         setDocumentPackMessage(errorMessage(error));
+        return false;
       } finally {
         setDocumentPackBusy(false);
       }
@@ -849,6 +851,35 @@ export function documentPackSizeError(
     return null;
   }
   return `Le ZIP dépasse la limite locale de ${maxZipSizeMb} Mo. Réduisez le pack avant l’analyse.`;
+}
+
+export function documentPackFilesSizeError(
+  files: Array<Pick<File, "name" | "size">>,
+  capabilities: DocumentPackCapabilities | null
+): string | null {
+  if (!files.length) {
+    return "Ajoutez au moins une pièce technique.";
+  }
+  if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
+    return documentPackSizeError(files[0], capabilities);
+  }
+  const maxCount = capabilities?.limits?.max_member_count;
+  if (maxCount && files.length > maxCount) {
+    return `Le cahier de charge dépasse la limite de ${maxCount} fichiers.`;
+  }
+  const maxMemberSizeMb = capabilities?.limits?.max_member_size_mb;
+  const oversized = maxMemberSizeMb
+    ? files.find((file) => file.size > maxMemberSizeMb * 1024 * 1024)
+    : null;
+  if (oversized) {
+    return `${oversized.name} dépasse la limite de ${maxMemberSizeMb} Mo par fichier.`;
+  }
+  const maxTotalSizeMb = capabilities?.limits?.max_uncompressed_size_mb;
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  if (maxTotalSizeMb && total > maxTotalSizeMb * 1024 * 1024) {
+    return `Les pièces dépassent la limite totale de ${maxTotalSizeMb} Mo.`;
+  }
+  return null;
 }
 
 export function parseCorrectionValue(

@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile
 
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
@@ -493,23 +494,48 @@ def get_asset(asset_id: str) -> dict:
 @app.post("/document-packs")
 async def create_document_pack(request: Request) -> dict:
     limits = document_pack_service.archive_limits()
+    content_type = request.headers.get("content-type", "").lower()
+    multipart_upload = content_type.startswith("multipart/form-data")
+    request_limit = (
+        limits["max_uncompressed_size_bytes"] + 2 * 1024 * 1024
+        if multipart_upload
+        else limits["max_zip_size_bytes"]
+    )
     content_length = request.headers.get("content-length")
     if content_length:
         try:
-            if int(content_length) > limits["max_zip_size_bytes"]:
-                raise HTTPException(status_code=422, detail="document pack exceeds ZIP size limit")
+            if int(content_length) > request_limit:
+                raise HTTPException(
+                    status_code=422,
+                    detail="le cahier de charge dépasse la limite locale de taille",
+                )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="invalid content-length header") from exc
-    content = await _read_limited_request_body(request, limits["max_zip_size_bytes"])
-    if not content:
-        raise HTTPException(status_code=422, detail="empty document pack body")
-    filename = request.headers.get("x-filename")
     try:
-        summary = await run_in_threadpool(
-            document_pack_service.ingest_zip,
-            content,
-            filename=filename,
-        )
+        if multipart_upload:
+            form = await request.form(
+                max_files=limits["max_member_count"],
+                max_fields=8,
+                max_part_size=limits["max_member_size_bytes"],
+            )
+            uploads = [
+                value for _name, value in form.multi_items() if isinstance(value, UploadFile)
+            ]
+            files: list[tuple[str, bytes]] = []
+            for upload in uploads:
+                payload = await upload.read(limits["max_member_size_bytes"] + 1)
+                await upload.close()
+                files.append((upload.filename or "", payload))
+            summary = await run_in_threadpool(document_pack_service.ingest_files, files)
+        else:
+            content = await _read_limited_request_body(request, limits["max_zip_size_bytes"])
+            if not content:
+                raise HTTPException(status_code=422, detail="empty document pack body")
+            summary = await run_in_threadpool(
+                document_pack_service.ingest_zip,
+                content,
+                filename=request.headers.get("x-filename"),
+            )
         return summary.model_dump()
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -550,9 +576,9 @@ def get_document_pack_capabilities() -> dict:
     payload.update(
         {
             "document_pack_status": "limited",
-            "supported_upload_format": "zip",
+            "supported_upload_format": "zip_or_multiple_files",
             "supported_inputs": {
-                "upload": "zip",
+                "upload": "zip_or_multiple_files",
                 "extensions": [
                     ".pdf",
                     ".png",
@@ -567,7 +593,7 @@ def get_document_pack_capabilities() -> dict:
                     ".xlsx",
                 ],
                 "notes": [
-                    "Les fichiers doivent être groupés dans un ZIP.",
+                    "Les fichiers peuvent être envoyés directement ou groupés dans un ZIP.",
                     "Le traitement est local et synchrone.",
                 ],
             },
@@ -617,7 +643,7 @@ def get_document_pack_capabilities() -> dict:
                 "generation_from_pack": "available_when_qa_ready_and_mapping_mapped",
             },
             "next_action": (
-                "Uploader un ZIP de documents techniques, vérifier les champs manquants, "
+                "Joindre des documents techniques ou un ZIP, vérifier les champs manquants, "
                 "corriger si nécessaire, puis générer le design."
             ),
             "capabilities": payload.copy(),

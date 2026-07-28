@@ -42,6 +42,17 @@ def test_document_pack_ingestion_classifies_extracts_and_maps(tmp_path: Path) ->
     assert mapping.requirements["azimuths_deg"] == [0.0, 120.0, 240.0]
 
 
+def test_direct_file_ingestion_rejects_unsafe_and_duplicate_names(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    with pytest.raises(ValueError, match="nom de fichier non sûr"):
+        service.ingest_files([("../outside.txt", b"unsafe")])
+    with pytest.raises(ValueError, match="nom de fichier dupliqué"):
+        service.ingest_files([("radio.txt", b"one"), ("RADIO.TXT", b"two")])
+
+    assert not service.packs_dir.exists()
+
+
 def test_document_pack_does_not_invent_foundation_or_vendor_antenna(tmp_path: Path) -> None:
     service = DocumentPackService(tmp_path)
     summary = service.ingest_zip(

@@ -6,7 +6,6 @@ import {
   Clock3,
   Cpu,
   FileArchive,
-  FileUp,
   Layers3,
   MessageSquareText,
   RadioTower,
@@ -17,7 +16,7 @@ import {
   WifiOff,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   AdaptationCapabilityCatalog,
   AssetLibrarySearch,
@@ -41,6 +40,7 @@ import type {
 import type { NormalizedWorkflowEvent } from "../api/sse";
 import type { RuntimeMode, WorkflowPhase } from "../state/workflowMachine";
 import { actionIsSupported } from "../state/workflowMachine";
+import { DocumentFileComposer } from "./DocumentFileComposer";
 
 export function BackendStatusBar({
   health,
@@ -139,7 +139,7 @@ export function ChatCommandPanel({
   onConfirm: () => void;
   onDocumentPackCorrection: (field: string, value: string, reason: string) => void;
   onDocumentPackGenerate: () => void;
-  onDocumentPackUpload: (file: File) => void;
+  onDocumentPackUpload: (files: File[]) => Promise<boolean>;
   onPromptChange: (value: string) => void;
   onRevisionPromptChange: (value: string) => void;
   onRevisionSubmit: () => void;
@@ -380,11 +380,10 @@ function DocumentPackIntake({
   message: string | null;
   onCorrect: (field: string, value: string, reason: string) => void;
   onGenerate: () => void;
-  onUpload: (file: File) => void;
+  onUpload: (files: File[]) => Promise<boolean>;
   review: DocumentPackReview | null;
   summary: DocumentPackSummary | null;
 }) {
-  const accept = ".zip,application/zip,application/x-zip-compressed";
   const canGenerate = summary?.can_generate_design === true;
   const [expanded, setExpanded] = useState(Boolean(summary || review || message));
   useEffect(() => {
@@ -404,32 +403,20 @@ function DocumentPackIntake({
         {summary ? <small>{summary.document_count} pièce(s)</small> : null}
       </summary>
       <div className="document-intake-body">
-        <div>
-        <span className="eyebrow">Cahier de charge</span>
-        <strong>ZIP documentaire</strong>
-        <p>
-          {capabilities?.document_pack_status === "limited"
-            ? "Regroupez PDF, images, DXF et autres pièces dans un seul ZIP. Le backend local trie les pièces utiles avant de construire le design."
-            : "Capacités documentaires en cours de chargement."}
-        </p>
+        <div className="document-intake-copy">
+          <span className="eyebrow">Cahier de charge</span>
+          <strong>Pièces techniques et cahier de charge</strong>
+          <p>
+            {capabilities?.document_pack_status === "limited"
+              ? "Joignez directement plusieurs PDF, images, plans et tableaux, ou déposez un ZIP. Le backend local inventorie, déduplique et conserve la provenance avant de construire le design."
+              : "Capacités documentaires en cours de chargement."}
+          </p>
         </div>
-        <label className="file-drop">
-        <FileUp size={17} aria-hidden="true" />
-        <span>{busy ? "Traitement..." : "Charger un ZIP"}</span>
-        <input
-          accept={accept}
-          aria-label="Cahier de charge"
-          disabled={busy}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (file) {
-              onUpload(file);
-            }
-          }}
-          type="file"
+        <DocumentFileComposer
+          busy={busy}
+          capabilities={capabilities}
+          onSubmit={onUpload}
         />
-        </label>
         {summary ? (
         <div className="pack-summary">
           <strong>{summary.pack_id}</strong>

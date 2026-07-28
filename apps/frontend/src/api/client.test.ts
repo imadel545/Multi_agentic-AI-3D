@@ -282,7 +282,7 @@ describe("TelecomStudioApi", () => {
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
     const file = new File(["zip-bytes"], "cahier-charge.zip", { type: "application/zip" });
 
-    const result = await client.createDocumentPack(file);
+    const result = await client.createDocumentPack([file]);
 
     expect(result.pack_id).toBe("pack_1");
     expect(result.can_generate_design).toBe(true);
@@ -296,17 +296,29 @@ describe("TelecomStudioApi", () => {
     });
   });
 
-  it("rejects raw PDF/image/DXF inputs before any document-pack network call", async () => {
-    const fetcher = vi.fn();
+  it("uploads multiple direct documents as multipart without inventing a project entity", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        pack_id: "pack_direct",
+        status: "processed",
+        document_count: 2,
+        can_generate_design: false
+      })
+    );
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const files = [
+      new File(["pdf"], "cahier.pdf", { type: "application/pdf" }),
+      new File(["image"], "site.jpg", { type: "image/jpeg" })
+    ];
 
-    await expect(
-      client.createDocumentPack(new File(["pdf"], "cahier.pdf", { type: "application/pdf" }))
-    ).rejects.toMatchObject({
-      endpoint: "/document-packs",
-      message: expect.stringContaining("uniquement une archive ZIP")
-    });
-    expect(fetcher).not.toHaveBeenCalled();
+    const result = await client.createDocumentPack(files);
+
+    expect(result.pack_id).toBe("pack_direct");
+    const request = fetcher.mock.calls[0][1];
+    expect(request.method).toBe("POST");
+    expect(request.headers).toEqual({});
+    expect(request.body).toBeInstanceOf(FormData);
+    expect(Array.from((request.body as FormData).getAll("files"))).toHaveLength(2);
   });
 
   it("loads the real document-pack review and submits a bounded correction", async () => {

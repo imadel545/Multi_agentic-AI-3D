@@ -566,8 +566,8 @@ def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
     payload = client.get("/document-packs/capabilities").json()
 
     assert payload["document_pack_status"] == "limited"
-    assert payload["supported_upload_format"] == "zip"
-    assert payload["supported_inputs"]["upload"] == "zip"
+    assert payload["supported_upload_format"] == "zip_or_multiple_files"
+    assert payload["supported_inputs"]["upload"] == "zip_or_multiple_files"
     assert ".pdf" in payload["supported_extensions"]
     assert payload["limits"]["max_zip_size_mb"] == 80
     assert payload["max_size"]["zip_mb"] == 80

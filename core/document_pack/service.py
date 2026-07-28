@@ -4,6 +4,7 @@ import shutil
 import time
 import uuid
 import zipfile
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -92,6 +93,50 @@ class DocumentPackService:
         except Exception:
             shutil.rmtree(pack_dir, ignore_errors=True)
             raise
+
+    def ingest_files(self, files: Sequence[tuple[str, bytes]]) -> DocumentPackSummary:
+        if not files:
+            raise ValueError("aucun fichier documentaire reçu")
+        if len(files) > MAX_MEMBER_COUNT:
+            raise ValueError(
+                f"le cahier de charge dépasse la limite de {MAX_MEMBER_COUNT} fichiers"
+            )
+
+        normalized: list[tuple[str, bytes]] = []
+        seen_names: set[str] = set()
+        total_size = 0
+        for index, (filename, content) in enumerate(files, start=1):
+            member_name = _normalize_direct_upload_name(filename, index)
+            identity = member_name.casefold()
+            if identity in seen_names:
+                raise ValueError(f"nom de fichier dupliqué dans le cahier de charge: {member_name}")
+            seen_names.add(identity)
+            if len(content) > MAX_MEMBER_SIZE_BYTES:
+                raise ValueError(
+                    f"{member_name} dépasse la limite de "
+                    f"{MAX_MEMBER_SIZE_BYTES // (1024 * 1024)} Mo"
+                )
+            total_size += len(content)
+            if total_size > MAX_UNCOMPRESSED_SIZE_BYTES:
+                raise ValueError("le cahier de charge dépasse la limite totale de 200 Mo")
+            normalized.append((member_name, content))
+
+        archive_buffer = BytesIO()
+        with zipfile.ZipFile(
+            archive_buffer,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+        ) as archive:
+            for member_name, content in normalized:
+                archive.writestr(member_name, content)
+        archive_content = archive_buffer.getvalue()
+        if len(archive_content) > MAX_PACK_SIZE_BYTES:
+            raise ValueError("les fichiers compressés dépassent la limite locale de 80 Mo")
+        return self.ingest_zip(
+            archive_content,
+            filename=f"direct_upload_{len(normalized)}_files.zip",
+        )
 
     def archive_limits(self) -> dict[str, int]:
         return {
@@ -691,6 +736,15 @@ def _evaluate_generation_readiness(
 def _unsafe_zip_path(path: str) -> bool:
     candidate = Path(path)
     return candidate.is_absolute() or ".." in candidate.parts
+
+
+def _normalize_direct_upload_name(filename: str, index: int) -> str:
+    candidate = filename.strip().replace("\\", "/")
+    if not candidate:
+        candidate = f"document_{index}"
+    if "\x00" in candidate or candidate.endswith("/") or _unsafe_zip_path(candidate):
+        raise ValueError("le cahier de charge contient un nom de fichier non sûr")
+    return candidate
 
 
 def _validate_zip_archive(content: bytes) -> None:

@@ -11,7 +11,7 @@ FastAPI
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
   -> Groq extraction or deterministic fallback
-  -> NVIDIA API BGE-M3 query/passage retrieval + NVIDIA reranker evidence
+  -> NVIDIA API Nemotron query/passage retrieval + NVIDIA reranker evidence
   -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
   -> asset registry + inventory
@@ -41,10 +41,11 @@ active SceneSpec + prompt
 - `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
 - `apps/blender_worker`: SceneSpec-driven Blender script.
 - `core/contracts`: strict contracts.
-- `core/document_pack`: ZIP/PDF/OCR/DXF extraction and `ProjectDesignSpec`.
+- `core/document_pack`: bounded direct-file/ZIP intake, PDF/OCR/DXF extraction,
+  and `ProjectDesignSpec`.
 - `core/orchestration`: LangGraph workflow and route logic.
 - `core/agents`: deterministic/LLM wrappers for extraction, planning, editing, RF/tower checks.
-- `core/rag`: Qdrant, NVIDIA API BGE-M3 embeddings, NVIDIA reranker with visible
+- `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.

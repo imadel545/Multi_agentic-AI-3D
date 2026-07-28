@@ -44,7 +44,7 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 ## Fonctions obligatoires
 
 1. Générer un design depuis un prompt.
-2. Uploader un document pack (ZIP avec PDF/DXF/images).
+2. Joindre directement plusieurs PDF/DXF/images/tableaux, ou un ZIP.
 3. Générer depuis un document pack corrigé.
 4. Éditer un design par prompt.
 5. Voir l'historique des versions et rollback.
@@ -72,3 +72,7 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
   version/rollback et document-pack avec correction bloquante. Le replay de
   toutes ces mutations depuis les contrôles navigateur reste nécessaire avant
   l'acceptation frontend finale.
+- Le smoke du 2026-07-28 prouve le composeur multi-fichiers réel: sélection
+  multiple, file d'attente, retrait individuel, limites backend et envoi
+  multipart. L'analyse complète depuis le navigateur reste une mutation à
+  rejouer avec un pack métier dédié avant la Gate finale.

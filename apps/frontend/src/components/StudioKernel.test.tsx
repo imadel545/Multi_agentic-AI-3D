@@ -305,7 +305,7 @@ describe("studio kernel components", () => {
     expect(screen.getByText("Édition appliquée")).toBeInTheDocument();
   });
 
-  it("restricts cahier-de-charge upload to ZIP and exposes corrective review", () => {
+  it("exposes the multi-file document composer and corrective review", () => {
     const onDocumentPackCorrection = vi.fn();
     render(
       <ChatCommandPanel
@@ -443,9 +443,12 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByLabelText("Cahier de charge")).toHaveAttribute(
+    expect(screen.getByLabelText("Ajouter des pièces techniques")).toHaveAttribute(
+      "multiple"
+    );
+    expect(screen.getByLabelText("Ajouter des pièces techniques")).toHaveAttribute(
       "accept",
-      ".zip,application/zip,application/x-zip-compressed"
+      ".zip"
     );
     expect(screen.getByText("Hauteur des antennes (HBA): HBA absente")).toBeInTheDocument();
     expect(screen.getByText("HBA antennes: 24 m")).toBeInTheDocument();
