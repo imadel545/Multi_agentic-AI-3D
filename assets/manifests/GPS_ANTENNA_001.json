@@ -23,6 +23,15 @@
   "front_axis": "+Y",
   "import_fallback_allowed": true,
   "adaptation_profile_id": "accessory_transform_v1",
+  "builder_profile_id": "gps_radome_v1",
+  "capability_tags": ["timing", "gps"],
+  "anchors": [
+    {"anchor_id": "mast_mount", "position_m": [0, 0, -0.11], "normal": [0, 0, -1], "roles": ["mechanical_mount"]}
+  ],
+  "connectors": [
+    {"connector_id": "mast_mount", "kind": "mechanical", "gender": "source", "anchor_id": "mast_mount", "compatible_connector_kinds": ["mechanical"]}
+  ],
+  "allowed_parameters": [],
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["imported_glb_exact"],

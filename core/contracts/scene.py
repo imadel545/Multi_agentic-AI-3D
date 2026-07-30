@@ -8,6 +8,7 @@ from core.contracts.assets import (
     PanelAntennaGeometryProfile,
     RadioGeometryProfile,
 )
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.common import AssetType, DetailLevel, NetworkType, StrictModel
 from core.contracts.parametric import GenerationStrategy, GeometrySource
 from core.contracts.tower import TowerCharacteristics
@@ -175,6 +176,7 @@ class SceneSpec(StrictModel):
     sectors: list[SectorSpec] = Field(min_length=1)
     visual_elements: VisualElements = Field(default_factory=VisualElements)
     accessory_assets: list[SceneAccessoryPlacement] = Field(default_factory=list)
+    assembly_plan: AssemblyPlan | None = None
     preview: PreviewSpec = Field(default_factory=PreviewSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
 

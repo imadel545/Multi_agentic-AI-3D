@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.design_blueprint import (
     BlueprintAssetQuery,
@@ -12,6 +13,7 @@ from core.contracts.design_blueprint import (
     BlueprintIssue,
     BlueprintSpecialistDecision,
     ComponentIntent,
+    ConnectionIntent,
     DesignBlueprint,
 )
 from core.contracts.requirements import RequirementSpec
@@ -58,6 +60,7 @@ class BlueprintComposer:
         tower_validation: TowerValidationReport,
         rf_validation: RfValidationReport,
         planning_resolution: dict | None,
+        assembly_plan: AssemblyPlan | None = None,
     ) -> DesignBlueprint:
         context = BlueprintContext(
             requirements=requirements,
@@ -70,7 +73,7 @@ class BlueprintComposer:
         if missing:
             raise ValueError(f"blueprint specialist registry is missing domains: {missing}")
         decisions = [self._specialists[domain](context) for domain in required_domains]
-        components = _component_intents(requirements, selected_assets)
+        components = _component_intents(requirements, selected_assets, assembly_plan)
         applied_fields = sorted(
             {
                 str(decision.get("field"))
@@ -87,7 +90,7 @@ class BlueprintComposer:
             network_type=requirements.network_type,
             detail_level=requirements.detail_level,
             component_intents=components,
-            connection_intents=[],
+            connection_intents=_connection_intents(assembly_plan),
             constraints=_constraints(requirements, planning_resolution),
             required_specialist_domains=required_domains,
             specialist_decisions=decisions,
@@ -164,18 +167,32 @@ def _structural_specialist(context: BlueprintContext) -> BlueprintSpecialistDeci
 def _component_intents(
     requirements: RequirementSpec,
     selected_assets: list[AssetManifest],
+    assembly_plan: AssemblyPlan | None,
 ) -> list[ComponentIntent]:
     intents: list[ComponentIntent] = []
     type_counts: dict[str, int] = {}
+    role_by_asset = {
+        component.selected_asset_id: component.role_id
+        for component in (assembly_plan.components if assembly_plan else [])
+        if component.selected_asset_id
+    }
+    profile_by_asset = {
+        component.selected_asset_id: component.builder_profile_id
+        for component in (assembly_plan.components if assembly_plan else [])
+        if component.selected_asset_id
+    }
     for asset in selected_assets:
         type_counts[asset.type] = type_counts.get(asset.type, 0) + 1
         suffix = type_counts[asset.type]
         per_sector = asset.type in {"antenna", "radio"}
-        role_id = {
-            "tower": "support_structure",
-            "antenna": "sector_antenna",
-            "radio": "remote_radio",
-        }.get(asset.type, asset.type)
+        role_id = role_by_asset.get(
+            asset.asset_id,
+            {
+                "tower": "support_structure",
+                "antenna": "sector_antenna",
+                "radio": "remote_radio",
+            }.get(asset.type, asset.type),
+        )
         intents.append(
             ComponentIntent(
                 intent_id=f"component:{asset.type}:{suffix}",
@@ -190,7 +207,8 @@ def _component_intents(
                 ),
                 resolved_asset_id=asset.asset_id,
                 generation_strategy=_generation_strategy(asset),
-                geometry_profile_id=_geometry_profile_id(asset),
+                geometry_profile_id=profile_by_asset.get(asset.asset_id)
+                or _geometry_profile_id(asset),
                 geometry_fidelity=asset.geometry_fidelity,
                 placement_strategy_id=_placement_strategy(asset.type),
                 provenance=[
@@ -242,6 +260,35 @@ def _component_intents(
             )
         )
     return intents
+
+
+def _connection_intents(assembly_plan: AssemblyPlan | None):
+    if assembly_plan is None:
+        return []
+    return [
+        ConnectionIntent(
+            connection_id=connection.connection_id,
+            kind=connection.kind,
+            source_intent_id=_intent_id_for_role(connection.source_role_id, assembly_plan),
+            target_intent_id=_intent_id_for_role(connection.target_role_id, assembly_plan),
+            source_connector_role=connection.source_connector_id,
+            target_connector_role=connection.target_connector_id,
+            route_strategy_id="validated_connector_route",
+            required=connection.required,
+            provenance=["assembly_plan", "asset_manifest_connectors"],
+        )
+        for connection in assembly_plan.connections
+        if _intent_id_for_role(connection.source_role_id, assembly_plan)
+        and _intent_id_for_role(connection.target_role_id, assembly_plan)
+    ]
+
+
+def _intent_id_for_role(role_id: str, assembly_plan: AssemblyPlan) -> str | None:
+    component = next((item for item in assembly_plan.components if item.role_id == role_id), None)
+    if component is None:
+        return None
+    asset_type = component.asset_type
+    return f"component:{asset_type}:1"
 
 
 def _constraints(

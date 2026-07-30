@@ -339,6 +339,45 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current verdict
 
+## ASSET-DRIVEN TELECOM ASSEMBLY V1 — delivered scope
+
+- The qualified milestone sample is intentionally small: `TOWER_LATTICE_30M`,
+  `ANT_PANEL_5G_001`, `RRU_SMALL_001`, `MOUNTING_BRACKET_001`,
+  `POWER_CABINET_001`, and `GPS_ANTENNA_001`. It does not scan, convert or
+  claim qualification for the rest of the local library.
+- Manifests now carry meter-based dimensions, typed anchors, connector roles,
+  allowed adaptation parameters, builder-profile IDs and capability tags for
+  the selected families. The bracket is qualified for bounded parametric
+  generation; its companion GLB remains reference-only.
+- `AssetAssemblyPlanner` ranks every generation-eligible candidate with
+  reproducible compatibility, generation-permission and dimensional scores.
+  When Groq is configured, its bounded selector may choose only a supplied
+  candidate ID for each role. If unavailable or rejected, deterministic top
+  ranking is used and recorded as `deterministic_fallback`.
+- `AssemblyPlan` is persisted as `assembly_plan.json`, embedded in `SceneSpec`,
+  linked to the blueprint, exposed in `/viewer-bundle`, and listed by the
+  frontend artifact drawer. It records component candidates, selection reason,
+  allowed parameters, selected builder profile, connectors and fallback truth.
+- Blender remains fully deterministic: it consumes `SceneSpec`, records the
+  selected parametric bracket per sector, and records the missing cable tray as
+  a visible `PROCEDURAL_CABLE_ROUTE` fallback. No LLM-generated Blender code is
+  accepted or executed.
+- The end-to-end acceptance test creates a 5G site with tower, panel antenna,
+  RRU, bracket, cable fallback, cabinet and GPS; produces GLB and preview;
+  passes real-Blender QA; exposes provenance; then edits the design and creates
+  a new active version.
+
+### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
+
+- The current qualified sample has only one eligible 5G panel, RRU, bracket,
+  cabinet and GPS candidate. Scoring is operational, but meaningful
+  multi-candidate choice is currently strongest for the tower family; additional
+  candidates require independent qualification, not copied manifests.
+- Preview generation is scene-level. Per-asset preview images and a close-up
+  visual QA gate remain future work.
+- Connector roles prove composition contracts and route intent; they are not an
+  electrical, RF, load, clearance or vendor-installation certification.
+
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The

@@ -246,6 +246,9 @@ class ProductService:
             _artifact("extraction_report.json", "application/json", "extraction_report")
         )
         viewer_artifacts.append(_artifact("scene_spec.json", "application/json", "scene_spec"))
+        viewer_artifacts.append(
+            _artifact("assembly_plan.json", "application/json", "assembly_plan")
+        )
         viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
         viewer_artifacts.append(
             _artifact("generation_report.json", "application/json", "generation_report")
@@ -276,6 +279,7 @@ class ProductService:
         requirements_spec = _artifact_by_name(viewer_artifacts, "requirements_spec.json")
         extraction_report = _artifact_by_name(viewer_artifacts, "extraction_report.json")
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
+        assembly_plan = _artifact_by_name(viewer_artifacts, "assembly_plan.json")
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
         rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
@@ -310,6 +314,7 @@ class ProductService:
             "requirements_spec_url": _available_artifact_url(requirements_spec),
             "extraction_report_url": _available_artifact_url(extraction_report),
             "scene_spec_url": _available_artifact_url(scene_spec),
+            "assembly_plan_url": _available_artifact_url(assembly_plan),
             "qa_report_url": _available_artifact_url(qa_report),
             "generation_report_url": _available_artifact_url(generation_report),
             "rag_evidence_url": _available_artifact_url(rag_evidence),

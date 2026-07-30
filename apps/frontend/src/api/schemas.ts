@@ -376,6 +376,7 @@ export const ViewerBundleSchema = publicSchema(
     report_url: z.string().nullish(),
     metadata_url: z.string().nullish(),
     scene_spec_url: z.string().nullish(),
+    assembly_plan_url: z.string().nullish(),
     qa_report_url: z.string().nullish(),
     generation_report_url: z.string().nullish(),
     geometry_validation_url: z.string().nullish(),

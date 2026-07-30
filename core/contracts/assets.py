@@ -50,6 +50,42 @@ class MountZone(StrictModel):
         return self
 
 
+class AssetAnchor(StrictModel):
+    """A named local-frame attachment point, expressed exclusively in meters."""
+
+    anchor_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$")
+    position_m: tuple[float, float, float]
+    normal: tuple[float, float, float]
+    roles: list[str] = Field(min_length=1, max_length=12)
+
+
+class AssetConnector(StrictModel):
+    connector_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$")
+    kind: Literal["mechanical", "power", "fiber", "rf", "grounding", "routing"]
+    gender: Literal["source", "target", "bidirectional"] = "bidirectional"
+    anchor_id: str = Field(min_length=1, max_length=96)
+    compatible_connector_kinds: list[str] = Field(default_factory=list, max_length=12)
+
+
+class AllowedAssetParameter(StrictModel):
+    parameter_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$")
+    value_type: Literal["number", "integer", "boolean", "enum"]
+    unit: Literal["meters", "degrees", "count", "none"] = "none"
+    minimum: float | None = None
+    maximum: float | None = None
+    enum_values: list[str] = Field(default_factory=list, max_length=24)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "AllowedAssetParameter":
+        if self.value_type == "enum" and not self.enum_values:
+            raise ValueError("enum parameters require enum_values")
+        if self.value_type != "enum" and self.enum_values:
+            raise ValueError("only enum parameters may declare enum_values")
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
+            raise ValueError("parameter minimum must not exceed maximum")
+        return self
+
+
 AssetQualificationStatus = Literal[
     "qualified_for_generation",
     "reference_only",
@@ -141,6 +177,12 @@ class AssetManifest(StrictModel):
     adaptation_profile_id: str | None = Field(default=None, min_length=1)
     panel_geometry_profile: PanelAntennaGeometryProfile | None = None
     radio_geometry_profile: RadioGeometryProfile | None = None
+    preview_file: str | None = Field(default=None, min_length=1)
+    builder_profile_id: str | None = Field(default=None, min_length=1, max_length=120)
+    capability_tags: list[str] = Field(default_factory=list, max_length=32)
+    anchors: list[AssetAnchor] = Field(default_factory=list, max_length=48)
+    connectors: list[AssetConnector] = Field(default_factory=list, max_length=64)
+    allowed_parameters: list[AllowedAssetParameter] = Field(default_factory=list, max_length=48)
     qualification: AssetQualification = Field(default_factory=AssetQualification)
 
     @model_validator(mode="after")
@@ -149,6 +191,14 @@ class AssetManifest(StrictModel):
             raise ValueError("panel_geometry_profile is only valid for antenna assets")
         if self.radio_geometry_profile is not None and self.type != "radio":
             raise ValueError("radio_geometry_profile is only valid for radio assets")
+        anchor_ids = {anchor.anchor_id for anchor in self.anchors}
+        if len(anchor_ids) != len(self.anchors):
+            raise ValueError("asset anchor IDs must be unique")
+        if any(connector.anchor_id not in anchor_ids for connector in self.connectors):
+            raise ValueError("asset connectors must reference a declared anchor")
+        parameter_ids = [parameter.parameter_id for parameter in self.allowed_parameters]
+        if len(parameter_ids) != len(set(parameter_ids)):
+            raise ValueError("allowed asset parameter IDs must be unique")
         return self
 
     @property

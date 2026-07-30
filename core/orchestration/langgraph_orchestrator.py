@@ -17,6 +17,7 @@ from core.agents.blueprint_composer import BlueprintComposer
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
 from core.agents.tower_engineer import TowerEngineerAgent
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.completion import CompletionCertificate, RequirementCoverageReport
 from core.contracts.design_blueprint import BlueprintCoverageReport, DesignBlueprint
@@ -50,6 +51,7 @@ from core.rag.planning import (
 )
 from core.repair.scene_repair import repair_scene_spec
 from core.rules import RuleEngine
+from core.services.assembly_planner import AssetAssemblyPlanner, BoundedAssemblyDecisionClient
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
 from core.validation import validate_scene_spec
@@ -103,6 +105,7 @@ class WorkflowState(TypedDict, total=False):
     radio: AssetManifest | None
     accessory_assets: list[AssetManifest]
     selected_assets: list[AssetManifest]
+    assembly_plan: AssemblyPlan
     requirement_report: ValidationReport
     scene: SceneSpec
     scene_report: ValidationReport
@@ -165,6 +168,7 @@ class OrchestratorResult:
     tower_validation: TowerValidationReport | None
     rf_validation: RfValidationReport | None
     design_blueprint: DesignBlueprint | None
+    assembly_plan: AssemblyPlan | None
     blueprint_requirement_coverage: BlueprintCoverageReport | None
     blueprint_scene_coverage: BlueprintCoverageReport | None
     metrics: dict[str, int | float | str | bool | None]
@@ -181,6 +185,7 @@ class DesignOrchestrator:
         memory_service: MemoryService | None = None,
         checkpoint_saver: Any | None = None,
         planning_decision_client: GroqPlanningDecisionClient | None = None,
+        asset_selection_client: BoundedAssemblyDecisionClient | None = None,
         allow_blender_fallback: bool = False,
         runtime_event_sink: RuntimeEventSink | None = None,
         blueprint_composer: BlueprintComposer | None = None,
@@ -194,6 +199,7 @@ class DesignOrchestrator:
         self.default_runtime_event_sink = runtime_event_sink
         self.checkpoint_saver = checkpoint_saver
         self.planning_decision_client = planning_decision_client
+        self.assembly_planner = AssetAssemblyPlanner(registry, asset_selection_client)
         self.blueprint_composer = blueprint_composer or BlueprintComposer()
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
@@ -954,22 +960,18 @@ class DesignOrchestrator:
         started = time.perf_counter()
         requirements = state["requirements"]
         try:
-            tower = self.registry.select_tower(
-                requirements.tower_type,
-                requirements.network_type,
-                requirements.tower_height_m,
+            assembly = self.assembly_planner.plan(
+                workflow_id=state["workflow_id"], requirements=requirements
             )
-            antenna = self.registry.select_asset(
-                "antenna", requirements.network_type, requirements.tower_type
-            )
-            radio = (
-                self.registry.select_asset(
-                    "radio", requirements.network_type, requirements.tower_type
-                )
-                if requirements.include_rru
-                else None
-            )
-            accessory_assets = _select_accessory_assets(self.registry, requirements)
+            assets = assembly.assets_by_role
+            tower = assets["support_structure"]
+            antenna = assets["sector_antenna"]
+            radio = assets.get("remote_radio")
+            accessory_assets = [
+                asset
+                for role, asset in assets.items()
+                if role in {"ground_equipment", "timing_antenna"}
+            ]
         except LookupError as exc:
             report = _failed_report(
                 design_id=state["workflow_id"],
@@ -990,21 +992,32 @@ class DesignOrchestrator:
                     errors=["ASSET_SELECTION_FAILED"],
                 ),
             }
-        selected_assets = [
-            asset for asset in [tower, antenna, radio, *accessory_assets] if asset is not None
-        ]
+        selected_assets = _unique_assets(list(assembly.assets_by_role.values()))
         return {
             "tower": tower,
             "antenna": antenna,
             "radio": radio,
             "accessory_assets": accessory_assets,
             "selected_assets": selected_assets,
+            "assembly_plan": assembly.plan,
             "cache_metrics": self._cache_metrics(),
             "trace": _trace(
                 state,
                 "select_assets",
-                ",".join(a.asset_id for a in selected_assets),
+                (
+                    f"{','.join(a.asset_id for a in selected_assets)}; "
+                    f"authority={assembly.plan.selection_authority}"
+                ),
                 started,
+                actor_kind="llm_decision"
+                if assembly.plan.selection_authority == "llm_bounded"
+                else "deterministic_specialist",
+                decision_authority="llm_bounded"
+                if assembly.plan.selection_authority == "llm_bounded"
+                else "deterministic",
+                warnings=["ASSET_SELECTION_LLM_FALLBACK"]
+                if assembly.plan.llm_fallback_used
+                else [],
             ),
         }
 
@@ -1194,6 +1207,7 @@ class DesignOrchestrator:
             tower_validation=state["tower_validation"],
             rf_validation=state["rf_validation"],
             planning_resolution=state.get("rag_planning_resolution"),
+            assembly_plan=state.get("assembly_plan"),
         )
         coverage = evaluate_blueprint_requirement_coverage(
             state["requirements"],
@@ -1232,6 +1246,7 @@ class DesignOrchestrator:
             rag_context=state.get("rag_context"),
             memory_recall=state.get("memory_recall"),
             planning_resolution=state.get("rag_planning_resolution"),
+            assembly_plan=state.get("assembly_plan"),
         )
         return {
             "scene": scene,
@@ -2577,6 +2592,7 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         tower_validation=state.get("tower_validation"),
         rf_validation=state.get("rf_validation"),
         design_blueprint=state.get("design_blueprint"),
+        assembly_plan=state.get("assembly_plan"),
         blueprint_requirement_coverage=state.get("blueprint_requirement_coverage"),
         blueprint_scene_coverage=state.get("blueprint_scene_coverage"),
     )

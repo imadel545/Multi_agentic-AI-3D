@@ -30,6 +30,18 @@
   "front_axis": "+Y",
   "import_fallback_allowed": true,
   "adaptation_profile_id": "telecom_tower_parametric_v1",
+  "builder_profile_id": "tower_structure_v1",
+  "capability_tags": ["lattice", "sector_mount", "grounded"],
+  "anchors": [
+    {"anchor_id": "mount_zone", "position_m": [0, 0, 24], "normal": [0, 1, 0], "roles": ["mechanical_mount"]}
+  ],
+  "connectors": [
+    {"connector_id": "mount_zone", "kind": "mechanical", "gender": "target", "anchor_id": "mount_zone", "compatible_connector_kinds": ["mechanical"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "height_m", "value_type": "number", "unit": "meters", "minimum": 10, "maximum": 45},
+    {"parameter_id": "base_width_m", "value_type": "number", "unit": "meters", "minimum": 2, "maximum": 6}
+  ],
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["parametric_generated"],

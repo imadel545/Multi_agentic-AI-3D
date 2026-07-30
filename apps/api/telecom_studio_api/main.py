@@ -56,6 +56,7 @@ from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
 from core.document_pack import DocumentPackService
 from core.llm import GroqStructuredClient
+from core.llm.asset_selection import GroqAssetSelectionClient
 from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
@@ -172,6 +173,16 @@ planning_decision_client = (
     if settings.resolved_groq_api_key and settings.enable_groq_planning_decision
     else None
 )
+asset_selection_client = (
+    GroqAssetSelectionClient(
+        api_key=settings.resolved_groq_api_key,
+        model=settings.groq_model,
+        base_url=settings.groq_base_url,
+        timeout_s=settings.groq_planning_timeout_s,
+    )
+    if settings.resolved_groq_api_key and settings.enable_groq_asset_selection
+    else None
+)
 document_pack_service = DocumentPackService(
     settings.temp_outputs_dir,
     groq_client=groq_client,
@@ -206,6 +217,7 @@ orchestrator = DesignOrchestrator(
     blender_runner=blender_runner,
     checkpoint_saver=checkpoint_saver,
     planning_decision_client=planning_decision_client,
+    asset_selection_client=asset_selection_client,
     allow_blender_fallback=settings.allow_blender_fallback,
 )
 scene_edit_agent = SceneEditAgent(

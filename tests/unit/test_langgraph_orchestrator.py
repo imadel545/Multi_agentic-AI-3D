@@ -680,9 +680,9 @@ def test_invalid_rule_blocks_blender(tmp_path: Path) -> None:
     nodes = [entry["node"] for entry in result.trace]
     assert result.status == "failed"
     assert result.generation is None
-    assert "rule_violation_handler" in nodes
+    assert "asset_fallback_handler" in nodes
     assert "generate_blender" not in nodes
-    assert result.route_history[0]["route"] == "rule_violation"
+    assert result.route_history[0]["route"] == "asset_fallback"
 
 
 def test_pre_blender_quality_gate_blocks_blender(tmp_path: Path) -> None:

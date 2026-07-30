@@ -22,17 +22,29 @@
   "pivot_policy": "center_mount",
   "front_axis": "+X",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "reference_only_v1",
+  "adaptation_profile_id": "mount_bracket_pose_v1",
+  "builder_profile_id": "mount_bracket_v1",
+  "capability_tags": ["sector_mount", "mechanical"],
+  "anchors": [
+    {"anchor_id": "tower_clamp", "position_m": [-0.4, 0, 0], "normal": [-1, 0, 0], "roles": ["tower_mount"]},
+    {"anchor_id": "antenna_rail", "position_m": [0.4, 0, 0], "normal": [1, 0, 0], "roles": ["antenna_mount"]}
+  ],
+  "connectors": [
+    {"connector_id": "tower_clamp", "kind": "mechanical", "gender": "source", "anchor_id": "tower_clamp", "compatible_connector_kinds": ["mechanical"]},
+    {"connector_id": "antenna_rail", "kind": "mechanical", "gender": "target", "anchor_id": "antenna_rail", "compatible_connector_kinds": ["mechanical"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "arm_length_m", "value_type": "number", "unit": "meters", "minimum": 0.3, "maximum": 1.5}
+  ],
   "qualification": {
-    "status": "reference_only",
-    "allowed_generation_modes": [],
-    "verified_file_sha256": "a1fe35d6c7ab1652cc8bfbc15c3118b956115d3dfd4a3946cfdc9897de1640b3",
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["parametric_generated"],
     "units": "meters",
     "mesh_integrity_verified": true,
-    "dimensions_verified": false,
+    "dimensions_verified": true,
     "pivot_verified": false,
     "orientation_verified": false,
-    "qualification_method": "GLB binary integrity inspection only",
-    "limitations": ["No typed connector or placement contract; the worker generates brackets procedurally."]
+    "qualification_method": "SceneSpec-driven bounded mount_bracket_v1 procedural assembly",
+    "limitations": ["The companion GLB remains reference-only; the qualified component is generated from its typed mount contract."]
   }
 }

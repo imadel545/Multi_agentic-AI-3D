@@ -23,6 +23,17 @@
   "front_axis": "-Y",
   "import_fallback_allowed": true,
   "adaptation_profile_id": "accessory_transform_v1",
+  "builder_profile_id": "ground_cabinet_v1",
+  "capability_tags": ["ground_equipment", "power"],
+  "anchors": [
+    {"anchor_id": "power_entry", "position_m": [0, -0.24, 0.3], "normal": [0, -1, 0], "roles": ["power", "grounding"]}
+  ],
+  "connectors": [
+    {"connector_id": "power_entry", "kind": "power", "gender": "target", "anchor_id": "power_entry", "compatible_connector_kinds": ["power"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "ground_offset_m", "value_type": "number", "unit": "meters", "minimum": 2, "maximum": 20}
+  ],
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["imported_glb_exact"],

@@ -1,3 +1,4 @@
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import (
     AssetManifest,
     PanelAntennaGeometryProfile,
@@ -29,6 +30,7 @@ class ScenePlanner:
         rag_context: list[dict] | None = None,
         memory_recall: dict | None = None,
         planning_resolution: RagPlanningResolution | dict | None = None,
+        assembly_plan: AssemblyPlan | None = None,
     ) -> SceneSpec:
         del memory_recall
         if planning_resolution is None:
@@ -40,14 +42,10 @@ class ScenePlanner:
                 antenna_install_height_m=float(planning_resolution["antenna_install_height_m"]),
                 beamwidth_deg=float(planning_resolution["beamwidth_deg"]),
                 mechanical_tilt_deg=float(
-                    planning_resolution.get(
-                        "mechanical_tilt_deg", requirements.mechanical_tilt_deg
-                    )
+                    planning_resolution.get("mechanical_tilt_deg", requirements.mechanical_tilt_deg)
                 ),
                 electrical_tilt_deg=float(
-                    planning_resolution.get(
-                        "electrical_tilt_deg", requirements.electrical_tilt_deg
-                    )
+                    planning_resolution.get("electrical_tilt_deg", requirements.electrical_tilt_deg)
                 ),
                 include_cables=bool(planning_resolution["include_cables"]),
                 include_sector_beams=bool(planning_resolution["include_sector_beams"]),
@@ -146,6 +144,7 @@ class ScenePlanner:
                 tower=tower,
                 assets=accessory_assets or [],
             ),
+            assembly_plan=assembly_plan,
         )
 
 

@@ -515,6 +515,7 @@ class ViewerBundle(BaseModel):
     requirements_spec_url: str | None = None
     extraction_report_url: str | None = None
     scene_spec_url: str | None = None
+    assembly_plan_url: str | None = None
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None

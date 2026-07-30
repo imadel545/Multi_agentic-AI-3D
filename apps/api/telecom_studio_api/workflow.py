@@ -1737,6 +1737,7 @@ class WorkflowService:
             "requirements_spec": str(output_dir / "requirements_spec.json"),
             "extraction_report": str(output_dir / "extraction_report.json"),
             "scene_spec": str(output_dir / "scene_spec.json"),
+            "assembly_plan": str(output_dir / "assembly_plan.json"),
             "validation_report": str(output_dir / "validation_report.json"),
             "quality_gates": str(output_dir / "quality_gates.json"),
             "requirement_coverage": str(output_dir / "requirement_coverage.json"),
@@ -1931,6 +1932,14 @@ class WorkflowService:
             self._write_json(output_dir / "extraction_report.json", _extraction_report(result))
         if result.scene:
             self._write_json(output_dir / "scene_spec.json", result.scene.model_dump())
+        assembly_plan = result.assembly_plan or (
+            result.scene.assembly_plan if result.scene else None
+        )
+        if assembly_plan:
+            self._write_json(
+                output_dir / "assembly_plan.json",
+                assembly_plan.model_dump(mode="json"),
+            )
         self._write_json(output_dir / "validation_report.json", result.report.model_dump())
         self._write_json(
             output_dir / "quality_gates.json",
@@ -2928,6 +2937,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "requirements_spec": "requirements_spec.json",
     "extraction_report": "extraction_report.json",
     "scene_spec": "scene_spec.json",
+    "assembly_plan": "assembly_plan.json",
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
     "requirement_coverage": "requirement_coverage.json",

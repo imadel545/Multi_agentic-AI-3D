@@ -60,8 +60,9 @@ def test_registry_exposes_only_qualified_generation_candidates() -> None:
     registry = AssetRegistry(Path("assets/manifests"))
 
     selected = registry.select_asset("antenna", "4G", "lattice_tower")
-    reference_only = registry.get("MOUNTING_BRACKET_001")
+    bracket = registry.get("MOUNTING_BRACKET_001")
 
     assert selected.asset_id == "ANT_PANEL_4G_001"
     assert selected.allows_generation_mode("imported_glb_exact") is True
-    assert reference_only.is_generation_eligible is False
+    assert bracket.is_generation_eligible is True
+    assert bracket.builder_profile_id == "mount_bracket_v1"

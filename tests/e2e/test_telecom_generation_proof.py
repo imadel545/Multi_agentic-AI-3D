@@ -100,6 +100,22 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
             accessory["asset_type"] == "gps" for accessory in scene_plan.get("accessory_assets", [])
         )
 
+        assembly_plan = client.get(f"/designs/{workflow_id}/artifacts/assembly_plan").json()
+        components = {component["role_id"]: component for component in assembly_plan["components"]}
+        assert {
+            "support_structure",
+            "sector_antenna",
+            "antenna_mount",
+            "remote_radio",
+            "ground_equipment",
+            "timing_antenna",
+        }.issubset(components)
+        assert components["support_structure"]["candidate_scores"]
+        assert components["sector_antenna"]["selected_asset_id"]
+        assert components["antenna_mount"]["builder_profile_id"] == "mount_bracket_v1"
+        assert components["sector_cable_route"]["generation_strategy"] == "procedural_fallback"
+        assert assembly_plan["units"] == "meters"
+
         validation_report = client.get(f"/designs/{workflow_id}/artifacts/validation_report").json()
         assert validation_report["status"] in {"passed", "failed"}
         assert validation_report["checks"]["tower_height_valid"] is True
@@ -158,6 +174,9 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["workflow_id"] == workflow_id
         assert bundle["scene_spec_url"].startswith(f"/designs/{workflow_id}/artifacts/scene_spec")
+        assert bundle["assembly_plan_url"].startswith(
+            f"/designs/{workflow_id}/artifacts/assembly_plan"
+        )
         assert bundle["qa_report_url"].startswith(f"/designs/{workflow_id}/artifacts/qa_report")
         assert bundle["generation_report_url"].startswith(
             f"/designs/{workflow_id}/artifacts/generation_report"
@@ -225,6 +244,15 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
             assert status["status"] == "completed"
             assert status["generation_mode"] == "real_blender"
             assert bundle["mesh_qa_passed"] is True
+            edit = client.post(
+                f"/designs/{workflow_id}/edit",
+                json={"edit_prompt": "Augmente la hauteur du pylône à 32 m."},
+            )
+            assert edit.status_code == 200
+            assert edit.json()["version_id"]
+            versions = client.get(f"/designs/{workflow_id}/versions").json()
+            assert len(versions) >= 2
+            assert any(version["active"] for version in versions)
         else:
             assert status["generation_mode"].startswith("fallback_")
             issues = client.get(f"/designs/{workflow_id}/user-issues").json()

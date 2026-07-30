@@ -24,6 +24,21 @@
   "front_axis": "+Y",
   "import_fallback_allowed": true,
   "adaptation_profile_id": "sector_antenna_pose_v1",
+  "builder_profile_id": "sector_panel_v1",
+  "capability_tags": ["5g", "sector", "rru_rf"],
+  "anchors": [
+    {"anchor_id": "rear_mount", "position_m": [0, -0.09, 0], "normal": [0, -1, 0], "roles": ["mechanical_mount"]},
+    {"anchor_id": "rf_port", "position_m": [0, 0, -0.8], "normal": [0, 0, -1], "roles": ["rf", "routing"]}
+  ],
+  "connectors": [
+    {"connector_id": "rear_mount", "kind": "mechanical", "gender": "source", "anchor_id": "rear_mount", "compatible_connector_kinds": ["mechanical"]},
+    {"connector_id": "rf_port", "kind": "rf", "gender": "source", "anchor_id": "rf_port", "compatible_connector_kinds": ["rf"]},
+    {"connector_id": "cable_exit", "kind": "routing", "gender": "source", "anchor_id": "rf_port", "compatible_connector_kinds": ["routing"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "azimuth_deg", "value_type": "number", "unit": "degrees", "minimum": 0, "maximum": 359.99},
+    {"parameter_id": "mechanical_tilt_deg", "value_type": "number", "unit": "degrees", "minimum": -15, "maximum": 30}
+  ],
   "panel_geometry_profile": {
     "family": "sector_panel_v1",
     "rear_mount_rail_count": 2,

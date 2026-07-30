@@ -470,8 +470,26 @@ def _create_sectors(
             properties={
                 "requested_azimuth_deg": azimuth_deg,
                 "requested_hba_m": z,
+                **_classification_properties("internal_project_generated"),
             },
         )
+        bracket_plan = _assembly_component(scene, "antenna_mount")
+        if bracket_plan:
+            _record_asset_generation(
+                asset_imports,
+                asset_warnings,
+                asset_id=bracket_plan.get("selected_asset_id"),
+                asset_file=None,
+                asset_source="internal_project_generated",
+                asset_metadata=None,
+                object_role="mount_bracket",
+                object_name=f"mount_bracket_{sector_id}",
+                dimensions=None,
+                location=(x, y, z),
+                rotation=(0.0, 0.0, -azimuth),
+                generation_strategy="internal_project_generated",
+                generated_object_names=[bracket.name],
+            )
         procedural_objects.append(f"mount_bracket:{sector_id}")
 
         electrical_tilt_deg = float(sector.get("electrical_tilt_deg") or 0.0)
@@ -714,6 +732,23 @@ def _create_sectors(
                 },
             )
             procedural_objects.append(f"cable:{sector_id}")
+            cable_plan = _assembly_component(scene, "sector_cable_route")
+            if cable_plan:
+                _record_asset_generation(
+                    asset_imports,
+                    asset_warnings,
+                    asset_id=cable_plan.get("selected_asset_id") or "PROCEDURAL_CABLE_ROUTE",
+                    asset_file=None,
+                    asset_source="internal_project_generated",
+                    asset_metadata=None,
+                    object_role="cable",
+                    object_name=f"cable_{sector_id}",
+                    dimensions=None,
+                    location=route_points[0],
+                    rotation=(0.0, 0.0, 0.0),
+                    generation_strategy="procedural_fallback",
+                    generated_object_names=[cable.name],
+                )
 
         if scene["visual_elements"].get("include_sector_beams"):
             beamwidth = float(sector.get("beamwidth_deg") or 65.0)
@@ -864,6 +899,14 @@ def _create_cable(bpy, sector_id: str, route_points: list[tuple[float, float, fl
     bpy.context.collection.objects.link(obj)
     obj.data.materials.append(_material(bpy, "cable_sheath_black", (0.035, 0.045, 0.055, 1)))
     return obj
+
+
+def _assembly_component(scene: dict, role_id: str) -> dict | None:
+    plan = scene.get("assembly_plan") or {}
+    return next(
+        (item for item in plan.get("components", []) if item.get("role_id") == role_id),
+        None,
+    )
 
 
 def _create_beam(
@@ -1681,6 +1724,9 @@ def _record_asset_generation(
             "generated_object_names": generated_object_names or [object_name],
         }
     )
+    if generation_strategy == "procedural_fallback":
+        _append_warning(record["warnings"], "PROCEDURAL_FALLBACK_USED")
+        _append_warning(warnings, f"PROCEDURAL_FALLBACK_USED:{asset_id}")
     asset_imports.append(record)
 
 
@@ -2205,6 +2251,7 @@ def _write_metadata(
         ],
         "visual_elements": scene.get("visual_elements", {}),
         "accessory_assets": scene.get("accessory_assets", []),
+        "assembly_plan": scene.get("assembly_plan"),
         "preview_camera": camera_metadata,
         "segment_connectivity": segment_connectivity
         or {

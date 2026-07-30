@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from core.contracts.assembly import AssetCandidateScore
 from core.contracts.assets import AssetManifest
 from core.performance import asset_manifest_hash
 
@@ -99,7 +100,52 @@ class AssetRegistry:
         ]
         if not candidates:
             raise LookupError(f"no validated {asset_type} asset for {network_type}")
-        return candidates[0]
+        return self.rank_candidates(
+            asset_type=asset_type,
+            network_type=network_type,
+            tower_type=tower_type,
+        )[0][0]
+
+    def rank_candidates(
+        self,
+        *,
+        asset_type: str,
+        network_type: str,
+        tower_type: str | None = None,
+        min_height_m: float | None = None,
+    ) -> list[tuple[AssetManifest, AssetCandidateScore]]:
+        """Return all generation-eligible candidates with reproducible scoring.
+
+        The scorer is deliberately deterministic. A bounded LLM may choose only
+        from this ordered list; it never invents an asset ID or a transform.
+        """
+        candidates = [
+            asset
+            for asset in self.list_assets()
+            if asset.type == asset_type
+            and asset.is_generation_eligible
+            and network_type in asset.compatible_networks
+            and (
+                not tower_type
+                or not asset.compatible_tower_types
+                or tower_type in asset.compatible_tower_types
+            )
+        ]
+        if not candidates:
+            raise LookupError(f"no validated {asset_type} asset for {network_type}")
+        scored = [
+            (
+                asset,
+                _candidate_score(
+                    asset,
+                    network_type=network_type,
+                    tower_type=tower_type,
+                    min_height_m=min_height_m,
+                ),
+            )
+            for asset in candidates
+        ]
+        return sorted(scored, key=lambda item: (-item[1].total_score, item[0].asset_id))
 
     def select_asset_fallback(
         self,
@@ -168,3 +214,40 @@ def _tower_type_distance(requested: str, compatible_tower_types: list[str]) -> i
         if family and family in requested_lower:
             return 1
     return 2
+
+
+def _candidate_score(
+    asset: AssetManifest,
+    *,
+    network_type: str,
+    tower_type: str | None,
+    min_height_m: float | None,
+) -> AssetCandidateScore:
+    compatibility = 55.0
+    reasons = [f"compatible avec le réseau {network_type}"]
+    if tower_type:
+        if not asset.compatible_tower_types or tower_type in asset.compatible_tower_types:
+            compatibility += 25.0
+            reasons.append(f"compatible avec le support {tower_type}")
+    if asset.allows_generation_mode("imported_glb_exact"):
+        generation = 100.0
+        reasons.append("import GLB exact qualifié")
+    else:
+        generation = 82.0
+        reasons.append("génération paramétrique qualifiée")
+    dimensional = 100.0
+    if min_height_m is not None and asset.height_m is not None:
+        if asset.height_m >= min_height_m:
+            reasons.append("hauteur nominale suffisante")
+        else:
+            dimensional = max(0.0, 100.0 - ((min_height_m - asset.height_m) / min_height_m) * 100)
+            reasons.append("hauteur nominale inférieure à la cible")
+    total = round(compatibility * 0.6 + generation * 0.25 + dimensional * 0.15, 2)
+    return AssetCandidateScore(
+        asset_id=asset.asset_id,
+        total_score=total,
+        compatibility_score=round(compatibility, 2),
+        generation_score=generation,
+        dimensional_score=round(dimensional, 2),
+        reasons=reasons,
+    )

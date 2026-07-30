@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     enable_groq_extraction: bool = True
     enable_groq_planning_decision: bool = True
+    enable_groq_asset_selection: bool = True
     groq_planning_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
     groq_planning_max_completion_tokens: int = Field(default=2048, ge=128, le=2048)
     blender_binary: str = "blender"
