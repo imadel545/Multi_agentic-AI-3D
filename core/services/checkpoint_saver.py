@@ -434,6 +434,23 @@ class SqliteCheckpointSaver(BaseCheckpointSaver):
             conn.execute("BEGIN IMMEDIATE")
             self._delete_scope(conn, thread_id)
 
+    def delete_threads_with_prefix(self, thread_id_prefix: str) -> tuple[str, ...]:
+        """Atomically remove every checkpoint thread owned by one workflow."""
+
+        if not thread_id_prefix:
+            raise ValueError("thread_id_prefix is required")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints "
+                "WHERE substr(thread_id, 1, ?) = ? ORDER BY thread_id",
+                (len(thread_id_prefix), thread_id_prefix),
+            ).fetchall()
+            thread_ids = tuple(str(row[0]) for row in rows)
+            for thread_id in thread_ids:
+                self._delete_scope(conn, thread_id)
+        return thread_ids
+
     def prune(self, thread_ids: Sequence[str], *, strategy: str = "keep_latest") -> None:
         if strategy != "delete":
             raise NotImplementedError(

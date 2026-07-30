@@ -18,7 +18,11 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - Plans a controlled 3D scene (`SceneSpec`).
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.
-- Current mesh QA is `mesh_level_transform_basic` when GLB node transforms are readable, otherwise `mesh_level_basic`. It parses GLB accessors/bounding boxes and basic role transforms, but it is not exact per-antenna RF/azimuth/collision QA.
+- Current mesh QA reaches `mesh_level_spatial_basic` when semantic transforms and
+  primary-equipment bounds are complete, `mesh_level_transform_basic` when only
+  transforms are complete, otherwise `mesh_level_basic`. It screens real GLB
+  AABBs with a bounded same-sector antenna/RRU contact tolerance, but it is not
+  exact triangle/BVH, RF, structural, or vendor-grade QA.
 - Supports prompt edits, versioning, and rollback.
 - The frontend product vocabulary maps to existing backend concepts: a "run" is
   a `workflow_id`, and a "scene plan" is the `scene_spec` artifact.
@@ -51,12 +55,19 @@ Override with `TELECOM_STUDIO_CORS_ORIGINS` when a future frontend uses a differ
 
 ### Optional: Blender
 
-Real `design.glb` generation requires Blender 4.5+ installed locally. The runner searches:
+Real `design.glb` generation requires a locally operational Blender. Pin
+**Blender 4.5 LTS** for this production-style pipeline instead of treating any
+newer executable as qualified. The runner searches:
 
 - `BLENDER_BINARY` env var
 - `TELECOM_STUDIO_BLENDER_BINARY` env var
 - `blender` in `PATH`
-- `/Applications/Blender.app/Contents/MacOS/Blender`
+- `/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender`
+- `/Applications/Blender.app/Contents/MacOS/Blender` as a last generic macOS candidate
+
+Executable presence is not runtime proof. Validate the chosen binary with a
+background/factory-startup smoke; a Blender crash remains a failed workflow and
+is never converted into a completed placeholder.
 
 ### Optional: Qdrant
 
@@ -66,6 +77,20 @@ TELECOM_STUDIO_QDRANT_URL=http://127.0.0.1:6333 uvicorn apps.api.telecom_studio_
 ```
 
 Without `TELECOM_STUDIO_QDRANT_URL`, the API uses Qdrant local mode under `data/qdrant`.
+The Compose service is bound to `127.0.0.1` only. Its current server pin is
+`qdrant/qdrant:v1.9.2`; do not expose it to a network and do not jump directly
+to a recent image over an existing volume without following Qdrant's supported
+stepwise migration path.
+
+### Dependency reproducibility
+
+`package-lock.json` pins the frontend dependency tree. Python dependencies are
+still range-based in `pyproject.toml` and no `uv.lock` is committed yet; a fresh
+Python environment is therefore not bit-for-bit reproducible. The validated
+local environment is Python 3.12.7. Direct security floors are enforced for
+LangSmith, pydantic-settings, Pillow, PyTorch and the setuptools build backend,
+but producing and enforcing a reviewed full Python lock remains required before
+a release.
 
 ### Product intelligence: Groq
 
@@ -159,7 +184,8 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 12 manifests, 12 local GLBs, 0 missing tower GLBs, `ready_for_import`, not vendor-grade.
+- Assets: 12 manifests, 12 local GLBs, 10 generation-eligible, 4 exact imports,
+  2 reference-only, `qualified_mixed_catalog`, not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.

@@ -11,6 +11,33 @@ class DimensionsM(StrictModel):
     height: float = Field(gt=0)
 
 
+class PanelAntennaGeometryProfile(StrictModel):
+    """Bounded procedural detail contract for a generic sector antenna.
+
+    The profile is selected from an asset manifest/blueprint.  It describes
+    supported builder parameters; it is not free-form Blender code.
+    """
+
+    family: Literal["sector_panel_v1"] = "sector_panel_v1"
+    rear_mount_rail_count: int = Field(default=2, ge=2, le=4)
+    bottom_port_count: int = Field(default=4, ge=2, le=8)
+    radome_bevel_ratio: float = Field(default=0.035, ge=0.01, le=0.08)
+
+
+class RadioGeometryProfile(StrictModel):
+    """Bounded procedural detail and mounting contract for a generic RRU."""
+
+    family: Literal["rru_enclosure_v1"] = "rru_enclosure_v1"
+    heat_sink_fin_count: int = Field(default=8, ge=4, le=16)
+    bottom_connector_count: int = Field(default=4, ge=2, le=8)
+    mounting_rail_count: int = Field(default=2, ge=2, le=4)
+    enclosure_bevel_ratio: float = Field(default=0.04, ge=0.01, le=0.08)
+    vertical_offset_m: float = Field(default=1.0, ge=0.25, le=3.0)
+    radial_inset_m: float = Field(default=0.08, ge=0.0, le=0.5)
+    include_status_indicator: bool = True
+    include_label_plate: bool = True
+
+
 class MountZone(StrictModel):
     name: str = Field(min_length=1)
     min_height_m: float = Field(ge=0)
@@ -31,6 +58,11 @@ AssetQualificationStatus = Literal[
 AssetGenerationMode = Literal[
     "parametric_generated",
     "imported_glb_exact",
+]
+GeometryFidelity = Literal[
+    "schematic",
+    "technical_generic",
+    "vendor_qualified",
 ]
 
 
@@ -86,6 +118,7 @@ class AssetManifest(StrictModel):
     mount_zones: list[MountZone] = Field(default_factory=list)
     status: str = "validated"
     version: str = "1.0.0"
+    geometry_fidelity: GeometryFidelity = "schematic"
     source: Literal[
         "vendor_expected",
         "vendor_supplied",
@@ -106,7 +139,17 @@ class AssetManifest(StrictModel):
     front_axis: str | None = None
     import_fallback_allowed: bool = True
     adaptation_profile_id: str | None = Field(default=None, min_length=1)
+    panel_geometry_profile: PanelAntennaGeometryProfile | None = None
+    radio_geometry_profile: RadioGeometryProfile | None = None
     qualification: AssetQualification = Field(default_factory=AssetQualification)
+
+    @model_validator(mode="after")
+    def validate_geometry_profile_role(self) -> "AssetManifest":
+        if self.panel_geometry_profile is not None and self.type != "antenna":
+            raise ValueError("panel_geometry_profile is only valid for antenna assets")
+        if self.radio_geometry_profile is not None and self.type != "radio":
+            raise ValueError("radio_geometry_profile is only valid for radio assets")
+        return self
 
     @property
     def is_validated(self) -> bool:

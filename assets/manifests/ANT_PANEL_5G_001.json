@@ -12,7 +12,8 @@
   "compatible_tower_types": ["lattice_tower", "monopole", "rooftop_mast", "small_cell_pole"],
   "mount_zones": [],
   "status": "validated",
-  "version": "1.1.0",
+  "version": "1.2.0",
+  "geometry_fidelity": "technical_generic",
   "source": "internal_test_minimal",
   "license": "internal_project_generated",
   "attribution_required": false,
@@ -23,6 +24,12 @@
   "front_axis": "+Y",
   "import_fallback_allowed": true,
   "adaptation_profile_id": "sector_antenna_pose_v1",
+  "panel_geometry_profile": {
+    "family": "sector_panel_v1",
+    "rear_mount_rail_count": 2,
+    "bottom_port_count": 4,
+    "radome_bevel_ratio": 0.035
+  },
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["parametric_generated"],
@@ -31,7 +38,7 @@
     "dimensions_verified": true,
     "pivot_verified": false,
     "orientation_verified": false,
-    "qualification_method": "SceneSpec-driven parametric component profile",
-    "limitations": ["Companion GLB orientation is not qualified; Blender must generate this component parametrically.", "Internal generic geometry; not vendor-grade."]
+    "qualification_method": "SceneSpec-driven bounded sector_panel_v1 procedural assembly",
+    "limitations": ["Companion GLB orientation is not qualified; Blender must generate this component parametrically.", "Internal generic multi-part geometry; not vendor-specific and not a certification model."]
   }
 }

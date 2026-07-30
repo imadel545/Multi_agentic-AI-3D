@@ -14,12 +14,14 @@ import math
 import sys
 from pathlib import Path
 
-# Make project root importable when this script is executed inside Blender.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+# Prefer the immutable sibling snapshot prepared by BlenderRunner. Normal
+# repository execution resolves the same sibling module. No worker dependency
+# is imported later from a mutable project-root package.
+_WORKER_ROOT = Path(__file__).resolve().parent
+if str(_WORKER_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKER_ROOT))
 
-from apps.blender_worker import parametric_builder  # noqa: E402
+import parametric_builder  # noqa: E402
 
 
 def main() -> int:
@@ -103,12 +105,12 @@ def _configure_scene(bpy, scene: dict) -> None:
     bpy.context.scene.render.resolution_x = int(width)
     bpy.context.scene.render.resolution_y = int(height)
     bpy.context.scene.world = bpy.context.scene.world or bpy.data.worlds.new("World")
-    bpy.context.scene.world.color = (0.025, 0.038, 0.052)
+    bpy.context.scene.world.color = (0.04, 0.055, 0.072)
     bpy.context.scene.world.use_nodes = True
     world_background = bpy.context.scene.world.node_tree.nodes.get("Background")
     if world_background is not None:
-        world_background.inputs["Color"].default_value = (0.025, 0.038, 0.052, 1)
-        world_background.inputs["Strength"].default_value = 0.28
+        world_background.inputs["Color"].default_value = (0.04, 0.055, 0.072, 1)
+        world_background.inputs["Strength"].default_value = 0.48
     bpy.context.scene.render.film_transparent = False
     bpy.context.scene.render.image_settings.file_format = "PNG"
     bpy.context.scene.render.resolution_percentage = 100
@@ -117,7 +119,7 @@ def _configure_scene(bpy, scene: dict) -> None:
         shading.light = "STUDIO"
         shading.color_type = "MATERIAL"
         shading.background_type = "COLOR"
-        shading.background_color = (0.025, 0.038, 0.052)
+        shading.background_color = (0.04, 0.055, 0.072)
     if hasattr(bpy.context.scene, "eevee"):
         if hasattr(bpy.context.scene.eevee, "use_gtao"):
             bpy.context.scene.eevee.use_gtao = True
@@ -130,7 +132,7 @@ def _configure_scene(bpy, scene: dict) -> None:
         bpy.context.scene.view_settings.look = "None"
     except TypeError:
         bpy.context.scene.view_settings.look = "Medium High Contrast"
-    bpy.context.scene.view_settings.exposure = 0.45
+    bpy.context.scene.view_settings.exposure = 0.75
     bpy.context.scene.view_settings.gamma = 1
 
 
@@ -140,7 +142,7 @@ def _create_ground_plane(bpy, scene: dict) -> None:
     bpy.ops.mesh.primitive_plane_add(size=size, location=(0, 0, -0.02))
     ground = bpy.context.object
     ground.name = "technical_ground_plane"
-    ground.data.materials.append(_material(bpy, "matte_ground", (0.08, 0.12, 0.15, 1)))
+    ground.data.materials.append(_material(bpy, "matte_ground", (0.12, 0.16, 0.20, 1)))
 
 
 def _create_tower(
@@ -575,7 +577,14 @@ def _create_sectors(
 
         if sector.get("radio_asset_id"):
             radio_strategy = sector.get("radio_generation_strategy", "internal_project_generated")
-            radio_location = (x * 0.92, y * 0.92, z - 1.0)
+            radio_profile = sector.get("radio_geometry_profile") or {}
+            radio_vertical_offset = float(radio_profile.get("vertical_offset_m") or 1.0)
+            radio_radial_inset = float(radio_profile.get("radial_inset_m") or 0.0)
+            radio_location = (
+                x - (math.sin(azimuth) * radio_radial_inset),
+                y - (math.cos(azimuth) * radio_radial_inset),
+                z - radio_vertical_offset,
+            )
             radio_object_name = f"radio_{sector_id}_{sector['radio_asset_id']}"
             if radio_strategy == "imported_glb_exact":
                 radio_mode = _try_import_glb_asset(
@@ -595,7 +604,7 @@ def _create_sectors(
                     warnings=asset_warnings,
                     semantic_properties={
                         "sector_id": sector_id,
-                        "install_height_m": z - 1.0,
+                        "install_height_m": radio_location[2],
                         "requested_azimuth_deg": azimuth_deg,
                         "requested_hba_m": z,
                     },
@@ -623,7 +632,7 @@ def _create_sectors(
                         semantic_root=radio_object_name,
                         sector_id=sector_id,
                         properties={
-                            "install_height_m": z - 1.0,
+                            "install_height_m": radio_location[2],
                             "requested_azimuth_deg": azimuth_deg,
                             "requested_hba_m": z,
                             **_classification_properties("procedural_fallback"),
@@ -667,7 +676,7 @@ def _create_sectors(
             tower_entry_radius = max(tower_radius * 0.82, 0.18)
             route_points = [
                 (x, y, z - 0.65),
-                (x * 0.92, y * 0.92, z - 1.0)
+                radio_location
                 if sector.get("radio_asset_id")
                 else (
                     math.sin(azimuth) * tower_entry_radius,
@@ -759,6 +768,7 @@ def _build_generated_antenna(
             height=float(dims.get("height") or 1.6),
             location=location,
             rotation=(0.0, 0.0, 0.0),
+            geometry_profile=sector.get("antenna_geometry_profile"),
         )
     parametric_builder.apply_sector_pose(
         root,
@@ -808,6 +818,7 @@ def _build_generated_radio(
         height=float(dims.get("height") or 0.6),
         location=location,
         rotation=(0.0, 0.0, 0.0),
+        geometry_profile=sector.get("radio_geometry_profile"),
     )
     parametric_builder.apply_sector_pose(
         root,
@@ -1380,10 +1391,11 @@ def _try_import_glb_asset(
             fallback_allowed=fallback_allowed,
         )
 
-    before_names = {obj.name for obj in bpy.data.objects}
+    before_object_ids = {id(obj) for obj in bpy.data.objects}
     try:
         bpy.ops.import_scene.gltf(filepath=str(path))
     except Exception as exc:
+        _remove_partial_import_objects(bpy, before_object_ids)
         return _record_asset_import_fallback(
             record,
             asset_imports,
@@ -1392,7 +1404,7 @@ def _try_import_glb_asset(
             fallback_allowed=fallback_allowed,
         )
 
-    imported = [obj for obj in bpy.data.objects if obj.name not in before_names]
+    imported = [obj for obj in bpy.data.objects if id(obj) not in before_object_ids]
     if not imported:
         return _record_asset_import_fallback(
             record,
@@ -1503,6 +1515,14 @@ def _try_import_glb_asset(
         _append_warning(warnings, f"{source_warning}:{asset_id}")
     asset_imports.append(record)
     return import_mode
+
+
+def _remove_partial_import_objects(bpy, before_object_ids: set[int]) -> None:
+    """Remove every scene object created by a failed, non-transactional importer."""
+
+    created = [obj for obj in bpy.data.objects if id(obj) not in before_object_ids]
+    for obj in created:
+        bpy.data.objects.remove(obj, do_unlink=True)
 
 
 def _asset_placement_location(
@@ -1746,7 +1766,7 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
     bpy.ops.object.light_add(type="SUN", location=(8, -6, tower_height + 12))
     sun = bpy.context.object
     sun.name = "sun_key"
-    sun.data.energy = 2.2
+    sun.data.energy = 3.0
     sun.rotation_euler = (math.radians(28), math.radians(-18), math.radians(-32))
     bpy.ops.object.light_add(
         type="AREA",
@@ -1754,7 +1774,7 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
     )
     fill = bpy.context.object
     fill.name = "area_fill"
-    fill.data.energy = 950
+    fill.data.energy = 1550
     fill.data.size = max(7, tower_height * 0.42)
     _point_object_at(fill, target)
     bpy.ops.object.light_add(
@@ -1763,7 +1783,7 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
     )
     rim = bpy.context.object
     rim.name = "area_rim"
-    rim.data.energy = 1200
+    rim.data.energy = 1750
     rim.data.size = max(5, tower_height * 0.3)
     _point_object_at(rim, target)
 
@@ -1819,6 +1839,10 @@ def _subject_world_corners(bpy) -> list:
         "camera_",
         "sun_",
         "area_",
+        "sector_beam_",
+        "azimuth_arrow_",
+        "height_marker",
+        "label_",
     )
     for obj in bpy.context.scene.objects:
         if obj.type not in {"MESH", "CURVE", "FONT", "SURFACE"}:
@@ -1915,7 +1939,7 @@ def _create_preview_backdrop(bpy, scene: dict) -> None:
     backdrop.name = "technical_preview_backdrop"
     backdrop.dimensions = (width, height, 1)
     backdrop.data.materials.append(
-        _emission_material(bpy, "preview_backdrop_dark", (0.025, 0.04, 0.055, 1), 0.42)
+        _emission_material(bpy, "preview_backdrop_dark", (0.04, 0.055, 0.072, 1), 0.52)
     )
 
 

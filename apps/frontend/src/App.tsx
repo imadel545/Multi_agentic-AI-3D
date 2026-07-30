@@ -17,6 +17,7 @@ import {
 } from "./api/client";
 import { normalizeWorkflowEvent, openWorkflowEventStream } from "./api/sse";
 import type {
+  AdaptationCapabilityCatalog,
   DocumentPackCapabilities,
   DocumentPackReview,
   DocumentPackSummary,
@@ -26,6 +27,7 @@ import type {
   AssetLibrarySummary,
   ParseRequirementsResponse,
   PublicVersionInfo,
+  SceneAdaptationCapabilities,
   ViewerBundle,
   WorkflowEvent,
   WorkflowStatus
@@ -66,6 +68,13 @@ export default function App() {
     useState<AssetLibrarySearch | null>(null);
   const [assetLibrarySearchBusy, setAssetLibrarySearchBusy] = useState(false);
   const [assetLibrarySearchError, setAssetLibrarySearchError] = useState<string | null>(null);
+  const [adaptationCatalog, setAdaptationCatalog] =
+    useState<AdaptationCapabilityCatalog | null>(null);
+  const [adaptationCapabilities, setAdaptationCapabilities] =
+    useState<SceneAdaptationCapabilities | null>(null);
+  const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
+  const [ragEvidenceError, setRagEvidenceError] = useState<string | null>(null);
+  const [ragEvidenceLoading, setRagEvidenceLoading] = useState(false);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
   const [documentPackSummary, setDocumentPackSummary] = useState<DocumentPackSummary | null>(null);
@@ -88,6 +97,7 @@ export default function App() {
   const apiClient = useMemo(() => api, []);
   const streamRef = useRef<{ close: () => void } | null>(null);
   const streamCursorRef = useRef<string | null>(null);
+  const eventSequenceCursorRef = useRef<number | null>(null);
   const submissionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
   const restoredDocumentPackRef = useRef(false);
@@ -98,6 +108,24 @@ export default function App() {
   const toArtifactUrl = useCallback(
     (url: string | null | undefined) => apiClient.artifactUrl(url),
     [apiClient]
+  );
+  const rememberEventSequence = useCallback((sequence: number | null | undefined) => {
+    if (sequence != null) {
+      eventSequenceCursorRef.current = Math.max(
+        eventSequenceCursorRef.current ?? 0,
+        sequence
+      );
+    }
+  }, []);
+  const receiveWorkflowEvents = useCallback(
+    (events: WorkflowEvent[]) => {
+      const normalized = events.map(normalizeWorkflowEvent);
+      rememberEventSequence(latestEventSequence(events));
+      if (normalized.length) {
+        dispatch({ type: "EVENTS_RECEIVED", events: normalized });
+      }
+    },
+    [rememberEventSequence]
   );
 
   useEffect(() => {
@@ -146,6 +174,14 @@ export default function App() {
         if (!cancelled) setAssetInventory(null);
       });
     void apiClient
+      .adaptationCapabilityCatalog()
+      .then((catalog) => {
+        if (!cancelled) setAdaptationCatalog(catalog);
+      })
+      .catch(() => {
+        if (!cancelled) setAdaptationCatalog(null);
+      });
+    void apiClient
       .documentPackCapabilities()
       .then((caps) => {
         if (!cancelled) {
@@ -166,6 +202,48 @@ export default function App() {
       cancelled = true;
     };
   }, [apiClient]);
+
+  useEffect(() => {
+    const bundle = state.viewerBundle;
+    setAdaptationCapabilities(null);
+    setRagEvidence(null);
+    setRagEvidenceError(null);
+    setRagEvidenceLoading(Boolean(bundle?.rag_evidence_url));
+    if (!bundle) {
+      return;
+    }
+    let cancelled = false;
+    void apiClient
+      .designAdaptationCapabilities(bundle.workflow_id)
+      .then((capabilities) => {
+        if (!cancelled) setAdaptationCapabilities(capabilities);
+      })
+      .catch(() => {
+        if (!cancelled) setAdaptationCapabilities(null);
+      });
+    if (bundle.rag_evidence_url) {
+      void apiClient
+        .artifactJson(bundle.rag_evidence_url)
+        .then((evidence) => {
+          if (!cancelled) {
+            setRagEvidence(evidence);
+            setRagEvidenceError(null);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setRagEvidence(null);
+            setRagEvidenceError(userFacingError(error, "resource"));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setRagEvidenceLoading(false);
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [apiClient, state.viewerBundle]);
 
   const searchAssetLibrary = useCallback(
     async (query: string) => {
@@ -275,7 +353,10 @@ export default function App() {
       streamRef.current = openWorkflowEventStream(
         apiClient.streamUrl(workflowId, afterEventId),
         {
-          onEvent: (event) => dispatch({ type: "EVENT_RECEIVED", event }),
+          onEvent: (event) => {
+            rememberEventSequence(event.sequence);
+            dispatch({ type: "EVENT_RECEIVED", event });
+          },
           onTerminal: (event) => {
             void loadTerminalBundle(event.workflow_id).catch((error) => {
               dispatch({
@@ -290,7 +371,7 @@ export default function App() {
         }
       );
     },
-    [apiClient, loadTerminalBundle]
+    [apiClient, loadTerminalBundle, rememberEventSequence]
   );
 
   const loadPollingSnapshot = useCallback(
@@ -311,7 +392,7 @@ export default function App() {
 
       const [operationResult, eventsResult, timelineResult] = await Promise.allSettled([
         apiClient.currentOperation(workflowId),
-        apiClient.workflowEvents(workflowId),
+        apiClient.workflowEvents(workflowId, eventSequenceCursorRef.current),
         apiClient.timelineSummary(workflowId)
       ]);
       applyResourceResult(
@@ -323,11 +404,7 @@ export default function App() {
       applyResourceResult(
         eventsResult,
         "events",
-        (events) => {
-          for (const event of events) {
-            dispatch({ type: "EVENT_RECEIVED", event: normalizeWorkflowEvent(event) });
-          }
-        },
+        receiveWorkflowEvents,
         dispatch
       );
       applyResourceResult(
@@ -340,7 +417,7 @@ export default function App() {
         await loadTerminalBundle(workflowId);
       }
     },
-    [apiClient, loadTerminalBundle]
+    [apiClient, loadTerminalBundle, receiveWorkflowEvents]
   );
 
   useEffect(() => {
@@ -359,6 +436,7 @@ export default function App() {
           return;
         }
         restoredWorkflowRef.current = true;
+        eventSequenceCursorRef.current = null;
         dispatch({ type: "WORKFLOW_RESTORED", status: latest });
         if (latest.status === "pending" || latest.status === "running") {
           void loadLiveStatus(latest.workflow_id)
@@ -422,13 +500,16 @@ export default function App() {
           );
         }
       })
-      .catch(() => {
-        if (storage) clearDocumentPackSession(storage);
+      .catch((error) => {
+        const missingPack = shouldForgetDocumentPackSession(error);
+        if (missingPack && storage) clearDocumentPackSession(storage);
         if (!cancelled) {
           setDocumentPackSummary(null);
           setDocumentPackReview(null);
           setDocumentPackMessage(
-            "La revue documentaire précédente n’est plus disponible. Importez de nouveau les pièces."
+            missingPack
+              ? "La revue documentaire précédente n’est plus disponible. Importez de nouveau les pièces."
+              : "La revue documentaire n’a pas pu être resynchronisée. Le pack est conservé; rechargez le studio pour réessayer."
           );
         }
       })
@@ -511,6 +592,7 @@ export default function App() {
       });
       setSubmittedRequirementsHash(requirementsAnalysis.requirements_hash);
       setVersions([]);
+      eventSequenceCursorRef.current = null;
       dispatch({ type: "DESIGN_CREATED", workflowId: created.workflow_id });
       const status = await loadLiveStatus(created.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -628,6 +710,7 @@ export default function App() {
       }
       setDocumentPackMessage("Workflow lancé depuis le pack documentaire.");
       setVersions([]);
+      eventSequenceCursorRef.current = null;
       dispatch({ type: "DESIGN_CREATED", workflowId: generated.workflow_id });
       const status = await loadLiveStatus(generated.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -654,9 +737,7 @@ export default function App() {
     try {
       try {
         const eventHistory = await apiClient.workflowEvents(workflowId);
-        for (const event of eventHistory) {
-          dispatch({ type: "EVENT_RECEIVED", event: normalizeWorkflowEvent(event) });
-        }
+        receiveWorkflowEvents(eventHistory);
         const cursor = latestEventCursor(eventHistory);
         if (cursor) {
           streamCursorRef.current = cursor;
@@ -701,6 +782,7 @@ export default function App() {
   }, [
     apiClient,
     loadTerminalBundle,
+    receiveWorkflowEvents,
     revisionBusy,
     revisionPrompt,
     state.workflowId
@@ -717,6 +799,7 @@ export default function App() {
       try {
         try {
           const eventHistory = await apiClient.workflowEvents(state.workflowId);
+          receiveWorkflowEvents(eventHistory);
           const cursor = latestEventCursor(eventHistory);
           streamCursorRef.current = cursor;
           runtimeMode = cursor ? "sse" : "polling";
@@ -738,7 +821,13 @@ export default function App() {
         setRollbackBusyVersionId(null);
       }
     },
-    [apiClient, loadTerminalBundle, rollbackBusyVersionId, state.workflowId]
+    [
+      apiClient,
+      loadTerminalBundle,
+      receiveWorkflowEvents,
+      rollbackBusyVersionId,
+      state.workflowId
+    ]
   );
 
   useEffect(() => {
@@ -784,7 +873,11 @@ export default function App() {
     submittedRequirementsHash === requirementsAnalysis?.requirements_hash;
   const canRollbackVersions =
     state.viewerBundle?.runtime_capabilities?.can_rollback_versions === true &&
-    actionIsSupported("rollback_versions", state.viewerBundle.unsupported_actions);
+    state.viewerBundle.available_actions.includes("rollback_version") &&
+    actionIsSupported("rollback_version", state.viewerBundle.unsupported_actions) &&
+    !revisionBusy &&
+    rollbackBusyVersionId === null &&
+    (state.phase === "completed" || state.phase === "degraded");
 
   return (
     <div className="studio-root">
@@ -842,6 +935,8 @@ export default function App() {
             <TelecomGlbViewer bundle={state.viewerBundle} toAbsoluteUrl={toArtifactUrl} />
           </Suspense>
           <InspectorDock
+            adaptationCapabilities={adaptationCapabilities}
+            adaptationCatalog={adaptationCatalog}
             assetInventory={assetInventory}
             assetLibrarySearch={assetLibrarySearch}
             assetLibrarySearchBusy={assetLibrarySearchBusy}
@@ -850,7 +945,11 @@ export default function App() {
             bundle={state.viewerBundle}
             canRollback={canRollbackVersions}
             events={state.events}
+            documentCapabilities={documentCapabilities}
             issues={state.userIssues}
+            ragEvidence={ragEvidence}
+            ragEvidenceError={ragEvidenceError}
+            ragEvidenceLoading={ragEvidenceLoading}
             summary={state.summary}
             timeline={state.timeline}
             toAbsoluteUrl={toArtifactUrl}
@@ -942,9 +1041,14 @@ export function selectWorkflowToRestore(designs: WorkflowStatus[]): WorkflowStat
   for (const statuses of [
     new Set(["pending", "running"]),
     new Set(["completed"]),
-    new Set(["failed"])
+    new Set(["failed", "legacy_unverified", "integrity_failed"])
   ]) {
-    const candidates = designs.filter((design) => statuses.has(design.status));
+    const candidates = designs.filter(
+      (design) =>
+        statuses.has(design.status) &&
+        (design.status !== "completed" ||
+          design.completion_certificate_status === "issued")
+    );
     if (candidates.length) {
       return [...candidates].sort(
         (left, right) => timestamp(right.created_at) - timestamp(left.created_at)
@@ -954,10 +1058,26 @@ export function selectWorkflowToRestore(designs: WorkflowStatus[]): WorkflowStat
   return null;
 }
 
+export function shouldForgetDocumentPackSession(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 404;
+}
+
 export function latestEventCursor(
   events: Array<Pick<WorkflowEvent, "event_id">>
 ): string | null {
   return events.at(-1)?.event_id ?? null;
+}
+
+export function latestEventSequence(
+  events: Array<Pick<WorkflowEvent, "sequence">>
+): number | null {
+  let latest: number | null = null;
+  for (const event of events) {
+    if (event.sequence != null) {
+      latest = Math.max(latest ?? 0, event.sequence);
+    }
+  }
+  return latest;
 }
 
 export function documentPackSizeError(
@@ -1051,7 +1171,12 @@ function timestamp(value: string | null | undefined): number {
 }
 
 function isTerminalStatus(status: string): boolean {
-  return status === "completed" || status === "failed";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "legacy_unverified" ||
+    status === "integrity_failed"
+  );
 }
 
 export function createTestApi(baseUrl = "http://127.0.0.1:8000", fetcher = fetch) {

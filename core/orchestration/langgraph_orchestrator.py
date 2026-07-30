@@ -13,11 +13,13 @@ from langgraph.types import Command
 from pydantic import ValidationError
 
 from core.agents import ScenePlanner
+from core.agents.blueprint_composer import BlueprintComposer
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
 from core.agents.tower_engineer import TowerEngineerAgent
 from core.contracts.assets import AssetManifest
 from core.contracts.completion import CompletionCertificate, RequirementCoverageReport
+from core.contracts.design_blueprint import BlueprintCoverageReport, DesignBlueprint
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
@@ -31,7 +33,7 @@ from core.contracts.planning_decision import (
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
 from core.contracts.rf_validation import RfValidationReport
-from core.contracts.runtime import AgentStepTrace, WorkflowTrace
+from core.contracts.runtime import ActorKind, AgentStepTrace, DecisionAuthority, WorkflowTrace
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.contracts.tower_validation import TowerValidationReport
 from core.contracts.validation import ValidationIssue, ValidationReport
@@ -52,6 +54,10 @@ from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
 from core.validation import validate_scene_spec
 from core.validation.completion_certificate import build_completion_certificate
+from core.validation.design_blueprint import (
+    evaluate_blueprint_requirement_coverage,
+    evaluate_blueprint_scene_coverage,
+)
 from core.validation.quality_gates import (
     evaluate_post_blender_gate,
     evaluate_pre_blender_gate,
@@ -124,6 +130,9 @@ class WorkflowState(TypedDict, total=False):
     route_history: list[dict]
     tower_validation: TowerValidationReport
     rf_validation: RfValidationReport
+    design_blueprint: DesignBlueprint
+    blueprint_requirement_coverage: BlueprintCoverageReport
+    blueprint_scene_coverage: BlueprintCoverageReport
 
 
 @dataclass(frozen=True)
@@ -155,6 +164,9 @@ class OrchestratorResult:
     total_duration_ms: int
     tower_validation: TowerValidationReport | None
     rf_validation: RfValidationReport | None
+    design_blueprint: DesignBlueprint | None
+    blueprint_requirement_coverage: BlueprintCoverageReport | None
+    blueprint_scene_coverage: BlueprintCoverageReport | None
     metrics: dict[str, int | float | str | bool | None]
     route_history: list[dict]
 
@@ -171,6 +183,7 @@ class DesignOrchestrator:
         planning_decision_client: GroqPlanningDecisionClient | None = None,
         allow_blender_fallback: bool = False,
         runtime_event_sink: RuntimeEventSink | None = None,
+        blueprint_composer: BlueprintComposer | None = None,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -181,6 +194,7 @@ class DesignOrchestrator:
         self.default_runtime_event_sink = runtime_event_sink
         self.checkpoint_saver = checkpoint_saver
         self.planning_decision_client = planning_decision_client
+        self.blueprint_composer = blueprint_composer or BlueprintComposer()
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
         self.rf_engineer = RfEngineerAgent()
@@ -392,6 +406,10 @@ class DesignOrchestrator:
             "rule_violation_handler",
             self._runtime_node("rule_violation_handler", self._rule_violation_handler),
         )
+        graph.add_node(
+            "compose_design_blueprint",
+            self._runtime_node("compose_design_blueprint", self._compose_design_blueprint),
+        )
         graph.add_node("plan_scene", self._runtime_node("plan_scene", self._plan_scene))
         graph.add_node("validate_scene", self._runtime_node("validate_scene", self._validate_scene))
         graph.add_node(
@@ -467,12 +485,19 @@ class DesignOrchestrator:
             "validate_requirements",
             _requirements_route,
             {
-                "continue": "plan_scene",
-                "validate_scene": "validate_scene",
+                "continue": "compose_design_blueprint",
                 "rule_violation": "rule_violation_handler",
             },
         )
         graph.add_edge("rule_violation_handler", terminal_node)
+        graph.add_conditional_edges(
+            "compose_design_blueprint",
+            _blueprint_route,
+            {
+                "plan_scene": "plan_scene",
+                "validate_scene": "validate_scene",
+            },
+        )
         graph.add_edge("plan_scene", "validate_scene")
         graph.add_conditional_edges(
             "validate_scene",
@@ -662,6 +687,8 @@ class DesignOrchestrator:
                     started,
                     status="failed",
                     errors=["INVALID_REQUIREMENTS"],
+                    actor_kind="deterministic_specialist",
+                    decision_authority="deterministic",
                 ),
             }
         except Exception as exc:
@@ -681,6 +708,8 @@ class DesignOrchestrator:
                     started,
                     status="failed",
                     errors=["EXTRACTION_FAILED"],
+                    actor_kind="deterministic_specialist",
+                    decision_authority="deterministic",
                 ),
             }
         requirements = extraction.requirements
@@ -714,6 +743,16 @@ class DesignOrchestrator:
                     started,
                     status="failed",
                     errors=["INPUT_CONFIRMATION_REQUIRED"],
+                    actor_kind=(
+                        "llm_decision"
+                        if extraction.provider.startswith("groq") and not extraction.fallback_used
+                        else "deterministic_specialist"
+                    ),
+                    decision_authority=(
+                        "llm_bounded"
+                        if extraction.provider.startswith("groq") and not extraction.fallback_used
+                        else "deterministic"
+                    ),
                 ),
             }
         return {
@@ -726,7 +765,22 @@ class DesignOrchestrator:
             "extraction_provider": extraction.provider,
             "extraction_fallback_used": extraction.fallback_used,
             "extraction_error": extraction.error,
-            "trace": _trace(state, "extract_requirements", extraction.provider, started),
+            "trace": _trace(
+                state,
+                "extract_requirements",
+                extraction.provider,
+                started,
+                actor_kind=(
+                    "llm_decision"
+                    if extraction.provider.startswith("groq") and not extraction.fallback_used
+                    else "deterministic_specialist"
+                ),
+                decision_authority=(
+                    "llm_bounded"
+                    if extraction.provider.startswith("groq") and not extraction.fallback_used
+                    else "deterministic"
+                ),
+            ),
         }
 
     def _missing_data_handler(self, state: WorkflowState) -> dict:
@@ -854,6 +908,8 @@ class DesignOrchestrator:
                     reason,
                     started,
                     status="skipped" if status == "not_needed" else "passed",
+                    actor_kind="deterministic_specialist",
+                    decision_authority="deterministic",
                 ),
             }
 
@@ -887,6 +943,10 @@ class DesignOrchestrator:
                 ),
                 started,
                 warnings=["PLANNING_DECISION_FALLBACK"] if result.diagnostics.fallback_used else [],
+                actor_kind="llm_decision",
+                decision_authority=(
+                    "deterministic" if result.diagnostics.fallback_used else "llm_bounded"
+                ),
             ),
         }
 
@@ -1125,6 +1185,41 @@ class DesignOrchestrator:
             ),
         }
 
+    def _compose_design_blueprint(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        blueprint = self.blueprint_composer.compose(
+            workflow_id=state["workflow_id"],
+            requirements=state["requirements"],
+            selected_assets=state["selected_assets"],
+            tower_validation=state["tower_validation"],
+            rf_validation=state["rf_validation"],
+            planning_resolution=state.get("rag_planning_resolution"),
+        )
+        coverage = evaluate_blueprint_requirement_coverage(
+            state["requirements"],
+            blueprint,
+            state.get("rag_planning_resolution"),
+        )
+        if not coverage.passed:
+            raise ValueError(
+                "DesignBlueprint does not cover requirements: "
+                + ", ".join(coverage.critical_errors)
+            )
+        domains = ",".join(blueprint.required_specialist_domains)
+        return {
+            "design_blueprint": blueprint,
+            "blueprint_requirement_coverage": coverage,
+            "trace": _trace(
+                state,
+                "compose_design_blueprint",
+                f"{len(blueprint.component_intents)} intents; specialists={domains}",
+                started,
+                actor_kind="deterministic_specialist",
+                decision_authority="deterministic",
+                warnings=[issue.code for issue in blueprint.open_issues],
+            ),
+        }
+
     def _plan_scene(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         scene = self.scene_planner.build_scene_spec(
@@ -1147,12 +1242,16 @@ class DesignOrchestrator:
     def _validate_scene(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         report = validate_scene_spec(state["scene"], self.registry.list_assets())
+        blueprint_coverage = evaluate_blueprint_scene_coverage(
+            state["design_blueprint"],
+            state["scene"],
+        )
         requirement_coverage = evaluate_requirement_coverage(
             state["requirements"],
             state["scene"],
             state.get("rag_planning_resolution"),
         )
-        if not requirement_coverage.passed:
+        if not requirement_coverage.passed or not blueprint_coverage.passed:
             coverage_errors = [
                 ValidationIssue(
                     code="REQUIREMENT_NOT_COVERED",
@@ -1161,12 +1260,21 @@ class DesignOrchestrator:
                 )
                 for path in requirement_coverage.critical_errors
             ]
+            coverage_errors.extend(
+                ValidationIssue(
+                    code="BLUEPRINT_NOT_COMPILED",
+                    message=f"SceneSpec does not compile blueprint intent: {path}",
+                    severity="error",
+                )
+                for path in blueprint_coverage.critical_errors
+            )
             report = report.model_copy(
                 update={
                     "status": "failed",
                     "checks": {
                         **report.checks,
                         "requirement_coverage_valid": False,
+                        "blueprint_scene_coverage_valid": blueprint_coverage.passed,
                     },
                     "errors": [*report.errors, *coverage_errors],
                 }
@@ -1177,6 +1285,7 @@ class DesignOrchestrator:
                     "checks": {
                         **report.checks,
                         "requirement_coverage_valid": True,
+                        "blueprint_scene_coverage_valid": True,
                     }
                 }
             )
@@ -1184,6 +1293,7 @@ class DesignOrchestrator:
         return {
             "scene_report": report,
             "requirement_coverage": requirement_coverage,
+            "blueprint_scene_coverage": blueprint_coverage,
             "report": merged,
             "trace": _trace(
                 state,
@@ -1332,6 +1442,8 @@ class DesignOrchestrator:
                 started,
                 status=status,
                 errors=[generation.error] if generation.error else [],
+                actor_kind="external_tool",
+                decision_authority=("external_verified" if real_generation else "deterministic"),
             ),
         }
 
@@ -1441,6 +1553,9 @@ class DesignOrchestrator:
         certificate = build_completion_certificate(
             workflow_id=state["workflow_id"],
             requirements=state.get("requirements"),
+            design_blueprint=state.get("design_blueprint"),
+            blueprint_requirement_coverage=state.get("blueprint_requirement_coverage"),
+            blueprint_scene_coverage=state.get("blueprint_scene_coverage"),
             scene=state.get("scene"),
             requirement_coverage=state.get("requirement_coverage"),
             generation=state.get("generation"),
@@ -1651,6 +1766,8 @@ def _planning_resolution_payload(resolution: Any) -> dict:
     return {
         "antenna_install_height_m": resolution.antenna_install_height_m,
         "beamwidth_deg": resolution.beamwidth_deg,
+        "mechanical_tilt_deg": resolution.mechanical_tilt_deg,
+        "electrical_tilt_deg": resolution.electrical_tilt_deg,
         "include_cables": resolution.include_cables,
         "include_sector_beams": resolution.include_sector_beams,
         "decisions": list(resolution.decisions),
@@ -1979,6 +2096,7 @@ def _scene_accessory_ids(scene: SceneSpec) -> set[str]:
 
 def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
     return RuntimeAssetMetadata(
+        geometry_fidelity=asset.geometry_fidelity,
         license=asset.license,
         attribution_required=asset.attribution_required,
         attribution=asset.attribution,
@@ -2006,9 +2124,13 @@ def _asset_fallback_route(state: WorkflowState) -> str:
 def _requirements_route(state: WorkflowState) -> str:
     if state["requirement_report"].status not in ("passed", "warning"):
         return "rule_violation"
+    return "continue"
+
+
+def _blueprint_route(state: WorkflowState) -> str:
     if state.get("entry_mode") == "scene_revision" and state.get("scene") is not None:
         return "validate_scene"
-    return "continue"
+    return "plan_scene"
 
 
 def _scene_route(state: WorkflowState) -> str:
@@ -2062,10 +2184,15 @@ def _trace(
     errors: list[str] | None = None,
     route: str | None = None,
     attempt: int | None = None,
+    actor_kind: ActorKind | None = None,
+    decision_authority: DecisionAuthority | None = None,
 ) -> list[dict]:
+    default_actor_kind, default_decision_authority = _step_truth_defaults(node)
     step = AgentStepTrace(
         node=node,
         status=status,
+        actor_kind=actor_kind or default_actor_kind,
+        decision_authority=decision_authority or default_decision_authority,
         detail=detail,
         duration_ms=_duration_ms(started),
         warnings=warnings or [],
@@ -2077,10 +2204,36 @@ def _trace(
     return state.get("trace", []) + [step.model_dump()]
 
 
+def _step_truth_defaults(node: str) -> tuple[ActorKind, DecisionAuthority]:
+    if node in {
+        "validate_requirements",
+        "plan_scene",
+        "validate_scene",
+        "scene_repair_handler",
+    }:
+        return "deterministic_specialist", "deterministic"
+    if node in {
+        "pre_blender_gate",
+        "qa_generation",
+        "post_blender_gate",
+        "certify_completion",
+        "qa_failure_handler",
+        "quality_gate_failure_handler",
+    }:
+        return "quality_gate", "deterministic"
+    if node == "generate_blender":
+        # A started/failed tool call is not externally verified yet. The
+        # generation node promotes this authority only after real artifacts
+        # have been produced.
+        return "external_tool", "deterministic"
+    return "service", "deterministic"
+
+
 def _emit_node_started_runtime_event(state: WorkflowState, node: str) -> None:
     sink = _runtime_event_sink(state)
     if sink is None:
         return
+    actor_kind, decision_authority = _step_truth_defaults(node)
     sink(
         state["workflow_id"],
         "node_started",
@@ -2088,6 +2241,8 @@ def _emit_node_started_runtime_event(state: WorkflowState, node: str) -> None:
             "node": node,
             "phase": _phase_for_node(node),
             "status": "running",
+            "actor_kind": actor_kind,
+            "decision_authority": decision_authority,
             "detail": "started",
             "duration_ms": None,
             "warnings": [],
@@ -2106,6 +2261,7 @@ def _emit_node_exception_runtime_event(
     sink = _runtime_event_sink(state)
     if sink is None:
         return
+    actor_kind, decision_authority = _step_truth_defaults(node)
     sink(
         state["workflow_id"],
         "node_failed",
@@ -2113,6 +2269,8 @@ def _emit_node_exception_runtime_event(
             "node": node,
             "phase": _phase_for_node(node),
             "status": "failed",
+            "actor_kind": actor_kind,
+            "decision_authority": decision_authority,
             "detail": type(exc).__name__,
             "duration_ms": None,
             "warnings": [],
@@ -2138,6 +2296,8 @@ def _emit_node_runtime_event(state: WorkflowState, step: AgentStepTrace) -> None
             "node": step.node,
             "phase": _phase_for_node(step.node),
             "status": step.status,
+            "actor_kind": step.actor_kind,
+            "decision_authority": step.decision_authority,
             "detail": step.detail,
             "duration_ms": step.duration_ms,
             "warnings": step.warnings,
@@ -2416,6 +2576,9 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         ],
         tower_validation=state.get("tower_validation"),
         rf_validation=state.get("rf_validation"),
+        design_blueprint=state.get("design_blueprint"),
+        blueprint_requirement_coverage=state.get("blueprint_requirement_coverage"),
+        blueprint_scene_coverage=state.get("blueprint_scene_coverage"),
     )
 
 

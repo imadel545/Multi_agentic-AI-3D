@@ -6,6 +6,7 @@ import {
   AgentTimeline,
   ArtifactsPanel,
   AssetLibraryPanel,
+  BackendStatusBar,
   ChatCommandPanel,
   InspectorDock,
   IssuesPanel,
@@ -14,8 +15,10 @@ import {
   RuntimeCapabilitiesPanel,
   SummaryPanel,
   VersionSummary,
+  humanRagLimitation,
   humanRequirementWarning,
   meshQaLevelLabel,
+  summarizeAdaptationCapabilityGroups,
   summarizeTimelineRows,
   summarizeUserIssues
 } from "./StudioKernel";
@@ -138,6 +141,45 @@ const parsedRequirements = {
 afterEach(() => cleanup());
 
 describe("studio kernel components", () => {
+  it("keeps component geometry fidelity visible independently from QA proof", () => {
+    render(
+      <BackendStatusBar
+        bundle={{
+          ...bundle,
+          generation_mode: "real_blender",
+          mesh_qa_passed: true,
+          completion_certificate_status: "issued",
+          geometry_fidelity_summary: {
+            component_count: 7,
+            counts: {
+              schematic: 1,
+              technical_generic: 6,
+              vendor_qualified: 0
+            },
+            roles: {
+              schematic: ["tower"],
+              technical_generic: ["antenna", "radio"],
+              vendor_qualified: []
+            }
+          }
+        }}
+        health={{
+          status: "ok",
+          service: "agentic_telecom_3d_studio_api",
+          version: "1.0.0",
+          api_contract_version: "2026-07-29"
+        }}
+        issues={null}
+        phase="completed"
+      />
+    );
+
+    expect(
+      screen.getByText("Équipements génériques techniques · 6 composants · antennes, radios")
+    ).toHaveAttribute("data-geometry-fidelity", "technical_generic");
+    expect(screen.queryByText(/Modèle fournisseur qualifié/)).not.toBeInTheDocument();
+  });
+
   it("translates spatial QA codes into operator language", () => {
     expect(meshQaLevelLabel("mesh_level_spatial_basic")).toBe("QA spatiale AABB");
     render(
@@ -814,7 +856,8 @@ describe("studio kernel components", () => {
     render(<RagEvidencePanel bundle={bundle} evidence={null} />);
 
     expect(screen.getByText("Aucune preuve RAG chargée; le frontend n’en invente pas.")).toBeInTheDocument();
-    expect(screen.getByText("NVIDIA reranker unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("NVIDIA reranker unavailable")).not.toBeInTheDocument();
+    expect(screen.getByText(/reranker NVIDIA est indisponible/)).toBeInTheDocument();
   });
 
   it("does not present artifact URLs as usable when the workflow failed", () => {
@@ -856,6 +899,61 @@ describe("studio kernel components", () => {
     expect(screen.getByText("include_labels")).toBeInTheDocument();
     expect(screen.getByText("scene_templates.md")).toBeInTheDocument();
     expect(screen.queryByText("Données RAG techniques")).not.toBeInTheDocument();
+  });
+
+  it("translates backend RAG limitations without hiding their meaning", () => {
+    const limitations = [
+      "RAG is evidence and controlled planning context, not a free-form planner.",
+      "RAG does not participate in RequirementSpec extraction in v1.",
+      "Only whitelisted payload.planning_hints are eligible for planner influence."
+    ];
+
+    const translated = limitations.map(humanRagLimitation);
+
+    expect(translated).toHaveLength(3);
+    expect(translated.join(" ")).not.toMatch(/free-form|does not participate|whitelisted/);
+    expect(translated.join(" ")).toMatch(/contexte de planification contrôlé/);
+    expect(translated.join(" ")).toMatch(/RequirementSpec/);
+    expect(translated.join(" ")).toMatch(/explicitement autorisés/);
+  });
+
+  it("groups repeated per-sector adaptation parameters into one readable summary", () => {
+    const capability = (id: string, path: string, label: string) => ({
+      capability_id: id,
+      asset_id: "ANT_PANEL_5G_001",
+      profile_id: "sector_antenna_pose_v1",
+      label,
+      path,
+      value_type: "number",
+      execution_tool: "sector_layout",
+      effect: "rf",
+      description: label,
+      unit: "deg",
+      minimum: 0,
+      maximum: 360,
+      allowed_values: [],
+      requires_regeneration: true
+    });
+    const summaries = summarizeAdaptationCapabilityGroups({
+      scene_id: "scene_1",
+      catalog_version: "1.0.0",
+      catalog_hash: "hash",
+      capabilities: [
+        capability("sector_1:azimuth", "/sectors/0/azimuth_deg", "Azimut"),
+        capability("sector_2:azimuth", "/sectors/1/azimuth_deg", "Azimut"),
+        capability("sector_3:azimuth", "/sectors/2/azimuth_deg", "Azimut"),
+        capability("sector_1:tilt", "/sectors/0/mechanical_tilt_deg", "Tilt mécanique"),
+        capability("sector_2:tilt", "/sectors/1/mechanical_tilt_deg", "Tilt mécanique"),
+        capability("sector_3:tilt", "/sectors/2/mechanical_tilt_deg", "Tilt mécanique")
+      ],
+      unsupported_operations: [],
+      missing_profiles: []
+    });
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toContain("2 paramètres sur 3 secteurs");
+    expect(summaries[0]).toContain("Azimut");
+    expect(summaries[0]).toContain("Tilt mécanique");
   });
 
   it("does not create a link for an unavailable artifact", () => {
@@ -1039,8 +1137,15 @@ describe("studio kernel components", () => {
 
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Résumé" }));
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
     fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
     expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Narration du workflow");
+    fireEvent.click(screen.getByRole("button", { name: "RAG" }));
+    expect(screen.getByLabelText("RAG evidence")).toHaveTextContent(
+      "Aucune preuve RAG chargée"
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

@@ -23,6 +23,7 @@ from core.contracts.parametric import (
     MeshQAReport,
 )
 from core.contracts.scene import SceneSpec
+from core.qa.gltf_integrity import inspect_gltf_integrity
 
 SemanticInspectionMode = Literal[
     "semantic_extras",
@@ -34,6 +35,7 @@ SemanticInspectionMode = Literal[
 _PER_SECTOR_ROLES = {"antenna", "rru", "cable", "beam", "azimuth_arrow"}
 _PRIMARY_EQUIPMENT_ROLES = {"antenna", "rru", "gps", "power_cabinet"}
 _AABB_INTERFERENCE_EPSILON_M = 0.005
+_ALLOWED_CONTACT_MAX_PENETRATION_M = 0.15
 _ROLE_ALIASES = {
     "antenna": "antenna",
     "antenna_panel": "antenna",
@@ -794,6 +796,37 @@ class MeshQA:
     def validate(self, glb_path: Path, scene: SceneSpec) -> MeshQAReport:
         payload = _read_glb_json(glb_path)
         semantic_index = _build_semantic_index(payload or {}, scene)
+        integrity = inspect_gltf_integrity(glb_path)
+        transform_error_codes = {
+            "GLTF_NODES_INVALID",
+            "GLTF_NODE_INVALID",
+            "GLTF_NODE_TRANSFORM_INVALID",
+            "GLTF_NODE_CHILDREN_INVALID",
+            "GLTF_NODE_GRAPH_INVALID",
+        }
+        node_errors = [error for error in integrity.errors if error in transform_error_codes]
+        if node_errors:
+            return MeshQAReport(
+                level="mesh_level_basic",
+                geometry_source="unknown",
+                generation_strategy="unknown",
+                glb_parse_ok=True,
+                checks=[
+                    MeshCheckResult(name="glb_parse_ok", passed=True),
+                    MeshCheckResult(
+                        name="node_transforms_valid",
+                        passed=False,
+                        detail=", ".join(node_errors),
+                    ),
+                ],
+                warnings=[],
+                critical_errors=node_errors,
+                mesh_qa_passed=False,
+                limitations=[
+                    "Mesh-level QA stopped before transform evaluation because the GLB node "
+                    "graph or transforms are malformed."
+                ],
+            )
         bounding_box = _compute_glb_bounding_box(glb_path, payload)
         tower_bbox = _tower_bounding_box(glb_path, payload or {}, semantic_index)
         geometry_source, geometry_source_incomplete = _guess_geometry_source(semantic_index)
@@ -1077,8 +1110,17 @@ def _primary_equipment_spatial_checks(
             overlap = _aabb_overlap_depth(left.bounds, right.bounds)
             if overlap is None:
                 continue
-            if _is_allowed_primary_equipment_contact(left.entity, right.entity):
-                allowed_contacts.append(f"{left.entity.identity}<->{right.entity.identity}")
+            if _is_allowed_primary_equipment_contact(
+                left.entity,
+                right.entity,
+                left.bounds,
+                right.bounds,
+                overlap,
+            ):
+                allowed_contacts.append(
+                    f"{left.entity.identity}<->{right.entity.identity}:"
+                    f"contact_penetration={min(overlap):.3f}m"
+                )
                 continue
             interferences.append(
                 f"{left.entity.identity}<->{right.entity.identity}:"
@@ -1123,11 +1165,34 @@ def _aabb_overlap_depth(
 def _is_allowed_primary_equipment_contact(
     left: _SemanticEntity,
     right: _SemanticEntity,
+    left_bounds: BoundingBoxM,
+    right_bounds: BoundingBoxM,
+    overlap: tuple[float, float, float],
 ) -> bool:
+    contact_axis = min(range(3), key=overlap.__getitem__)
+    left_extents = (
+        left_bounds.max_x - left_bounds.min_x,
+        left_bounds.max_y - left_bounds.min_y,
+        left_bounds.max_z - left_bounds.min_z,
+    )
+    right_extents = (
+        right_bounds.max_x - right_bounds.min_x,
+        right_bounds.max_y - right_bounds.min_y,
+        right_bounds.max_z - right_bounds.min_z,
+    )
+    smaller_contact_extent = min(
+        left_extents[contact_axis],
+        right_extents[contact_axis],
+    )
+    shallow_boundary_contact = (
+        overlap[contact_axis] <= _ALLOWED_CONTACT_MAX_PENETRATION_M
+        and overlap[contact_axis] < smaller_contact_extent - _AABB_INTERFERENCE_EPSILON_M
+    )
     return bool(
         left.sector_id
         and left.sector_id == right.sector_id
         and {left.role, right.role} == {"antenna", "rru"}
+        and shallow_boundary_contact
     )
 
 

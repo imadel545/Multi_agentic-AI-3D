@@ -54,6 +54,7 @@ export type WorkflowMachineAction =
   | { type: "WORKFLOW_RESTORED"; status: WorkflowStatus }
   | { type: "REVISION_STARTED"; runtimeMode: Exclude<RuntimeMode, "idle"> }
   | { type: "EVENT_RECEIVED"; event: NormalizedWorkflowEvent }
+  | { type: "EVENTS_RECEIVED"; events: NormalizedWorkflowEvent[] }
   | { type: "SSE_FAILED"; reason: StreamFailureReason }
   | { type: "SSE_RECOVERED" }
   | { type: "STATUS_LOADED"; status: WorkflowStatus }
@@ -162,16 +163,10 @@ export function workflowReducer(
         runtimeMode: action.runtimeMode,
         error: null
       };
-    case "EVENT_RECEIVED": {
-      const next = { ...state, events: appendUniqueEvent(state.events, action.event) };
-      if (action.event.event_type === "workflow_failed") {
-        return { ...next, phase: "failed", runtimeMode: "idle" };
-      }
-      if (action.event.event_type === "workflow_completed") {
-        return { ...next, phase: "completed", runtimeMode: "idle" };
-      }
-      return isTerminalPhase(state.phase) ? next : { ...next, phase: "running" };
-    }
+    case "EVENT_RECEIVED":
+      return reduceReceivedEvents(state, [action.event]);
+    case "EVENTS_RECEIVED":
+      return reduceReceivedEvents(state, action.events);
     case "SSE_FAILED":
       return {
         ...state,
@@ -248,20 +243,24 @@ export function isDegraded(
   if (source.status === "failed") {
     return false;
   }
-  if (source.generation_mode && source.generation_mode !== "real_blender") {
-    return true;
-  }
-  if (source.mesh_qa_passed === false) {
-    return true;
-  }
-  if (source.requirement_coverage_passed === false) {
-    return true;
-  }
-  if (source.completion_certificate_status === "rejected") {
-    return true;
-  }
-  if ("primary_glb_url" in source && !source.primary_glb_url) {
-    return true;
+  if (source.status === "completed") {
+    if (
+      source.generation_mode !== "real_blender" ||
+      source.mesh_qa_passed !== true ||
+      source.requirement_coverage_passed !== true ||
+      source.completion_certificate_status !== "issued"
+    ) {
+      return true;
+    }
+    if ("primary_glb_url" in source && !source.primary_glb_url) {
+      return true;
+    }
+    if (!("primary_glb_url" in source)) {
+      const artifacts = source.artifacts as Record<string, unknown> | undefined;
+      if (!artifacts?.glb) {
+        return true;
+      }
+    }
   }
   const assetSummary = source.asset_import_summary;
   if (
@@ -275,7 +274,13 @@ export function isDegraded(
 }
 
 function qualityFrom(source: ViewerBundle | WorkflowStatus): DesignQuality {
-  if (source.status === "failed") return "failed";
+  if (
+    source.status === "failed" ||
+    source.status === "legacy_unverified" ||
+    source.status === "integrity_failed"
+  ) {
+    return "failed";
+  }
   if (source.status !== "completed") return "unknown";
   const viewerBundle = isViewerBundle(source) ? source : null;
   const workflowStatus = isViewerBundle(source) ? null : source;
@@ -296,7 +301,13 @@ function artifactsFrom(source: ViewerBundle | WorkflowStatus): ArtifactReadiness
     return source.status === "completed" || source.status === "failed" ? "missing" : "waiting";
   }
   if (source.status === "pending" || source.status === "running") return "waiting";
-  if (source.status === "failed") return "missing";
+  if (
+    source.status === "failed" ||
+    source.status === "legacy_unverified" ||
+    source.status === "integrity_failed"
+  ) {
+    return "missing";
+  }
   return source.artifacts?.glb ? "ready" : "unknown";
 }
 
@@ -316,7 +327,11 @@ function phaseFromStatus(
   viewerBundle: ViewerBundle | null,
   currentPhase: WorkflowPhase
 ): WorkflowPhase {
-  if (status.status === "failed") {
+  if (
+    status.status === "failed" ||
+    status.status === "legacy_unverified" ||
+    status.status === "integrity_failed"
+  ) {
     return "failed";
   }
   if (status.status === "completed") {
@@ -328,14 +343,50 @@ function phaseFromStatus(
   return currentPhase;
 }
 
-function appendUniqueEvent(
+function reduceReceivedEvents(
+  state: WorkflowMachineState,
+  incoming: NormalizedWorkflowEvent[]
+): WorkflowMachineState {
+  if (!incoming.length) {
+    return state;
+  }
+  const events = appendUniqueEvents(state.events, incoming);
+  let phase = state.phase;
+  let runtimeMode = state.runtimeMode;
+  for (const event of incoming) {
+    if (event.event_type === "workflow_failed") {
+      phase = "failed";
+      runtimeMode = "idle";
+    } else if (event.event_type === "workflow_completed") {
+      phase = "completed";
+      runtimeMode = "idle";
+    } else if (!isTerminalPhase(phase)) {
+      phase = "running";
+    }
+  }
+  if (events === state.events && phase === state.phase && runtimeMode === state.runtimeMode) {
+    return state;
+  }
+  return { ...state, events, phase, runtimeMode };
+}
+
+function appendUniqueEvents(
   events: NormalizedWorkflowEvent[],
-  event: NormalizedWorkflowEvent
+  incoming: NormalizedWorkflowEvent[]
 ): NormalizedWorkflowEvent[] {
-  if (events.some((item) => item.event_id === event.event_id)) {
+  const seen = new Set(events.map((event) => event.event_id));
+  const additions: NormalizedWorkflowEvent[] = [];
+  for (const event of incoming) {
+    if (seen.has(event.event_id)) {
+      continue;
+    }
+    seen.add(event.event_id);
+    additions.push(event);
+  }
+  if (!additions.length) {
     return events;
   }
-  return [...events, event].slice(-500);
+  return [...events, ...additions].slice(-500);
 }
 
 function isTerminalPhase(phase: WorkflowPhase): boolean {
@@ -343,7 +394,12 @@ function isTerminalPhase(phase: WorkflowPhase): boolean {
 }
 
 function isTerminalStatus(status: string): boolean {
-  return status === "completed" || status === "failed";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "legacy_unverified" ||
+    status === "integrity_failed"
+  );
 }
 
 function phaseAfterRequestFailure(state: WorkflowMachineState): WorkflowPhase {

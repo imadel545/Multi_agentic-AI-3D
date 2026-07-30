@@ -249,6 +249,7 @@ class RollbackVersionResponse(BaseModel):
 
 class WorkflowEventView(BaseModel):
     event_id: str
+    sequence: int | None = None
     event_type: str
     workflow_id: str
     timestamp: str
@@ -475,6 +476,24 @@ class ViewerArtifact(BaseModel):
     available: bool
 
 
+class GeometryFidelityCounts(BaseModel):
+    schematic: int = Field(default=0, ge=0)
+    technical_generic: int = Field(default=0, ge=0)
+    vendor_qualified: int = Field(default=0, ge=0)
+
+
+class GeometryFidelityRoles(BaseModel):
+    schematic: list[str] = Field(default_factory=list)
+    technical_generic: list[str] = Field(default_factory=list)
+    vendor_qualified: list[str] = Field(default_factory=list)
+
+
+class GeometryFidelitySummary(BaseModel):
+    component_count: int = Field(ge=0)
+    counts: GeometryFidelityCounts
+    roles: GeometryFidelityRoles
+
+
 class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
@@ -486,6 +505,7 @@ class ViewerBundle(BaseModel):
     mesh_qa_passed: bool | None = None
     qa_score: float | None = None
     asset_import_summary: dict | None = None
+    geometry_fidelity_summary: GeometryFidelitySummary | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
     primary_glb_url: str | None = None
@@ -555,6 +575,7 @@ class DesignListSummary(BaseModel):
     created_at: str | None = None
     qa_score: float | None = None
     generation_mode: str | None = None
+    completion_certificate_status: Literal["issued", "rejected"] | None = None
     current_operation: str | None = None
 
 
@@ -568,6 +589,7 @@ class StudioSummary(BaseModel):
     asset_inventory_status: str
     asset_count: int = 0
     real_glb_asset_count: int = 0
+    import_qualified_glb_count: int = 0
     generation_eligible_asset_count: int = 0
     reference_only_asset_count: int = 0
     missing_file_count: int = 0

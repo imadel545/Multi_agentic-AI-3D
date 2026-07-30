@@ -2,13 +2,19 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from core.contracts.assets import DimensionsM
-from core.contracts.common import AssetType, NetworkType, StrictModel
+from core.contracts.assets import (
+    DimensionsM,
+    GeometryFidelity,
+    PanelAntennaGeometryProfile,
+    RadioGeometryProfile,
+)
+from core.contracts.common import AssetType, DetailLevel, NetworkType, StrictModel
 from core.contracts.parametric import GenerationStrategy, GeometrySource
 from core.contracts.tower import TowerCharacteristics
 
 
 class RuntimeAssetMetadata(StrictModel):
+    geometry_fidelity: GeometryFidelity = "schematic"
     license: str | None = None
     attribution_required: bool = False
     attribution: str | None = None
@@ -85,6 +91,8 @@ class SectorSpec(StrictModel):
     beam_radius_m: float = Field(default=8.0, gt=0)
     antenna_dimensions_m: DimensionsM | None = None
     radio_dimensions_m: DimensionsM | None = None
+    antenna_geometry_profile: PanelAntennaGeometryProfile | None = None
+    radio_geometry_profile: RadioGeometryProfile | None = None
     include_cable: bool = True
     include_label: bool = True
 
@@ -158,10 +166,11 @@ class ExportSpec(StrictModel):
 
 
 class SceneSpec(StrictModel):
-    schema_version: str = "1.0.0"
+    schema_version: Literal["1.0.0"] = "1.0.0"
     scene_id: str = Field(min_length=1)
     units: Literal["meters"] = "meters"
     network_type: NetworkType
+    detail_level: DetailLevel = "high"
     tower: SceneAssetPlacement
     sectors: list[SectorSpec] = Field(min_length=1)
     visual_elements: VisualElements = Field(default_factory=VisualElements)
@@ -171,6 +180,12 @@ class SceneSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_scene_geometry(self) -> "SceneSpec":
+        sector_ids = [sector.sector_id for sector in self.sectors]
+        if len(sector_ids) != len(set(sector_ids)):
+            raise ValueError("sector_id values must be unique")
+        accessory_ids = [asset.asset_id for asset in self.accessory_assets]
+        if len(accessory_ids) != len(set(accessory_ids)):
+            raise ValueError("accessory asset_id values must be unique")
         if self.tower.position != [0.0, 0.0, 0.0]:
             raise ValueError("tower.position is not operational and must remain [0, 0, 0]")
         if self.tower.rotation_deg != [0.0, 0.0, 0.0]:

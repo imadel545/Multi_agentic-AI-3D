@@ -205,6 +205,10 @@ def _report(
         report_warnings.append("GLB_SEMANTIC_EXTRAS_MISSING_NAME_BASED_MODE")
     elif semantic_index.mode == "mixed_semantic_name_based":
         report_warnings.append("GLB_SEMANTIC_EXTRAS_PARTIAL_MIXED_MODE")
+    panel_detail_complete, radio_detail_complete = _technical_component_detail_checks(
+        scene,
+        object_names,
+    )
     checks = {
         "has_tower": found["tower"],
         "has_antennas": found["antennas"],
@@ -231,6 +235,8 @@ def _report(
         "buffer_views_present": buffer_view_count > 0,
         "binary_payload_present": binary_chunk_count > 0,
         "semantic_mesh_coverage_complete": semantic_mesh_coverage_complete,
+        "technical_panel_detail_complete": panel_detail_complete,
+        "technical_radio_detail_complete": radio_detail_complete,
     }
     errors = list(critical_errors)
     if not expected_objects_present:
@@ -247,6 +253,10 @@ def _report(
         errors.append("GLB_POSITION_ACCESSORS_EMPTY")
     if inspection_mode == "glb_parse" and not semantic_mesh_coverage_complete:
         errors.append("GLB_SEMANTIC_ENTITY_WITHOUT_MESH")
+    if not panel_detail_complete:
+        errors.append("TECHNICAL_PANEL_DETAIL_MISSING")
+    if not radio_detail_complete:
+        errors.append("TECHNICAL_RADIO_DETAIL_MISSING")
     errors = list(dict.fromkeys(errors))
     structural_qa_passed = not errors
     return GlbInspectionReport(
@@ -277,6 +287,80 @@ def _report(
         critical_errors=errors,
         structural_qa_passed=structural_qa_passed,
     )
+
+
+def _technical_component_detail_checks(
+    scene: SceneSpec,
+    object_names: list[str],
+) -> tuple[bool, bool]:
+    normalized_names = [name.lower() for name in object_names]
+    panel_checks: list[bool] = []
+    radio_checks: list[bool] = []
+    for sector in scene.sectors:
+        if (
+            sector.antenna_geometry_profile is not None
+            and sector.antenna_generation_strategy != "imported_glb_exact"
+        ):
+            prefix = f"antenna_{sector.sector_id.lower()}_"
+            profile = sector.antenna_geometry_profile
+            panel_checks.extend(
+                [
+                    _has_named_parts(normalized_names, prefix, "_radome", 1),
+                    _has_named_parts(normalized_names, prefix, "_rear_chassis", 1),
+                    _has_named_parts(
+                        normalized_names,
+                        prefix,
+                        "_mount_rail_",
+                        profile.rear_mount_rail_count,
+                    ),
+                    _has_named_parts(
+                        normalized_names,
+                        prefix,
+                        "_bottom_port_",
+                        profile.bottom_port_count,
+                    ),
+                ]
+            )
+        if (
+            sector.radio_asset_id
+            and sector.radio_geometry_profile is not None
+            and sector.radio_generation_strategy != "imported_glb_exact"
+        ):
+            prefix = f"radio_{sector.sector_id.lower()}_"
+            profile = sector.radio_geometry_profile
+            radio_checks.extend(
+                [
+                    _has_named_parts(normalized_names, prefix, "_enclosure", 1),
+                    _has_named_parts(
+                        normalized_names,
+                        prefix,
+                        "_heat_sink_",
+                        profile.heat_sink_fin_count,
+                    ),
+                    _has_named_parts(
+                        normalized_names,
+                        prefix,
+                        "_mount_rail_",
+                        profile.mounting_rail_count,
+                    ),
+                    _has_named_parts(
+                        normalized_names,
+                        prefix,
+                        "_bottom_connector_",
+                        profile.bottom_connector_count,
+                    ),
+                ]
+            )
+    return all(panel_checks), all(radio_checks)
+
+
+def _has_named_parts(
+    object_names: list[str],
+    prefix: str,
+    marker: str,
+    minimum: int,
+) -> bool:
+    return sum(1 for name in object_names if prefix in name and marker in name) >= minimum
 
 
 def _expected_semantic_categories(scene: SceneSpec) -> list[tuple[str, str, int]]:

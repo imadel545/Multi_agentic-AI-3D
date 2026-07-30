@@ -505,6 +505,26 @@ describe("TelecomStudioApi", () => {
     );
   });
 
+  it("requests bounded workflow-event deltas only when a sequence cursor is provided", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse([]));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    await client.workflowEvents("wf_1");
+    await client.workflowEvents("wf_1", 42);
+
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      new URL("/designs/wf_1/events", "http://127.0.0.1:8000")
+    );
+    expect(fetcher).toHaveBeenNthCalledWith(
+      2,
+      new URL("/designs/wf_1/events?after_sequence=42", "http://127.0.0.1:8000")
+    );
+  });
+
   it("adds an encoded after_event_id cursor to the existing SSE route", () => {
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetch);
 

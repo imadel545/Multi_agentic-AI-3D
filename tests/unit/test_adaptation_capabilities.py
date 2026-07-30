@@ -14,6 +14,7 @@ from core.contracts.scene import (
 from core.orchestration.langgraph_orchestrator import _scene_with_revision_dependencies
 from core.services.adaptation_capabilities import AdaptationCapabilityService
 from core.services.asset_registry import AssetRegistry
+from core.services.checkpoint_saver import SqliteCheckpointSaver
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -154,6 +155,38 @@ def test_langgraph_adaptation_uses_strict_groq_schema_and_executes_scene_spec() 
     ]["properties"]
     assert "value_json" in operation_properties
     assert "value" not in operation_properties
+
+
+def test_terminal_adaptation_removes_its_checkpoint_thread(tmp_path: Path, monkeypatch) -> None:
+    _, service = _services()
+    saver = SqliteCheckpointSaver(tmp_path / "checkpoints.db")
+    deleted_threads: list[str] = []
+    original_delete = saver.delete_thread
+
+    def record_delete(thread_id: str) -> None:
+        deleted_threads.append(thread_id)
+        original_delete(thread_id)
+
+    monkeypatch.setattr(saver, "delete_thread", record_delete)
+    agent = SceneEditAgent(
+        groq_client=None,
+        capability_service=service,
+        checkpoint_saver=saver,
+    )
+
+    decision = agent.create_adaptation(
+        "wf_checkpoint_cleanup",
+        _scene(),
+        "mets la tour à 40 m",
+    )
+
+    assert decision.patched_scene.tower.height_m == 40
+    assert len(deleted_threads) == 1
+    assert deleted_threads[0].startswith("wf_checkpoint_cleanup:adaptation:")
+    assert (
+        list(saver.list({"configurable": {"thread_id": deleted_threads[0], "checkpoint_ns": ""}}))
+        == []
+    )
 
 
 def test_invalid_llm_plan_falls_back_before_scene_mutation() -> None:

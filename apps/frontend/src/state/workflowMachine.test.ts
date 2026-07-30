@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { actionIsSupported, initialWorkflowState, workflowReducer } from "./workflowMachine";
 import type { ViewerBundle, WorkflowStatus } from "../api/schemas";
+import type { NormalizedWorkflowEvent } from "../api/sse";
 
 const runningStatus: WorkflowStatus = {
   workflow_id: "wf_1",
@@ -12,6 +13,16 @@ const runningStatus: WorkflowStatus = {
   unsupported_actions: []
 };
 
+const completedStatus: WorkflowStatus = {
+  ...runningStatus,
+  status: "completed",
+  generation_mode: "real_blender",
+  mesh_qa_passed: true,
+  requirement_coverage_passed: true,
+  completion_certificate_status: "issued",
+  artifacts: { glb: "/designs/wf_1/artifacts/glb" }
+};
+
 const baseBundle: ViewerBundle = {
   workflow_id: "wf_1",
   status: "completed",
@@ -20,6 +31,8 @@ const baseBundle: ViewerBundle = {
   geometry_source: "scene_spec",
   mesh_qa_level: "mesh_level_transform_basic",
   mesh_qa_passed: true,
+  requirement_coverage_passed: true,
+  completion_certificate_status: "issued",
   qa_score: 0.9,
   asset_import_summary: null,
   human_warnings_count: 0,
@@ -53,6 +66,35 @@ const baseBundle: ViewerBundle = {
   available_actions: []
 };
 
+function normalizedEvent(
+  eventId: string,
+  eventType = "node_completed"
+): NormalizedWorkflowEvent {
+  return {
+    event_id: eventId,
+    sequence: Number(eventId.replace(/\D/g, "")) || null,
+    event_type: eventType,
+    workflow_id: "wf_1",
+    timestamp: "2026-07-29T10:00:00Z",
+    phase: null,
+    status: eventType === "workflow_completed" ? "completed" : null,
+    node: null,
+    human_label: eventType,
+    progress_message: eventType,
+    warnings: [],
+    errors: [],
+    artifact_refs: [],
+    raw: {
+      event_id: eventId,
+      sequence: Number(eventId.replace(/\D/g, "")) || null,
+      event_type: eventType,
+      workflow_id: "wf_1",
+      timestamp: "2026-07-29T10:00:00Z",
+      payload: { artifact_refs: [], errors: [], warnings: [] }
+    }
+  };
+}
+
 describe("workflow reducer", () => {
   it("starts without a demo prompt baked into state", () => {
     expect(initialWorkflowState.prompt).toBe("");
@@ -65,7 +107,7 @@ describe("workflow reducer", () => {
         phase: "completed",
         workflowId: "wf_old",
         viewerBundle: baseBundle,
-        status: { ...runningStatus, status: "completed" },
+        status: completedStatus,
         userIssues: {
           workflow_id: "wf_old",
           status: "completed",
@@ -131,13 +173,42 @@ describe("workflow reducer", () => {
     expect(state.phase).toBe("completed");
   });
 
+  it("inserts a polled event delta once and applies terminal state in one batch", () => {
+    const first = normalizedEvent("evt_1");
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "running",
+        runtimeMode: "polling",
+        events: [first]
+      },
+      {
+        type: "EVENTS_RECEIVED",
+        events: [
+          first,
+          normalizedEvent("evt_2"),
+          normalizedEvent("evt_2"),
+          normalizedEvent("evt_3", "workflow_completed")
+        ]
+      }
+    );
+
+    expect(state.events.map((event) => event.event_id)).toEqual([
+      "evt_1",
+      "evt_2",
+      "evt_3"
+    ]);
+    expect(state.phase).toBe("completed");
+    expect(state.runtimeMode).toBe("idle");
+  });
+
   it("keeps the active design until a new workflow is accepted", () => {
     const active = {
       ...initialWorkflowState,
       phase: "completed" as const,
       workflowId: "wf_active",
       viewerBundle: baseBundle,
-      status: { ...runningStatus, status: "completed" }
+      status: completedStatus
     };
 
     const submitting = workflowReducer(active, { type: "SUBMIT_STARTED" });
@@ -171,7 +242,7 @@ describe("workflow reducer", () => {
   it("restores a completed workflow without reopening a live transport", () => {
     const state = workflowReducer(initialWorkflowState, {
       type: "WORKFLOW_RESTORED",
-      status: { ...runningStatus, workflow_id: "wf_completed", status: "completed" }
+      status: { ...completedStatus, workflow_id: "wf_completed" }
     });
 
     expect(state.phase).toBe("completed");
@@ -183,7 +254,7 @@ describe("workflow reducer", () => {
       {
         ...initialWorkflowState,
         phase: "completed",
-        status: { ...runningStatus, status: "completed" }
+        status: completedStatus
       },
       {
         type: "VIEWER_BUNDLE_LOADED",
@@ -212,12 +283,28 @@ describe("workflow reducer", () => {
     );
   });
 
+  it("returns to SSE state when the transport recovers", () => {
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "running",
+        runtimeMode: "polling",
+        transportError: "Mode de secours"
+      },
+      { type: "SSE_RECOVERED" }
+    );
+
+    expect(state.runtimeMode).toBe("sse");
+    expect(state.phase).toBe("running");
+    expect(state.transportError).toBeNull();
+  });
+
   it("keeps secondary resource failures separate from workflow truth", () => {
     const state = workflowReducer(
       {
         ...initialWorkflowState,
         phase: "completed",
-        status: { ...runningStatus, status: "completed" },
+        status: completedStatus,
         workflowId: "wf_1"
       },
       { type: "RESOURCE_FAILED", resource: "rag_evidence", message: "404" }
@@ -233,7 +320,7 @@ describe("workflow reducer", () => {
       {
         ...initialWorkflowState,
         phase: "completed",
-        status: { ...runningStatus, status: "completed" },
+        status: completedStatus,
         workflowId: "wf_1"
       },
       { type: "REQUEST_FAILED", message: "revision refused" }

@@ -22,6 +22,7 @@ from apps.api.telecom_studio_api.runtime_contract import (
     unsupported_actions,
 )
 from apps.api.telecom_studio_api.workflow import WorkflowService
+from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.services.asset_inventory import AssetInventoryService
 
 
@@ -50,8 +51,8 @@ class ProductService:
             status = design.get("status", "unknown")
             if status in counts:
                 counts[status] += 1
-            elif status == "running":
-                counts["running"] += 1
+            elif status in {"legacy_unverified", "integrity_failed"}:
+                counts["failed"] += 1
             summaries.append(
                 {
                     "workflow_id": design.get("workflow_id"),
@@ -59,6 +60,7 @@ class ProductService:
                     "created_at": design.get("created_at"),
                     "qa_score": design.get("qa_score"),
                     "generation_mode": design.get("generation_mode"),
+                    "completion_certificate_status": design.get("completion_certificate_status"),
                     "current_operation": _operation_for_status(status),
                 }
             )
@@ -73,6 +75,7 @@ class ProductService:
             "asset_inventory_status": inventory_status,
             "asset_count": int(inventory.get("asset_count") or 0),
             "real_glb_asset_count": int(inventory.get("real_glb_asset_count") or 0),
+            "import_qualified_glb_count": int(inventory.get("import_qualified_glb_count") or 0),
             "generation_eligible_asset_count": int(
                 inventory.get("generation_eligible_asset_count") or 0
             ),
@@ -142,13 +145,20 @@ class ProductService:
         )
         backend_status = status.get("status", "unknown")
         current_operation = _current_operation(status, events)
-        if backend_status in {"completed", "failed"} and not isinstance(active_operation, dict):
+        terminal_statuses = {
+            "completed",
+            "failed",
+            "legacy_unverified",
+            "integrity_failed",
+        }
+        if backend_status in terminal_statuses and not isinstance(active_operation, dict):
+            event_status = "completed" if backend_status == "completed" else "failed"
             runtime = {
                 "node": "workflow",
                 "phase": "workflow",
                 "source": "status",
-                "operation": _event_to_human(f"workflow_{backend_status}", {}),
-                "node_status": backend_status,
+                "operation": _event_to_human(f"workflow_{event_status}", {}),
+                "node_status": event_status,
                 "timestamp": runtime.get("timestamp"),
             }
         current_node = runtime.get("node")
@@ -177,7 +187,7 @@ class ProductService:
             "event_source": "push_sse" if events else "status",
             "state_source": runtime.get("source", "status"),
             "is_running": backend_status in {"pending", "running"},
-            "is_terminal": backend_status in {"completed", "failed"},
+            "is_terminal": backend_status in terminal_statuses,
             "last_event_at": runtime.get("timestamp"),
             "generation_mode": status.get("generation_mode"),
             "generation_strategy": status.get("generation_strategy"),
@@ -273,6 +283,11 @@ class ProductService:
         requirement_coverage = _artifact_by_name(viewer_artifacts, "requirement_coverage.json")
         completion_certificate = _artifact_by_name(viewer_artifacts, "completion_certificate.json")
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
+        scene_spec_path = self._artifact_path_or_none(
+            workflow_id,
+            "scene_spec",
+            active_version,
+        )
 
         return {
             "workflow_id": workflow_id,
@@ -285,6 +300,7 @@ class ProductService:
             "mesh_qa_passed": status.get("mesh_qa_passed"),
             "qa_score": status.get("qa_score"),
             "asset_import_summary": status.get("asset_import_summary"),
+            "geometry_fidelity_summary": _geometry_fidelity_summary_from_path(scene_spec_path),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
             "primary_glb_url": _available_artifact_url(primary_glb),
@@ -494,8 +510,9 @@ def _resolve_blender_binary(binary: str) -> Path | None:
         candidates.extend(
             [
                 shutil.which("blender"),
-                "/Applications/Blender.app/Contents/MacOS/Blender",
+                "/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender",
                 "/Applications/Blender 4.5.app/Contents/MacOS/Blender",
+                "/Applications/Blender.app/Contents/MacOS/Blender",
                 "/Applications/Blender 4.4.app/Contents/MacOS/Blender",
                 "/Applications/Blender 4.3.app/Contents/MacOS/Blender",
             ]
@@ -518,6 +535,8 @@ def _operation_for_status(status: str) -> str:
         "running": "Génération en cours",
         "completed": "Design terminé",
         "failed": "Échec de la génération",
+        "legacy_unverified": "Résultat historique non certifié",
+        "integrity_failed": "Intégrité du résultat en échec",
     }
     return mapping.get(status, status)
 
@@ -533,7 +552,7 @@ def _current_operation(status: dict, events: list[dict] | None = None) -> str:
         return runtime["operation"]
     if backend_status == "pending":
         return "Le design est en file d'attente et va démarrer."
-    if backend_status == "failed":
+    if backend_status in {"failed", "legacy_unverified", "integrity_failed"}:
         return "Le design a échoué. Consultez les problèmes pour corriger la situation."
     if backend_status == "completed":
         return "Le design est terminé. Vous pouvez l'inspecter en 3D."
@@ -637,7 +656,7 @@ def _progress_indicator(status: dict) -> str | None:
         return "queued"
     if backend_status == "completed":
         return "done"
-    if backend_status == "failed":
+    if backend_status in {"failed", "legacy_unverified", "integrity_failed"}:
         return "failed"
     return "running"
 
@@ -649,6 +668,8 @@ def _progress_label(status: dict) -> str:
         "running": "En cours",
         "completed": "Terminé",
         "failed": "Échec",
+        "legacy_unverified": "Non certifié",
+        "integrity_failed": "Intégrité en échec",
     }.get(backend_status, str(backend_status))
 
 
@@ -658,12 +679,58 @@ def _available_actions(status: dict, issues: list[dict]) -> list[str]:
         return ["view_timeline"]
     if backend_status == "failed":
         return ["view_issues", "view_timeline", "retry_with_changes"]
+    if backend_status in {"legacy_unverified", "integrity_failed"}:
+        return ["view_issues", "view_timeline", "regenerate_for_certification"]
     actions = ["open_viewer", "download_artifacts", "view_timeline", "edit_design"]
     if status.get("active_version_id"):
-        actions.append("view_versions")
+        actions.extend(["view_versions", "rollback_version"])
     if issues:
         actions.append("review_issues")
     return actions
+
+
+_GEOMETRY_FIDELITIES = ("schematic", "technical_generic", "vendor_qualified")
+
+
+def _geometry_fidelity_summary_from_path(path: Path | None) -> dict | None:
+    if path is None or not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return _geometry_fidelity_summary(payload)
+
+
+def _geometry_fidelity_summary(scene_spec: object) -> dict | None:
+    """Return bounded component fidelity facts without exposing the raw SceneSpec."""
+    try:
+        scene = SceneSpec.model_validate(scene_spec)
+    except (TypeError, ValueError):
+        return None
+
+    components: list[tuple[str, RuntimeAssetMetadata]] = [("tower", scene.tower.asset_metadata)]
+    for sector in scene.sectors:
+        components.append(("antenna", sector.antenna_asset_metadata))
+        if sector.radio_asset_id:
+            components.append(("radio", sector.radio_asset_metadata))
+    components.extend(
+        (accessory.asset_type, accessory.asset_metadata) for accessory in scene.accessory_assets
+    )
+
+    counts = {fidelity: 0 for fidelity in _GEOMETRY_FIDELITIES}
+    roles: dict[str, list[str]] = {fidelity: [] for fidelity in _GEOMETRY_FIDELITIES}
+    for role, metadata in components:
+        fidelity = metadata.geometry_fidelity
+        counts[fidelity] += 1
+        if role not in roles[fidelity]:
+            roles[fidelity].append(role)
+
+    return {
+        "component_count": len(components),
+        "counts": counts,
+        "roles": roles,
+    }
 
 
 def _artifact_by_name(artifacts: list[dict], name: str) -> dict | None:
@@ -792,6 +859,11 @@ def _asset_quality_summary(status: dict) -> str | None:
 
 def _collect_limitations(status: dict) -> list[str]:
     limitations = []
+    if status.get("completion_certificate_status") != "issued":
+        limitations.append(
+            "La preuve de complétion n'est pas vérifiable : ce résultat n'est pas certifié "
+            "et ses artefacts ne sont pas publiés."
+        )
     if status.get("blender_available") is False:
         limitations.append(
             "Blender n'est pas installé : le modèle 3D est un fallback, pas un vrai GLB."
@@ -846,6 +918,11 @@ def _next_recommended_action(status: dict, issues: list[dict]) -> str:
         return "Patientez pendant que le design démarre."
     if backend_status == "failed":
         return "Relisez le prompt ou le document pack, corrigez les problèmes, puis relancez."
+    if backend_status in {"legacy_unverified", "integrity_failed"}:
+        return (
+            "Les fichiers ont été mis en quarantaine. Relancez une génération pour produire "
+            "un résultat certifié et vérifiable."
+        )
     if backend_status == "completed":
         if issues:
             return "Le design est prêt, mais vérifiez les avertissements avant de valider."
@@ -1038,13 +1115,25 @@ def _runtime_node_recommended_action(node: str) -> str:
 _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
     "ASSET_IMPORT_INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR": {
         "title": "Asset interne minimal",
-        "impact": "Le design est valide techniquement mais l'asset n'est pas vendor-grade.",
-        "recommended_action": "Remplacer plus tard par un asset constructeur réaliste.",
+        "impact": (
+            "La chaîne de génération est vérifiée, mais cet équipement reste une géométrie "
+            "interne générique sans fidélité constructeur."
+        ),
+        "recommended_action": (
+            "Vérifier le niveau de fidélité déclaré et utiliser un asset constructeur qualifié "
+            "si une représentation exacte est requise."
+        ),
     },
     "ASSET_IMPORT_INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE": {
         "title": "Asset interne minimal",
-        "impact": "Le design est valide techniquement mais l'asset n'est pas vendor-grade.",
-        "recommended_action": "Remplacer plus tard par un asset constructeur réaliste.",
+        "impact": (
+            "La chaîne de génération est vérifiée, mais cet équipement reste une géométrie "
+            "interne générique sans fidélité constructeur."
+        ),
+        "recommended_action": (
+            "Vérifier le niveau de fidélité déclaré et utiliser un asset constructeur qualifié "
+            "si une représentation exacte est requise."
+        ),
     },
     "ASSET_IMPORT_INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE": {
         "title": "Asset interne nettoyé",
@@ -1213,6 +1302,7 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
         event_status = _event_status(
             event_type,
             status.get("status", "unknown"),
+            data=data,
             index=index,
             total=len(events),
         )
@@ -1317,8 +1407,15 @@ def _events_to_timeline(events: list[dict], status: dict) -> list[dict]:
     return steps
 
 
-def _event_status(event_type: str, workflow_status: str, *, index: int, total: int) -> str:
-    if event_type == "node_failed":
+def _event_status(
+    event_type: str,
+    workflow_status: str,
+    *,
+    data: dict,
+    index: int,
+    total: int,
+) -> str:
+    if event_type in {"node_failed", "edit_patch_rejected", "blender_failed", "qa_failed"}:
         return "failed"
     if event_type == "node_skipped":
         return "skipped"
@@ -1329,6 +1426,15 @@ def _event_status(event_type: str, workflow_status: str, *, index: int, total: i
     terminal = {"workflow_completed": "completed", "workflow_failed": "failed"}
     if event_type in terminal:
         return terminal[event_type]
+    payload_status = data.get("status")
+    if payload_status in {"failed", "rejected", "error"}:
+        return "failed"
+    if payload_status == "skipped":
+        return "skipped"
+    if payload_status in {"running", "pending"}:
+        return "running"
+    if payload_status in {"completed", "applied", "ready"}:
+        return "completed"
     if workflow_status == "running" and index == total - 1:
         return "running"
     if workflow_status in {"completed", "failed"}:

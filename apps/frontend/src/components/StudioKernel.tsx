@@ -38,6 +38,7 @@ import type {
   ViewerBundle
 } from "../api/schemas";
 import type { NormalizedWorkflowEvent } from "../api/sse";
+import { geometryFidelityBadge } from "../features/three-viewer/viewerRules";
 import type { RuntimeMode, WorkflowPhase } from "../state/workflowMachine";
 import { actionIsSupported } from "../state/workflowMachine";
 import { DocumentFileComposer } from "./DocumentFileComposer";
@@ -54,6 +55,7 @@ export function BackendStatusBar({
   issues: UserIssues | null;
 }) {
   const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
+  const fidelityBadge = geometryFidelityBadge(bundle);
   return (
     <header className="topbar">
       <div className="brand-lockup">
@@ -71,6 +73,18 @@ export function BackendStatusBar({
         {bundle?.generation_mode === "real_blender" ? (
           <span className="topbar-proof"><Boxes size={14} aria-hidden="true" /> Blender réel</span>
         ) : null}
+        {fidelityBadge ? (
+          <span
+            className={
+              fidelityBadge.fidelity === "vendor_qualified"
+                ? "topbar-proof ok"
+                : "topbar-proof warn"
+            }
+            data-geometry-fidelity={fidelityBadge.fidelity}
+          >
+            <Boxes size={14} aria-hidden="true" /> {fidelityBadge.label}
+          </span>
+        ) : null}
         {bundle ? (
           <span className={bundle.mesh_qa_passed ? "topbar-proof ok" : "topbar-proof warn"}>
             <CheckCircle2 size={14} aria-hidden="true" /> {bundle.mesh_qa_passed ? "QA validée" : "QA à vérifier"}
@@ -78,6 +92,10 @@ export function BackendStatusBar({
         ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
         {bundle?.completion_certificate_status === "issued" ? (
           <span className="topbar-proof"><ShieldAlert size={14} aria-hidden="true" /> Intégrité vérifiée</span>
+        ) : bundle?.completion_certificate_status === "rejected" ? (
+          <span className="topbar-proof warn">
+            <ShieldAlert size={14} aria-hidden="true" /> Intégrité non vérifiée
+          </span>
         ) : null}
         {issueCount ? (
           <span className="topbar-issue-count">
@@ -103,7 +121,7 @@ export function ChatCommandPanel({
   revisionPrompt,
   revisionBusy,
   editMessage,
-  documentCapabilities,
+  documentCapabilities = null,
   documentPackReview,
   documentPackSummary,
   documentPackMessage,
@@ -172,11 +190,19 @@ export function ChatCommandPanel({
       <div className="assistant-card conversation-message">
         <RadioTower size={18} aria-hidden="true" />
         <div>
-          <strong>{phase === "completed" ? "Le résultat est prêt à inspecter" : "Décrivez le résultat attendu"}</strong>
+          <strong>
+            {phase === "completed"
+              ? "Le résultat est prêt à inspecter"
+              : phase === "failed"
+                ? "Le résultat nécessite une correction"
+                : "Décrivez le résultat attendu"}
+          </strong>
           <p>
             {phase === "completed"
               ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
-              : "Les contraintes sont extraites puis confirmées avant toute génération Blender."}
+              : phase === "failed"
+                ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération certifiée."
+                : "Les contraintes sont extraites puis confirmées avant toute génération Blender."}
           </p>
         </div>
       </div>
@@ -629,6 +655,12 @@ export function CurrentOperationStrip({
 }) {
   const running = phase === "running" || phase === "streaming" || phase === "submitting";
   const pollingFallback = runtimeMode === "polling" && running;
+  const transportLabel =
+    runtimeMode === "sse" && running
+      ? "Temps réel"
+      : pollingFallback
+        ? "Mode de secours"
+        : "Suivi inactif";
   return (
     <section className="operation-strip" aria-label="Opération courante">
       <Clock3 size={18} aria-hidden="true" />
@@ -637,7 +669,11 @@ export function CurrentOperationStrip({
         <span>{operation?.progress_message ?? "Les étapes de conception apparaissent ici pendant la génération."}</span>
         {notice ? <small className="operation-notice" aria-live="polite">{notice}</small> : null}
       </div>
-      <StatusPill label={pollingFallback ? "Mode de secours" : "Temps réel"} value={phaseLabel(phase)} tone={pollingFallback ? "warn" : "muted"} />
+      <StatusPill
+        label={transportLabel}
+        value={phaseLabel(phase)}
+        tone={pollingFallback || Boolean(notice) ? "warn" : "muted"}
+      />
     </section>
   );
 }
@@ -716,6 +752,8 @@ type DrawerId = "summary" | "agents" | "qa" | "issues" | "artifacts" | "library"
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
 export function InspectorDock({
+  adaptationCapabilities = null,
+  adaptationCatalog = null,
   assetInventory = null,
   assetLibrarySearch = null,
   assetLibrarySearchBusy = false,
@@ -723,8 +761,12 @@ export function InspectorDock({
   assetLibrarySummary = null,
   bundle,
   canRollback,
+  documentCapabilities,
   events,
   issues,
+  ragEvidence = null,
+  ragEvidenceError = null,
+  ragEvidenceLoading = false,
   summary,
   timeline,
   toAbsoluteUrl,
@@ -734,6 +776,8 @@ export function InspectorDock({
   versionMessage,
   versions
 }: {
+  adaptationCapabilities?: SceneAdaptationCapabilities | null;
+  adaptationCatalog?: AdaptationCapabilityCatalog | null;
   assetInventory?: AssetInventory | null;
   assetLibrarySearch?: AssetLibrarySearch | null;
   assetLibrarySearchBusy?: boolean;
@@ -741,8 +785,12 @@ export function InspectorDock({
   assetLibrarySummary?: AssetLibrarySummary | null;
   bundle: ViewerBundle | null;
   canRollback: boolean;
+  documentCapabilities?: DocumentPackCapabilities | null;
   events: NormalizedWorkflowEvent[];
   issues: UserIssues | null;
+  ragEvidence?: unknown | null;
+  ragEvidenceError?: string | null;
+  ragEvidenceLoading?: boolean;
   summary: StudioSummary | null;
   timeline: TimelineSummary | null;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
@@ -754,6 +802,7 @@ export function InspectorDock({
 }) {
   const [activeDrawer, setActiveDrawer] = useState<DrawerId | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
   const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
   const drawers: DrawerDefinition[] = [];
@@ -763,6 +812,8 @@ export function InspectorDock({
   if (issueCount) drawers.push({ id: "issues", label: "Alertes", badge: String(issueCount), icon: <AlertTriangle size={16} /> });
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
   if (assetLibrarySummary?.catalog_available) drawers.push({ id: "library", label: "Bibliothèque", icon: <Boxes size={16} /> });
+  if (bundle) drawers.push({ id: "rag", label: "RAG", icon: <Cpu size={16} /> });
+  if (summary) drawers.push({ id: "runtime", label: "Runtime", icon: <Boxes size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -773,6 +824,28 @@ export function InspectorDock({
       if (event.key === "Escape") {
         setActiveDrawer(null);
         lastTriggerRef.current?.focus();
+        return;
+      }
+      if (event.key !== "Tab" || !drawerRef.current) {
+        return;
+      }
+      const focusable = Array.from(
+        drawerRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener("keydown", closeOnEscape);
@@ -809,7 +882,14 @@ export function InspectorDock({
         ))}
       </div>
       {activeDrawer ? (
-        <div className="context-drawer" id="studio-context-drawer" role="region" aria-label={`Détails ${activeDrawer}`}>
+        <div
+          aria-label={`Détails ${activeDrawer}`}
+          aria-modal="true"
+          className="context-drawer"
+          id="studio-context-drawer"
+          ref={drawerRef}
+          role="dialog"
+        >
           <button aria-label="Fermer les détails" className="drawer-close" onClick={closeDrawer} ref={closeButtonRef} title="Fermer" type="button">
             <X size={16} aria-hidden="true" />
           </button>
@@ -826,6 +906,24 @@ export function InspectorDock({
               onSearch={onSearchAssetLibrary}
               search={assetLibrarySearch}
               summary={assetLibrarySummary}
+            />
+          ) : null}
+          {activeDrawer === "rag" ? (
+            <RagEvidencePanel
+              bundle={bundle}
+              error={ragEvidenceError}
+              evidence={ragEvidence}
+              loading={ragEvidenceLoading}
+            />
+          ) : null}
+          {activeDrawer === "runtime" ? (
+            <RuntimeCapabilitiesPanel
+              adaptationCapabilities={adaptationCapabilities}
+              adaptationCatalog={adaptationCatalog}
+              bundle={bundle}
+              documentCapabilities={documentCapabilities ?? null}
+              inventory={assetInventory}
+              summary={summary}
             />
           ) : null}
           {activeDrawer === "versions" ? (
@@ -1165,7 +1263,17 @@ function assetQualificationMessage(modes: string[], source: string | null | unde
   return `Dimensions pilotées par SceneSpec et générateur borné. ${origin}`;
 }
 
-export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | null; evidence: unknown | null }) {
+export function RagEvidencePanel({
+  bundle,
+  error = null,
+  evidence,
+  loading = false
+}: {
+  bundle: ViewerBundle | null;
+  error?: string | null;
+  evidence: unknown | null;
+  loading?: boolean;
+}) {
   const summary = summarizeRagEvidence(evidence);
   return (
     <section className="drawer-section" aria-label="RAG evidence">
@@ -1179,10 +1287,17 @@ export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | 
       </div>
       {bundle?.rag_reranker_degraded_reason ? (
         <p className="inline-alert">
-          <WifiOff size={16} aria-hidden="true" /> {bundle.rag_reranker_degraded_reason}
+          <WifiOff size={16} aria-hidden="true" />{" "}
+          {humanRagLimitation(bundle.rag_reranker_degraded_reason)}
         </p>
       ) : null}
-      {evidence ? (
+      {loading ? (
+        <p className="muted" aria-live="polite">Chargement des preuves RAG vérifiées…</p>
+      ) : error ? (
+        <p className="inline-alert" role="alert">
+          <AlertTriangle size={16} aria-hidden="true" /> {error}
+        </p>
+      ) : evidence ? (
         <>
           <List
             title="Hints appliqués au plan"
@@ -1207,7 +1322,11 @@ export function RagEvidencePanel({ bundle, evidence }: { bundle: ViewerBundle | 
               <p className="muted">Aucune source RAG exploitable affichable.</p>
             )}
           </div>
-          <List title="Limites RAG" items={summary.limitations} empty="Aucune limite RAG remontée." />
+          <List
+            title="Limites RAG"
+            items={summary.limitations.map(humanRagLimitation)}
+            empty="Aucune limite RAG remontée."
+          />
         </>
       ) : (
         <p className="muted">Aucune preuve RAG chargée; le frontend n’en invente pas.</p>
@@ -1232,7 +1351,10 @@ export function RuntimeCapabilitiesPanel({
   documentCapabilities: DocumentPackCapabilities | null;
 }) {
   const unsupported = bundle?.unsupported_actions ?? summary?.unsupported_actions ?? [];
-  const showDownload = actionIsSupported("download_artifacts", unsupported);
+  const runtime = bundle?.runtime_capabilities ?? summary?.runtime_capabilities;
+  const showDownload =
+    runtime?.can_download_artifacts === true &&
+    actionIsSupported("download_artifacts", unsupported);
   return (
     <section className="drawer-section" aria-label="Capacités runtime">
       <PanelTitle icon={<Boxes size={17} />} title="Capacités réelles" />
@@ -1248,14 +1370,11 @@ export function RuntimeCapabilitiesPanel({
         />
         <Metric label="Documents" value={documentCapabilities?.document_pack_status ?? "unknown"} />
         <Metric label="Download" value={showDownload ? "supporté" : "non supporté"} />
-        <Metric label="WebSocket" value={truth(!unsupported.some((item) => item.action === "websocket_runtime"))} />
+        <Metric label="WebSocket" value={truth(runtime?.websocket_runtime === true)} />
       </div>
       <List
         title="Modifications vérifiées du design actif"
-        items={(adaptationCapabilities?.capabilities ?? []).map(
-          (capability) =>
-            `${capability.label} · ${humanAdaptationTool(capability.execution_tool)}`
-        )}
+        items={summarizeAdaptationCapabilityGroups(adaptationCapabilities)}
         empty="Aucun design actif: les paramètres seront résolus après génération."
       />
       <List
@@ -1306,7 +1425,7 @@ export function VersionSummary({
                 {version.edit_description ? <small>{version.edit_description}</small> : null}
               </span>
               <small>{version.active ? "active" : version.status ?? version.generation_mode ?? "version"}</small>
-              {!version.active && canRollback && version.status !== "failed" ? (
+              {!version.active && canRollback && version.status === "completed" ? (
                 pendingVersionId === version.version_id ? (
                   <button
                     className="secondary-action"
@@ -1756,6 +1875,54 @@ function humanAdaptationTool(tool: string): string {
   }[tool] ?? "outil backend déclaré";
 }
 
+export function summarizeAdaptationCapabilityGroups(
+  capabilities: SceneAdaptationCapabilities | null
+): string[] {
+  const groups = new Map<
+    string,
+    { label: string; labels: Set<string>; sectors: Set<number>; tools: Set<string> }
+  >();
+  for (const capability of capabilities?.capabilities ?? []) {
+    const sectorMatch = capability.path.match(/^\/sectors\/(\d+)\//);
+    const key = sectorMatch
+      ? "sectors"
+      : capability.path.startsWith("/tower/")
+        ? "tower"
+        : capability.path.startsWith("/visual_elements/")
+          ? "scene"
+          : "other";
+    const group =
+      groups.get(key) ??
+      {
+        label:
+          key === "sectors"
+            ? "Secteurs radio"
+            : key === "tower"
+              ? "Pylône"
+              : key === "scene"
+                ? "Affichage de la scène"
+                : "Autres composants",
+        labels: new Set<string>(),
+        sectors: new Set<number>(),
+        tools: new Set<string>()
+      };
+    group.labels.add(capability.label);
+    group.tools.add(humanAdaptationTool(capability.execution_tool));
+    if (sectorMatch) group.sectors.add(Number(sectorMatch[1]) + 1);
+    groups.set(key, group);
+  }
+  return ["scene", "tower", "sectors", "other"].flatMap((key) => {
+    const group = groups.get(key);
+    if (!group) return [];
+    const sectorScope = group.sectors.size ? ` sur ${group.sectors.size} secteurs` : "";
+    return [
+      `${group.label} · ${group.labels.size} paramètres${sectorScope}: ${[
+        ...group.labels
+      ].join(", ")} · ${[...group.tools].join(" / ")}`
+    ];
+  });
+}
+
 function yesNo(value: boolean): string {
   return value ? "oui" : "non";
 }
@@ -1924,6 +2091,35 @@ function summarizeRagEvidence(evidence: unknown) {
     limitations: readStringArray(record?.["limitations"]),
     sources
   };
+}
+
+export function humanRagLimitation(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized.includes("evidence and controlled planning context") ||
+    normalized.includes("not a free-form planner")
+  ) {
+    return "Le RAG fournit des preuves et un contexte de planification contrôlé; il ne planifie jamais librement la géométrie.";
+  }
+  if (
+    normalized.includes("does not participate in requirementspec extraction") ||
+    normalized.includes("not used for requirementspec extraction")
+  ) {
+    return "Le RAG ne participe pas à l’extraction du RequirementSpec dans cette version.";
+  }
+  if (
+    normalized.includes("whitelisted") &&
+    normalized.includes("planning_hints")
+  ) {
+    return "Seuls les indices de planification explicitement autorisés peuvent influencer le SceneSpec.";
+  }
+  if (normalized.includes("reranker") && normalized.includes("unavailable")) {
+    return "Le reranker NVIDIA est indisponible; l’ordre vectoriel est conservé et le mode dégradé reste signalé.";
+  }
+  if (/^(le|la|les|un|une|seul|seuls|aucun|aucune)\b/i.test(value.trim())) {
+    return value.trim();
+  }
+  return "Une limitation RAG supplémentaire est déclarée par le backend; son détail technique reste disponible dans les livrables.";
 }
 
 function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {

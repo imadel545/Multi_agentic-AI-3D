@@ -13,6 +13,8 @@ SUPPORTED_PLANNING_HINT_FIELDS = frozenset(
     {
         "antenna_install_height_m",
         "beamwidth_deg",
+        "mechanical_tilt_deg",
+        "electrical_tilt_deg",
         "include_cables",
         "include_sector_beams",
     }
@@ -21,6 +23,8 @@ SUPPORTED_PLANNING_HINT_FIELDS = frozenset(
 _INFERENCE_WARNING_FIELDS = {
     "DEFAULT_INSTALL_HEIGHT_USED": frozenset({"antenna_install_height_m"}),
     "DEFAULT_BEAMWIDTH_USED": frozenset({"beamwidth_deg"}),
+    "DEFAULT_MECHANICAL_TILT_USED": frozenset({"mechanical_tilt_deg"}),
+    "DEFAULT_ELECTRICAL_TILT_USED": frozenset({"electrical_tilt_deg"}),
     "DEFAULT_CABLES_USED": frozenset({"include_cables"}),
     "DEFAULT_BEAMS_USED": frozenset({"include_sector_beams"}),
 }
@@ -30,6 +34,8 @@ _INFERENCE_WARNING_FIELDS = {
 class RagPlanningResolution:
     antenna_install_height_m: float
     beamwidth_deg: float
+    mechanical_tilt_deg: float
+    electrical_tilt_deg: float
     include_cables: bool
     include_sector_beams: bool
     decisions: tuple[dict[str, object], ...]
@@ -152,6 +158,8 @@ def collect_planning_evidence(
     current_values: dict[str, object] = {
         "antenna_install_height_m": requirements.antenna_install_height_m,
         "beamwidth_deg": requirements.beamwidth_deg,
+        "mechanical_tilt_deg": requirements.mechanical_tilt_deg,
+        "electrical_tilt_deg": requirements.electrical_tilt_deg,
         "include_cables": requirements.include_cables,
         "include_sector_beams": requirements.include_beams,
     }
@@ -301,6 +309,8 @@ def _resolution(
     return RagPlanningResolution(
         antenna_install_height_m=float(values["antenna_install_height_m"]),
         beamwidth_deg=float(values["beamwidth_deg"]),
+        mechanical_tilt_deg=float(values["mechanical_tilt_deg"]),
+        electrical_tilt_deg=float(values["electrical_tilt_deg"]),
         include_cables=bool(values["include_cables"]),
         include_sector_beams=bool(values["include_sector_beams"]),
         decisions=tuple(decisions),
@@ -343,6 +353,10 @@ def _validated_value(
         return normalized, "hint_out_of_range"
     if field == "antenna_install_height_m" and not (
         0.1 <= normalized <= requirements.tower_height_m
+    ):
+        return normalized, "hint_out_of_range"
+    if field in {"mechanical_tilt_deg", "electrical_tilt_deg"} and not (
+        -15.0 <= normalized <= 30.0
     ):
         return normalized, "hint_out_of_range"
     return normalized, None

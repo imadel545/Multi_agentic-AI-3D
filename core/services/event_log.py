@@ -187,6 +187,14 @@ class EventLogService:
     def diagnostics(self, workflow_id: str) -> EventLogDiagnostics:
         return self.read_events(workflow_id).diagnostics
 
+    def forget_workflow(self, workflow_id: str) -> None:
+        """Release process-local sequence/cache state after durable workflow deletion."""
+
+        path = self._events_path(workflow_id).resolve(strict=False)
+        with _EVENT_LOG_LOCKS_GUARD:
+            _EVENT_LOG_SEQUENCES.pop(path, None)
+        self._append_counts.pop(path, None)
+
     def emit(
         self,
         workflow_id: str,

@@ -124,6 +124,34 @@ def test_glb_inspection_detects_missing_expected_objects(tmp_path: Path) -> None
     assert "EXPECTED_GLB_OBJECTS_MISSING" in report.critical_errors
 
 
+def test_glb_inspector_rejects_box_only_profiled_radio_and_panel(tmp_path: Path) -> None:
+    scene = _scene()
+    names = ["tower_lattice", "foundation_concrete_pad"]
+    for sector in scene.sectors:
+        names.extend(
+            [
+                f"antenna_{sector.sector_id}",
+                f"radio_{sector.sector_id}",
+                f"cable_{sector.sector_id}",
+                f"sector_beam_{sector.sector_id}",
+                f"azimuth_arrow_{sector.sector_id}",
+                f"label_sector_{sector.sector_id}_{int(sector.azimuth_deg)}deg",
+            ]
+        )
+    glb_path = tmp_path / "box_only_equipment.glb"
+    _write_test_glb(glb_path, names)
+
+    report = GLBInspector().inspect(glb_path, scene, None)
+
+    assert report.checks["has_antennas"] is True
+    assert report.checks["has_radios_or_rru"] is True
+    assert report.checks["technical_panel_detail_complete"] is False
+    assert report.checks["technical_radio_detail_complete"] is False
+    assert report.structural_qa_passed is False
+    assert "TECHNICAL_PANEL_DETAIL_MISSING" in report.critical_errors
+    assert "TECHNICAL_RADIO_DETAIL_MISSING" in report.critical_errors
+
+
 def test_glb_inspector_requires_requested_accessories(tmp_path: Path) -> None:
     scene = _accessory_scene()
     glb_path = tmp_path / "design.glb"
@@ -286,6 +314,35 @@ def _expected_object_names(scene) -> list[str]:
                 f"azimuth_arrow_{sector.sector_id}",
             ]
         )
+        if sector.antenna_geometry_profile is not None:
+            names.extend(
+                [
+                    f"antenna_{sector.sector_id}_radome",
+                    f"antenna_{sector.sector_id}_rear_chassis",
+                ]
+            )
+            names.extend(
+                f"antenna_{sector.sector_id}_mount_rail_{index + 1:02d}"
+                for index in range(sector.antenna_geometry_profile.rear_mount_rail_count)
+            )
+            names.extend(
+                f"antenna_{sector.sector_id}_bottom_port_{index + 1:02d}"
+                for index in range(sector.antenna_geometry_profile.bottom_port_count)
+            )
+        if sector.radio_geometry_profile is not None:
+            names.append(f"radio_{sector.sector_id}_enclosure")
+            names.extend(
+                f"radio_{sector.sector_id}_heat_sink_{index + 1:02d}"
+                for index in range(sector.radio_geometry_profile.heat_sink_fin_count)
+            )
+            names.extend(
+                f"radio_{sector.sector_id}_mount_rail_{index + 1:02d}"
+                for index in range(sector.radio_geometry_profile.mounting_rail_count)
+            )
+            names.extend(
+                f"radio_{sector.sector_id}_bottom_connector_{index + 1:02d}"
+                for index in range(sector.radio_geometry_profile.bottom_connector_count)
+            )
         if scene.visual_elements.include_labels:
             names.append(f"label_sector_{sector.sector_id}_{int(sector.azimuth_deg)}deg")
     for accessory in scene.accessory_assets:

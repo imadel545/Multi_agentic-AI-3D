@@ -1,7 +1,10 @@
+from pathlib import Path
+
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.assets import AssetManifest, AssetQualification, DimensionsM
 from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
+from core.services.asset_registry import AssetRegistry
 
 
 def test_scene_planner_rejects_rag_overrides_for_source_requirements() -> None:
@@ -14,6 +17,8 @@ def test_scene_planner_rejects_rag_overrides_for_source_requirements() -> None:
                 "planning_hints": {
                     "beamwidth_deg": 80,
                     "antenna_install_height_m": 25,
+                    "mechanical_tilt_deg": 7,
+                    "electrical_tilt_deg": 4,
                     "include_cables": False,
                     "include_sector_beams": False,
                 }
@@ -34,6 +39,8 @@ def test_scene_planner_rejects_rag_overrides_for_source_requirements() -> None:
 
     assert [sector.beamwidth_deg for sector in scene.sectors] == [65.0, 65.0, 65.0]
     assert [sector.install_height_m for sector in scene.sectors] == [24.0, 24.0, 24.0]
+    assert [sector.mechanical_tilt_deg for sector in scene.sectors] == [3.0, 3.0, 3.0]
+    assert [sector.electrical_tilt_deg for sector in scene.sectors] == [0.0, 0.0, 0.0]
     assert all(sector.include_cable is True for sector in scene.sectors)
     assert scene.visual_elements.include_sector_beams is True
     assert scene.visual_elements.include_gps_antenna is False
@@ -102,6 +109,54 @@ def test_scene_planner_applies_only_highest_ranked_hint_to_inferred_field() -> N
     lower_ranked = rag_context[1]["payload"]["planning_decisions"][0]
     assert lower_ranked["status"] == "rejected"
     assert lower_ranked["reason"] == "lower_ranked_conflict"
+
+
+def test_scene_planner_applies_bounded_tilt_hints_only_when_defaults_are_explicit() -> None:
+    requirements = _requirements().model_copy(
+        update={
+            "warnings": [
+                WarningItem(
+                    code="DEFAULT_MECHANICAL_TILT_USED",
+                    message="Mechanical tilt used the controlled default.",
+                ),
+                WarningItem(
+                    code="DEFAULT_ELECTRICAL_TILT_USED",
+                    message="Electrical tilt used the controlled default.",
+                ),
+            ]
+        }
+    )
+    rag_context = [
+        {
+            "collection": "telecom_rules",
+            "doc_id": "rule:tilt",
+            "score": 0.94,
+            "payload": {
+                "network_type": "5G",
+                "tower_type": "lattice_tower",
+                "planning_hints": {
+                    "mechanical_tilt_deg": 6,
+                    "electrical_tilt_deg": 3,
+                },
+            },
+        }
+    ]
+
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_inferred_tilts",
+        requirements=requirements,
+        tower=_tower(),
+        antenna=_antenna(),
+        radio=_radio(),
+        rag_context=rag_context,
+    )
+
+    assert {sector.mechanical_tilt_deg for sector in scene.sectors} == {6.0}
+    assert {sector.electrical_tilt_deg for sector in scene.sectors} == {3.0}
+    assert rag_context[0]["payload"]["planning_hints"] == {
+        "mechanical_tilt_deg": 6.0,
+        "electrical_tilt_deg": 3.0,
+    }
 
 
 def test_scene_planner_records_equal_hint_as_no_op_not_rag_use() -> None:
@@ -212,6 +267,88 @@ def test_scene_planner_uses_only_manifest_authorized_generation_modes() -> None:
     assert scene.sectors[0].radio_generation_strategy == "internal_project_generated"
     assert scene.accessory_assets[0].generation_strategy == "imported_glb_exact"
     assert scene.sectors[0].antenna_asset_metadata.verified_file_sha256 == "a" * 64
+
+
+def test_scene_planner_propagates_geometry_fidelity_to_runtime_metadata() -> None:
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_geometry_fidelity",
+        requirements=_requirements(),
+        tower=_tower(),
+        antenna=_antenna().model_copy(update={"geometry_fidelity": "technical_generic"}),
+        radio=_radio().model_copy(update={"geometry_fidelity": "vendor_qualified"}),
+    )
+
+    assert scene.tower.asset_metadata.geometry_fidelity == "schematic"
+    assert scene.sectors[0].antenna_asset_metadata.geometry_fidelity == "technical_generic"
+    assert scene.sectors[0].radio_asset_metadata.geometry_fidelity == "vendor_qualified"
+
+
+def test_scene_planner_resolves_bounded_geometry_profiles_from_detail_level() -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    tower = registry.select_tower("lattice_tower", "5G", 30)
+    antenna = registry.get("ANT_PANEL_5G_001")
+    radio = registry.get("RRU_SMALL_001")
+    planner = ScenePlanner()
+
+    high = planner.build_scene_spec(
+        workflow_id="wf_detail_high",
+        requirements=_requirements().model_copy(update={"detail_level": "high"}),
+        tower=tower,
+        antenna=antenna,
+        radio=radio,
+    )
+    medium = planner.build_scene_spec(
+        workflow_id="wf_detail_medium",
+        requirements=_requirements().model_copy(update={"detail_level": "medium"}),
+        tower=tower,
+        antenna=antenna,
+        radio=radio,
+    )
+    low = planner.build_scene_spec(
+        workflow_id="wf_detail_low",
+        requirements=_requirements().model_copy(update={"detail_level": "low"}),
+        tower=tower,
+        antenna=antenna,
+        radio=radio,
+    )
+
+    high_sector = high.sectors[0]
+    medium_sector = medium.sectors[0]
+    low_sector = low.sectors[0]
+    assert (high.detail_level, medium.detail_level, low.detail_level) == (
+        "high",
+        "medium",
+        "low",
+    )
+    assert high_sector.radio_geometry_profile is not None
+    assert medium_sector.radio_geometry_profile is not None
+    assert low_sector.radio_geometry_profile is not None
+    assert high_sector.antenna_geometry_profile is not None
+    assert medium_sector.antenna_geometry_profile is not None
+    assert low_sector.antenna_geometry_profile is not None
+
+    assert high_sector.radio_geometry_profile.heat_sink_fin_count == 8
+    assert high_sector.radio_geometry_profile.bottom_connector_count == 4
+    assert medium_sector.radio_geometry_profile.heat_sink_fin_count == 6
+    assert medium_sector.radio_geometry_profile.bottom_connector_count == 3
+    assert low_sector.radio_geometry_profile.heat_sink_fin_count == 4
+    assert low_sector.radio_geometry_profile.bottom_connector_count == 2
+    assert high_sector.antenna_geometry_profile.bottom_port_count == 4
+    assert medium_sector.antenna_geometry_profile.bottom_port_count == 3
+    assert low_sector.antenna_geometry_profile.bottom_port_count == 2
+
+    assert high_sector.radio_dimensions_m == low_sector.radio_dimensions_m
+    assert high_sector.antenna_dimensions_m == low_sector.antenna_dimensions_m
+    assert high_sector.install_height_m == low_sector.install_height_m
+    assert high_sector.azimuth_deg == low_sector.azimuth_deg
+    assert (
+        high_sector.radio_geometry_profile.vertical_offset_m
+        == low_sector.radio_geometry_profile.vertical_offset_m
+    )
+    assert (
+        high_sector.radio_geometry_profile.radial_inset_m
+        == low_sector.radio_geometry_profile.radial_inset_m
+    )
 
 
 def test_scene_planner_resolves_optional_tower_widths_into_scene_spec() -> None:

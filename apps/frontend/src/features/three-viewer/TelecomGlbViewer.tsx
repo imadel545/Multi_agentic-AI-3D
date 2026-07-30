@@ -122,6 +122,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             >
               <Canvas
                 dpr={[1, 1.5]}
+                frameloop="demand"
                 gl={{ alpha: false, antialias: true }}
                 key={resetKey}
                 camera={{ fov: 38, position: [42, 20, 46] }}
@@ -314,6 +315,31 @@ function viewerHealthLabel(health: ViewerHealth): string {
   return "chargé";
 }
 
+type RenderHealthProbeState = {
+  frames: number;
+  sampled: boolean;
+};
+
+const RenderHealthProbeFrameCount = 10;
+
+export function advanceRenderHealthProbe(
+  state: RenderHealthProbeState,
+  invalidate: () => void,
+  sample: () => boolean,
+  onResult: (visible: boolean) => void
+) {
+  if (state.sampled) {
+    return;
+  }
+  state.frames += 1;
+  if (state.frames < RenderHealthProbeFrameCount) {
+    invalidate();
+    return;
+  }
+  state.sampled = true;
+  onResult(sample());
+}
+
 function RenderHealthProbe({
   enabled,
   onResult
@@ -321,25 +347,24 @@ function RenderHealthProbe({
   enabled: boolean;
   onResult: (visible: boolean) => void;
 }) {
-  const { camera, gl, scene } = useThree();
-  const frames = useRef(0);
-  const sampled = useRef(false);
+  const { camera, gl, invalidate, scene } = useThree();
+  const probe = useRef<RenderHealthProbeState>({ frames: 0, sampled: false });
   useEffect(() => {
-    if (!enabled) {
-      frames.current = 0;
-      sampled.current = false;
+    probe.current = { frames: 0, sampled: false };
+    if (enabled) {
+      invalidate();
     }
-  }, [enabled]);
+  }, [enabled, invalidate]);
   useFrame(() => {
-    if (!enabled || sampled.current) {
+    if (!enabled) {
       return;
     }
-    frames.current += 1;
-    if (frames.current < 10) {
-      return;
-    }
-    sampled.current = true;
-    onResult(isRendererVisible(gl, scene, camera));
+    advanceRenderHealthProbe(
+      probe.current,
+      invalidate,
+      () => isRendererVisible(gl, scene, camera),
+      onResult
+    );
   });
   return null;
 }

@@ -23,6 +23,19 @@ const viewerBundlePayload = {
   completion_certificate_status: "issued",
   primary_glb_url: "/designs/wf_123/artifacts/design.glb",
   preview_url: "/designs/wf_123/artifacts/preview.png",
+  geometry_fidelity_summary: {
+    component_count: 7,
+    counts: {
+      schematic: 1,
+      technical_generic: 6,
+      vendor_qualified: 0
+    },
+    roles: {
+      schematic: ["tower"],
+      technical_generic: ["antenna", "radio"],
+      vendor_qualified: []
+    }
+  },
   rag_context_count: 3,
   viewer_artifacts: [
     {
@@ -68,6 +81,42 @@ describe("frontend contract schemas", () => {
 
     expect(parsed.primary_glb_url).toBe("/designs/wf_123/artifacts/design.glb");
     expect(parsed.viewer_artifacts).toHaveLength(1);
+    expect(parsed.geometry_fidelity_summary?.counts.technical_generic).toBe(6);
+    expect(parsed.geometry_fidelity_summary?.roles.technical_generic).toEqual([
+      "antenna",
+      "radio"
+    ]);
+  });
+
+  it("rejects inconsistent geometry fidelity component counts", () => {
+    expect(() =>
+      parseContract("ViewerBundle", ViewerBundleSchema, {
+        ...viewerBundlePayload,
+        geometry_fidelity_summary: {
+          ...viewerBundlePayload.geometry_fidelity_summary,
+          component_count: 99
+        }
+      })
+    ).toThrow(ContractValidationError);
+  });
+
+  it("accepts explicit quarantine states and rejects unknown lifecycle states", () => {
+    expect(
+      parseContract("ViewerBundle", ViewerBundleSchema, {
+        ...viewerBundlePayload,
+        status: "integrity_failed",
+        completion_certificate_status: "rejected",
+        primary_glb_url: null,
+        preview_url: null,
+        viewer_artifacts: []
+      }).status
+    ).toBe("integrity_failed");
+    expect(() =>
+      parseContract("ViewerBundle", ViewerBundleSchema, {
+        ...viewerBundlePayload,
+        status: "completed_without_proof"
+      })
+    ).toThrow(ContractValidationError);
   });
 
   it("rejects local filesystem paths in public payloads", () => {

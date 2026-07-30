@@ -24,6 +24,8 @@ def evaluate_requirement_coverage(
     controlled = {
         "antenna_install_height_m": requirements.antenna_install_height_m,
         "beamwidth_deg": requirements.beamwidth_deg,
+        "mechanical_tilt_deg": requirements.mechanical_tilt_deg,
+        "electrical_tilt_deg": requirements.electrical_tilt_deg,
         "include_cables": requirements.include_cables,
         "include_sector_beams": requirements.include_beams,
     }
@@ -129,13 +131,15 @@ def evaluate_requirement_coverage(
         ),
         _check(
             "sectors.mechanical_tilt_deg",
-            [requirements.mechanical_tilt_deg] * requirements.sector_count,
+            [effective["mechanical_tilt_deg"]] * requirements.sector_count,
             [sector.mechanical_tilt_deg for sector in scene.sectors],
+            source=_source_for("mechanical_tilt_deg", applied_decisions),
         ),
         _check(
             "sectors.electrical_tilt_deg",
-            [requirements.electrical_tilt_deg] * requirements.sector_count,
+            [effective["electrical_tilt_deg"]] * requirements.sector_count,
             [sector.electrical_tilt_deg for sector in scene.sectors],
+            source=_source_for("electrical_tilt_deg", applied_decisions),
         ),
         _check(
             "sectors.beamwidth_deg",

@@ -313,6 +313,57 @@ def test_vector_memory_reindex_compacts_sqlite_and_preserves_legacy_collections(
     rag_service.close()
 
 
+def test_purge_workflow_removes_sqlite_memory_and_invalidates_vector_projection(
+    tmp_path: Path,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    requirements = None
+    for workflow_id in ("wf_delete", "wf_keep"):
+        requirements, scene, report, _ = _memory_inputs(workflow_id)
+        service.write_workflow_summary(
+            workflow_id=workflow_id,
+            requirements=requirements,
+            scene=scene,
+            report=report.model_copy(update={"warnings": []}),
+            generation=_real_generation(),
+            scene_spec_path=tmp_path / f"{workflow_id}_scene.json",
+            validation_report_path=tmp_path / f"{workflow_id}_validation.json",
+        )
+    service.reindex_vector_memory()
+    active_collection = service.index_health()["vector_compatibility"]["collections"][
+        "design_memory"
+    ]["active_collection"]
+
+    report = service.purge_workflow("wf_delete")
+
+    assert report["status"] == "purged"
+    assert report["deleted"]["workflow_memory"] == 1
+    assert report["deleted"]["design_memory"] == 1
+    assert report["vector_projection"]["status"] == "invalidated"
+    assert service.stats()["workflow_memory_count"] == 1
+    assert service.stats()["design_memory_count"] == 1
+    assert not rag_service.client.collection_exists(active_collection)
+    assert not (tmp_path / "qdrant" / "qdrant_runtime_memory_state.json").exists()
+    assert requirements is not None
+    assert [row["workflow_id"] for row in service.recall(requirements).similar_workflows] == [
+        "wf_keep"
+    ]
+
+    rebuilt = service.reindex_vector_memory()
+    assert rebuilt["status"] == "indexed"
+    results = rag_service.search(
+        "pylône 5G trois secteurs",
+        collection="design_memory",
+    )
+    assert results[0].payload["occurrence_count"] == 1
+    rag_service.close()
+
+
 def _memory_inputs(
     workflow_id: str,
 ) -> tuple[RequirementSpec, object, ValidationReport, _GenerationResult]:

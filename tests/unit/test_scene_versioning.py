@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from core.contracts.completion import CompletionCertificate
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
 from core.services.event_log import EventLogService
+from core.services.requirement_parser import parse_requirements_text
 from core.services.scene_versioning import SceneVersioningService, _atomic_write_text
 
 
@@ -92,25 +94,107 @@ def test_completed_version_commit_is_hash_bound_and_canonical(tmp_outputs, sampl
     version = svc.save_version("wf_1", sample_scene, edit_description="verified", activate=False)
     artifact_dir = svc.version_artifacts_dir("wf_1", version.version_id)
     artifact_dir.mkdir(parents=True)
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 1 secteur à 24m. Azimut : 0°."
+    )
+    requirements_path = artifact_dir / "requirements_spec.json"
+    scene_path = artifact_dir / "scene_spec.json"
+    requirements_payload = requirements.model_dump()
+    for field_name in (
+        "field_evidence",
+        "conflicts",
+        "assumptions",
+        "requires_confirmation",
+        "confirmation_fields",
+    ):
+        requirements_payload.pop(field_name)
+    scene_payload = sample_scene.model_dump()
+    scene_payload.pop("schema_version")
+    requirements_path.write_text(json.dumps(requirements_payload), encoding="utf-8")
+    scene_path.write_text(json.dumps(scene_payload), encoding="utf-8")
+    (artifact_dir / "design.glb").write_bytes(b"verified-glb")
+    (artifact_dir / "preview.png").write_bytes(b"verified-preview")
+    (artifact_dir / "scene_metadata.json").write_bytes(b"verified-metadata")
+    artifact_hashes = {
+        name: {
+            "size_bytes": (artifact_dir / name).stat().st_size,
+            "sha256": hashlib.sha256((artifact_dir / name).read_bytes()).hexdigest(),
+        }
+        for name in ("design.glb", "preview.png", "scene_metadata.json")
+    }
+    (artifact_dir / "build.lock.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "build_id": "build_verified",
+                "attempt_id": "build_verified_attempt_1",
+                "scene_id": sample_scene.scene_id,
+                "scene_spec_sha256": hashlib.sha256(scene_path.read_bytes()).hexdigest(),
+                "worker_script_sha256": "a" * 64,
+                "blender_runtime": {
+                    "version": "test",
+                    "background": True,
+                    "factory_startup": True,
+                },
+                "command_profile": {
+                    "background": True,
+                    "factory_startup": True,
+                    "python_exit_code": 97,
+                },
+                "artifacts": artifact_hashes,
+            }
+        ),
+        encoding="utf-8",
+    )
     artifacts = []
-    for logical_name, file_name, content in (
-        ("glb", "design.glb", b"verified-glb"),
-        ("preview", "preview.png", b"verified-preview"),
-        ("metadata", "scene_metadata.json", b"verified-metadata"),
-        ("build_lock", "build.lock.json", b"verified-build-lock"),
+    for logical_name, file_name in (
+        ("glb", "design.glb"),
+        ("preview", "preview.png"),
+        ("metadata", "scene_metadata.json"),
+        ("build_lock", "build.lock.json"),
     ):
         path = artifact_dir / file_name
-        path.write_bytes(content)
         artifacts.append(
             {
                 "logical_name": logical_name,
                 "file_name": file_name,
-                "size_bytes": len(content),
-                "sha256": hashlib.sha256(content).hexdigest(),
+                "size_bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             }
         )
+    checks = {
+        "requirements_present": True,
+        "scene_spec_present": True,
+        "requirement_coverage_passed": True,
+        "pre_blender_gate_passed": True,
+        "real_blender_generation": True,
+        "required_artifacts_regular_files": True,
+        "artifact_hashes_recorded": True,
+        "qa_report_passed": True,
+        "glb_binary_integrity_passed": True,
+        "semantic_mesh_coverage_complete": True,
+        "geometry_validation_passed": True,
+        "mesh_qa_passed": True,
+        "preview_qa_passed": True,
+        "post_blender_gate_passed": True,
+        "no_critical_fallback": True,
+    }
+    certificate = CompletionCertificate(
+        workflow_id="wf_1",
+        status="issued",
+        evaluated_at="2026-07-29T00:00:00Z",
+        requirements_sha256=_canonical_json_hash(
+            requirements_payload,
+            exclude={"warnings", "repair_events"},
+        ),
+        scene_spec_sha256=_canonical_json_hash(scene_payload),
+        generation_mode="real_blender",
+        artifacts=artifacts,
+        checks=checks,
+        blockers=[],
+    )
     (artifact_dir / "completion_certificate.json").write_text(
-        json.dumps({"status": "issued", "artifacts": artifacts}), encoding="utf-8"
+        certificate.model_dump_json(), encoding="utf-8"
     )
     (artifact_dir / "status.json").write_text(
         json.dumps(
@@ -119,6 +203,8 @@ def test_completed_version_commit_is_hash_bound_and_canonical(tmp_outputs, sampl
                 "version_id": version.version_id,
                 "active_version_id": version.version_id,
                 "status": "completed",
+                "generation_mode": "real_blender",
+                "completion_certificate_status": "issued",
             }
         ),
         encoding="utf-8",
@@ -144,6 +230,51 @@ def test_completed_version_commit_is_hash_bound_and_canonical(tmp_outputs, sampl
         "build_lock",
     }
 
+    divergent_scene = sample_scene.model_copy(
+        update={
+            "tower": sample_scene.tower.model_copy(update={"height_m": 37.0}),
+        }
+    )
+    svc.update_version("wf_1", version.version_id, scene=divergent_scene)
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_SCENE_VERSION_MISMATCH"):
+        svc.verified_active_status_path("wf_1")
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_SCENE_VERSION_MISMATCH"):
+        svc.commit_active_version("wf_1", version.version_id)
+    svc.update_version("wf_1", version.version_id, scene=sample_scene)
+
     (artifact_dir / "design.glb").write_bytes(b"tampered")
     with pytest.raises(ValueError, match="ACTIVE_VERSION_ARTIFACT_HASH_MISMATCH"):
+        svc.verified_active_status_path("wf_1")
+
+
+def _canonical_json_hash(payload: dict, *, exclude: set[str] | None = None) -> str:
+    canonical_payload = {
+        key: value for key, value in payload.items() if key not in (exclude or set())
+    }
+    encoded = json.dumps(
+        canonical_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def test_completed_version_rejects_minimal_certificate(tmp_outputs, sample_scene):
+    svc = SceneVersioningService(tmp_outputs)
+    version = svc.save_version("wf_1", sample_scene, activate=False)
+    artifact_dir = svc.version_artifacts_dir("wf_1", version.version_id)
+    artifact_dir.mkdir(parents=True)
+    (artifact_dir / "completion_certificate.json").write_text(
+        json.dumps({"status": "issued", "artifacts": []}),
+        encoding="utf-8",
+    )
+    svc.update_version(
+        "wf_1",
+        version.version_id,
+        status="completed",
+        artifact_dir=str(artifact_dir),
+    )
+
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_COMPLETION_CERTIFICATE_INVALID"):
         svc.commit_active_version("wf_1", version.version_id)

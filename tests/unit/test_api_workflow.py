@@ -1,4 +1,5 @@
 import json
+import queue
 import threading
 import time
 import zipfile
@@ -84,6 +85,95 @@ def test_create_design_api_exposes_insufficient_local_storage(monkeypatch) -> No
 
     assert response.status_code == 507
     assert response.json()["detail"] == "Espace disque local insuffisant."
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/designs/%2E%2E",
+        "/designs/%2E%2E/events",
+        "/designs/wf_000000000000/artifacts/glb?version_id=..%2F..%2Fsecret",
+        "/designs/wf_000000000000/versions/%2E%2E/rollback",
+    ],
+)
+def test_api_rejects_encoded_path_identifiers_before_service_lookup(
+    monkeypatch,
+    path: str,
+) -> None:
+    monkeypatch.setattr(
+        workflow_service,
+        "get_public_status",
+        lambda *_args, **_kwargs: pytest.fail("invalid identifier reached workflow service"),
+    )
+    response = TestClient(app).get(path) if "rollback" not in path else TestClient(app).post(path)
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("suffix", ["events", "versions"])
+def test_collection_endpoints_return_404_for_unknown_workflow(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    try:
+        response = TestClient(app).get(f"/designs/wf_000000000000/{suffix}")
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "workflow not found"
+
+
+def test_workflow_events_cursor_returns_bounded_deltas_and_preserves_full_history(
+    tmp_path: Path,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_id = "wf_000000000001"
+    workflow_dir = tmp_path / workflow_id
+    workflow_dir.mkdir()
+    events_path = workflow_dir / "workflow_events.jsonl"
+    events = [
+        {
+            "event_id": f"evt_{sequence:012d}",
+            "sequence": sequence,
+            "event_type": "node_completed",
+            "workflow_id": workflow_id,
+            "timestamp": "2026-07-29T10:00:00Z",
+            "payload": {"node": f"step_{sequence}"},
+        }
+        for sequence in range(1, 206)
+    ]
+    events_path.write_text(
+        "".join(f"{json.dumps(event)}\n" for event in events),
+        encoding="utf-8",
+    )
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        full_response = client.get(f"/designs/{workflow_id}/events")
+        first_delta = client.get(
+            f"/designs/{workflow_id}/events",
+            params={"after_sequence": 3},
+        )
+        second_delta = client.get(
+            f"/designs/{workflow_id}/events",
+            params={"after_sequence": 203},
+        )
+        invalid_cursor = client.get(
+            f"/designs/{workflow_id}/events",
+            params={"after_sequence": -1},
+        )
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        workflow_service._sync_output_services()
+
+    assert full_response.status_code == 200
+    assert len(full_response.json()) == 205
+    assert [event["sequence"] for event in first_delta.json()] == list(range(4, 204))
+    assert [event["sequence"] for event in second_delta.json()] == [204, 205]
+    assert invalid_cursor.status_code == 422
 
 
 def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
@@ -219,6 +309,16 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert trace["geometry_validation"]["status"] == "passed"
         assert trace["preview_inspection"]["preview_qa_passed"] is True
         assert any(step["node"] == "memory_writeback" for step in trace["steps"])
+
+        glb_path = Path(internal_status["artifacts"]["glb"])
+        glb_bytes = glb_path.read_bytes()
+        glb_path.write_bytes(glb_bytes[:-1] + bytes([glb_bytes[-1] ^ 0x01]))
+        quarantined = client.get(f"/designs/{response['workflow_id']}").json()
+        assert quarantined["status"] == "integrity_failed"
+        assert quarantined["completion_certificate_status"] == "rejected"
+        assert quarantined["artifacts"] == {}
+        assert quarantined["download_url"] is None
+        assert client.get(f"/designs/{response['workflow_id']}/artifacts/glb").status_code == 404
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -645,7 +745,9 @@ def test_startup_reconciliation_restores_active_version_after_interrupted_edit(
         workflow_service._sync_output_services()  # noqa: SLF001
 
     assert reconciled == [workflow_id]
-    assert restored["status"] == "completed"
+    assert restored["status"] == "legacy_unverified"
+    assert restored["completion_certificate_status"] == "rejected"
+    assert restored["artifacts"] == {}
     assert restored["active_operation"] is None
     assert restored["active_version_id"] == active.version_id
     assert restored["warnings"][-1]["code"] == "EDIT_INTERRUPTED_ACTIVE_VERSION_RESTORED"
@@ -655,6 +757,71 @@ def test_startup_reconciliation_restores_active_version_after_interrupted_edit(
         "user_issue_created",
         "edit_patch_rejected",
     ]
+
+
+def test_verified_commit_survives_terminal_event_failure_and_running_root_recovery(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    workflow_service._sync_output_services()  # noqa: SLF001
+    original_emit = workflow_service._emit_workflow_event
+    failed_terminal_once = False
+
+    def fail_first_terminal(workflow_id: str, event_type: str, payload: dict) -> dict:
+        nonlocal failed_terminal_once
+        if event_type == "workflow_completed" and not failed_terminal_once:
+            failed_terminal_once = True
+            raise OSError("simulated terminal event persistence failure")
+        return original_emit(workflow_id, event_type, payload)
+
+    monkeypatch.setattr(workflow_service, "_emit_workflow_event", fail_first_terminal)
+    try:
+        response = workflow_service.create_design(
+            requirements_text=(
+                "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+                "Azimuts : 0°, 120°, 240°."
+            ),
+            detail_level="high",
+            use_llm=False,
+            _synchronous=True,
+        )
+        workflow_id = response["workflow_id"]
+        assert response["status"] == "completed"
+
+        status_path = tmp_path / workflow_id / "status.json"
+        interrupted_root = json.loads(status_path.read_text(encoding="utf-8"))
+        interrupted_root["status"] = "running"
+        status_path.write_text(json.dumps(interrupted_root), encoding="utf-8")
+
+        reconciled = workflow_service.reconcile_interrupted_workflows()
+        effective = workflow_service.get_status(workflow_id)
+        listed = next(
+            item for item in workflow_service.list_designs() if item["workflow_id"] == workflow_id
+        )
+        root_after_recovery = json.loads(status_path.read_text(encoding="utf-8"))
+        event_types = [event["event_type"] for event in workflow_service.get_events(workflow_id)]
+
+        contradictory_root = dict(root_after_recovery)
+        contradictory_root["status"] = "failed"
+        status_path.write_text(json.dumps(contradictory_root), encoding="utf-8")
+        effective_after_failed_root = workflow_service.get_status(workflow_id)
+        listed_after_failed_root = next(
+            item for item in workflow_service.list_designs() if item["workflow_id"] == workflow_id
+        )
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        workflow_service._sync_output_services()  # noqa: SLF001
+
+    assert reconciled == [workflow_id]
+    assert root_after_recovery["status"] == "completed"
+    assert effective["status"] == "completed"
+    assert listed["status"] == "completed"
+    assert effective_after_failed_root["status"] == "completed"
+    assert listed_after_failed_root["status"] == "completed"
+    assert event_types[-1] == "workflow_completed"
+    assert "workflow_failed" not in event_types
 
 
 def test_assets_inventory_route_is_not_shadowed() -> None:
@@ -697,7 +864,7 @@ def test_asset_adaptation_catalog_is_typed_and_not_shadowed() -> None:
 def test_design_adaptation_capabilities_require_an_active_version() -> None:
     client = TestClient(app)
 
-    response = client.get("/designs/wf_missing/adaptation-capabilities")
+    response = client.get("/designs/wf_000000000000/adaptation-capabilities")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "active design version not found"
@@ -731,7 +898,7 @@ def test_design_artifact_endpoint_serves_active_and_version_files(tmp_path: Path
         assert scene_response.json()["network_type"] == "5G"
         assert version_scene_response.status_code == 200
         assert version_scene_response.json()["network_type"] == "5G"
-        assert traversal_response.status_code == 404
+        assert traversal_response.status_code in {404, 422}
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -774,7 +941,7 @@ def test_event_stream_unknown_workflow_returns_404(tmp_path: Path) -> None:
 def test_delete_active_workflow_returns_conflict(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
-    workflow_id = "wf_active_delete"
+    workflow_id = "wf_a11cedde1e7e"
     (tmp_path / workflow_id).mkdir(parents=True)
     workflow_service._mark_workflow_active(workflow_id)
     client = TestClient(app)
@@ -886,6 +1053,106 @@ def test_event_stream_cursor_skips_old_terminal_event_for_revision(tmp_path: Pat
         workflow_service.outputs_dir = original_outputs
 
 
+def test_event_stream_latest_cursor_does_not_replay_history(tmp_path: Path) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        workflow_id = "wf_55e1a7e57c01"
+        (tmp_path / workflow_id).mkdir(parents=True)
+        workflow_service._sync_output_services()
+        workflow_service._emit_workflow_event(workflow_id, "design_created", {})
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "workflow_completed",
+            {"status": "completed"},
+        )
+        terminal_event = workflow_service.get_events(workflow_id)[-1]
+
+        with client.stream(
+            "GET",
+            f"/designs/{workflow_id}/events/stream?after_event_id={terminal_event['event_id']}",
+        ) as stream:
+            assert stream.status_code == 200
+            body = "".join(stream.iter_text())
+
+        assert "event: design_created" not in body
+        assert "event: workflow_completed" not in body
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_event_stream_recovers_events_dropped_from_slow_subscriber_queue(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    workflow_id = "wf_sse_slow_subscriber"
+    (tmp_path / workflow_id).mkdir(parents=True)
+    workflow_service._sync_output_services()
+    workflow_service._mark_workflow_active(workflow_id)
+    monkeypatch.setattr(workflow_service, "_SUBSCRIBER_QUEUE_MAX_SIZE", 2)
+    workflow_service._emit_workflow_event(workflow_id, "design_created", {})
+    stream = workflow_service.stream_events(workflow_id)
+    try:
+        first = next(stream)
+        assert first["event_type"] == "design_created"
+        for index in range(4):
+            workflow_service._emit_workflow_event(
+                workflow_id,
+                "node_started",
+                {"node": f"node_{index}", "status": "running"},
+            )
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "workflow_completed",
+            {"status": "completed"},
+        )
+        workflow_service._mark_workflow_inactive(workflow_id)
+
+        remaining = list(stream)
+
+        assert [event["sequence"] for event in [first, *remaining]] == list(range(1, 7))
+        assert [event["event_type"] for event in remaining][-1] == "workflow_completed"
+    finally:
+        stream.close()
+        workflow_service._mark_workflow_inactive(workflow_id)
+        workflow_service.outputs_dir = original_outputs
+
+
+def test_event_emission_survives_queue_refill_between_drop_and_retry(tmp_path: Path) -> None:
+    class RefilledQueue:
+        def put_nowait(self, _payload) -> None:
+            raise queue.Full
+
+        def get_nowait(self) -> dict:
+            return {"event_id": "older"}
+
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    workflow_id = "wf_sse_refill_race"
+    (tmp_path / workflow_id).mkdir(parents=True)
+    workflow_service._sync_output_services()
+    with workflow_service._lock:
+        workflow_service._event_subscribers[workflow_id] = {
+            "refilled": RefilledQueue(),  # type: ignore[dict-item]
+        }
+    try:
+        event = workflow_service._emit_workflow_event(
+            workflow_id,
+            "node_started",
+            {"node": "validate_scene", "status": "running"},
+        )
+    finally:
+        with workflow_service._lock:
+            workflow_service._event_subscribers.pop(workflow_id, None)
+        workflow_service.outputs_dir = original_outputs
+
+    assert event["sequence"] == 1
+    assert event["event_type"] == "node_started"
+
+
 def test_download_archive_contains_only_canonical_artifact_files(tmp_path: Path) -> None:
     output_dir = tmp_path / "wf_archive"
     output_dir.mkdir()
@@ -992,7 +1259,7 @@ def test_failed_terminal_event_observes_persisted_failed_status(
     assert terminal_statuses == ["failed"]
 
 
-def test_completed_terminal_event_observes_persisted_completed_status(
+def test_completed_terminal_event_cannot_bypass_persisted_completion_proof(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1038,8 +1305,8 @@ def test_completed_terminal_event_observes_persisted_completed_status(
     finally:
         workflow_service.outputs_dir = original_outputs
 
-    assert response["status"] == "completed"
-    assert terminal_statuses == ["completed"]
+    assert response["status"] == "legacy_unverified"
+    assert terminal_statuses == ["legacy_unverified"]
 
 
 def test_completed_result_without_certificate_is_rejected() -> None:

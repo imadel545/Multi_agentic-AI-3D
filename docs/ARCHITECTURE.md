@@ -16,6 +16,7 @@ FastAPI
   -> SQLite memory recall
   -> asset registry + inventory
   -> qualified asset-library retrieval only (raw CAD stays quarantined)
+  -> manifest-bounded equipment profiles + explicit geometry LOD
   -> SceneSpec planner
   -> SceneSpec validation + quality gates
   -> Blender runner
@@ -63,6 +64,14 @@ active SceneSpec + prompt
 - Workflow mutations check free local storage before persistence. Startup
   recovery restores the last valid active version after an interrupted edit,
   while an interrupted initial generation remains failed.
+- `active_design.json` is the canonical commit marker. Reads resolve the
+  verified version manifest even if a compatibility root-status or terminal
+  event projection failed after commit.
+- Blender executes a per-attempt immutable copy of every Python worker source;
+  the build lock hashes that executed copy, the SceneSpec, runtime profile and
+  generated artifacts.
+- Workflow/version identifiers are validated at the HTTP boundary before local
+  path lookup. Qdrant Docker ports are loopback-only.
 - `.env` contains real secrets and must never be committed.
 - `.env.example` contains placeholders only.
 - `apps/frontend` is a real-backend product rework, not an accepted final gate.
@@ -77,7 +86,12 @@ active SceneSpec + prompt
   accessory rotation/scale are preserved; explicitly moved positions are marked
   `user_defined`, while derived positions continue to follow tower geometry.
 - Events are frontend-readable and `/events/stream` is `push_sse` local-process, but there is
-  no broker, cancellation manager, or durable resume yet.
+  no broker, cancellation manager, or durable resume yet. Cursor replay and
+  sequence-gap catch-up are durable through the JSONL log within this
+  single-process scope.
+- The orchestration trace distinguishes bounded LLM decisions, deterministic
+  specialists, services, quality gates and external tools. The fixed graph is
+  not yet a dynamic specialist registry or supervisor.
 - Asset import fallback can still create procedural geometry if an import fails, but the active
   inventory has 12 manifests and 12 GLB files: 10 manifests are
   generation-eligible, 4 authorize exact hash-pinned GLB import, and 2 remain
@@ -89,6 +103,16 @@ active SceneSpec + prompt
 - Geometry QA combines binary accessor checks, semantic role transforms and a
   real-vertex AABB interference screen for primary equipment. It is not exact
   triangle/BVH collision, RF, structural or vendor-grade QA.
+- Generic panel/RRU generation is manifest-profiled and LOD-aware, and GLB QA
+  requires declared technical sub-parts. These profiles remain generic rather
+  than vendor-qualified.
 - RAG is not used for extraction in v1; only structured, whitelisted
   `payload.planning_hints` can influence planning, and `rag_planning_summary`
   plus `rag_evidence.json` expose whether that happened.
+- Document-pack locks are process-local. Atomic JSON replacements prevent
+  partial files and concurrent readers cannot observe an in-flight correction,
+  but a crash can still split a multi-file pack revision.
+- Python dependency ranges have explicit advisory-driven security floors but
+  are not accompanied by a committed resolution lock. The optional Qdrant
+  Docker image remains on legacy server `v1.9.2` pending a stepwise storage
+  migration.

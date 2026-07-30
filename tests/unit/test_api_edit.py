@@ -22,6 +22,21 @@ def isolate_unit_tests_from_groq():
         workflow_service.scene_edit_agent.groq = original
 
 
+def test_edit_unknown_workflow_returns_404(client, tmp_path):
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    try:
+        response = client.post(
+            "/designs/wf_000000000000/edit",
+            json={"edit_prompt": "augmente la hauteur à 35 m"},
+        )
+    finally:
+        workflow_service.outputs_dir = original_outputs
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "workflow not found"
+
+
 def test_edit_design_creates_version(client, tmp_path):
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -140,6 +155,34 @@ def test_edit_design_creates_version(client, tmp_path):
 
         active_version = workflow_service.versioning.get_active_version(workflow_id)
         assert active_version is not None
+        divergent_scene = active_version.scene.model_copy(
+            update={
+                "tower": active_version.scene.tower.model_copy(update={"height_m": 37.0}),
+            }
+        )
+        workflow_service.versioning.update_version(
+            workflow_id,
+            active_version.version_id,
+            scene=divergent_scene,
+        )
+        blocked_edit = client.post(
+            f"/designs/{workflow_id}/edit",
+            json={"edit_prompt": "mets les antennes à 25m"},
+        )
+        assert blocked_edit.status_code == 200
+        assert blocked_edit.json()["status"] == "failed"
+        assert blocked_edit.json()["errors"][0]["code"] == "ACTIVE_VERSION_INTEGRITY_FAILED"
+        assert (
+            client.post(
+                f"/designs/{workflow_id}/versions/{active_version.version_id}/rollback"
+            ).status_code
+            == 404
+        )
+        workflow_service.versioning.update_version(
+            workflow_id,
+            active_version.version_id,
+            scene=active_version.scene,
+        )
         failed_version = workflow_service.versioning.save_version(
             workflow_id,
             active_version.scene,

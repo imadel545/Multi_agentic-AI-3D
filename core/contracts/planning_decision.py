@@ -9,6 +9,8 @@ from core.contracts.common import StrictModel
 PlanningField = Literal[
     "antenna_install_height_m",
     "beamwidth_deg",
+    "mechanical_tilt_deg",
+    "electrical_tilt_deg",
     "include_cables",
     "include_sector_beams",
 ]
@@ -26,6 +28,8 @@ CandidateId = Annotated[
 PLANNING_FIELDS: tuple[PlanningField, ...] = (
     "antenna_install_height_m",
     "beamwidth_deg",
+    "mechanical_tilt_deg",
+    "electrical_tilt_deg",
     "include_cables",
     "include_sector_beams",
 )
@@ -38,6 +42,8 @@ class StrictDecisionModel(StrictModel):
 class PlanningCurrentValues(StrictDecisionModel):
     antenna_install_height_m: float = Field(gt=0, le=150)
     beamwidth_deg: float = Field(gt=0, le=360)
+    mechanical_tilt_deg: float = Field(ge=-15, le=30)
+    electrical_tilt_deg: float = Field(ge=-15, le=30)
     include_cables: bool
     include_sector_beams: bool
 
@@ -69,6 +75,10 @@ class PlanningCandidate(StrictDecisionModel):
             raise ValueError("antenna_install_height_m candidate is outside the global range")
         if self.field == "beamwidth_deg" and not 0 < float(self.value) <= 360:
             raise ValueError("beamwidth_deg candidate is outside the global range")
+        if self.field in {"mechanical_tilt_deg", "electrical_tilt_deg"} and not (
+            -15 <= float(self.value) <= 30
+        ):
+            raise ValueError(f"{self.field} candidate is outside the global range")
         return self
 
 
@@ -85,7 +95,7 @@ class PlanningMemoryRisk(StrictDecisionModel):
 
 class PlanningDecisionRequest(StrictDecisionModel):
     current_values: PlanningCurrentValues
-    protected_fields: list[PlanningField] = Field(default_factory=list, max_length=4)
+    protected_fields: list[PlanningField] = Field(default_factory=list, max_length=6)
     candidates: list[PlanningCandidate] = Field(default_factory=list, max_length=24)
     memory_risks: list[PlanningMemoryRisk] = Field(default_factory=list, max_length=12)
 
@@ -132,7 +142,7 @@ class PlanningModelSelection(StrictDecisionModel):
 
 
 class PlanningModelDecision(StrictDecisionModel):
-    selections: list[PlanningModelSelection] = Field(min_length=4, max_length=4)
+    selections: list[PlanningModelSelection] = Field(min_length=6, max_length=6)
 
 
 class ResolvedPlanningSelection(StrictDecisionModel):
@@ -167,5 +177,5 @@ class PlanningDecisionDiagnostics(StrictDecisionModel):
 
 class PlanningDecisionResult(StrictDecisionModel):
     resolved_values: PlanningCurrentValues
-    selections: list[ResolvedPlanningSelection] = Field(min_length=4, max_length=4)
+    selections: list[ResolvedPlanningSelection] = Field(min_length=6, max_length=6)
     diagnostics: PlanningDecisionDiagnostics

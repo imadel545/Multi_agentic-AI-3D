@@ -4,11 +4,13 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
+from core.agents.blueprint_composer import design_blueprint_hash
 from core.contracts.completion import (
     CertifiedArtifact,
     CompletionCertificate,
     RequirementCoverageReport,
 )
+from core.contracts.design_blueprint import BlueprintCoverageReport, DesignBlueprint
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.quality import QualityGateReport
@@ -25,6 +27,9 @@ def build_completion_certificate(
     *,
     workflow_id: str,
     requirements: RequirementSpec | None,
+    design_blueprint: DesignBlueprint | None,
+    blueprint_requirement_coverage: BlueprintCoverageReport | None,
+    blueprint_scene_coverage: BlueprintCoverageReport | None,
     scene: SceneSpec | None,
     requirement_coverage: RequirementCoverageReport | None,
     generation: GenerationResult | None,
@@ -37,10 +42,20 @@ def build_completion_certificate(
 ) -> CompletionCertificate:
     artifacts = _artifact_evidence(generation)
     requirements_sha256 = requirements_hash(requirements) if requirements else "0" * 64
+    blueprint_sha256 = (
+        design_blueprint_hash(design_blueprint) if design_blueprint is not None else None
+    )
     scene_sha256 = scene_spec_hash(scene) if scene else "0" * 64
     mesh_qa = geometry_validation.mesh_qa if geometry_validation else None
     checks = {
         "requirements_present": requirements is not None,
+        "design_blueprint_present": design_blueprint is not None,
+        "blueprint_requirement_coverage_passed": bool(
+            blueprint_requirement_coverage and blueprint_requirement_coverage.passed
+        ),
+        "blueprint_scene_coverage_passed": bool(
+            blueprint_scene_coverage and blueprint_scene_coverage.passed
+        ),
         "scene_spec_present": scene is not None,
         "requirement_coverage_passed": bool(requirement_coverage and requirement_coverage.passed),
         "pre_blender_gate_passed": bool(pre_blender_gate and pre_blender_gate.passed),
@@ -73,10 +88,12 @@ def build_completion_certificate(
     }
     blockers = [name for name, passed in checks.items() if not passed]
     return CompletionCertificate(
+        schema_version="1.1.0",
         workflow_id=workflow_id,
         status="issued" if not blockers else "rejected",
         evaluated_at=datetime.now(UTC),
         requirements_sha256=requirements_sha256,
+        design_blueprint_sha256=blueprint_sha256,
         scene_spec_sha256=scene_sha256,
         generation_mode=generation.mode if generation else None,
         artifacts=artifacts,
@@ -89,6 +106,7 @@ def verify_completion_certificate(
     certificate: CompletionCertificate | None,
     *,
     requirements: RequirementSpec | None,
+    design_blueprint: DesignBlueprint | None,
     scene: SceneSpec | None,
     generation: GenerationResult | None,
 ) -> bool:
@@ -98,9 +116,11 @@ def verify_completion_certificate(
         or not certificate.checks
         or not all(certificate.checks.values())
         or requirements is None
+        or design_blueprint is None
         or scene is None
         or generation is None
         or certificate.requirements_sha256 != requirements_hash(requirements)
+        or certificate.design_blueprint_sha256 != design_blueprint_hash(design_blueprint)
         or certificate.scene_spec_sha256 != scene_spec_hash(scene)
     ):
         return False

@@ -122,6 +122,7 @@ class RagService:
         self._reindex_flight: _ReindexFlight | None = None
         self._collection_condition = threading.Condition()
         self._collection_readers: dict[str, int] = defaultdict(int)
+        self._runtime_memory_invalidating = False
         self._last_rerank_diagnostics: contextvars.ContextVar[RerankDiagnostics | None] = (
             contextvars.ContextVar(
                 f"rag_service_rerank_diagnostics_{id(self)}",
@@ -255,6 +256,9 @@ class RagService:
         collection: str | None = None,
         filters: dict[str, str | int | float | bool | None] | None = None,
     ) -> list[RagSearchResult]:
+        allowed_collections = {*RAG_COLLECTIONS, *RUNTIME_MEMORY_COLLECTIONS}
+        if collection is not None and collection not in allowed_collections:
+            raise ValueError(f"unsupported RAG collection: {collection}")
         try:
             if collection not in RUNTIME_MEMORY_COLLECTIONS:
                 self._ensure_static_index_current()
@@ -361,9 +365,9 @@ class RagService:
     ) -> None:
         if collection not in RUNTIME_MEMORY_COLLECTIONS:
             raise ValueError(f"unsupported runtime collection: {collection}")
-        physical_collection = self._runtime_collection_name(collection)
         try:
             with self._runtime_collection_lock:
+                physical_collection = self._runtime_collection_name(collection)
                 if not self.client.collection_exists(physical_collection):
                     self.client.create_collection(
                         collection_name=physical_collection,
@@ -372,18 +376,19 @@ class RagService:
                             distance=Distance.COSINE,
                         ),
                     )
-            document = RagDocument(
-                doc_id=doc_id,
-                collection=collection,
-                text=text,
-                payload=payload,
-            )
+                document = RagDocument(
+                    doc_id=doc_id,
+                    collection=collection,
+                    text=text,
+                    payload=payload,
+                )
+                self.client.upsert(
+                    collection_name=physical_collection,
+                    points=[self._point_for_document(document)],
+                    wait=True,
+                )
             with self._cache_lock:
                 self.query_cache.clear()
-            self.client.upsert(
-                collection_name=physical_collection,
-                points=[self._point_for_document(document)],
-            )
         except Exception as exc:
             self._record_failure(f"runtime_upsert:{collection}", exc)
             raise
@@ -401,10 +406,10 @@ class RagService:
             raise ValueError(f"unsupported runtime collection: {collection}")
         if any(document.collection != collection for document in documents):
             raise ValueError("runtime replacement documents must use the requested collection")
-        physical_collection = self._runtime_collection_name(collection)
         try:
             points = self._points_for_documents(documents)
             with self._runtime_collection_lock:
+                physical_collection = self._runtime_collection_name(collection)
                 if not self.client.collection_exists(physical_collection):
                     self.client.create_collection(
                         collection_name=physical_collection,
@@ -446,7 +451,7 @@ class RagService:
             raise ValueError("runtime reindex requires every runtime memory collection")
         if not source_fingerprint:
             raise ValueError("runtime reindex requires a source fingerprint")
-        with self._runtime_reindex_lock:
+        with self._runtime_reindex_lock, self._runtime_collection_lock:
             return self._reindex_runtime_documents_once(
                 documents_by_collection,
                 source_fingerprint=source_fingerprint,
@@ -523,26 +528,85 @@ class RagService:
 
     def update_runtime_source_fingerprint(self, source_fingerprint: str) -> bool:
         """Advance sync proof after a successful incremental SQLite/Qdrant write."""
-        state = self._read_runtime_index_state()
-        identity = self._runtime_index_identity()
-        if not _runtime_index_matches(state, identity):
-            return False
-        mapping = _runtime_physical_collection_map(state)
-        counts = state.get("indexed_counts") if state else None
-        if set(mapping) != set(RUNTIME_MEMORY_COLLECTIONS) or not isinstance(counts, dict):
-            return False
-        indexed_counts = {
-            name: int(self.client.get_collection(mapping[name]).points_count or 0)
-            for name in RUNTIME_MEMORY_COLLECTIONS
+        with self._runtime_collection_lock:
+            state = self._read_runtime_index_state()
+            identity = self._runtime_index_identity()
+            if not _runtime_index_matches(state, identity):
+                return False
+            mapping = _runtime_physical_collection_map(state)
+            counts = state.get("indexed_counts") if state else None
+            if set(mapping) != set(RUNTIME_MEMORY_COLLECTIONS) or not isinstance(counts, dict):
+                return False
+            indexed_counts = {
+                name: int(self.client.get_collection(mapping[name]).points_count or 0)
+                for name in RUNTIME_MEMORY_COLLECTIONS
+            }
+            self._write_runtime_index_state(
+                indexed_counts=indexed_counts,
+                physical_collections=mapping,
+                source_fingerprint=source_fingerprint,
+                index_identity=identity,
+                obsolete_collections=_runtime_obsolete_collections(state),
+            )
+            return True
+
+    def invalidate_runtime_memory(self) -> dict[str, object]:
+        """Remove the complete derived memory projection without touching SQLite."""
+
+        with self._runtime_reindex_lock, self._runtime_collection_lock:
+            state = self._read_runtime_index_state()
+            runtime_bases = {
+                self._runtime_collection_base_name(collection)
+                for collection in RUNTIME_MEMORY_COLLECTIONS
+            }
+            collections = {
+                *(_runtime_physical_collection_map(state).values()),
+                *_runtime_obsolete_collections(state),
+                *runtime_bases,
+            }
+            collections.update(
+                description.name
+                for description in self.client.get_collections().collections
+                if any(
+                    description.name == base
+                    or description.name.startswith(f"{base}{_INDEX_BUILD_MARKER}")
+                    for base in runtime_bases
+                )
+            )
+            with self._collection_condition:
+                self._runtime_memory_invalidating = True
+                deadline = time.monotonic() + _OBSOLETE_COLLECTION_WAIT_S
+                while any(self._collection_readers.get(name, 0) for name in collections):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._runtime_memory_invalidating = False
+                        self._collection_condition.notify_all()
+                        raise RuntimeError("runtime memory collections are still in use")
+                    self._collection_condition.wait(timeout=remaining)
+            try:
+                failed = self._delete_collections(sorted(collections))
+                if failed:
+                    error = RuntimeError(
+                        "runtime memory invalidation failed for: " + ", ".join(sorted(failed))
+                    )
+                    self._record_failure("runtime_memory_invalidation", error)
+                    raise error
+                state_path = self._runtime_index_state_path()
+                state_path.unlink(missing_ok=True)
+                if state_path.parent.exists():
+                    _fsync_directory(state_path.parent)
+                with self._cache_lock:
+                    self.query_cache.clear()
+                self._record_success("runtime_memory_invalidation")
+            finally:
+                with self._collection_condition:
+                    self._runtime_memory_invalidating = False
+                    self._collection_condition.notify_all()
+        return {
+            "status": "invalidated",
+            "collections_deleted": sorted(collections),
+            "reindex_required": True,
         }
-        self._write_runtime_index_state(
-            indexed_counts=indexed_counts,
-            physical_collections=mapping,
-            source_fingerprint=source_fingerprint,
-            index_identity=identity,
-            obsolete_collections=_runtime_obsolete_collections(state),
-        )
-        return True
 
     def health_snapshot(self) -> dict[str, object]:
         with self._health_lock:
@@ -673,6 +737,8 @@ class RagService:
         collections: Sequence[str],
     ) -> Iterator[dict[str, str]]:
         with self._collection_condition:
+            while self._runtime_memory_invalidating:
+                self._collection_condition.wait()
             state = self._read_runtime_index_state()
             active = (
                 _runtime_physical_collection_map(state)

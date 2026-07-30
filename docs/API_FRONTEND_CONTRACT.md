@@ -3,6 +3,11 @@
 Contrat minimal entre le backend FastAPI et le futur frontend React. Le contrat
 stable actuel est `/designs` + `workflow_id`.
 
+`workflow_id` doit respecter `wf_[0-9a-f]{12}` et `version_id`
+`v[0-9a-f]{8}`. La validation HTTP rejette aussi les traversées encodées avant
+toute lecture locale. Un workflow bien formé mais inconnu retourne `404` pour
+le statut, les événements et les versions.
+
 > `apps/frontend` est une rework connectée au backend réel, non encore acceptée
 > comme produit. Ce contrat reste la frontière stable `/designs` + `workflow_id`.
 
@@ -52,6 +57,12 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `POST` | `/document-packs/{pack_id}/corrections` | Appliquer une correction manuelle. |
 | `POST` | `/document-packs/{pack_id}/generate-design` | Générer un design depuis le pack. |
 
+`GET /health` est aussi un contrôle d'identité du service, pas seulement un
+ping. Le frontend exige `status=ok`,
+`service=agentic_telecom_3d_studio_api` et
+`api_contract_version=2026-07-29`; une autre application sur le même port doit
+être refusée.
+
 ## Artifacts importants
 
 Noms d'artifact utilisés par le frontend :
@@ -73,6 +84,9 @@ Noms d'artifact utilisés par le frontend :
 - `adaptation_capabilities` → `adaptation_capabilities.json`
 - `scene_patch` → `scene_patch.json`
 - `scene_diff` → `scene_diff.json`
+- `design_blueprint` → `design_blueprint.json`
+- `blueprint_requirement_coverage` → `blueprint_requirement_coverage.json`
+- `blueprint_scene_coverage` → `blueprint_scene_coverage.json`
 
 Dans les réponses publiques (`/designs/{id}`, `/designs/{id}/edit`,
 `/designs/{id}/versions`, `/viewer-bundle`), ces artefacts sont exposés via
@@ -81,7 +95,9 @@ restent internes au backend.
 
 ## Champs clés du statut workflow
 
-- `status` : `pending`, `running`, `completed`, `failed`.
+- `status` : `pending`, `running`, `completed`, `failed`,
+  `legacy_unverified` (ancien résultat sans preuve complète) ou
+  `integrity_failed` (preuve active modifiée/incohérente).
 - `generation_mode` : `real_blender` ou fallback.
 - `generation_strategy`, `geometry_source`, `mesh_qa_level`, `mesh_qa_passed` :
   vérité 3D/QA affichable. `mesh_qa_level` peut être
@@ -95,6 +111,9 @@ restent internes au backend.
   exigences critiques sont présentes dans `SceneSpec`.
 - `completion_certificate_status` : `issued` uniquement lorsque le résultat
   terminal et les hashes des artefacts ont été vérifiés.
+- Les deux statuts de quarantaine exposent `artifacts={}` et ne fournissent ni
+  `download_url` ni `trace_url`; le frontend doit proposer une régénération
+  certifiée, jamais afficher le viewer comme prêt.
 - `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`,
   `rag_reranker_degraded_reason` : vérité reranker NVIDIA/passthrough.
 - `asset_import_summary` : résumé des imports GLB/fallback.
@@ -108,6 +127,8 @@ restent internes au backend.
 - `runtime_capabilities` : capacités runtime réelles du backend v1.
 - `unsupported_actions` : actions explicitement non disponibles avec raison.
 - `available_actions` : actions que l'UI peut proposer pour cet état.
+  `rollback_version` n'est présent que pour un résultat certifié avec version
+  active.
 
 ## Limites connues du contrat
 
@@ -243,6 +264,8 @@ visible and ask the user to clean temporary artifacts before retrying.
 6. `GET /designs` pour restaurer les designs locaux.
 7. `POST /designs` quand l'utilisateur envoie un prompt.
 8. Ouvrir `/designs/{workflow_id}/events/stream`.
+   Après fallback polling, appeler `/designs/{workflow_id}/events?after_sequence=N`
+   et traiter le lot delta au lieu de relire l'historique complet.
 9. À l'événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
    `/user-issues` et `/versions`.
 10. Charger `/designs/{id}/adaptation-capabilities` avant d'afficher les
@@ -252,7 +275,9 @@ Le frontend doit rendre:
 
 - chat en surface principale;
 - viewer 3D depuis `primary_glb_url`;
-- strip d'agents depuis `payload.human_label` et `payload.progress_message`;
+- exécution spécialisée depuis `payload.human_label`,
+  `payload.progress_message`, `payload.actor_kind` et
+  `payload.decision_authority`; ne pas appeler Blender/QA/services « agents LLM »;
 - drawers QA, timeline, scene plan, documents, assets, versions;
 - raw JSON seulement en détail secondaire.
 

@@ -167,6 +167,135 @@ def test_runtime_reindex_failure_keeps_last_published_index(tmp_path: Path) -> N
     service.close()
 
 
+def test_runtime_invalidation_removes_orphan_builds_and_rejects_physical_names(
+    tmp_path: Path,
+) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    orphan = f"{service._runtime_collection_base_name('design_memory')}__build_crashdeadbeef"
+    service.client.create_collection(
+        collection_name=orphan,
+        vectors_config=VectorParams(size=provider.dimensions, distance=Distance.COSINE),
+    )
+
+    with pytest.raises(ValueError, match="unsupported RAG collection"):
+        service.search("stale memory", collection=orphan)
+
+    report = service.invalidate_runtime_memory()
+
+    assert orphan in report["collections_deleted"]
+    assert not service.client.collection_exists(orphan)
+    service.close()
+
+
+def test_runtime_search_waits_while_invalidation_deletes_collections(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    service.upsert_runtime_document(
+        collection="design_memory",
+        doc_id="memory:design:before-purge",
+        text="design before purge",
+        payload={},
+    )
+    deleting = threading.Event()
+    release_delete = threading.Event()
+    original_delete = service._delete_collections
+
+    def delayed_delete(collections):
+        deleting.set()
+        assert release_delete.wait(timeout=2.0)
+        return original_delete(collections)
+
+    monkeypatch.setattr(service, "_delete_collections", delayed_delete)
+    invalidation_errors: list[Exception] = []
+    search_errors: list[Exception] = []
+    search_results: list[list[RagSearchResult]] = []
+
+    def invalidate() -> None:
+        try:
+            service.invalidate_runtime_memory()
+        except Exception as exc:  # pragma: no cover - unexpected failure evidence
+            invalidation_errors.append(exc)
+
+    def search() -> None:
+        try:
+            search_results.append(service.search("design before purge", collection="design_memory"))
+        except Exception as exc:  # pragma: no cover - unexpected failure evidence
+            search_errors.append(exc)
+
+    invalidator = threading.Thread(target=invalidate)
+    invalidator.start()
+    assert deleting.wait(timeout=2.0)
+    reader = threading.Thread(target=search)
+    reader.start()
+    time.sleep(0.05)
+    assert reader.is_alive()
+    release_delete.set()
+    invalidator.join(timeout=3.0)
+    reader.join(timeout=3.0)
+
+    assert invalidation_errors == []
+    assert search_errors == []
+    assert search_results == [[]]
+    service.close()
+
+
+def test_runtime_upsert_holds_publication_lock_through_collection_resolution_and_write(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    provider = _SwitchableEmbeddingProvider()
+    service = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker_provider_name="passthrough",
+    )
+    original_collection_name = service._runtime_collection_name
+    original_upsert = service.client.upsert
+
+    def checked_collection_name(collection: str) -> str:
+        assert service._runtime_collection_lock.locked()
+        return original_collection_name(collection)
+
+    def checked_upsert(*args, **kwargs):
+        assert service._runtime_collection_lock.locked()
+        return original_upsert(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_runtime_collection_name", checked_collection_name)
+    monkeypatch.setattr(service.client, "upsert", checked_upsert)
+
+    service.upsert_runtime_document(
+        collection="design_memory",
+        doc_id="memory:design:locked",
+        text="locked publication",
+        payload={},
+    )
+
+    assert [
+        result.doc_id
+        for result in service.search(
+            "locked publication",
+            collection="design_memory",
+            limit=1,
+        )
+    ] == ["memory:design:locked"]
+    service.close()
+
+
 def test_rag_health_records_real_embedding_failure(tmp_path: Path) -> None:
     provider = _SwitchableEmbeddingProvider()
     provider.fail_batch = True

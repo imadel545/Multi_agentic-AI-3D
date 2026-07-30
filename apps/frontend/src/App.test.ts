@@ -5,15 +5,17 @@ import {
   documentPackFilesSizeError,
   documentPackSizeError,
   latestEventCursor,
+  latestEventSequence,
   needsPolling,
   parseCorrectionValue,
   selectWorkflowToRestore,
+  shouldForgetDocumentPackSession,
   userFacingError
 } from "./App";
 
 function workflow(
   workflowId: string,
-  status: string,
+  status: WorkflowStatus["status"],
   createdAt: string
 ): WorkflowStatus {
   return {
@@ -24,7 +26,8 @@ function workflow(
     warnings: [],
     errors: [],
     available_actions: [],
-    unsupported_actions: []
+    unsupported_actions: [],
+    completion_certificate_status: status === "completed" ? "issued" : null
   };
 }
 
@@ -48,6 +51,19 @@ describe("frontend runtime selection", () => {
     expect(selected?.workflow_id).toBe("wf_completed_new");
   });
 
+  it("does not auto-restore an uncertified completed design", () => {
+    const legacy = {
+      ...workflow("wf_legacy", "completed", "2026-07-15T12:00:00Z"),
+      completion_certificate_status: null
+    };
+    const selected = selectWorkflowToRestore([
+      legacy,
+      workflow("wf_failed", "failed", "2026-07-15T11:00:00Z")
+    ]);
+
+    expect(selected?.workflow_id).toBe("wf_failed");
+  });
+
   it("polls only after the runtime explicitly falls back from SSE", () => {
     expect(needsPolling("running", "sse")).toBe(false);
     expect(needsPolling("streaming", "sse")).toBe(false);
@@ -63,6 +79,18 @@ describe("frontend runtime selection", () => {
       ])
     ).toBe("evt_terminal");
     expect(latestEventCursor([])).toBeNull();
+  });
+
+  it("keeps the highest durable sequence as the polling delta cursor", () => {
+    expect(
+      latestEventSequence([
+        { sequence: 4 },
+        { sequence: null },
+        { sequence: 9 },
+        { sequence: 7 }
+      ])
+    ).toBe(9);
+    expect(latestEventSequence([{ sequence: null }])).toBeNull();
   });
 
   it("normalizes simple user correction values without inventing structure", () => {
@@ -124,5 +152,19 @@ describe("frontend runtime selection", () => {
     expect(
       userFacingError(new ApiClientError(507, "/designs", "free disk 10MB"), "generation")
     ).toContain("Libérez de la place");
+  });
+
+  it("keeps the document-pack pointer on transient failures and forgets only a missing pack", () => {
+    expect(
+      shouldForgetDocumentPackSession(
+        new ApiClientError(503, "/document-packs/pack_1", "temporarily unavailable")
+      )
+    ).toBe(false);
+    expect(
+      shouldForgetDocumentPackSession(
+        new ApiClientError(404, "/document-packs/pack_1", "not found")
+      )
+    ).toBe(true);
+    expect(shouldForgetDocumentPackSession(new TypeError("network failure"))).toBe(false);
   });
 });

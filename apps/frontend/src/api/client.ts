@@ -277,11 +277,19 @@ export class TelecomStudioApi {
     );
   }
 
-  async workflowEvents(workflowId: string): Promise<WorkflowEvent[]> {
+  async workflowEvents(
+    workflowId: string,
+    afterSequence?: number | null
+  ): Promise<WorkflowEvent[]> {
+    const params = new URLSearchParams();
+    if (afterSequence != null) {
+      params.set("after_sequence", String(afterSequence));
+    }
+    const query = params.size ? `?${params.toString()}` : "";
     return parseContract(
       "WorkflowEvents",
       WorkflowEventSchema.array(),
-      await this.getJson(`/designs/${workflowId}/events`)
+      await this.getJson(`/designs/${workflowId}/events${query}`)
     );
   }
 

@@ -41,6 +41,16 @@ button {
   user-select: none;
 }
 
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+textarea:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgba(29, 118, 111, 0.38);
+  outline-offset: 2px;
+}
+
 .studio-root {
   height: 100vh;
   display: grid;
@@ -1267,7 +1277,42 @@ a:focus-visible {
   .studio-root {
     height: auto;
     min-height: 100vh;
+    grid-template-rows: auto 1fr;
     overflow: visible;
+  }
+
+  .topbar {
+    min-height: 0;
+    padding: 10px 12px;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .brand-lockup {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .brand-lockup strong {
+    display: block;
+    font-size: 14px;
+    line-height: 1.2;
+  }
+
+  .topbar-status {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 5px;
+  }
+
+  .runtime-presence,
+  .topbar-proof,
+  .topbar-issue-count {
+    font-size: 11px;
+  }
+
+  .topbar-proof {
+    display: none;
   }
 
   .studio-layout {

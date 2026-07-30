@@ -5,7 +5,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
-from apps.api.telecom_studio_api.product import _studio_warnings
+from apps.api.telecom_studio_api.product import (
+    _events_to_timeline,
+    _geometry_fidelity_summary,
+    _studio_warnings,
+)
 from apps.api.telecom_studio_api.runtime_contract import memory_status
 
 
@@ -34,6 +38,7 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["reference_only_asset_count"] == 2
         assert summary["asset_count"] == 12
         assert summary["real_glb_asset_count"] == 12
+        assert summary["import_qualified_glb_count"] == 4
         assert summary["missing_file_count"] == 0
         assert not any(
             warning.get("technical_code") == "STUDIO_NO_QUALIFIED_ASSETS"
@@ -87,6 +92,69 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert isinstance(summary["warnings"], list)
     finally:
         workflow_service.outputs_dir = original_outputs
+
+
+def test_geometry_fidelity_summary_counts_scene_components_by_declared_role() -> None:
+    summary = _geometry_fidelity_summary(
+        {
+            "scene_id": "scene_fidelity",
+            "network_type": "5G",
+            "tower": {
+                "asset_id": "tower",
+                "asset_metadata": {"geometry_fidelity": "schematic"},
+                "position": [0.0, 0.0, 0.0],
+                "rotation_deg": [0.0, 0.0, 0.0],
+                "height_m": 30.0,
+            },
+            "sectors": [
+                {
+                    "sector_id": "S1",
+                    "antenna_asset_id": "antenna_generic",
+                    "antenna_asset_metadata": {"geometry_fidelity": "technical_generic"},
+                    "radio_asset_id": "radio_generic",
+                    "radio_asset_metadata": {"geometry_fidelity": "technical_generic"},
+                    "install_height_m": 24.0,
+                    "azimuth_deg": 0.0,
+                    "beamwidth_deg": 65.0,
+                },
+                {
+                    "sector_id": "S2",
+                    "antenna_asset_id": "antenna_vendor",
+                    "antenna_asset_metadata": {"geometry_fidelity": "vendor_qualified"},
+                    "install_height_m": 24.0,
+                    "azimuth_deg": 120.0,
+                    "beamwidth_deg": 65.0,
+                },
+            ],
+            "accessory_assets": [
+                {
+                    "asset_id": "cabinet_vendor",
+                    "asset_type": "cabinet",
+                    "asset_metadata": {"geometry_fidelity": "vendor_qualified"},
+                    "position": [2.0, 0.0, 0.0],
+                    "rotation_deg": [0.0, 0.0, 0.0],
+                }
+            ],
+        }
+    )
+
+    assert summary == {
+        "component_count": 5,
+        "counts": {
+            "schematic": 1,
+            "technical_generic": 2,
+            "vendor_qualified": 2,
+        },
+        "roles": {
+            "schematic": ["tower"],
+            "technical_generic": ["antenna", "radio"],
+            "vendor_qualified": ["antenna", "cabinet"],
+        },
+    }
+
+
+def test_geometry_fidelity_summary_rejects_invalid_scene_instead_of_guessing() -> None:
+    assert _geometry_fidelity_summary({"mesh_qa_passed": True}) is None
 
 
 class _MemoryStatusProbe:
@@ -337,6 +405,10 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["qa_summary"]["mesh_qa_level"]
         assert isinstance(bundle["qa_summary"]["checks_passed"], list)
         assert isinstance(bundle["qa_summary"]["checks_failed"], list)
+        fidelity = bundle["geometry_fidelity_summary"]
+        assert fidelity["component_count"] == sum(fidelity["counts"].values())
+        assert fidelity["counts"]["technical_generic"] >= 1
+        assert "antenna" in fidelity["roles"]["technical_generic"]
         assert bundle["primary_glb_url"].startswith(f"/designs/{workflow_id}/artifacts/glb")
         assert "/Users/" not in bundle["primary_glb_url"]
         assert bundle["runtime_capabilities"]["workflow_id_source"] == "workflow_id"
@@ -566,6 +638,25 @@ def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -
         workflow_service.outputs_dir = original_outputs
 
 
+def test_timeline_marks_rejected_edit_and_failed_qa_as_failed() -> None:
+    events = [
+        {
+            "event_type": "edit_patch_rejected",
+            "timestamp": "2026-07-29T00:00:00Z",
+            "payload": {"status": "rejected"},
+        },
+        {
+            "event_type": "qa_failed",
+            "timestamp": "2026-07-29T00:00:01Z",
+            "payload": {"status": "failed"},
+        },
+    ]
+
+    timeline = _events_to_timeline(events, {"status": "completed"})
+
+    assert [step["status"] for step in timeline[:2]] == ["failed", "failed"]
+
+
 def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
     client = TestClient(app)
 
@@ -591,11 +682,11 @@ def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
 def test_product_endpoints_return_404_for_unknown_workflow() -> None:
     client = TestClient(app)
     endpoints = [
-        "/designs/wf_unknown/user-summary",
-        "/designs/wf_unknown/current-operation",
-        "/designs/wf_unknown/user-issues",
-        "/designs/wf_unknown/viewer-bundle",
-        "/designs/wf_unknown/timeline-summary",
+        "/designs/wf_000000000000/user-summary",
+        "/designs/wf_000000000000/current-operation",
+        "/designs/wf_000000000000/user-issues",
+        "/designs/wf_000000000000/viewer-bundle",
+        "/designs/wf_000000000000/timeline-summary",
     ]
     for endpoint in endpoints:
         response = client.get(endpoint)
@@ -716,6 +807,10 @@ def test_product_issues_humanize_real_asset_warning_codes() -> None:
     titles = {issue["title"] for issue in issues}
     assert "Asset interne minimal" in titles
     assert "Fallback procédural d'asset" in titles
+    minimal_issue = next(issue for issue in issues if issue["title"] == "Asset interne minimal")
+    assert "chaîne de génération est vérifiée" in minimal_issue["impact"]
+    assert "fidélité constructeur" in minimal_issue["impact"]
+    assert "valide techniquement" not in minimal_issue["impact"]
 
 
 def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:

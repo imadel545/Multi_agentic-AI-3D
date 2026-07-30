@@ -66,7 +66,7 @@ describe("SSE adapter", () => {
     expect(source.closed).toBe(true);
   });
 
-  it("reports stream failure for polling fallback", () => {
+  it("waits for three consecutive transport errors before polling fallback", () => {
     const onError = vi.fn();
 
     openWorkflowEventStream(
@@ -78,18 +78,51 @@ describe("SSE adapter", () => {
     const source = FakeEventSource.instances.at(-1)!;
     source.onerror?.();
 
-    expect(onError).toHaveBeenCalledWith("connection_lost");
+    expect(onError).not.toHaveBeenCalled();
     expect(source.closed).toBe(false);
     source.onerror?.();
+    expect(onError).not.toHaveBeenCalled();
+    expect(source.closed).toBe(false);
     source.onerror?.();
+
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith("connection_lost");
+    expect(source.closed).toBe(true);
+  });
+
+  it("recovers a transient transport error and resets the failure threshold", () => {
+    const onError = vi.fn();
+    const onRecovered = vi.fn();
+
+    openWorkflowEventStream(
+      "http://127.0.0.1:8000/designs/wf_1/events/stream",
+      { onError, onEvent: vi.fn(), onRecovered, onTerminal: vi.fn() },
+      FakeEventSource as unknown as new (url: string) => EventSource
+    );
+
+    const source = FakeEventSource.instances.at(-1)!;
+    source.onerror?.();
+    source.onopen?.();
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(onRecovered).toHaveBeenCalledOnce();
+    expect(source.closed).toBe(false);
+
+    source.onerror?.();
+    source.onerror?.();
+    expect(onError).not.toHaveBeenCalled();
+
+    source.onerror?.();
+    expect(onError).toHaveBeenCalledWith("connection_lost");
     expect(source.closed).toBe(true);
   });
 
   it("reports a typed sequence gap without exposing transport copy", () => {
     const onError = vi.fn();
+    const onEvent = vi.fn();
     openWorkflowEventStream(
       "http://127.0.0.1:8000/designs/wf_1/events/stream",
-      { onError, onEvent: vi.fn(), onTerminal: vi.fn() },
+      { onError, onEvent, onTerminal: vi.fn() },
       FakeEventSource as unknown as new (url: string) => EventSource
     );
     const source = FakeEventSource.instances.at(-1)!;
@@ -104,6 +137,8 @@ describe("SSE adapter", () => {
       });
     }
     expect(onError).toHaveBeenCalledWith("sequence_gap");
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ sequence: 4 }));
   });
 
   it("treats an applied edit as a terminal revision event", () => {

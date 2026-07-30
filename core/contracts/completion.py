@@ -33,11 +33,15 @@ class CertifiedArtifact(StrictModel):
 
 
 class CompletionCertificate(StrictModel):
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.0.0"
     workflow_id: str = Field(min_length=1)
     status: Literal["issued", "rejected"]
     evaluated_at: datetime
     requirements_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    design_blueprint_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[a-f0-9]{64}$",
+    )
     scene_spec_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     generation_mode: str | None = None
     artifacts: list[CertifiedArtifact] = Field(default_factory=list)

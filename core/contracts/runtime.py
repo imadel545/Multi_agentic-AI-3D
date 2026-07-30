@@ -5,10 +5,27 @@ from pydantic import Field
 from core.contracts.common import StrictModel
 from core.contracts.memory import MemoryRecallResult
 
+ActorKind = Literal[
+    "llm_decision",
+    "deterministic_specialist",
+    "service",
+    "quality_gate",
+    "external_tool",
+]
+DecisionAuthority = Literal[
+    "llm_bounded",
+    "deterministic",
+    "external_verified",
+]
+
 
 class AgentStepTrace(StrictModel):
     node: str = Field(min_length=1)
     status: Literal["passed", "failed", "skipped"] = "passed"
+    # Conservative defaults keep historical trace payloads readable without
+    # reclassifying an unknown legacy step as an LLM agent.
+    actor_kind: ActorKind = "service"
+    decision_authority: DecisionAuthority = "deterministic"
     detail: str = ""
     duration_ms: int = Field(default=0, ge=0)
     warnings: list[str] = Field(default_factory=list)
@@ -38,7 +55,9 @@ class MemoryEvent(StrictModel):
 
 
 __all__ = [
+    "ActorKind",
     "AgentStepTrace",
+    "DecisionAuthority",
     "MemoryEvent",
     "MemoryRecallResult",
     "WorkflowTrace",

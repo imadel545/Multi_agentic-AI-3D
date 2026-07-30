@@ -1,10 +1,9 @@
-import re
 import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-WORKFLOW_DIR_PATTERN = re.compile(r"^wf_[0-9a-f]{12}$")
+from core.contracts.identifiers import require_workflow_id
 
 
 @dataclass(frozen=True)
@@ -55,8 +54,7 @@ class CleanupService:
         )
 
     def delete_workflow(self, workflow_id: str) -> bool:
-        if not WORKFLOW_DIR_PATTERN.fullmatch(workflow_id):
-            raise ValueError("workflow_id must match wf_<12 hex chars>")
+        require_workflow_id(workflow_id)
         path = self.outputs_dir / workflow_id
         root = self.outputs_dir.resolve()
         if not _is_managed_workflow_dir(path) or not _inside_root(root, path):
@@ -66,12 +64,11 @@ class CleanupService:
 
 
 def _is_managed_workflow_dir(path: Path) -> bool:
-    return (
-        WORKFLOW_DIR_PATTERN.fullmatch(path.name) is not None
-        and path.exists()
-        and not path.is_symlink()
-        and path.is_dir()
-    )
+    try:
+        require_workflow_id(path.name)
+    except ValueError:
+        return False
+    return path.exists() and not path.is_symlink() and path.is_dir()
 
 
 def _inside_root(root: Path, path: Path) -> bool:

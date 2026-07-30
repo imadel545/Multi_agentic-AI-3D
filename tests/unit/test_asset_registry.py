@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from core.contracts.assets import AssetQualification
+from core.contracts.assets import AssetManifest, AssetQualification
 from core.services.asset_registry import AssetRegistry
 
 
@@ -17,6 +17,30 @@ def test_registry_loads_and_selects_5g_assets() -> None:
     assert tower.asset_id == "TOWER_LATTICE_30M"
     assert antenna.asset_id == "ANT_PANEL_5G_001"
     assert radio.asset_id == "RRU_SMALL_001"
+    assert antenna.geometry_fidelity == "technical_generic"
+    assert radio.geometry_fidelity == "technical_generic"
+
+
+def test_asset_manifest_defaults_to_schematic_geometry_fidelity() -> None:
+    manifest = AssetManifest(
+        asset_id="TEST_SCHEMATIC",
+        type="radio",
+        file="assets/test.glb",
+        compatible_networks=["5G"],
+    )
+
+    assert manifest.geometry_fidelity == "schematic"
+
+
+def test_asset_manifest_rejects_unknown_geometry_fidelity() -> None:
+    with pytest.raises(ValidationError):
+        AssetManifest(
+            asset_id="TEST_UNKNOWN_FIDELITY",
+            type="radio",
+            file="assets/test.glb",
+            compatible_networks=["5G"],
+            geometry_fidelity="marketing_grade",
+        )
 
 
 def test_exact_import_qualification_requires_all_geometry_proofs() -> None:

@@ -44,6 +44,35 @@ def test_scene_rejects_unimplemented_gltf_export() -> None:
         SceneSpec.model_validate(payload)
 
 
+def test_scene_rejects_unknown_schema_and_non_finite_geometry() -> None:
+    payload = _scene_payload()
+    payload["schema_version"] = "2.0.0"
+    with pytest.raises(ValidationError, match="1.0.0"):
+        SceneSpec.model_validate(payload)
+
+    payload = _scene_payload()
+    payload["sectors"][0]["beam_radius_m"] = float("inf")
+    with pytest.raises(ValidationError, match="finite number"):
+        SceneSpec.model_validate(payload)
+
+
+def test_legacy_scene_without_detail_level_defaults_to_high() -> None:
+    payload = _scene_payload()
+    payload.pop("detail_level")
+
+    scene = SceneSpec.model_validate(payload)
+
+    assert scene.detail_level == "high"
+
+
+def test_scene_rejects_duplicate_sector_ids() -> None:
+    payload = _scene_payload()
+    payload["sectors"].append({**payload["sectors"][0], "azimuth_deg": 120})
+
+    with pytest.raises(ValidationError, match="sector_id values must be unique"):
+        SceneSpec.model_validate(payload)
+
+
 def test_preview_camera_modes_have_distinct_operational_directions() -> None:
     directions = {mode: _camera_view_direction(mode) for mode in ("isometric", "front", "top")}
 

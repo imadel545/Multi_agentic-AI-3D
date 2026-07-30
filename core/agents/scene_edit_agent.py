@@ -71,15 +71,27 @@ class SceneEditAgent:
     ) -> AdaptationDecision:
         if self.graph is None or self.capability_service is None:
             raise RuntimeError("adaptation capability service is unavailable")
-        state = self.graph.invoke(
-            {
-                "workflow_id": workflow_id,
-                "scene": scene,
-                "edit_prompt": edit_prompt,
-                "graph_trace": [],
-            },
-            config={"configurable": {"thread_id": f"{workflow_id}:adaptation:{uuid.uuid4().hex}"}},
-        )
+        thread_id = f"{workflow_id}:adaptation:{uuid.uuid4().hex}"
+        try:
+            state = self.graph.invoke(
+                {
+                    "workflow_id": workflow_id,
+                    "scene": scene,
+                    "edit_prompt": edit_prompt,
+                    "graph_trace": [],
+                },
+                config={"configurable": {"thread_id": thread_id}},
+            )
+        finally:
+            if self.checkpoint_saver is not None:
+                try:
+                    self.checkpoint_saver.delete_thread(thread_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to remove terminal adaptation checkpoints for %s.",
+                        workflow_id,
+                        exc_info=True,
+                    )
         return AdaptationDecision(
             workflow_id=workflow_id,
             prompt=edit_prompt,

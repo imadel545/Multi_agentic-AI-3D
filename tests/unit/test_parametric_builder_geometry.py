@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from apps.blender_worker import parametric_builder
 from apps.blender_worker.generate_scene import _compute_scene_bounding_box
 from apps.blender_worker.parametric_builder import (
     sector_forward_vector,
@@ -20,6 +21,98 @@ class _Vector:
 class _IdentityMatrix:
     def __matmul__(self, vector: _Vector) -> _Vector:
         return vector
+
+
+class _Part:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.data = SimpleNamespace(materials=[])
+        self.parent = None
+        self.rotation_mode = ""
+        self.rotation_euler = ()
+        self.location = ()
+
+
+def _stub_builder_bpy(monkeypatch):
+    created: list[_Part] = []
+
+    def new_object(name: str, _data) -> _Part:
+        part = _Part(name)
+        created.append(part)
+        return part
+
+    def create_box(_bpy, name, _width, _depth, _height, _location) -> _Part:
+        part = _Part(name)
+        created.append(part)
+        return part
+
+    def create_cylinder(_bpy, *, name, **_kwargs) -> _Part:
+        part = _Part(name)
+        created.append(part)
+        return part
+
+    monkeypatch.setattr(parametric_builder, "_create_box", create_box)
+    monkeypatch.setattr(parametric_builder, "_create_cylinder", create_cylinder)
+    monkeypatch.setattr(parametric_builder, "_material", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(parametric_builder, "_add_bevel", lambda *_args, **_kwargs: None)
+    bpy = SimpleNamespace(
+        data=SimpleNamespace(objects=SimpleNamespace(new=new_object)),
+        context=SimpleNamespace(
+            collection=SimpleNamespace(objects=SimpleNamespace(link=lambda _x: None))
+        ),
+    )
+    return bpy, created
+
+
+def test_rru_builder_creates_profiled_technical_parts(monkeypatch) -> None:
+    bpy, created = _stub_builder_bpy(monkeypatch)
+
+    root = parametric_builder.build_parametric_radio(
+        bpy,
+        name="radio_S1_RRU",
+        width=0.35,
+        depth=0.18,
+        height=0.6,
+        location=(0.0, 1.0, 20.0),
+        rotation=(0.0, 0.0, 0.0),
+        geometry_profile={
+            "heat_sink_fin_count": 10,
+            "bottom_connector_count": 5,
+            "mounting_rail_count": 2,
+        },
+    )
+
+    names = [part.name for part in created]
+    assert root.name == "radio_S1_RRU"
+    assert "radio_S1_RRU_enclosure" in names
+    assert "radio_S1_RRU_front_cover" in names
+    assert sum("_heat_sink_" in name for name in names) == 10
+    assert sum("_bottom_connector_" in name for name in names) == 5
+    assert sum("_mount_rail_" in name for name in names) == 2
+    assert "radio_S1_RRU_status_indicator" in names
+    assert "radio_S1_RRU_label_plate" in names
+
+
+def test_panel_builder_creates_mounts_and_ports_from_profile(monkeypatch) -> None:
+    bpy, created = _stub_builder_bpy(monkeypatch)
+
+    root = parametric_builder.build_parametric_panel_antenna(
+        bpy,
+        name="antenna_S1_PANEL",
+        width=0.45,
+        depth=0.18,
+        height=1.6,
+        location=(0.0, 1.0, 24.0),
+        rotation=(0.0, 0.0, 0.0),
+        geometry_profile={"rear_mount_rail_count": 3, "bottom_port_count": 6},
+    )
+
+    names = [part.name for part in created]
+    assert root.name == "antenna_S1_PANEL"
+    assert "antenna_S1_PANEL_radome" in names
+    assert "antenna_S1_PANEL_rear_chassis" in names
+    assert sum("_mount_rail_" in name for name in names) == 3
+    assert sum("_bottom_port_" in name for name in names) == 6
 
 
 @pytest.mark.parametrize(

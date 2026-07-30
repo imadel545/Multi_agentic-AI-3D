@@ -118,6 +118,7 @@ export function openWorkflowEventStream(
         normalized.sequence > lastSequence + 1
       ) {
         callbacks.onError("sequence_gap");
+        return;
       }
       if (normalized.sequence != null) {
         lastSequence = Math.max(lastSequence ?? 0, normalized.sequence);
@@ -147,11 +148,12 @@ export function openWorkflowEventStream(
       return;
     }
     consecutiveErrors += 1;
-    callbacks.onError("connection_lost");
-    if (consecutiveErrors >= 3) {
-      closed = true;
-      source.close();
+    if (consecutiveErrors < 3) {
+      return;
     }
+    closed = true;
+    source.close();
+    callbacks.onError("connection_lost");
   };
 
   return {

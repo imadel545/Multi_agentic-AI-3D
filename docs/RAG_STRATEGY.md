@@ -106,14 +106,19 @@ hints are:
 
 - `antenna_install_height_m`
 - `beamwidth_deg`
+- `mechanical_tilt_deg`
+- `electrical_tilt_deg`
 - `include_cables`
 - `include_sector_beams`
 
 Free text retrieved by RAG is audit context. It must not mutate the 3D plan
 silently.
 
-RAG must not overwrite an explicit user/document value. If later code lets a
-hint fill a default, that change must be visible in `rag_evidence.json`.
+RAG must not overwrite an explicit user/document value. A hint can replace only
+a field carrying the matching explicit default-warning code; every applied,
+rejected or no-op candidate remains visible in `rag_evidence.json`. Foundation,
+equipment presence, labels, GPS and cabinet decisions remain outside this
+bounded six-field authority.
 
 ## Public Truth Fields
 

@@ -33,6 +33,18 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   executes a checkpointed four-node adaptation graph: discover declared
   capabilities, plan, validate, then mutate `SceneSpec`. Version bookkeeping
   remains service-level.
+- Runtime traces classify every step as `llm_decision`,
+  `deterministic_specialist`, `service`, `quality_gate`, or `external_tool`,
+  with explicit decision authority. This is a controlled expert workflow, not
+  yet a dynamic swarm/supervisor architecture.
+- `compose_design_blueprint` now creates a generic typed planning intent after
+  requirement validation. It routes the required deterministic specialist
+  domains, records component quantities/asset queries/fidelity/placement,
+  persists `design_blueprint.json`, and proves
+  `RequirementSpec -> DesignBlueprint -> SceneSpec`. `SceneSpec` remains the
+  sole 3D generation source of truth. The current blueprint is deterministic,
+  has no operational connector catalog, and is not yet selected by an LLM from
+  competing candidates.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction.
 - `RequirementSpec` carries typed field evidence, candidate values, assumptions,
@@ -104,6 +116,13 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   generation. These mutations were verified at Product API level; the remaining
   frontend limitation is replaying every mutation through browser controls in
   one recorded session.
+- The 2026-07-30 audit extended the frontend baseline to 117 tests, typecheck,
+  production build and npm audit, then restored real workflow
+  `wf_a6660b81b929` against the
+  current API. Desktop/mobile rendering showed its verified Blender model; a
+  separate Chrome headless run without WebGL displayed the real backend preview
+  and the explicit WebGL warning. All requested product endpoints returned 200
+  and no application console error was observed.
 - Old dashboard patterns remain rejected.
 
 ## Current assets
@@ -129,6 +148,14 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   GPS and power-cabinet GLBs while keeping the tower and RRU parametric. The 5G
   panel and RRU companion GLBs are not imported because their orientation is
   not qualified; this prevents silent non-uniform distortion.
+- The generic 5G panel and RRU carry typed, bounded geometry profiles in their
+  manifests and resolved `SceneSpec`. `detail_level` is operational:
+  high/medium/low select different declared sub-part counts while preserving
+  dimensions and placement. Their fidelity is `technical_generic`, never
+  `vendor_qualified`.
+- The RRU adaptation profile exposes bounded vertical/radial mounting offsets.
+  The LLM may select declared values only; the deterministic Blender builder
+  owns topology and never executes generated Python.
 - Every manifest references an explicit adaptation profile. The versioned
   catalog under `assets/capabilities/adaptation_profiles.json` declares the
   editable parameter, JSON pointer, value type, bounds, effect, and execution
@@ -162,10 +189,12 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - GLB is only the exported viewer result, not the source of truth.
 - Blender produces `design.glb`, `preview.png`, `scene_metadata.json`, and
   a runner-owned `build.lock.json` containing the isolated attempt/build ID,
-  SceneSpec/worker hashes, Blender runtime identity and artifact hashes. Blender
-  starts in background factory mode and every retry uses a fresh staging directory.
-  reports. The workflow also persists `requirement_coverage.json` and
-  `completion_certificate.json`.
+  the raw SceneSpec hash, a canonical bundle hash for the immutable copy of
+  every Python source under `apps/blender_worker` that Blender actually
+  executes, Blender runtime identity and artifact hashes. Blender starts in
+  background factory mode and every retry uses a fresh staging directory. The
+  workflow also persists `requirement_coverage.json`,
+  `completion_certificate.json` and the critical QA reports.
 - Successful revisions also persist `adaptation_plan.json`,
   `adaptation_capabilities.json`, `scene_patch.json`, and `scene_diff.json`.
   Blender still regenerates from the validated `SceneSpec`; the LLM never
@@ -185,11 +214,15 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   approximate HBA from antenna node transforms when possible, RRU/cable/cabinet/GPS
   presence, concrete pad presence when requested, real label object presence, and
   primary-equipment AABB interference. Same-sector antenna/RRU contact is the only
-  declared primary-equipment overlap allowed by this gate.
+  declared primary-equipment overlap allowed by this gate; its minimum-axis
+  penetration is bounded to 0.15 m and a total overlap is rejected.
 - GLB integrity QA reads actual binary buffers, buffer views, `POSITION`
   accessors and optional index accessors. It rejects JSON-only accessor claims,
   non-finite vertex values, out-of-range indices, incomplete primitives, and
   semantic entities that have no valid mesh in their node tree.
+- For profiled internal panel/RRU generation, structural QA also requires the
+  declared radome/chassis/mount/port and enclosure/heatsink/mount/connector
+  sub-parts. A single semantic box can no longer satisfy these profiles.
 - Before export, every generated cylindrical member records its requested
   endpoints and is measured from transformed Blender mesh vertices. Generation
   hard-fails above 1 mm endpoint error; this protects lattice legs/braces,
@@ -203,10 +236,19 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   real-Blender mode, requirement coverage, both quality gates, GLB binary
   integrity, geometry QA and preview QA. The persistence boundary re-verifies
   those hashes before activation.
+- Persisted completion is also revalidated on active status reads, rollback and
+  artifact serving: full certificate schema/check set, RequirementSpec/SceneSpec
+  hashes, selected `SceneVersion.scene`, build-lock evidence, every certified
+  artifact hash and, for schema 1.1, critical report hashes. A historical
+  result without this chain becomes `legacy_unverified`; a changed active
+  artifact becomes `integrity_failed`. Files remain on disk but are not served.
 - Mesh QA v1 does **not** verify exact antenna azimuth from vertices and does
   **not** perform collision/RF/structural wind-load validation.
 - Preview QA parses PNG pixels and checks subject occupancy, framing, clipping,
   centering, contrast, and resolution. It is still not semantic visual review.
+- Preview camera fitting excludes beams, azimuth arrows, height markers and
+  labels so annotations cannot inflate physical subject bounds. A dedicated
+  equipment close-up/role-pixel gate is still missing.
 - QA does not yet finely validate materials or vendor exact mesh dimensions.
 - Do not call this QA "advanced geometry".
 
@@ -217,6 +259,12 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - `/events/stream` is now `push_sse`: it replays persisted JSONL events first,
   then streams live queue events until `workflow_completed` or
   `workflow_failed`.
+- Reconnect cursors seed the already-seen durable prefix. If a slow subscriber's
+  bounded in-memory queue drops events, a sequence gap triggers JSONL catch-up
+  before the terminal event is emitted.
+- Polling recovery can request `/events?after_sequence=N`; the frontend batches
+  and deduplicates only the returned delta. SSE tolerates two transient errors
+  before the third switches to visible polling, and recovery restores SSE.
 - Orchestration nodes emit `node_started`, then `node_completed`,
   `node_failed`, or `node_skipped` with `node`, `phase`, `status`, human label,
   progress message, detail, `duration_ms`, warnings, and errors.
@@ -235,17 +283,28 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   version and status.
 - `active_design.json` is the canonical, atomically published active-version
   commit. It is created only for a completed version whose completion
-  certificate and four certified artifacts revalidate. `active_version.json`
-  and the root status are compatibility projections.
+  certificate, persisted `SceneVersion.scene`, four certified artifacts and,
+  for schema 1.1, critical QA reports revalidate. `active_version.json`, root
+  status and terminal/product events are compatibility projections; a failure
+  in one of them cannot downgrade the canonical commit.
 - Startup recovery distinguishes an interrupted initial generation from an
   interrupted revision. Initial generation fails without a valid product
   version; an interrupted revision marks only its candidate version failed,
   restores the last completed active version, clears `active_operation`, and
   emits `edit_patch_rejected`.
-- LangGraph checkpoint threads are deleted after terminal workflows and bounded
+- LangGraph checkpoint threads are deleted after terminal workflows and
+  terminal adaptation decisions, and bounded
   at startup. SQLite checkpoint pages are compacted only when at least 64 MiB
   and 25% of the file are reclaimable, preventing deleted graph state from
   retaining unbounded disk space without vacuuming every startup.
+- Deleting a design purges its workflow/design/error memory, unlinks
+  document-pack references, removes its checkpoint threads and invalidates the
+  complete derived Qdrant memory projection. SQLite remains canonical and
+  `/memory/vector/reindex` rebuilds the remaining projection.
+- Qdrant accepts logical search collections only; runtime invalidation also
+  removes abandoned build collections and serializes concurrent reads/writes.
+  The optional Docker server is loopback-bound but remains pinned to legacy
+  `v1.9.2` pending a tested stepwise volume migration.
 - Mutating generation endpoints enforce configurable free-space admission via
   `TELECOM_STUDIO_MIN_FREE_DISK_MB` (256 MB by default) and return HTTP 507
   before creating orphan state when local persistence is unsafe.
@@ -254,6 +313,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   error count, progress message, and artifact refs when available.
 - Public workflow/edit/version responses expose artifact URLs, not local
   filesystem paths. `asset_imports[].resolved_path` remains internal only.
+- HTTP workflow/version identifiers are pattern-validated before path lookup,
+  including percent-encoded inputs.
 - Frontend "scene plan" maps to the `scene_spec` artifact. `SceneSpec` remains
   the geometry source of truth.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,

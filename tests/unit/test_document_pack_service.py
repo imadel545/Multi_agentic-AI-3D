@@ -1,4 +1,5 @@
 import importlib.util
+import threading
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -6,6 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 import core.document_pack.service as document_pack_service_module
+from core.contracts.document_pack import DocumentPackCorrection
 from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
 
 
@@ -51,6 +53,55 @@ def test_direct_file_ingestion_rejects_unsafe_and_duplicate_names(tmp_path: Path
         service.ingest_files([("radio.txt", b"one"), ("RADIO.TXT", b"two")])
 
     assert not service.packs_dir.exists()
+
+
+def test_document_pack_rejects_pack_identifier_traversal(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+
+    with pytest.raises(KeyError):
+        service.get_summary("..")
+
+
+def test_concurrent_document_pack_corrections_preserve_both_updates(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+    summary = service.ingest_zip(_complete_pack_zip())
+    barrier = threading.Barrier(3)
+    results = []
+    errors: list[Exception] = []
+
+    def correct(height: float) -> None:
+        barrier.wait()
+        try:
+            results.append(
+                service.apply_correction(
+                    summary.pack_id,
+                    DocumentPackCorrection(
+                        field="tower.tower_height_m",
+                        value=height,
+                        reason=f"confirmed height {height}",
+                    ),
+                )
+            )
+        except Exception as exc:  # pragma: no cover - unexpected failure evidence
+            errors.append(exc)
+
+    first = threading.Thread(target=correct, args=(31.0,))
+    second = threading.Thread(target=correct, args=(32.0,))
+    first.start()
+    second.start()
+    barrier.wait()
+    first.join(timeout=5.0)
+    second.join(timeout=5.0)
+
+    assert errors == []
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert sorted(result.correction_count for result in results) == [1, 2]
+    persisted = document_pack_service_module._read_json(
+        service.packs_dir / summary.pack_id / "corrections.json"
+    )
+    assert len(persisted) == 2
+    assert not list((service.packs_dir / summary.pack_id).glob(".*.tmp"))
 
 
 def test_document_pack_does_not_invent_foundation_or_vendor_antenna(tmp_path: Path) -> None:

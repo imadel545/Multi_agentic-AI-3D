@@ -10,6 +10,7 @@ from core.contracts.common import WarningItem
 from core.contracts.planning_decision import PlanningModelDecision
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
+from core.contracts.runtime import AgentStepTrace, WorkflowTrace
 from core.contracts.scene import (
     SceneAccessoryPlacement,
     SceneAssetPlacement,
@@ -31,6 +32,64 @@ from core.orchestration.langgraph_orchestrator import (
 from core.rag import RagService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
+
+
+def test_legacy_runtime_trace_defaults_to_non_llm_service_authority() -> None:
+    legacy_step = AgentStepTrace.model_validate(
+        {
+            "node": "legacy_runtime_step",
+            "status": "passed",
+            "detail": "persisted before actor classification",
+        }
+    )
+    legacy_trace = WorkflowTrace.model_validate(
+        {
+            "workflow_id": "wf_legacy_trace",
+            "steps": [
+                {
+                    "node": "legacy_blender_label",
+                    "status": "passed",
+                }
+            ],
+        }
+    )
+
+    assert legacy_step.actor_kind == "service"
+    assert legacy_step.decision_authority == "deterministic"
+    assert legacy_trace.steps[0].actor_kind == "service"
+    assert legacy_trace.steps[0].decision_authority == "deterministic"
+
+
+def test_blender_authority_is_verified_only_after_real_generation(tmp_path: Path) -> None:
+    class SuccessfulBlenderRunner:
+        def generate(self, _scene: object, _output_dir: Path) -> GenerationResult:
+            return GenerationResult(
+                status="generated",
+                mode="real_blender",
+                blender_available=True,
+                blender_path="/Applications/Blender.app/Contents/MacOS/Blender",
+                duration_ms=1,
+                artifacts={},
+            )
+
+    orchestrator = DesignOrchestrator(
+        registry=AssetRegistry(Path("assets/manifests")),
+        extractor=RequirementExtractor(enabled=False),
+        rag_service=None,
+        blender_runner=SuccessfulBlenderRunner(),  # type: ignore[arg-type]
+    )
+
+    update = orchestrator._generate_blender(  # noqa: SLF001
+        {
+            "workflow_id": "wf_verified_blender",
+            "scene": object(),
+            "output_dir": tmp_path,
+            "trace": [],
+        }
+    )
+
+    assert update["trace"][-1]["actor_kind"] == "external_tool"
+    assert update["trace"][-1]["decision_authority"] == "external_verified"
 
 
 def test_langgraph_checkpoint_threads_are_operation_scoped() -> None:
@@ -161,6 +220,8 @@ def test_gpt_planning_decision_uses_only_validated_rag_candidates(tmp_path: Path
                         for field in (
                             "antenna_install_height_m",
                             "beamwidth_deg",
+                            "mechanical_tilt_deg",
+                            "electrical_tilt_deg",
                             "include_cables",
                             "include_sector_beams",
                         )
@@ -240,13 +301,19 @@ def test_gpt_planning_decision_uses_only_validated_rag_candidates(tmp_path: Path
 
     assert update["rag_planning_resolution"]["antenna_install_height_m"] == 25
     assert update["rag_planning_resolution"]["beamwidth_deg"] == 65
+    assert update["rag_planning_resolution"]["mechanical_tilt_deg"] == 3
+    assert update["rag_planning_resolution"]["electrical_tilt_deg"] == 0
     assert update["planning_decision"]["status"] == "primary"
     assert update["planning_decision"]["memory_risk_count"] == 1
+    assert update["trace"][-1]["actor_kind"] == "llm_decision"
+    assert update["trace"][-1]["decision_authority"] == "llm_bounded"
     assert client.request is not None
     assert client.request.protected_fields == [
         "beamwidth_deg",
+        "electrical_tilt_deg",
         "include_cables",
         "include_sector_beams",
+        "mechanical_tilt_deg",
     ]
     assert state["rag_context"][0]["payload"]["planning_hints"] == {
         "antenna_install_height_m": 25.0
@@ -268,15 +335,21 @@ def test_runtime_event_sinks_are_isolated_per_concurrent_invocation(tmp_path: Pa
     class ConcurrentGraph:
         def invoke(self, state: dict, config: dict) -> dict:
             barrier.wait(timeout=5)
-            _emit_node_started_runtime_event(state, "extract_requirements")
+            _emit_node_started_runtime_event(state, "generate_blender")
             raise RuntimeError("stop after event")
 
     orchestrator.graph = ConcurrentGraph()
-    received: dict[str, list[str]] = {"a": [], "b": []}
+    received: dict[str, list[tuple[str, str, str]]] = {"a": [], "b": []}
 
     def invoke(workflow_id: str, sink_name: str) -> None:
-        def sink(event_workflow_id: str, _event_type: str, _payload: dict) -> None:
-            received[sink_name].append(event_workflow_id)
+        def sink(event_workflow_id: str, _event_type: str, payload: dict) -> None:
+            received[sink_name].append(
+                (
+                    event_workflow_id,
+                    payload["actor_kind"],
+                    payload["decision_authority"],
+                )
+            )
 
         with pytest.raises(RuntimeError, match="stop after event"):
             orchestrator.run(
@@ -296,7 +369,10 @@ def test_runtime_event_sinks_are_isolated_per_concurrent_invocation(tmp_path: Pa
         for future in futures:
             future.result(timeout=10)
 
-    assert received == {"a": ["wf_concurrent_a"], "b": ["wf_concurrent_b"]}
+    assert received == {
+        "a": [("wf_concurrent_a", "external_tool", "deterministic")],
+        "b": [("wf_concurrent_b", "external_tool", "deterministic")],
+    }
 
 
 def test_scene_revision_asset_failure_has_one_terminal_route(
@@ -395,6 +471,7 @@ def test_langgraph_orchestrator_runs_full_controlled_workflow(tmp_path: Path) ->
         "decide_planning_context",
         "select_assets",
         "validate_requirements",
+        "compose_design_blueprint",
         "plan_scene",
         "validate_scene",
         "pre_blender_gate",
@@ -403,10 +480,24 @@ def test_langgraph_orchestrator_runs_full_controlled_workflow(tmp_path: Path) ->
         "qa_generation",
         "qa_failure_handler",
     ]
+    assert result.design_blueprint is not None
+    assert result.blueprint_requirement_coverage is not None
+    assert result.blueprint_requirement_coverage.passed is True
+    assert result.blueprint_scene_coverage is not None
+    assert result.blueprint_scene_coverage.passed is True
     assert len(result.quality_gate_reports) == 1
     assert all(gate.passed for gate in result.quality_gate_reports)
     assert len(result.workflow_trace.quality_gates) == 1
     assert all("duration_ms" in entry for entry in result.trace)
+    trace_by_node = {entry["node"]: entry for entry in result.trace}
+    assert trace_by_node["validate_requirements"]["actor_kind"] == "deterministic_specialist"
+    assert trace_by_node["validate_requirements"]["decision_authority"] == "deterministic"
+    assert trace_by_node["generate_blender"]["actor_kind"] == "external_tool"
+    assert trace_by_node["generate_blender"]["decision_authority"] == "deterministic"
+    assert trace_by_node["qa_generation"]["actor_kind"] == "quality_gate"
+    assert trace_by_node["qa_generation"]["decision_authority"] == "deterministic"
+    assert trace_by_node["retrieve_rag_context"]["actor_kind"] == "service"
+    assert trace_by_node["retrieve_rag_context"]["decision_authority"] == "deterministic"
     assert result.metrics["rag_duration_ms"] >= 0
     assert result.metrics["planning_duration_ms"] >= 0
     assert result.metrics["blender_duration_ms"] >= 0

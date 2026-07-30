@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 import struct
@@ -10,8 +11,23 @@ from core.agents import ScenePlanner
 from core.qa.glb_geometry_validator import GLBGeometryValidator
 from core.qa.glb_inspector import GLBInspector
 from core.services.asset_registry import AssetRegistry
-from core.services.blender_runner import BlenderRunner
+from core.services.blender_runner import BlenderRunner, _command_failure_details
 from core.services.requirement_parser import parse_requirements_text
+
+
+def test_blender_failure_details_keep_stdout_stderr_and_signal() -> None:
+    completed = subprocess.CompletedProcess(
+        ["blender"],
+        -11,
+        stdout="Python traceback",
+        stderr="GPU warning",
+    )
+
+    detail = _command_failure_details(completed)
+
+    assert "process_terminated_by=SIGSEGV" in detail
+    assert "Python traceback" in detail
+    assert "GPU warning" in detail
 
 
 def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Path) -> None:
@@ -497,7 +513,10 @@ def test_blender_runner_honors_operational_scene_switches_and_build_lock(
     )
     assert gps_record["scale_factors"][0] == pytest.approx(1.5)
     build_lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
+    assert build_lock["schema_version"] == "1.1.0"
     assert build_lock["scene_id"] == scene.scene_id
+    assert "generate_scene.py" in build_lock["worker_bundle"]["files"]
+    assert "parametric_builder.py" in build_lock["worker_bundle"]["files"]
     assert build_lock["blender_runtime"]["background"] is True
     assert build_lock["blender_runtime"]["version"]
     assert build_lock["command_profile"]["factory_startup"] is True
@@ -606,6 +625,67 @@ def test_blender_runner_never_reuses_failed_attempt_artifacts(tmp_path: Path, mo
     assert not Path(result.artifacts["preview"]).exists()
     assert not Path(result.artifacts["build_lock"]).exists()
     assert all(not path.exists() for path in attempt_directories)
+
+
+def test_blender_runner_executes_immutable_worker_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root = tmp_path / "project"
+    worker_dir = project_root / "apps" / "blender_worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "__init__.py").write_text("", encoding="utf-8")
+    (worker_dir / "generate_scene.py").write_text(
+        "import parametric_builder\n",
+        encoding="utf-8",
+    )
+    mutable_dependency = worker_dir / "parametric_builder.py"
+    mutable_dependency.write_text("VERSION = 'before'\n", encoding="utf-8")
+    output_dir = tmp_path / "output"
+    scene = _accessory_scene()
+    runner = BlenderRunner(project_root=project_root)
+    executed_script: Path | None = None
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal executed_script
+        executed_script = Path(command[command.index("--python") + 1])
+        assert executed_script.parent.name == ".worker_source"
+        assert (executed_script.parent / "parametric_builder.py").read_text(
+            encoding="utf-8"
+        ) == "VERSION = 'before'\n"
+        mutable_dependency.write_text("VERSION = 'after'\n", encoding="utf-8")
+        attempt_dir = Path(command[-1])
+        (attempt_dir / "design.glb").write_bytes(b"x" * 64)
+        (attempt_dir / "preview.png").write_bytes(b"x" * 64)
+        (attempt_dir / "scene_metadata.json").write_text(
+            json.dumps(
+                {
+                    "scene_id": scene.scene_id,
+                    "generation_mode": "real_blender",
+                    "blender_runtime": {
+                        "version": "test",
+                        "background": True,
+                        "factory_startup": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(runner, "_run_blender_command", fake_run)
+    monkeypatch.setattr("core.services.blender_runner._validate_staged_artifacts", lambda *_: None)
+
+    result = runner.generate(scene, output_dir)
+
+    assert result.status == "generated"
+    assert executed_script is not None
+    lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
+    before_hash = hashlib.sha256(b"VERSION = 'before'\n").hexdigest()
+    after_hash = hashlib.sha256(b"VERSION = 'after'\n").hexdigest()
+    assert lock["worker_bundle"]["files"]["parametric_builder.py"] == before_hash
+    assert lock["worker_bundle"]["files"]["parametric_builder.py"] != after_hash
 
 
 def _accessory_scene():

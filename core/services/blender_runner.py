@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -36,6 +37,7 @@ class BlenderRunner:
         self.blender_binary = blender_binary
         self.timeout_s = timeout_s
         self.worker_script = project_root / "apps" / "blender_worker" / "generate_scene.py"
+        self.worker_sources = tuple(sorted((project_root / "apps" / "blender_worker").glob("*.py")))
 
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()
@@ -63,6 +65,16 @@ class BlenderRunner:
             build_id = f"build_{uuid.uuid4().hex}"
             attempt_id = f"{build_id}_attempt_{attempt}"
             staging_dir = Path(tempfile.mkdtemp(prefix=f".blender-{attempt_id}-", dir=output_dir))
+            snapshot_script, worker_bundle_snapshot = _snapshot_worker_sources(
+                self.worker_sources,
+                staging_dir,
+                entry_script_name=self.worker_script.name,
+            )
+            worker_script_sha256 = worker_bundle_snapshot["files"].get(self.worker_script.name)
+            if worker_script_sha256 is None:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                attempt_errors.append(f"attempt_{attempt}: BLENDER_WORKER_SCRIPT_NOT_IN_BUNDLE")
+                continue
             command = [
                 str(blender_path),
                 "--background",
@@ -70,7 +82,7 @@ class BlenderRunner:
                 "--python-exit-code",
                 "97",
                 "--python",
-                str(self.worker_script),
+                str(snapshot_script),
                 "--",
                 str(scene_spec_path),
                 str(staging_dir),
@@ -90,7 +102,7 @@ class BlenderRunner:
                     error=str(exc),
                 )
             if completed.returncode != 0:
-                raw_error = (completed.stderr or completed.stdout).strip()
+                raw_error = _command_failure_details(completed)
                 attempt_errors.append(
                     f"attempt_{attempt}: {raw_error or f'exit_code={completed.returncode}'}"
                 )
@@ -101,7 +113,7 @@ class BlenderRunner:
 
             validation_error = _validate_staged_artifacts(staging_dir, scene)
             if validation_error:
-                raw_error = (completed.stderr or completed.stdout).strip()[-2000:]
+                raw_error = _combined_command_output(completed)[-2000:]
                 attempt_errors.append(
                     f"attempt_{attempt}: {validation_error}"
                     + (f"; {raw_error}" if raw_error else "")
@@ -114,13 +126,19 @@ class BlenderRunner:
             _write_build_lock(
                 staging_dir=staging_dir,
                 scene_spec_path=scene_spec_path,
-                worker_script=self.worker_script,
+                worker_script_sha256=worker_script_sha256,
+                worker_bundle_snapshot=worker_bundle_snapshot,
                 blender_path=blender_path,
                 build_id=build_id,
                 attempt_id=attempt_id,
                 attempt_number=attempt,
             )
-            lock_error = _validate_build_lock(staging_dir, scene_spec_path, self.worker_script)
+            lock_error = _validate_build_lock(
+                staging_dir,
+                scene_spec_path,
+                worker_script_sha256,
+                worker_bundle_snapshot,
+            )
             if lock_error:
                 attempt_errors.append(f"attempt_{attempt}: {lock_error}")
                 shutil.rmtree(staging_dir, ignore_errors=True)
@@ -169,8 +187,9 @@ class BlenderRunner:
             candidates.extend(
                 [
                     shutil.which("blender"),
-                    "/Applications/Blender.app/Contents/MacOS/Blender",
+                    "/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender",
                     "/Applications/Blender 4.5.app/Contents/MacOS/Blender",
+                    "/Applications/Blender.app/Contents/MacOS/Blender",
                     "/Applications/Blender 4.4.app/Contents/MacOS/Blender",
                     "/Applications/Blender 4.3.app/Contents/MacOS/Blender",
                 ]
@@ -494,6 +513,26 @@ def _blender_install_hint() -> str:
     )
 
 
+def _combined_command_output(completed: subprocess.CompletedProcess[str]) -> str:
+    streams = [
+        value.strip() for value in (completed.stdout or "", completed.stderr or "") if value.strip()
+    ]
+    return "\n".join(streams)
+
+
+def _command_failure_details(completed: subprocess.CompletedProcess[str]) -> str:
+    if completed.returncode < 0:
+        try:
+            signal_name = signal.Signals(-completed.returncode).name
+        except ValueError:
+            signal_name = f"SIGNAL_{-completed.returncode}"
+        prefix = f"process_terminated_by={signal_name}"
+    else:
+        prefix = f"exit_code={completed.returncode}"
+    output = _combined_command_output(completed)
+    return f"{prefix}\n{output}" if output else prefix
+
+
 def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None:
     # Imported lazily to avoid the qa package's GenerationResult dependency cycle.
     from core.qa.glb_inspector import GLBInspector
@@ -550,7 +589,8 @@ def _write_build_lock(
     *,
     staging_dir: Path,
     scene_spec_path: Path,
-    worker_script: Path,
+    worker_script_sha256: str,
+    worker_bundle_snapshot: dict,
     blender_path: Path,
     build_id: str,
     attempt_id: str,
@@ -566,14 +606,15 @@ def _write_build_lock(
         for name in ("design.glb", "preview.png", "scene_metadata.json")
     }
     payload = {
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "build_id": build_id,
         "attempt_id": attempt_id,
         "attempt_number": attempt_number,
         "created_at": datetime.now(UTC).isoformat(),
         "scene_id": metadata.get("scene_id"),
         "scene_spec_sha256": _sha256(scene_spec_path),
-        "worker_script_sha256": _sha256(worker_script),
+        "worker_script_sha256": worker_script_sha256,
+        "worker_bundle": worker_bundle_snapshot,
         "blender_binary": str(blender_path),
         "blender_runtime": metadata.get("blender_runtime"),
         "command_profile": {
@@ -592,7 +633,8 @@ def _write_build_lock(
 def _validate_build_lock(
     output_dir: Path,
     scene_spec_path: Path,
-    worker_script: Path,
+    worker_script_sha256: str,
+    worker_bundle_snapshot: dict,
 ) -> str | None:
     lock_path = output_dir / "build.lock.json"
     try:
@@ -611,8 +653,10 @@ def _validate_build_lock(
         return "BLENDER_BUILD_LOCK_IDENTITY_INVALID"
     if payload.get("scene_spec_sha256") != _sha256(scene_spec_path):
         return "BLENDER_BUILD_LOCK_SCENE_MISMATCH"
-    if payload.get("worker_script_sha256") != _sha256(worker_script):
+    if payload.get("worker_script_sha256") != worker_script_sha256:
         return "BLENDER_BUILD_LOCK_WORKER_MISMATCH"
+    if payload.get("worker_bundle") != worker_bundle_snapshot:
+        return "BLENDER_BUILD_LOCK_WORKER_BUNDLE_MISMATCH"
     command_profile = payload.get("command_profile")
     if command_profile != {
         "background": True,
@@ -643,6 +687,42 @@ def _validate_build_lock(
         ):
             return f"BLENDER_BUILD_LOCK_ARTIFACT_MISMATCH:{name}"
     return None
+
+
+def _worker_bundle(worker_sources: tuple[Path, ...]) -> dict:
+    files = {
+        path.name: _sha256(path)
+        for path in worker_sources
+        if path.is_file() and path.suffix == ".py"
+    }
+    digest = hashlib.sha256(
+        json.dumps(files, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {"files": files, "sha256": digest}
+
+
+def _snapshot_worker_sources(
+    worker_sources: tuple[Path, ...],
+    staging_dir: Path,
+    *,
+    entry_script_name: str,
+) -> tuple[Path, dict]:
+    """Copy and hash the exact worker source bundle that Blender will execute."""
+
+    snapshot_dir = staging_dir / ".worker_source"
+    snapshot_dir.mkdir(parents=True, exist_ok=False)
+    copied_sources: list[Path] = []
+    for source in worker_sources:
+        if not source.is_file() or source.suffix != ".py":
+            continue
+        target = snapshot_dir / source.name
+        _atomic_copy(source, target)
+        copied_sources.append(target)
+    snapshot_script = snapshot_dir / entry_script_name
+    if not snapshot_script.is_file():
+        raise ValueError("BLENDER_WORKER_SCRIPT_NOT_IN_BUNDLE")
+    snapshot = _worker_bundle(tuple(copied_sources))
+    return snapshot_script, snapshot
 
 
 def _sha256(path: Path) -> str:

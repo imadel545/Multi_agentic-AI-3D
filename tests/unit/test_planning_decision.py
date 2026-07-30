@@ -29,6 +29,8 @@ def test_gpt_oss_selects_only_validated_candidates() -> None:
                 "selections": [
                     _selection("antenna_install_height_m", "select_candidate", "rag:hba:1"),
                     _selection("beamwidth_deg", "keep_current"),
+                    _selection("mechanical_tilt_deg", "keep_current"),
+                    _selection("electrical_tilt_deg", "keep_current"),
                     _selection("include_cables", "select_candidate", "memory:cables:1"),
                     _selection("include_sector_beams", "keep_current"),
                 ]
@@ -67,6 +69,8 @@ def test_unknown_candidate_is_rejected_and_fallback_is_visible() -> None:
                 "selections": [
                     _selection("antenna_install_height_m", "select_candidate", "unknown"),
                     _selection("beamwidth_deg", "keep_current"),
+                    _selection("mechanical_tilt_deg", "keep_current"),
+                    _selection("electrical_tilt_deg", "keep_current"),
                     _selection("include_cables", "keep_current"),
                     _selection("include_sector_beams", "keep_current"),
                 ]
@@ -88,6 +92,8 @@ def test_explicitly_protected_field_cannot_be_overridden() -> None:
             "selections": [
                 _selection("antenna_install_height_m", "keep_current"),
                 _selection("beamwidth_deg", "select_candidate", "rag:beamwidth:1"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
                 _selection("include_cables", "keep_current"),
                 _selection("include_sector_beams", "keep_current"),
             ]
@@ -104,6 +110,8 @@ def test_candidate_from_another_field_cannot_be_selected() -> None:
             "selections": [
                 _selection("antenna_install_height_m", "select_candidate", "rag:beamwidth:1"),
                 _selection("beamwidth_deg", "keep_current"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
                 _selection("include_cables", "keep_current"),
                 _selection("include_sector_beams", "keep_current"),
             ]
@@ -119,6 +127,8 @@ def test_free_value_or_unknown_field_is_rejected_by_strict_contract() -> None:
         "selections": [
             {**_selection("antenna_install_height_m", "keep_current"), "value": 99.0},
             _selection("beamwidth_deg", "keep_current"),
+            _selection("mechanical_tilt_deg", "keep_current"),
+            _selection("electrical_tilt_deg", "keep_current"),
             _selection("include_cables", "keep_current"),
             _selection("include_sector_beams", "keep_current"),
         ]
@@ -165,6 +175,8 @@ def test_duplicate_or_missing_decision_field_is_rejected() -> None:
             "selections": [
                 _selection("antenna_install_height_m", "keep_current"),
                 _selection("beamwidth_deg", "keep_current"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
                 _selection("include_cables", "keep_current"),
                 _selection("include_cables", "keep_current"),
             ]
@@ -180,6 +192,8 @@ def _request() -> PlanningDecisionRequest:
         current_values=PlanningCurrentValues(
             antenna_install_height_m=24.0,
             beamwidth_deg=65.0,
+            mechanical_tilt_deg=3.0,
+            electrical_tilt_deg=0.0,
             include_cables=True,
             include_sector_beams=True,
         ),

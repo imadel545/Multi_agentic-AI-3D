@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import queue
 import shutil
@@ -26,7 +27,7 @@ from core.services.cleanup_service import CleanupService
 from core.services.diff_engine import DiffEngine
 from core.services.event_log import EventLogService
 from core.services.patch_applier import PatchApplier
-from core.services.scene_versioning import SceneVersioningService
+from core.services.scene_versioning import SceneVersioningService, verify_persisted_version
 from core.validation import validate_scene_spec
 from core.validation.completion_certificate import verify_completion_certificate
 
@@ -39,6 +40,8 @@ from .runtime_contract import (
     unsupported_actions,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class WorkflowBusyError(RuntimeError):
     """Raised when a mutating operation conflicts with an active workflow."""
@@ -46,6 +49,10 @@ class WorkflowBusyError(RuntimeError):
 
 class WorkflowStorageError(RuntimeError):
     """Raised before mutation when durable local storage is too low."""
+
+
+class WorkflowMemoryPurgeError(RuntimeError):
+    """Raised when a deleted design cannot be removed from agent memory safely."""
 
 
 class WorkflowService:
@@ -130,8 +137,25 @@ class WorkflowService:
                     subscriber_queue.get_nowait()
                 except queue.Empty:
                     pass
-                subscriber_queue.put_nowait(event_payload)
+                try:
+                    subscriber_queue.put_nowait(event_payload)
+                except queue.Full:
+                    # Another producer won the slot. The JSONL event is already
+                    # durable and the SSE reader will close the sequence gap from it.
+                    pass
         return event_payload
+
+    def _run_after_canonical_commit(self, workflow_id: str, label: str, operation) -> None:
+        """Run a compatibility projection without downgrading a committed design."""
+
+        try:
+            operation()
+        except Exception:
+            logger.exception(
+                "Post-commit projection failed: workflow_id=%s projection=%s",
+                workflow_id,
+                label,
+            )
 
     def _mark_workflow_active(self, workflow_id: str) -> None:
         with self._lock:
@@ -234,6 +258,9 @@ class WorkflowService:
             if self._restore_interrupted_edit(workflow_id, status, status_path):
                 reconciled.append(workflow_id)
                 continue
+            if self._restore_committed_active_design(workflow_id, status_path):
+                reconciled.append(workflow_id)
+                continue
             message = (
                 "Le processus local s'est arrêté avant la fin du design. "
                 "Relancez la génération à partir du cahier des charges confirmé."
@@ -272,6 +299,38 @@ class WorkflowService:
             reconciled.append(workflow_id)
         return reconciled
 
+    def _restore_committed_active_design(self, workflow_id: str, status_path: Path) -> bool:
+        """Recover a verified commit whose compatibility root status was not published."""
+
+        try:
+            active_status_path = self.versioning.verified_active_status_path(workflow_id)
+            restored = self._read_json(active_status_path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        _atomic_write_text(
+            status_path,
+            json.dumps(restored, indent=2, ensure_ascii=False),
+        )
+        self._run_after_canonical_commit(
+            workflow_id,
+            "recovery_event",
+            lambda: self._emit_workflow_event(
+                workflow_id,
+                "workflow_completed",
+                {
+                    "phase": "runtime",
+                    "node": "workflow_recovery",
+                    "status": "completed",
+                    "version_id": restored.get("active_version_id") or restored.get("version_id"),
+                    "human_label": "Résultat certifié restauré",
+                    "progress_message": (
+                        "Le commit certifié a été restauré après l'interruption locale."
+                    ),
+                },
+            ),
+        )
+        return True
+
     def _restore_interrupted_edit(self, workflow_id: str, status: dict, status_path: Path) -> bool:
         operation = status.get("active_operation")
         if not isinstance(operation, dict) or operation.get("kind") != "edit":
@@ -281,9 +340,16 @@ class WorkflowService:
         )
         if not isinstance(active_version_id, str):
             return False
-        active_version = self.versioning.get_version(workflow_id, active_version_id)
+        try:
+            if self.versioning._active_design_path(workflow_id).exists():
+                active_version = self.versioning.get_verified_active_version(workflow_id)
+            else:
+                active_version = self.versioning.get_version(workflow_id, active_version_id)
+        except ValueError:
+            return False
         if (
             active_version is None
+            or active_version.version_id != active_version_id
             or active_version.status != "completed"
             or not active_version.artifact_dir
         ):
@@ -397,15 +463,19 @@ class WorkflowService:
                     result=result,
                     edit_description="initial",
                 )
-                self._emit_workflow_event(
+                self._run_after_canonical_commit(
                     workflow_id,
-                    "workflow_completed" if result.status != "failed" else "workflow_failed",
-                    {
-                        "status": result.status,
-                        "duration_ms": result.total_duration_ms,
-                        "version_id": active_version_id,
-                        "node": "workflow",
-                    },
+                    "terminal_event",
+                    lambda: self._emit_workflow_event(
+                        workflow_id,
+                        "workflow_completed" if result.status != "failed" else "workflow_failed",
+                        {
+                            "status": result.status,
+                            "duration_ms": result.total_duration_ms,
+                            "version_id": active_version_id,
+                            "node": "workflow",
+                        },
+                    ),
                 )
             except Exception as exc:
                 self._emit_user_issue_event(
@@ -495,15 +565,19 @@ class WorkflowService:
                     result=result,
                     edit_description=f"initial from {source_label}",
                 )
-                self._emit_workflow_event(
+                self._run_after_canonical_commit(
                     workflow_id,
-                    "workflow_completed" if result.status != "failed" else "workflow_failed",
-                    {
-                        "status": result.status,
-                        "duration_ms": result.total_duration_ms,
-                        "version_id": active_version_id,
-                        "node": "workflow",
-                    },
+                    "terminal_event",
+                    lambda: self._emit_workflow_event(
+                        workflow_id,
+                        "workflow_completed" if result.status != "failed" else "workflow_failed",
+                        {
+                            "status": result.status,
+                            "duration_ms": result.total_duration_ms,
+                            "version_id": active_version_id,
+                            "node": "workflow",
+                        },
+                    ),
                 )
             except Exception as exc:
                 self._emit_user_issue_event(
@@ -640,27 +714,42 @@ class WorkflowService:
                 generation_mode=result.generation.mode if result.generation else None,
                 active=False,
             )
-            if activate:
-                self.versioning.commit_active_version(workflow_id, version.version_id)
-                self.versioning.update_version(
-                    workflow_id,
-                    version.version_id,
-                    active=True,
-                )
-
         self._make_archive(output_dir)
-        self._emit_result_product_events(
-            workflow_id,
-            result,
-            version_id=version_id,
-        )
-        self._publish_terminal_status(
-            workflow_id=workflow_id,
-            output_dir=output_dir,
-            result=result,
-            version_id=version_id,
-            active_version_id=active_version_id,
-        )
+        if version_id is not None and result.status != "failed":
+            self.versioning.commit_active_version(workflow_id, version_id)
+            self._run_after_canonical_commit(
+                workflow_id,
+                "product_events",
+                lambda: self._emit_result_product_events(
+                    workflow_id,
+                    result,
+                    version_id=version_id,
+                ),
+            )
+            self._run_after_canonical_commit(
+                workflow_id,
+                "root_status",
+                lambda: self._publish_terminal_status(
+                    workflow_id=workflow_id,
+                    output_dir=output_dir,
+                    result=result,
+                    version_id=version_id,
+                    active_version_id=active_version_id,
+                ),
+            )
+        else:
+            self._emit_result_product_events(
+                workflow_id,
+                result,
+                version_id=version_id,
+            )
+            self._publish_terminal_status(
+                workflow_id=workflow_id,
+                output_dir=output_dir,
+                result=result,
+                version_id=version_id,
+                active_version_id=active_version_id,
+            )
         return version_id, active_version_id
 
     def _publish_terminal_status(
@@ -691,21 +780,41 @@ class WorkflowService:
         if not status_path.exists():
             raise KeyError(workflow_id)
         root_status = json.loads(status_path.read_text(encoding="utf-8"))
-        if root_status.get("status") in {"pending", "running"}:
-            return root_status
         manifest = self.versioning.active_design_manifest(workflow_id)
-        if manifest is None:
-            return root_status
-        workflow_dir = (self.outputs_dir / workflow_id).resolve()
-        candidate_status = (workflow_dir / manifest["artifact_dir"] / "status.json").resolve()
-        try:
-            candidate_status.relative_to(workflow_dir)
-        except ValueError as exc:
-            raise RuntimeError("ACTIVE_DESIGN_STATUS_OUTSIDE_WORKFLOW") from exc
-        if not candidate_status.is_file() or _sha256_file(candidate_status) != manifest.get(
-            "status_sha256"
+        if (
+            root_status.get("status") in {"pending", "running"}
+            and isinstance(root_status.get("active_operation"), dict)
+            and (
+                self._is_workflow_active(workflow_id)
+                or manifest is None
+                or root_status.get("active_version_id") == manifest.get("version_id")
+            )
         ):
-            raise RuntimeError("ACTIVE_DESIGN_STATUS_HASH_MISMATCH")
+            return root_status
+        if manifest is None:
+            if root_status.get("status") == "completed":
+                manifest_exists = self.versioning._active_design_path(workflow_id).exists()
+                reason = (
+                    "Le manifeste actif est illisible ou incohérent."
+                    if manifest_exists
+                    else "Ce résultat historique ne possède pas de certificat actif vérifiable."
+                )
+                return _quarantined_status(
+                    root_status,
+                    reason=reason,
+                    integrity_failure=manifest_exists,
+                )
+            return root_status
+        try:
+            candidate_status = self.versioning.verified_active_status_path(workflow_id)
+        except ValueError as exc:
+            return _quarantined_status(
+                root_status,
+                reason=(
+                    f"La preuve d'intégrité du résultat actif a échoué. Diagnostic interne: {exc}."
+                ),
+                integrity_failure=True,
+            )
         return json.loads(candidate_status.read_text(encoding="utf-8"))
 
     def get_public_status(self, workflow_id: str) -> dict:
@@ -720,12 +829,22 @@ class WorkflowService:
     def archive_path(self, workflow_id: str) -> Path:
         self._sync_output_services()
         status = self.get_status(workflow_id)
-        artifact_path = status.get("artifacts", {}).get("download")
-        path = (
-            Path(artifact_path)
-            if artifact_path
-            else self.outputs_dir / workflow_id / "artifacts.zip"
-        )
+        if (
+            status.get("status") != "completed"
+            or status.get("completion_certificate_status") != "issued"
+        ):
+            raise KeyError(workflow_id)
+        manifest = self.versioning.active_design_manifest(workflow_id)
+        if manifest is None:
+            raise KeyError(workflow_id)
+        workflow_dir = (self.outputs_dir / workflow_id).resolve()
+        artifact_dir = (workflow_dir / manifest["artifact_dir"]).resolve()
+        try:
+            artifact_dir.relative_to(workflow_dir)
+        except ValueError as exc:
+            raise KeyError(workflow_id) from exc
+        self._make_archive(artifact_dir)
+        path = artifact_dir / "artifacts.zip"
         if not path.exists():
             raise KeyError(workflow_id)
         return path
@@ -749,13 +868,37 @@ class WorkflowService:
             if version is None or not version.artifact_dir:
                 raise KeyError(version_id)
             artifact_dir = Path(version.artifact_dir).resolve()
+            try:
+                artifact_dir.relative_to(workflow_dir)
+            except ValueError as exc:
+                raise KeyError(version_id) from exc
+            if version.status == "completed":
+                try:
+                    verify_persisted_version(
+                        artifact_dir,
+                        workflow_id=workflow_id,
+                        expected_scene=version.scene,
+                    )
+                except ValueError as exc:
+                    raise KeyError(artifact_name) from exc
+                if artifact_name == "download":
+                    self._make_archive(artifact_dir)
             path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
         else:
             status = self.get_status(workflow_id)
-            artifact_value = status.get("artifacts", {}).get(artifact_name)
-            path = Path(artifact_value).resolve() if artifact_value else None
-            if path is None:
-                path = workflow_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
+            if status.get("status") != "completed":
+                raise KeyError(artifact_name)
+            manifest = self.versioning.active_design_manifest(workflow_id)
+            if manifest is None:
+                raise KeyError(artifact_name)
+            artifact_dir = (workflow_dir / manifest["artifact_dir"]).resolve()
+            try:
+                artifact_dir.relative_to(workflow_dir)
+            except ValueError as exc:
+                raise KeyError(artifact_name) from exc
+            if artifact_name == "download":
+                self._make_archive(artifact_dir)
+            path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
 
         if path is None or not path.exists() or not path.is_file():
             raise KeyError(artifact_name)
@@ -779,15 +922,21 @@ class WorkflowService:
             status_path = workflow_dir / "status.json"
             if status_path.exists():
                 try:
-                    payload = json.loads(status_path.read_text(encoding="utf-8"))
+                    root_payload = json.loads(status_path.read_text(encoding="utf-8"))
+                    payload = self.get_status(workflow_dir.name)
                     created_at = _status_created_at(payload, workflow_dir)
                     designs.append(
                         {
-                            "workflow_id": payload.get("workflow_id"),
+                            "workflow_id": payload.get("workflow_id")
+                            or root_payload.get("workflow_id"),
                             "status": payload.get("status"),
-                            "created_at": created_at,
+                            "created_at": created_at
+                            or _status_created_at(root_payload, workflow_dir),
                             "qa_score": payload.get("qa_score"),
                             "generation_mode": payload.get("generation_mode"),
+                            "completion_certificate_status": payload.get(
+                                "completion_certificate_status"
+                            ),
                         }
                     )
                 except (OSError, json.JSONDecodeError):
@@ -802,12 +951,26 @@ class WorkflowService:
             output_dir = self.outputs_dir / workflow_id
             if not output_dir.exists():
                 raise KeyError(workflow_id)
+            memory_service = getattr(self.orchestrator, "memory_service", None)
+            if memory_service is not None:
+                try:
+                    memory_service.purge_workflow(workflow_id)
+                except Exception as exc:
+                    raise WorkflowMemoryPurgeError(
+                        "Le design n'a pas été supprimé car sa mémoire agent ne peut pas "
+                        "être purgée de façon vérifiable. Réessayez après avoir restauré "
+                        "le stockage mémoire."
+                    ) from exc
+            checkpoint_saver = getattr(self.orchestrator, "checkpoint_saver", None)
+            if checkpoint_saver is not None:
+                checkpoint_saver.delete_threads_with_prefix(f"{workflow_id}:")
             try:
                 deleted = self.cleanup_service.delete_workflow(workflow_id)
             except ValueError as exc:
                 raise KeyError(workflow_id) from exc
             if not deleted:
                 raise KeyError(workflow_id)
+            self.event_log.forget_workflow(workflow_id)
 
     def parse_requirements(
         self,
@@ -885,7 +1048,21 @@ class WorkflowService:
         self, workflow_id: str, edit_prompt: str, *, edit_id: str | None = None
     ) -> SceneEditResult:
         self._sync_output_services()
-        active_version = self.versioning.get_active_version(workflow_id)
+        try:
+            active_version = self.versioning.get_verified_active_version(workflow_id)
+        except ValueError as exc:
+            return SceneEditResult(
+                workflow_id=workflow_id,
+                edit_id=edit_id or f"edit_{uuid.uuid4().hex[:8]}",
+                status="failed",
+                errors=[
+                    {
+                        "code": "ACTIVE_VERSION_INTEGRITY_FAILED",
+                        "message": str(exc),
+                        "severity": "error",
+                    }
+                ],
+            )
         if active_version is None:
             return SceneEditResult(
                 workflow_id=workflow_id,
@@ -1140,20 +1317,27 @@ class WorkflowService:
             version_id=version.version_id,
             active_version_id=version.version_id,
         )
-        self.versioning.update_version(workflow_id, version.version_id, active=True)
         self.versioning.commit_active_version(workflow_id, version.version_id)
-        self._copy_active_status_to_root(workflow_id, version_output_dir)
-        self._emit_workflow_event(
+        self._run_after_canonical_commit(
             workflow_id,
-            "edit_patch_applied",
-            {
-                "edit_id": edit_id,
-                "version_id": version.version_id,
-                "status": result.status,
-                "llm_provider": patch.edit_llm_provider,
-                "llm_fallback_used": patch.edit_llm_fallback_used,
-                "llm_fallback_reason": patch.edit_llm_fallback_reason,
-            },
+            "root_status",
+            lambda: self._copy_active_status_to_root(workflow_id, version_output_dir),
+        )
+        self._run_after_canonical_commit(
+            workflow_id,
+            "edit_applied_event",
+            lambda: self._emit_workflow_event(
+                workflow_id,
+                "edit_patch_applied",
+                {
+                    "edit_id": edit_id,
+                    "version_id": version.version_id,
+                    "status": result.status,
+                    "llm_provider": patch.edit_llm_provider,
+                    "llm_fallback_used": patch.edit_llm_fallback_used,
+                    "llm_fallback_reason": patch.edit_llm_fallback_reason,
+                },
+            ),
         )
 
         return SceneEditResult(
@@ -1348,12 +1532,17 @@ class WorkflowService:
                 "available_actions": _status_available_actions(status),
             }
 
-    def get_events(self, workflow_id: str) -> list[dict]:
+    def get_events(self, workflow_id: str, after_sequence: int | None = None) -> list[dict]:
         self._sync_output_services()
-        return [
-            e.model_dump() | {"event_source": "workflow_events_jsonl"}
-            for e in self.event_log.list_events(workflow_id)
-        ]
+        if after_sequence is None:
+            events = self.event_log.list_events(workflow_id)
+        else:
+            events = self.event_log.list_events_page(
+                workflow_id,
+                offset=after_sequence,
+                limit=200,
+            ).events
+        return [e.model_dump() | {"event_source": "workflow_events_jsonl"} for e in events]
 
     def stream_events(self, workflow_id: str, after_event_id: str | None = None):
         """Yield events for a workflow in near real-time.
@@ -1373,10 +1562,25 @@ class WorkflowService:
         subscriber_id, subscriber_queue = self._register_event_subscriber(workflow_id)
         try:
             persisted_events = self.get_events(workflow_id)
+            last_sequence = 0
+            if after_event_id:
+                for persisted_event in persisted_events:
+                    seen_event_ids.add(_event_identity(persisted_event))
+                    last_sequence = max(
+                        last_sequence,
+                        int(persisted_event.get("sequence") or 0),
+                    )
+                    if _event_identity(persisted_event) == after_event_id:
+                        break
+                else:
+                    # Unknown cursors intentionally replay the durable history.
+                    seen_event_ids.clear()
+                    last_sequence = 0
             replay_events = _events_after(persisted_events, after_event_id)
             for event in replay_events:
                 identity = _event_identity(event)
                 seen_event_ids.add(identity)
+                last_sequence = max(last_sequence, int(event.get("sequence") or 0))
                 yield event | {"event_source": "push_sse"}
             if replay_events and replay_events[-1].get("event_type") in terminal:
                 return
@@ -1392,13 +1596,32 @@ class WorkflowService:
                         if identity in seen_event_ids:
                             continue
                         seen_event_ids.add(identity)
+                        last_sequence = max(
+                            last_sequence,
+                            int(persisted_event.get("sequence") or 0),
+                        )
                         yield persisted_event | {"event_source": "push_sse"}
                     return
 
+                event_sequence = int(event.get("sequence") or 0)
+                if event_sequence > last_sequence + 1:
+                    for persisted_event in self.get_events(workflow_id):
+                        identity = _event_identity(persisted_event)
+                        if identity in seen_event_ids:
+                            continue
+                        persisted_sequence = int(persisted_event.get("sequence") or 0)
+                        if persisted_sequence > event_sequence:
+                            break
+                        seen_event_ids.add(identity)
+                        last_sequence = max(last_sequence, persisted_sequence)
+                        yield persisted_event | {"event_source": "push_sse"}
+                        if persisted_event.get("event_type") in terminal:
+                            return
                 identity = _event_identity(event)
                 if identity in seen_event_ids:
                     continue
                 seen_event_ids.add(identity)
+                last_sequence = max(last_sequence, event_sequence)
                 yield event | {"event_source": "push_sse"}
                 if event.get("event_type") in terminal:
                     return
@@ -1407,7 +1630,8 @@ class WorkflowService:
 
     def workflow_exists(self, workflow_id: str) -> bool:
         self._sync_output_services()
-        return (self.outputs_dir / workflow_id).exists()
+        path = self.outputs_dir / workflow_id
+        return path.is_dir() and not path.is_symlink()
 
     def _emit_result_product_events(
         self,
@@ -1516,6 +1740,11 @@ class WorkflowService:
             "validation_report": str(output_dir / "validation_report.json"),
             "quality_gates": str(output_dir / "quality_gates.json"),
             "requirement_coverage": str(output_dir / "requirement_coverage.json"),
+            "design_blueprint": str(output_dir / "design_blueprint.json"),
+            "blueprint_requirement_coverage": str(
+                output_dir / "blueprint_requirement_coverage.json"
+            ),
+            "blueprint_scene_coverage": str(output_dir / "blueprint_scene_coverage.json"),
             "completion_certificate": str(output_dir / "completion_certificate.json"),
             "qa_report": str(output_dir / "qa_report.json"),
             "generation_report": str(output_dir / "generation_report.json"),
@@ -1721,6 +1950,21 @@ class WorkflowService:
                 output_dir / "requirement_coverage.json",
                 result.requirement_coverage.model_dump(),
             )
+        if result.design_blueprint:
+            self._write_json(
+                output_dir / "design_blueprint.json",
+                result.design_blueprint.model_dump(mode="json"),
+            )
+        if result.blueprint_requirement_coverage:
+            self._write_json(
+                output_dir / "blueprint_requirement_coverage.json",
+                result.blueprint_requirement_coverage.model_dump(mode="json"),
+            )
+        if result.blueprint_scene_coverage:
+            self._write_json(
+                output_dir / "blueprint_scene_coverage.json",
+                result.blueprint_scene_coverage.model_dump(mode="json"),
+            )
         if result.completion_certificate:
             self._write_json(
                 output_dir / "completion_certificate.json",
@@ -1761,6 +2005,7 @@ class WorkflowService:
         if not verify_completion_certificate(
             getattr(result, "completion_certificate", None),
             requirements=result.requirements,
+            design_blueprint=getattr(result, "design_blueprint", None),
             scene=result.scene,
             generation=result.generation,
         ):
@@ -2281,9 +2526,13 @@ def _public_status_payload(workflow_id: str, status: dict) -> dict:
         payload.get("artifacts") or {},
         version_id=None,
     )
-    payload["trace_url"] = _artifact_url(workflow_id, "trace")
+    certified = (
+        payload.get("status") == "completed"
+        and payload.get("completion_certificate_status") == "issued"
+    )
+    payload["trace_url"] = _artifact_url(workflow_id, "trace") if certified else None
     payload["trace_path"] = None
-    payload["download_url"] = f"/designs/{workflow_id}/download"
+    payload["download_url"] = f"/designs/{workflow_id}/download" if certified else None
     payload["available_actions"] = _status_available_actions(payload)
     payload["asset_imports"] = _public_asset_imports(payload.get("asset_imports"))
     if active_version_id:
@@ -2388,12 +2637,47 @@ def _status_available_actions(status: dict) -> list[str]:
         return ["view_timeline"]
     if backend_status == "failed":
         return ["view_issues", "view_timeline", "retry_with_changes"]
+    if backend_status in {"legacy_unverified", "integrity_failed"}:
+        return ["view_issues", "view_timeline", "regenerate_for_certification"]
     actions = ["open_viewer", "download_artifacts", "view_timeline", "edit_design"]
     if status.get("active_version_id"):
-        actions.append("view_versions")
+        actions.extend(["view_versions", "rollback_version"])
     if status.get("warnings") or status.get("errors"):
         actions.append("review_issues")
     return actions
+
+
+def _quarantined_status(
+    root_status: dict,
+    *,
+    reason: str,
+    integrity_failure: bool = False,
+) -> dict:
+    issue = {
+        "code": (
+            "COMPLETION_PROOF_INTEGRITY_FAILED"
+            if integrity_failure
+            else "COMPLETION_PROOF_MISSING_OR_INVALID"
+        ),
+        "message": reason,
+        "severity": "critical",
+        "user_message": (
+            "Le résultat ne peut pas être présenté comme terminé car sa preuve "
+            "de complétion n'est pas vérifiable. Les fichiers sont conservés, "
+            "mais une nouvelle génération certifiée est requise."
+        ),
+    }
+    return {
+        **root_status,
+        "status": "integrity_failed" if integrity_failure else "legacy_unverified",
+        "completion_certificate_status": "rejected",
+        "artifacts": {},
+        "active_version_artifacts": {},
+        "errors": [
+            *[item for item in root_status.get("errors", []) if isinstance(item, dict)],
+            issue,
+        ],
+    }
 
 
 def _edit_result_message(result: SceneEditResult) -> str:
@@ -2457,9 +2741,18 @@ def _atomic_write_text(path: Path, content: str) -> None:
             os.fsync(handle.fileno())
             temporary_path = Path(handle.name)
         temporary_path.replace(path)
+        _fsync_directory(path.parent)
     finally:
         if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _normalized_event_payload(event_type: str, payload: dict) -> dict:
@@ -2638,6 +2931,9 @@ _ALLOWED_ARTIFACT_FILES = {
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
     "requirement_coverage": "requirement_coverage.json",
+    "design_blueprint": "design_blueprint.json",
+    "blueprint_requirement_coverage": "blueprint_requirement_coverage.json",
+    "blueprint_scene_coverage": "blueprint_scene_coverage.json",
     "completion_certificate": "completion_certificate.json",
     "qa_report": "qa_report.json",
     "generation_report": "generation_report.json",

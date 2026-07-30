@@ -3,7 +3,7 @@
 Critères obligatoires pour accepter le futur frontend.  
 Si un critère échoue, le frontend n'est pas accepté.
 
-Dernier audit ciblé: 2026-07-28. La baseline visuelle réelle est validée; les
+Dernier audit ciblé: 2026-07-29. La baseline visuelle réelle est validée; les
 cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
@@ -15,6 +15,11 @@ smoke navigateur du 2026-07-28 prouve l'upload direct, la revue des champs avec
 provenance et la restauration du même `pack_id` après rechargement. Les données
 du pack sont relues depuis le backend; seul un pointeur local versionné est
 conservé par l'interface.
+
+Le smoke de clôture du 2026-07-29 a aussi restauré
+`wf_a6660b81b929` sur le contrat API courant, vérifié le modèle réel en
+desktop/mobile et la preview backend explicite sous Chrome headless sans
+WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 ---
 

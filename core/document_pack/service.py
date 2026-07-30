@@ -1,10 +1,14 @@
 import hashlib
 import json
+import os
+import re
 import shutil
+import threading
 import time
 import uuid
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,6 +46,7 @@ MAX_MEMBER_SIZE_BYTES = 15 * 1024 * 1024
 MAX_PACK_SIZE_BYTES = 80 * 1024 * 1024
 MAX_MEMBER_COUNT = 256
 MAX_UNCOMPRESSED_SIZE_BYTES = 200 * 1024 * 1024
+PACK_ID_PATTERN = re.compile(r"^pack_[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 class DocumentPackService:
@@ -63,6 +68,9 @@ class DocumentPackService:
         )
         self.groq_bounded_extraction_enabled = self.groq_extractor.enabled
         self.orchestrator = DocumentPackOrchestrator(self)
+        self._pack_locks_guard = threading.Lock()
+        self._pack_locks: dict[str, threading.RLock] = {}
+        self._pack_lock_users: dict[str, int] = {}
 
     @property
     def packs_dir(self) -> Path:
@@ -403,28 +411,32 @@ class DocumentPackService:
         return packs
 
     def get_summary(self, pack_id: str) -> dict:
-        pack_dir = self._pack_dir(pack_id)
-        persisted = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
-        qa_report, _mapping, ready = _evaluate_generation_readiness(self.get_spec(pack_id))
-        return persisted.model_copy(
-            update={
-                "can_generate_design": ready,
-                "qa_score": qa_report.score,
-                "missing_blocking_count": len(qa_report.blocking_issues),
-                "blocking_fields": qa_report.blocking_issues,
-            }
-        ).model_dump()
+        with self._pack_operation(pack_id):
+            pack_dir = self._pack_dir(pack_id)
+            persisted = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
+            qa_report, _mapping, ready = _evaluate_generation_readiness(self.get_spec(pack_id))
+            return persisted.model_copy(
+                update={
+                    "can_generate_design": ready,
+                    "qa_score": qa_report.score,
+                    "missing_blocking_count": len(qa_report.blocking_issues),
+                    "blocking_fields": qa_report.blocking_issues,
+                }
+            ).model_dump()
 
     def get_documents(self, pack_id: str) -> list[dict]:
-        return _read_json(self._pack_dir(pack_id) / "index.json")
+        with self._pack_operation(pack_id):
+            return _read_json(self._pack_dir(pack_id) / "index.json")
 
     def get_extractions(self, pack_id: str) -> list[dict]:
-        return _read_json(self._pack_dir(pack_id) / "extractions.json")
+        with self._pack_operation(pack_id):
+            return _read_json(self._pack_dir(pack_id) / "extractions.json")
 
     def get_spec(self, pack_id: str) -> ProjectDesignSpec:
-        return ProjectDesignSpec.model_validate(
-            _read_json(self._pack_dir(pack_id) / "consolidated_spec.json")
-        )
+        with self._pack_operation(pack_id):
+            return ProjectDesignSpec.model_validate(
+                _read_json(self._pack_dir(pack_id) / "consolidated_spec.json")
+            )
 
     def get_conflicts(self, pack_id: str) -> list[dict]:
         return [field.model_dump() for field in self.get_spec(pack_id).conflicts]
@@ -439,30 +451,52 @@ class DocumentPackService:
         }
 
     def get_qa_report(self, pack_id: str) -> dict:
-        pack_dir = self._pack_dir(pack_id)
-        persisted = DocumentPackQAReport.model_validate(_read_json(pack_dir / "qa_report.json"))
-        qa_report, _mapping, _ready = _evaluate_generation_readiness(self.get_spec(pack_id))
-        return qa_report.model_copy(
-            update={"memory_writeback": persisted.memory_writeback}
-        ).model_dump()
+        with self._pack_operation(pack_id):
+            pack_dir = self._pack_dir(pack_id)
+            persisted = DocumentPackQAReport.model_validate(_read_json(pack_dir / "qa_report.json"))
+            qa_report, _mapping, _ready = _evaluate_generation_readiness(self.get_spec(pack_id))
+            return qa_report.model_copy(
+                update={"memory_writeback": persisted.memory_writeback}
+            ).model_dump()
 
     def get_processing_report(self, pack_id: str) -> dict:
-        return _read_json(self._pack_dir(pack_id) / "processing_report.json")
+        with self._pack_operation(pack_id):
+            return _read_json(self._pack_dir(pack_id) / "processing_report.json")
 
     def get_memory_summary(self, pack_id: str) -> dict:
-        payload = _read_json(self._pack_dir(pack_id) / "memory_summary.json")
-        payload["can_generate_design"] = self.get_summary(pack_id)["can_generate_design"]
-        return payload
+        with self._pack_operation(pack_id):
+            payload = _read_json(self._pack_dir(pack_id) / "memory_summary.json")
+            payload["can_generate_design"] = self.get_summary(pack_id)["can_generate_design"]
+            return payload
 
     def get_generation_readiness(
         self,
         pack_id: str,
     ) -> tuple[ProjectDesignSpec, DocumentPackQAReport, RequirementMappingResult, bool]:
-        spec = self.get_spec(pack_id)
-        qa_report, mapping, ready = _evaluate_generation_readiness(spec)
-        return spec, qa_report, mapping, ready
+        with self._pack_operation(pack_id):
+            spec = self.get_spec(pack_id)
+            qa_report, mapping, ready = _evaluate_generation_readiness(spec)
+            return spec, qa_report, mapping, ready
+
+    @contextmanager
+    def generation_readiness_snapshot(
+        self,
+        pack_id: str,
+    ) -> Iterator[tuple[ProjectDesignSpec, DocumentPackQAReport, RequirementMappingResult, bool]]:
+        """Keep one document revision stable through design submission and linkage."""
+
+        with self._pack_operation(pack_id):
+            yield self.get_generation_readiness(pack_id)
 
     def apply_correction(
+        self,
+        pack_id: str,
+        correction: DocumentPackCorrection,
+    ) -> DocumentPackSummary:
+        with self._pack_operation(pack_id):
+            return self._apply_correction_locked(pack_id, correction)
+
+    def _apply_correction_locked(
         self,
         pack_id: str,
         correction: DocumentPackCorrection,
@@ -520,19 +554,25 @@ class DocumentPackService:
         return summary
 
     def get_trace(self, pack_id: str) -> list[dict]:
-        return _read_json(self._pack_dir(pack_id) / "trace.json")
+        with self._pack_operation(pack_id):
+            return _read_json(self._pack_dir(pack_id) / "trace.json")
 
     def get_events(self, pack_id: str) -> list[dict]:
-        events = _read_json(self._pack_dir(pack_id) / "events.json")
-        if not isinstance(events, list):
-            return []
-        return [
-            _public_document_pack_event(pack_id, event, index)
-            for index, event in enumerate(events)
-            if isinstance(event, dict)
-        ]
+        with self._pack_operation(pack_id):
+            events = _read_json(self._pack_dir(pack_id) / "events.json")
+            if not isinstance(events, list):
+                return []
+            return [
+                _public_document_pack_event(pack_id, event, index)
+                for index, event in enumerate(events)
+                if isinstance(event, dict)
+            ]
 
     def mark_generated_workflow(self, pack_id: str, workflow_id: str) -> dict:
+        with self._pack_operation(pack_id):
+            return self._mark_generated_workflow_locked(pack_id, workflow_id)
+
+    def _mark_generated_workflow_locked(self, pack_id: str, workflow_id: str) -> dict:
         pack_dir = self._pack_dir(pack_id)
         spec = self.get_spec(pack_id)
         summary = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
@@ -586,10 +626,37 @@ class DocumentPackService:
             return {"status": "failed", "error": f"{type(exc).__name__}: {exc}"}
 
     def _pack_dir(self, pack_id: str) -> Path:
+        if not PACK_ID_PATTERN.fullmatch(pack_id):
+            raise KeyError(pack_id)
         pack_dir = self.packs_dir / pack_id
-        if not pack_dir.exists():
+        root = self.packs_dir.resolve()
+        try:
+            pack_dir.resolve().relative_to(root)
+        except ValueError as exc:
+            raise KeyError(pack_id) from exc
+        if not pack_dir.exists() or pack_dir.is_symlink() or not pack_dir.is_dir():
             raise KeyError(pack_id)
         return pack_dir
+
+    @contextmanager
+    def _pack_operation(self, pack_id: str) -> Iterator[None]:
+        if not PACK_ID_PATTERN.fullmatch(pack_id):
+            raise KeyError(pack_id)
+        with self._pack_locks_guard:
+            lock = self._pack_locks.setdefault(pack_id, threading.RLock())
+            self._pack_lock_users[pack_id] = self._pack_lock_users.get(pack_id, 0) + 1
+        lock.acquire()
+        try:
+            yield
+        finally:
+            lock.release()
+            with self._pack_locks_guard:
+                users = self._pack_lock_users.get(pack_id, 1) - 1
+                if users <= 0:
+                    self._pack_lock_users.pop(pack_id, None)
+                    self._pack_locks.pop(pack_id, None)
+                else:
+                    self._pack_lock_users[pack_id] = users
 
 
 def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSummary:
@@ -1025,13 +1092,31 @@ def _category_counts(spec: ProjectDesignSpec) -> dict[str, int]:
 
 
 def _write_json(path: Path, payload) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary.open("x", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        _fsync_directory(path.parent)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _read_json(path: Path):
     if not path.exists():
         raise KeyError(path.name)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _candidate_json(candidate) -> dict:

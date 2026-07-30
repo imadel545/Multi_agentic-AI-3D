@@ -12,6 +12,14 @@ const ForbiddenPublicFields = new Set([
 const ForbiddenStringMarkers = ["/Users/", "/home/", "/private/var/", "/var/folders/", "file://"];
 
 const UnknownRecord = z.object({}).catchall(z.unknown());
+const WorkflowLifecycleStatusSchema = z.enum([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "legacy_unverified",
+  "integrity_failed"
+]);
 
 export class ContractValidationError extends Error {
   constructor(
@@ -75,6 +83,7 @@ const RuntimeCapabilitiesSchema = UnknownRecord.extend({
   can_resume: z.boolean().optional(),
   can_retry_same_workflow: z.boolean().optional(),
   can_human_in_loop: z.boolean().optional(),
+  can_download_artifacts: z.boolean().optional(),
   can_view_versions: z.boolean().optional(),
   can_edit_completed_design: z.boolean().optional(),
   can_rollback_versions: z.boolean().optional()
@@ -205,8 +214,10 @@ export const UserIssueSchema = publicSchema(
 
 export const HealthSchema = publicSchema(
   UnknownRecord.extend({
-    status: z.string(),
-    version: z.string().optional()
+    status: z.literal("ok"),
+    service: z.literal("agentic_telecom_3d_studio_api"),
+    version: z.string(),
+    api_contract_version: z.literal("2026-07-29")
   })
 );
 
@@ -217,6 +228,7 @@ export const StudioSummarySchema = publicSchema(
     asset_inventory_status: z.string().nullish(),
     asset_count: z.number().int().nonnegative().default(0),
     real_glb_asset_count: z.number().int().nonnegative().default(0),
+    import_qualified_glb_count: z.number().int().nonnegative().default(0),
     generation_eligible_asset_count: z.number().int().nonnegative().default(0),
     reference_only_asset_count: z.number().int().nonnegative().default(0),
     blender_available: z.boolean().nullish(),
@@ -246,7 +258,7 @@ export const CreateDesignResponseSchema = publicSchema(
 export const WorkflowStatusSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string().min(1),
-    status: z.enum(["pending", "running", "completed", "failed"]).or(z.string()),
+    status: WorkflowLifecycleStatusSchema,
     created_at: z.string().nullish(),
     artifacts: z.record(z.string(), z.string()).default({}),
     warnings: z.array(UnknownRecord).default([]),
@@ -313,10 +325,42 @@ const ViewerArtifactSchema = publicSchema(
   })
 );
 
+const GeometryFidelityCountsSchema = UnknownRecord.extend({
+  schematic: z.number().int().nonnegative(),
+  technical_generic: z.number().int().nonnegative(),
+  vendor_qualified: z.number().int().nonnegative()
+});
+
+const GeometryFidelityRolesSchema = UnknownRecord.extend({
+  schematic: z.array(z.string()).default([]),
+  technical_generic: z.array(z.string()).default([]),
+  vendor_qualified: z.array(z.string()).default([])
+});
+
+export const GeometryFidelitySummarySchema = publicSchema(
+  UnknownRecord.extend({
+    component_count: z.number().int().nonnegative(),
+    counts: GeometryFidelityCountsSchema,
+    roles: GeometryFidelityRolesSchema
+  }).superRefine((value, ctx) => {
+    const countedComponents =
+      value.counts.schematic +
+      value.counts.technical_generic +
+      value.counts.vendor_qualified;
+    if (countedComponents !== value.component_count) {
+      ctx.addIssue({
+        code: "custom",
+        message: "geometry fidelity counts must equal component_count",
+        path: ["counts"]
+      });
+    }
+  })
+);
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
-    status: z.string(),
+    status: WorkflowLifecycleStatusSchema,
     generation_mode: z.string().nullish(),
     generation_strategy: z.string().nullish(),
     geometry_source: z.string().nullish(),
@@ -324,6 +368,7 @@ export const ViewerBundleSchema = publicSchema(
     mesh_qa_passed: z.boolean().nullish(),
     qa_score: z.number().nullish(),
     asset_import_summary: UnknownRecord.nullish(),
+    geometry_fidelity_summary: GeometryFidelitySummarySchema.nullish(),
     human_warnings_count: z.number().default(0),
     human_errors_count: z.number().default(0),
     primary_glb_url: z.string().nullish(),
@@ -786,6 +831,7 @@ export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
 export type ViewerBundle = z.infer<typeof ViewerBundleSchema>;
+export type GeometryFidelitySummary = z.infer<typeof GeometryFidelitySummarySchema>;
 export type TimelineSummary = z.infer<typeof TimelineSummarySchema>;
 export type TimelineStep = z.infer<typeof TimelineStepSchema>;
 export type CurrentOperation = z.infer<typeof CurrentOperationSchema>;

@@ -35,6 +35,15 @@
       "unsupported_operations": ["Redimensionnement non uniforme de l'antenne active", "Modification interne d'un maillage opaque"]
     },
     {
+      "profile_id": "rru_installation_v1",
+      "representation": "parametric_scene",
+      "editable_parameters": [
+        {"parameter_id":"rru_vertical_offset","label":"Décalage vertical du RRU","path_template":"/sectors/{index}/radio_geometry_profile/vertical_offset_m","value_type":"number","execution_tool":"sector_layout","effect":"placement","description":"Positionne le RRU sous l'antenne avec une distance bornée et vérifiable.","unit":"m","minimum":0.25,"maximum":3.0},
+        {"parameter_id":"rru_radial_inset","label":"Retrait radial du RRU","path_template":"/sectors/{index}/radio_geometry_profile/radial_inset_m","value_type":"number","execution_tool":"sector_layout","effect":"placement","description":"Rapproche le RRU du support sans modifier librement son maillage.","unit":"m","minimum":0.0,"maximum":0.5}
+      ],
+      "unsupported_operations": ["Topologie RRU libre", "Imitation d'un produit fournisseur non vérifié", "Génération de Python Blender par LLM"]
+    },
+    {
       "profile_id": "accessory_transform_v1",
       "representation": "semantic_glb",
       "editable_parameters": [

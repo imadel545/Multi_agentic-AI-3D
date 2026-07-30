@@ -1,6 +1,9 @@
 from pathlib import Path
 
+from core.agents.blueprint_composer import BlueprintComposer
+from core.agents.rf_engineer import RfEngineerAgent
 from core.agents.scene_planner import ScenePlanner
+from core.agents.tower_engineer import TowerEngineerAgent
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.parametric import MeshQAReport
@@ -12,6 +15,10 @@ from core.services.requirement_parser import parse_requirements_text
 from core.validation.completion_certificate import (
     build_completion_certificate,
     verify_completion_certificate,
+)
+from core.validation.design_blueprint import (
+    evaluate_blueprint_requirement_coverage,
+    evaluate_blueprint_scene_coverage,
 )
 from core.validation.requirement_coverage import evaluate_requirement_coverage
 
@@ -80,6 +87,7 @@ def test_completion_certificate_binds_artifact_hashes(tmp_path: Path) -> None:
     assert verify_completion_certificate(
         certificate,
         requirements=inputs["requirements"],
+        design_blueprint=inputs["design_blueprint"],
         scene=inputs["scene"],
         generation=inputs["generation"],
     )
@@ -87,6 +95,7 @@ def test_completion_certificate_binds_artifact_hashes(tmp_path: Path) -> None:
     assert not verify_completion_certificate(
         certificate,
         requirements=inputs["requirements"],
+        design_blueprint=inputs["design_blueprint"],
         scene=inputs["scene"],
         generation=inputs["generation"],
     )
@@ -136,6 +145,25 @@ def _scene_for(requirements, planning_resolution=None):
 
 def _completion_inputs(tmp_path: Path) -> dict:
     requirements, scene = _requirements_and_scene()
+    registry = AssetRegistry(Path("assets/manifests"))
+    selected_assets = [
+        registry.get(scene.tower.asset_id),
+        registry.get(scene.sectors[0].antenna_asset_id),
+        registry.get(scene.sectors[0].radio_asset_id),
+    ]
+    blueprint = BlueprintComposer().compose(
+        workflow_id=scene.scene_id,
+        requirements=requirements,
+        selected_assets=selected_assets,
+        tower_validation=TowerEngineerAgent().validate(requirements, selected_assets[0]),
+        rf_validation=RfEngineerAgent().validate(requirements),
+        planning_resolution=None,
+    )
+    blueprint_requirement_coverage = evaluate_blueprint_requirement_coverage(
+        requirements,
+        blueprint,
+    )
+    blueprint_scene_coverage = evaluate_blueprint_scene_coverage(blueprint, scene)
     glb = tmp_path / "design.glb"
     preview = tmp_path / "preview.png"
     metadata = tmp_path / "scene_metadata.json"
@@ -207,6 +235,9 @@ def _completion_inputs(tmp_path: Path) -> dict:
     return {
         "workflow_id": scene.scene_id,
         "requirements": requirements,
+        "design_blueprint": blueprint,
+        "blueprint_requirement_coverage": blueprint_requirement_coverage,
+        "blueprint_scene_coverage": blueprint_scene_coverage,
         "scene": scene,
         "requirement_coverage": coverage,
         "generation": generation,

@@ -23,6 +23,9 @@ def _material(
     roughness: float = 0.55,
     metallic: float = 0.0,
 ) -> object:
+    existing = bpy.data.materials.get(name)
+    if existing is not None:
+        return existing
     mat = bpy.data.materials.new(name=name)
     mat.diffuse_color = color
     mat.use_nodes = True
@@ -78,6 +81,14 @@ def _create_box(
     obj.dimensions = (width, depth, height)
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     return obj
+
+
+def _add_bevel(obj, width: float, *, segments: int = 3) -> None:
+    """Attach a bounded non-destructive bevel to a technical enclosure part."""
+
+    modifier = obj.modifiers.new(name=f"{obj.name}_edge_bevel", type="BEVEL")
+    modifier.width = max(float(width), 0.0005)
+    modifier.segments = max(1, min(int(segments), 4))
 
 
 @dataclass(frozen=True)
@@ -259,10 +270,10 @@ def tower_material_profile(
     material_name: str,
 ) -> tuple[tuple[float, float, float, float], float, float]:
     profiles = {
-        "galvanized_steel": ((0.48, 0.53, 0.58, 1.0), 0.3, 0.72),
-        "painted_steel": ((0.12, 0.24, 0.38, 1.0), 0.38, 0.52),
+        "galvanized_steel": ((0.62, 0.68, 0.72, 1.0), 0.28, 0.68),
+        "painted_steel": ((0.18, 0.34, 0.50, 1.0), 0.36, 0.48),
         "concrete": ((0.56, 0.57, 0.55, 1.0), 0.82, 0.0),
-        "unknown": ((0.45, 0.47, 0.49, 1.0), 0.58, 0.2),
+        "unknown": ((0.56, 0.59, 0.61, 1.0), 0.55, 0.18),
     }
     return profiles.get(material_name, profiles["unknown"])
 
@@ -457,13 +468,98 @@ def build_parametric_panel_antenna(
     height: float,
     location: tuple[float, float, float],
     rotation: tuple[float, float, float],
+    geometry_profile: dict | None = None,
 ) -> object:
-    """Generate a simple rectangular panel antenna primitive."""
-    box = _create_box(bpy, name, width, depth, height, location)
-    box.rotation_mode = "ZXY"
-    box.rotation_euler = rotation
-    box.data.materials.append(_material(bpy, "antenna_white", (0.88, 0.88, 0.90, 1)))
-    return box
+    """Generate a bounded multi-part generic sector-panel assembly.
+
+    This intentionally models no vendor product.  The manifest-selected
+    profile controls supported detail counts while the builder owns topology
+    and safety limits.
+    """
+
+    profile = geometry_profile or {}
+    rail_count = max(2, min(int(profile.get("rear_mount_rail_count", 2)), 4))
+    port_count = max(2, min(int(profile.get("bottom_port_count", 4)), 8))
+    bevel_ratio = max(0.01, min(float(profile.get("radome_bevel_ratio", 0.035)), 0.08))
+
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_mode = "ZXY"
+    root.rotation_euler = rotation
+
+    radome = _create_box(
+        bpy,
+        f"{name}_radome",
+        width,
+        depth * 0.62,
+        height,
+        (0.0, depth * 0.12, 0.0),
+    )
+    radome.parent = root
+    radome.data.materials.append(
+        _material(bpy, "antenna_radome_white", (0.86, 0.89, 0.91, 1), roughness=0.34)
+    )
+    _add_bevel(radome, min(width, depth, height) * bevel_ratio)
+
+    rear_chassis = _create_box(
+        bpy,
+        f"{name}_rear_chassis",
+        width * 0.76,
+        depth * 0.32,
+        height * 0.9,
+        (0.0, -depth * 0.35, 0.0),
+    )
+    rear_chassis.parent = root
+    rear_chassis.data.materials.append(
+        _material(bpy, "antenna_rear_chassis", (0.24, 0.27, 0.29, 1), metallic=0.35)
+    )
+    _add_bevel(rear_chassis, min(width, depth) * 0.025, segments=2)
+
+    rail_material = _material(
+        bpy,
+        "antenna_mount_galvanized",
+        (0.36, 0.4, 0.42, 1),
+        roughness=0.38,
+        metallic=0.55,
+    )
+    for index in range(rail_count):
+        x_ratio = -0.28 if rail_count == 2 else (-0.32 + (0.64 * index / (rail_count - 1)))
+        rail = _create_box(
+            bpy,
+            f"{name}_mount_rail_{index + 1:02d}",
+            max(width * 0.075, 0.018),
+            max(depth * 0.12, 0.018),
+            height * 0.7,
+            (width * x_ratio, -depth * 0.56, 0.0),
+        )
+        rail.parent = root
+        rail.data.materials.append(rail_material)
+
+    port_material = _material(
+        bpy,
+        "antenna_port_metal",
+        (0.13, 0.15, 0.16, 1),
+        roughness=0.28,
+        metallic=0.72,
+    )
+    port_radius = min(max(width / (port_count * 5.2), 0.012), 0.028)
+    port_height = min(max(height * 0.035, 0.045), 0.075)
+    for index in range(port_count):
+        x = width * (-0.34 + (0.68 * (index + 0.5) / port_count))
+        port = _create_cylinder(
+            bpy,
+            name=f"{name}_bottom_port_{index + 1:02d}",
+            radius_bottom=port_radius,
+            radius_top=port_radius,
+            height=port_height,
+            location=(x, 0.0, -(height + port_height) / 2),
+            vertices=16,
+        )
+        port.parent = root
+        port.data.materials.append(port_material)
+
+    return root
 
 
 def build_parametric_microwave_dish(
@@ -555,13 +651,150 @@ def build_parametric_radio(
     height: float,
     location: tuple[float, float, float],
     rotation: tuple[float, float, float],
+    geometry_profile: dict | None = None,
 ) -> object:
-    """Generate a simple RRU box primitive."""
-    box = _create_box(bpy, name, width, depth, height, location)
-    box.rotation_mode = "XYZ"
-    box.rotation_euler = rotation
-    box.data.materials.append(_material(bpy, "radio_gray", (0.32, 0.34, 0.36, 1)))
-    return box
+    """Generate a bounded multi-part generic remote-radio assembly.
+
+    The output is a technical-generic RRU representation, not a vendor-exact
+    model.  Counts and optional parts come from the typed manifest profile.
+    """
+
+    profile = geometry_profile or {}
+    fin_count = max(4, min(int(profile.get("heat_sink_fin_count", 8)), 16))
+    connector_count = max(2, min(int(profile.get("bottom_connector_count", 4)), 8))
+    rail_count = max(2, min(int(profile.get("mounting_rail_count", 2)), 4))
+    bevel_ratio = max(
+        0.01,
+        min(float(profile.get("enclosure_bevel_ratio", 0.04)), 0.08),
+    )
+
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+    root.rotation_mode = "XYZ"
+    root.rotation_euler = rotation
+
+    enclosure = _create_box(
+        bpy,
+        f"{name}_enclosure",
+        width,
+        depth * 0.72,
+        height,
+        (0.0, depth * 0.1, 0.0),
+    )
+    enclosure.parent = root
+    enclosure.data.materials.append(
+        _material(bpy, "rru_enclosure_light", (0.67, 0.7, 0.72, 1), roughness=0.4)
+    )
+    _add_bevel(enclosure, min(width, depth, height) * bevel_ratio)
+
+    front_cover = _create_box(
+        bpy,
+        f"{name}_front_cover",
+        width * 0.86,
+        max(depth * 0.055, 0.012),
+        height * 0.88,
+        (0.0, depth * 0.49, 0.0),
+    )
+    front_cover.parent = root
+    front_cover.data.materials.append(
+        _material(bpy, "rru_front_cover", (0.78, 0.8, 0.81, 1), roughness=0.32)
+    )
+    _add_bevel(front_cover, min(width, depth) * 0.018, segments=2)
+
+    thermal_material = _material(
+        bpy,
+        "rru_heat_sink_dark",
+        (0.19, 0.22, 0.23, 1),
+        roughness=0.36,
+        metallic=0.5,
+    )
+    fin_width = max(width / (fin_count * 4.5), 0.008)
+    for index in range(fin_count):
+        x = width * (-0.4 + (0.8 * (index + 0.5) / fin_count))
+        fin = _create_box(
+            bpy,
+            f"{name}_heat_sink_{index + 1:02d}",
+            fin_width,
+            max(depth * 0.22, 0.025),
+            height * 0.78,
+            (x, -depth * 0.46, 0.02 * height),
+        )
+        fin.parent = root
+        fin.data.materials.append(thermal_material)
+
+    mount_material = _material(
+        bpy,
+        "rru_mount_galvanized",
+        (0.34, 0.38, 0.4, 1),
+        roughness=0.4,
+        metallic=0.6,
+    )
+    for index in range(rail_count):
+        x_ratio = -0.3 if rail_count == 2 else (-0.34 + (0.68 * index / (rail_count - 1)))
+        rail = _create_box(
+            bpy,
+            f"{name}_mount_rail_{index + 1:02d}",
+            max(width * 0.08, 0.018),
+            max(depth * 0.12, 0.018),
+            height * 0.72,
+            (width * x_ratio, -depth * 0.61, -height * 0.02),
+        )
+        rail.parent = root
+        rail.data.materials.append(mount_material)
+
+    connector_material = _material(
+        bpy,
+        "rru_connector_metal",
+        (0.11, 0.13, 0.14, 1),
+        roughness=0.24,
+        metallic=0.78,
+    )
+    connector_radius = min(max(width / (connector_count * 5.0), 0.012), 0.03)
+    connector_height = min(max(height * 0.055, 0.045), 0.08)
+    for index in range(connector_count):
+        x = width * (-0.36 + (0.72 * (index + 0.5) / connector_count))
+        connector = _create_cylinder(
+            bpy,
+            name=f"{name}_bottom_connector_{index + 1:02d}",
+            radius_bottom=connector_radius,
+            radius_top=connector_radius * 0.88,
+            height=connector_height,
+            location=(x, depth * 0.05, -(height + connector_height) / 2),
+            vertices=16,
+        )
+        connector.parent = root
+        connector.data.materials.append(connector_material)
+
+    if bool(profile.get("include_status_indicator", True)):
+        indicator = _create_box(
+            bpy,
+            f"{name}_status_indicator",
+            max(width * 0.035, 0.009),
+            max(depth * 0.025, 0.005),
+            max(height * 0.085, 0.025),
+            (width * 0.32, depth * 0.535, -height * 0.32),
+        )
+        indicator.parent = root
+        indicator.data.materials.append(
+            _material(bpy, "rru_status_green", (0.03, 0.75, 0.24, 1), roughness=0.25)
+        )
+
+    if bool(profile.get("include_label_plate", True)):
+        label = _create_box(
+            bpy,
+            f"{name}_label_plate",
+            width * 0.42,
+            max(depth * 0.022, 0.004),
+            height * 0.12,
+            (0.0, depth * 0.54, height * 0.27),
+        )
+        label.parent = root
+        label.data.materials.append(
+            _material(bpy, "rru_label_plate", (0.88, 0.89, 0.87, 1), roughness=0.5)
+        )
+
+    return root
 
 
 def build_parametric_cable(

@@ -27,8 +27,8 @@ PLANNING_DECISION_SCHEMA: dict[str, Any] = {
     "properties": {
         "selections": {
             "type": "array",
-            "minItems": 4,
-            "maxItems": 4,
+            "minItems": 6,
+            "maxItems": 6,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -137,7 +137,7 @@ class GroqPlanningDecisionClient:
                     "role": "system",
                     "content": (
                         "You are a bounded telecom planning decision component. "
-                        "Choose exactly one action for each of the four allowed fields. "
+                        "Choose exactly one action for each of the six allowed fields. "
                         "You may only keep the current value or select a supplied candidate_id. "
                         "Never create a value, field, formula, geometry, tool call, "
                         "or Blender code. "

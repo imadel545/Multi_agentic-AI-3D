@@ -1,8 +1,10 @@
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -40,6 +42,7 @@ from apps.api.telecom_studio_api.models import (
 from apps.api.telecom_studio_api.product import ProductNotFound, ProductService
 from apps.api.telecom_studio_api.workflow import (
     WorkflowBusyError,
+    WorkflowMemoryPurgeError,
     WorkflowService,
     WorkflowStorageError,
 )
@@ -47,6 +50,7 @@ from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import SceneAdaptationCapabilities
 from core.contracts.document_pack import DocumentPackCorrection
+from core.contracts.identifiers import VERSION_ID_PATTERN, WORKFLOW_ID_PATTERN
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
@@ -66,6 +70,10 @@ from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound,
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 from core.services.checkpoint_saver import SqliteCheckpointSaver
+
+WorkflowId = Annotated[str, ApiPath(pattern=WORKFLOW_ID_PATTERN)]
+VersionId = Annotated[str, ApiPath(pattern=VERSION_ID_PATTERN)]
+OptionalVersionId = Annotated[str | None, Query(pattern=VERSION_ID_PATTERN)]
 
 
 @asynccontextmanager
@@ -219,7 +227,12 @@ product_service = ProductService(workflow_service, asset_inventory_service)
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "version": "0.2.0"}
+    return {
+        "status": "ok",
+        "service": "agentic_telecom_3d_studio_api",
+        "version": "0.2.0",
+        "api_contract_version": "2026-07-29",
+    }
 
 
 @app.get("/studio/summary", response_model=StudioSummary)
@@ -259,7 +272,7 @@ def create_design(request: CreateDesignRequest) -> dict:
 
 
 @app.get("/designs/{workflow_id}", response_model=WorkflowStatus)
-def get_design(workflow_id: str) -> dict:
+def get_design(workflow_id: WorkflowId) -> dict:
     try:
         return workflow_service.get_public_status(workflow_id)
     except KeyError as exc:
@@ -267,7 +280,7 @@ def get_design(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/user-summary", response_model=UserSummary)
-def get_user_summary(workflow_id: str) -> dict:
+def get_user_summary(workflow_id: WorkflowId) -> dict:
     try:
         return product_service.user_summary(workflow_id)
     except ProductNotFound as exc:
@@ -275,7 +288,7 @@ def get_user_summary(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/current-operation", response_model=CurrentOperation)
-def get_current_operation(workflow_id: str) -> dict:
+def get_current_operation(workflow_id: WorkflowId) -> dict:
     try:
         return product_service.current_operation(workflow_id)
     except ProductNotFound as exc:
@@ -283,7 +296,7 @@ def get_current_operation(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/user-issues", response_model=UserIssuesResponse)
-def get_user_issues(workflow_id: str) -> dict:
+def get_user_issues(workflow_id: WorkflowId) -> dict:
     try:
         return product_service.user_issues(workflow_id)
     except ProductNotFound as exc:
@@ -291,7 +304,7 @@ def get_user_issues(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/viewer-bundle", response_model=ViewerBundle)
-def get_viewer_bundle(workflow_id: str) -> dict:
+def get_viewer_bundle(workflow_id: WorkflowId) -> dict:
     try:
         return product_service.viewer_bundle(workflow_id)
     except ProductNotFound as exc:
@@ -299,7 +312,7 @@ def get_viewer_bundle(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/timeline-summary", response_model=TimelineSummary)
-def get_timeline_summary(workflow_id: str) -> dict:
+def get_timeline_summary(workflow_id: WorkflowId) -> dict:
     try:
         return product_service.timeline_summary(workflow_id)
     except ProductNotFound as exc:
@@ -307,7 +320,7 @@ def get_timeline_summary(workflow_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/download")
-def download_design(workflow_id: str) -> FileResponse:
+def download_design(workflow_id: WorkflowId) -> FileResponse:
     try:
         path = workflow_service.archive_path(workflow_id)
     except KeyError as exc:
@@ -317,9 +330,9 @@ def download_design(workflow_id: str) -> FileResponse:
 
 @app.get("/designs/{workflow_id}/artifacts/{artifact_name}")
 def get_design_artifact(
-    workflow_id: str,
+    workflow_id: WorkflowId,
     artifact_name: str,
-    version_id: str | None = None,
+    version_id: OptionalVersionId = None,
 ) -> FileResponse:
     try:
         path = workflow_service.artifact_path(workflow_id, artifact_name, version_id=version_id)
@@ -342,12 +355,14 @@ def list_designs(
 
 
 @app.delete("/designs/{workflow_id}")
-def delete_design(workflow_id: str) -> dict:
+def delete_design(workflow_id: WorkflowId) -> dict:
     try:
         workflow_service.delete_design(workflow_id)
         return {"workflow_id": workflow_id, "deleted": True}
     except WorkflowBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkflowMemoryPurgeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="workflow not found") from exc
 
@@ -363,18 +378,22 @@ def parse_requirements(request: ParseRequirementsRequest) -> dict:
 
 
 @app.post("/designs/{workflow_id}/edit", response_model=EditDesignResponse)
-def edit_design(workflow_id: str, request: EditDesignRequest) -> dict:
+def edit_design(workflow_id: WorkflowId, request: EditDesignRequest) -> dict:
     try:
         result = workflow_service.edit_design(workflow_id, request.edit_prompt)
     except WorkflowBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except WorkflowStorageError as exc:
         raise HTTPException(status_code=507, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="workflow not found") from exc
     return workflow_service.public_edit_response(result)
 
 
 @app.get("/designs/{workflow_id}/versions", response_model=list[PublicVersionInfo])
-def list_versions(workflow_id: str) -> list[dict]:
+def list_versions(workflow_id: WorkflowId) -> list[dict]:
+    if not workflow_service.workflow_exists(workflow_id):
+        raise HTTPException(status_code=404, detail="workflow not found")
     return workflow_service.list_versions_public(workflow_id)
 
 
@@ -382,7 +401,7 @@ def list_versions(workflow_id: str) -> list[dict]:
     "/designs/{workflow_id}/versions/{version_id}/rollback",
     response_model=RollbackVersionResponse,
 )
-def rollback_version(workflow_id: str, version_id: str) -> dict:
+def rollback_version(workflow_id: WorkflowId, version_id: VersionId) -> dict:
     try:
         return workflow_service.rollback_version(workflow_id, version_id)
     except WorkflowBusyError as exc:
@@ -392,12 +411,17 @@ def rollback_version(workflow_id: str, version_id: str) -> dict:
 
 
 @app.get("/designs/{workflow_id}/events", response_model=list[WorkflowEventView])
-def get_events(workflow_id: str) -> list[dict]:
-    return workflow_service.get_events(workflow_id)
+def get_events(
+    workflow_id: WorkflowId,
+    after_sequence: int | None = Query(default=None, ge=0),
+) -> list[dict]:
+    if not workflow_service.workflow_exists(workflow_id):
+        raise HTTPException(status_code=404, detail="workflow not found")
+    return workflow_service.get_events(workflow_id, after_sequence=after_sequence)
 
 
 @app.get("/designs/{workflow_id}/events/stream")
-def stream_events(workflow_id: str, after_event_id: str | None = None):
+def stream_events(workflow_id: WorkflowId, after_event_id: str | None = None):
     if not workflow_service.workflow_exists(workflow_id):
         raise HTTPException(status_code=404, detail="workflow not found")
 
@@ -477,7 +501,7 @@ def asset_adaptation_capabilities() -> dict:
     "/designs/{workflow_id}/adaptation-capabilities",
     response_model=SceneAdaptationCapabilities,
 )
-def design_adaptation_capabilities(workflow_id: str) -> dict:
+def design_adaptation_capabilities(workflow_id: WorkflowId) -> dict:
     active_version = workflow_service.versioning.get_active_version(workflow_id)
     if active_version is None:
         raise HTTPException(status_code=404, detail="active design version not found")
@@ -763,38 +787,43 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
 )
 def generate_design_from_document_pack(pack_id: str) -> dict:
     try:
-        _spec, qa_report, mapping, ready = document_pack_service.get_generation_readiness(pack_id)
+        with document_pack_service.generation_readiness_snapshot(pack_id) as (
+            _spec,
+            qa_report,
+            mapping,
+            ready,
+        ):
+            if not ready:
+                return {
+                    "pack_id": pack_id,
+                    "status": "blocked",
+                    "mapping": mapping.model_dump(),
+                    "extraction_report": {
+                        "source": "project_design_spec",
+                        "prompt_text_reparse": False,
+                        "qa_status": qa_report.status,
+                        "qa_ready_to_generate": qa_report.ready_to_generate,
+                        "qa_blocking_issues": qa_report.blocking_issues,
+                        "mapping_loss_report": mapping.mapping_loss_report,
+                    },
+                }
+            requirements = RequirementSpec.model_validate(mapping.requirements)
+            try:
+                design = workflow_service.create_design_from_requirements(
+                    requirements=requirements,
+                    detail_level="high",
+                    source_label="project_design_spec",
+                )
+            except WorkflowBusyError as exc:
+                raise HTTPException(
+                    status_code=429,
+                    detail=str(exc),
+                    headers={"Retry-After": "5"},
+                ) from exc
+            if design.get("workflow_id"):
+                document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="document pack not found") from exc
-    if not ready:
-        return {
-            "pack_id": pack_id,
-            "status": "blocked",
-            "mapping": mapping.model_dump(),
-            "extraction_report": {
-                "source": "project_design_spec",
-                "prompt_text_reparse": False,
-                "qa_status": qa_report.status,
-                "qa_ready_to_generate": qa_report.ready_to_generate,
-                "qa_blocking_issues": qa_report.blocking_issues,
-                "mapping_loss_report": mapping.mapping_loss_report,
-            },
-        }
-    requirements = RequirementSpec.model_validate(mapping.requirements)
-    try:
-        design = workflow_service.create_design_from_requirements(
-            requirements=requirements,
-            detail_level="high",
-            source_label="project_design_spec",
-        )
-    except WorkflowBusyError as exc:
-        raise HTTPException(
-            status_code=429,
-            detail=str(exc),
-            headers={"Retry-After": "5"},
-        ) from exc
-    if design.get("workflow_id"):
-        document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
     return {
         "pack_id": pack_id,
         "status": "pending",

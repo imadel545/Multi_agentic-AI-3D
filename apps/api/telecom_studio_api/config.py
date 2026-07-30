@@ -22,7 +22,6 @@ class Settings(BaseSettings):
     enable_groq_planning_decision: bool = True
     groq_planning_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
     groq_planning_max_completion_tokens: int = Field(default=2048, ge=128, le=2048)
-    use_langgraph: bool = True
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
     max_concurrent_workflows: int = Field(default=2, ge=1, le=8)

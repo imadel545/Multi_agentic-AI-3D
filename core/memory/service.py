@@ -245,6 +245,67 @@ class MemoryService:
                 "document_pack_issue_memory_count": _count(conn, "document_pack_issue_memory"),
             }
 
+    def purge_workflow(self, workflow_id: str) -> dict:
+        """Forget one workflow in canonical memory and invalidate its vector projection."""
+
+        if not workflow_id or not workflow_id.strip():
+            raise ValueError("workflow_id is required")
+        with self._write_lock:
+            with self._connect() as conn:
+                counts = {
+                    "workflow_memory": conn.execute(
+                        "SELECT COUNT(*) FROM workflow_memory WHERE workflow_id = ?",
+                        (workflow_id,),
+                    ).fetchone()[0],
+                    "design_memory": conn.execute(
+                        "SELECT COUNT(*) FROM design_memory WHERE workflow_id = ?",
+                        (workflow_id,),
+                    ).fetchone()[0],
+                    "error_memory": conn.execute(
+                        "SELECT COUNT(*) FROM error_memory WHERE workflow_id = ?",
+                        (workflow_id,),
+                    ).fetchone()[0],
+                    "document_pack_links": conn.execute(
+                        "SELECT COUNT(*) FROM document_pack_memory WHERE generated_workflow_id = ?",
+                        (workflow_id,),
+                    ).fetchone()[0],
+                }
+            vector_projection = {
+                "status": "not_configured",
+                "reindex_required": False,
+            }
+            if self.rag_service is not None and any(
+                counts[name] for name in ("design_memory", "error_memory", "document_pack_links")
+            ):
+                vector_projection = self.rag_service.invalidate_runtime_memory()
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "DELETE FROM workflow_memory WHERE workflow_id = ?",
+                    (workflow_id,),
+                )
+                conn.execute(
+                    "DELETE FROM design_memory WHERE workflow_id = ?",
+                    (workflow_id,),
+                )
+                conn.execute(
+                    "DELETE FROM error_memory WHERE workflow_id = ?",
+                    (workflow_id,),
+                )
+                conn.execute(
+                    "UPDATE document_pack_memory SET generated_workflow_id = NULL "
+                    "WHERE generated_workflow_id = ?",
+                    (workflow_id,),
+                )
+                if any(counts.values()):
+                    _bump_vector_revision(conn)
+        return {
+            "status": "purged",
+            "workflow_id": workflow_id,
+            "deleted": counts,
+            "vector_projection": vector_projection,
+        }
+
     def write_document_pack_summary(
         self,
         *,

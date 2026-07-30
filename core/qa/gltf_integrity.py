@@ -70,6 +70,7 @@ def inspect_gltf_integrity(path: Path) -> GltfIntegrityResult:
     buffer_views = payload.get("bufferViews", [])
     accessors = payload.get("accessors", [])
     meshes = payload.get("meshes", [])
+    nodes = payload.get("nodes", [])
     if not isinstance(buffer_views, list):
         errors.append("GLTF_BUFFERVIEWS_INVALID")
         buffer_views = []
@@ -79,10 +80,14 @@ def inspect_gltf_integrity(path: Path) -> GltfIntegrityResult:
     if not isinstance(meshes, list):
         errors.append("GLTF_MESHES_INVALID")
         meshes = []
+    if not isinstance(nodes, list):
+        errors.append("GLTF_NODES_INVALID")
+        nodes = []
     if meshes and not buffers:
         errors.append("GLB_BINARY_CHUNK_MISSING")
 
     _validate_buffer_views(buffer_views, buffers, errors)
+    _validate_nodes(nodes, meshes, errors)
     primitive_count = 0
     valid_primitive_count = 0
     valid_position_accessors: set[int] = set()
@@ -302,6 +307,103 @@ def _validate_buffer_views(
             or byte_offset + byte_length > len(buffers[buffer_index] or b"")
         ):
             errors.append("GLTF_BUFFERVIEW_RANGE_INVALID")
+
+
+def _validate_nodes(
+    nodes: list[Any],
+    meshes: list[Any],
+    errors: list[str],
+) -> None:
+    parent_by_child: dict[int, int] = {}
+    adjacency: dict[int, list[int]] = {}
+    for node_index, node in enumerate(nodes):
+        if not isinstance(node, dict):
+            errors.append("GLTF_NODE_INVALID")
+            continue
+        matrix = node.get("matrix")
+        has_trs = any(field in node for field in ("translation", "rotation", "scale"))
+        if matrix is not None:
+            if has_trs or not _finite_vector(matrix, 16):
+                errors.append("GLTF_NODE_TRANSFORM_INVALID")
+        else:
+            if "translation" in node and not _finite_vector(node["translation"], 3):
+                errors.append("GLTF_NODE_TRANSFORM_INVALID")
+            if "scale" in node and not _finite_vector(node["scale"], 3):
+                errors.append("GLTF_NODE_TRANSFORM_INVALID")
+            if "rotation" in node:
+                rotation = node["rotation"]
+                if not _finite_vector(rotation, 4):
+                    errors.append("GLTF_NODE_TRANSFORM_INVALID")
+                else:
+                    norm = math.sqrt(sum(float(value) ** 2 for value in rotation))
+                    if norm <= 1e-8 or abs(norm - 1.0) > 1e-3:
+                        errors.append("GLTF_NODE_TRANSFORM_INVALID")
+
+        mesh_index = node.get("mesh")
+        if mesh_index is not None and (
+            not isinstance(mesh_index, int)
+            or isinstance(mesh_index, bool)
+            or not 0 <= mesh_index < len(meshes)
+        ):
+            errors.append("GLTF_NODE_MESH_INVALID")
+
+        children = node.get("children", [])
+        if not isinstance(children, list):
+            errors.append("GLTF_NODE_CHILDREN_INVALID")
+            continue
+        integer_children = [
+            child for child in children if isinstance(child, int) and not isinstance(child, bool)
+        ]
+        if len(integer_children) != len(children) or len(integer_children) != len(
+            set(integer_children)
+        ):
+            errors.append("GLTF_NODE_CHILDREN_INVALID")
+        valid_children: list[int] = []
+        for child in children:
+            if (
+                not isinstance(child, int)
+                or isinstance(child, bool)
+                or not 0 <= child < len(nodes)
+                or child == node_index
+                or child in parent_by_child
+            ):
+                errors.append("GLTF_NODE_GRAPH_INVALID")
+                continue
+            parent_by_child[child] = node_index
+            valid_children.append(child)
+        adjacency[node_index] = valid_children
+
+    visiting: set[int] = set()
+    visited: set[int] = set()
+
+    def visit(node_index: int) -> bool:
+        if node_index in visiting:
+            return False
+        if node_index in visited:
+            return True
+        visiting.add(node_index)
+        for child in adjacency.get(node_index, []):
+            if not visit(child):
+                return False
+        visiting.remove(node_index)
+        visited.add(node_index)
+        return True
+
+    if any(not visit(node_index) for node_index in range(len(nodes)) if node_index not in visited):
+        errors.append("GLTF_NODE_GRAPH_INVALID")
+
+
+def _finite_vector(value: object, length: int) -> bool:
+    return bool(
+        isinstance(value, list)
+        and len(value) == length
+        and all(
+            isinstance(component, (int, float))
+            and not isinstance(component, bool)
+            and math.isfinite(float(component))
+            for component in value
+        )
+    )
 
 
 def _read_accessor(

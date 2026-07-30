@@ -1,4 +1,9 @@
-from core.contracts.assets import AssetManifest
+from core.contracts.assets import (
+    AssetManifest,
+    PanelAntennaGeometryProfile,
+    RadioGeometryProfile,
+)
+from core.contracts.common import DetailLevel
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import (
     RuntimeAssetMetadata,
@@ -34,6 +39,16 @@ class ScenePlanner:
             rag_resolution = RagPlanningResolution(
                 antenna_install_height_m=float(planning_resolution["antenna_install_height_m"]),
                 beamwidth_deg=float(planning_resolution["beamwidth_deg"]),
+                mechanical_tilt_deg=float(
+                    planning_resolution.get(
+                        "mechanical_tilt_deg", requirements.mechanical_tilt_deg
+                    )
+                ),
+                electrical_tilt_deg=float(
+                    planning_resolution.get(
+                        "electrical_tilt_deg", requirements.electrical_tilt_deg
+                    )
+                ),
                 include_cables=bool(planning_resolution["include_cables"]),
                 include_sector_beams=bool(planning_resolution["include_sector_beams"]),
                 decisions=tuple(planning_resolution.get("decisions", ())),
@@ -48,8 +63,18 @@ class ScenePlanner:
         )
         beamwidth = rag_resolution.beamwidth_deg
         install_height = rag_resolution.antenna_install_height_m
+        mechanical_tilt = rag_resolution.mechanical_tilt_deg
+        electrical_tilt = rag_resolution.electrical_tilt_deg
         include_cables = rag_resolution.include_cables
         tower_characteristics = _resolved_tower_characteristics(requirements, tower)
+        antenna_geometry_profile = _panel_profile_for_detail(
+            antenna.panel_geometry_profile,
+            requirements.detail_level,
+        )
+        radio_geometry_profile = _radio_profile_for_detail(
+            radio.radio_geometry_profile if radio else None,
+            requirements.detail_level,
+        )
 
         sectors = [
             SectorSpec(
@@ -78,11 +103,13 @@ class ScenePlanner:
                 else "no radio requested",
                 install_height_m=install_height,
                 azimuth_deg=azimuth,
-                mechanical_tilt_deg=requirements.mechanical_tilt_deg,
-                electrical_tilt_deg=requirements.electrical_tilt_deg,
+                mechanical_tilt_deg=mechanical_tilt,
+                electrical_tilt_deg=electrical_tilt,
                 beamwidth_deg=beamwidth,
                 antenna_dimensions_m=antenna.dimensions_m,
                 radio_dimensions_m=radio.dimensions_m if radio else None,
+                antenna_geometry_profile=antenna_geometry_profile,
+                radio_geometry_profile=radio_geometry_profile,
                 include_cable=include_cables,
                 include_label=requirements.include_labels,
             )
@@ -91,6 +118,7 @@ class ScenePlanner:
         return SceneSpec(
             scene_id=workflow_id,
             network_type=requirements.network_type,
+            detail_level=requirements.detail_level,
             tower=SceneAssetPlacement(
                 asset_id=tower.asset_id,
                 asset_file=tower.file,
@@ -121,8 +149,74 @@ class ScenePlanner:
         )
 
 
+def _panel_profile_for_detail(
+    profile: PanelAntennaGeometryProfile | None,
+    detail_level: DetailLevel,
+) -> PanelAntennaGeometryProfile | None:
+    if profile is None or detail_level == "high":
+        return profile
+    payload = profile.model_dump()
+    payload.update(
+        {
+            "rear_mount_rail_count": _detail_count(
+                profile.rear_mount_rail_count,
+                minimum=2,
+                detail_level=detail_level,
+            ),
+            "bottom_port_count": _detail_count(
+                profile.bottom_port_count,
+                minimum=2,
+                detail_level=detail_level,
+            ),
+        }
+    )
+    return PanelAntennaGeometryProfile.model_validate(payload)
+
+
+def _radio_profile_for_detail(
+    profile: RadioGeometryProfile | None,
+    detail_level: DetailLevel,
+) -> RadioGeometryProfile | None:
+    if profile is None or detail_level == "high":
+        return profile
+    payload = profile.model_dump()
+    payload.update(
+        {
+            "heat_sink_fin_count": _detail_count(
+                profile.heat_sink_fin_count,
+                minimum=4,
+                detail_level=detail_level,
+            ),
+            "bottom_connector_count": _detail_count(
+                profile.bottom_connector_count,
+                minimum=2,
+                detail_level=detail_level,
+            ),
+            "mounting_rail_count": _detail_count(
+                profile.mounting_rail_count,
+                minimum=2,
+                detail_level=detail_level,
+            ),
+        }
+    )
+    return RadioGeometryProfile.model_validate(payload)
+
+
+def _detail_count(value: int, *, minimum: int, detail_level: DetailLevel) -> int:
+    """Reduce visual repetition without changing dimensions or installation semantics."""
+
+    if detail_level == "high":
+        return value
+    if detail_level == "medium":
+        reduced = (value * 3 + 3) // 4
+    else:
+        reduced = (value + 1) // 2
+    return max(minimum, min(value, reduced))
+
+
 def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
     return RuntimeAssetMetadata(
+        geometry_fidelity=asset.geometry_fidelity,
         license=asset.license,
         attribution_required=asset.attribution_required,
         attribution=asset.attribution,

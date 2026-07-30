@@ -269,7 +269,7 @@ def test_primary_equipment_spatial_qa_allows_same_sector_antenna_rru_contact(
     payload = _primary_equipment_payload(
         [
             ("antenna_S1", "antenna", "S1", [0.0, 24.0, 0.0]),
-            ("radio_S1", "radio", "S1", [0.0, 24.0, 0.0]),
+            ("radio_S1", "radio", "S1", [0.49, 24.0, 0.0]),
             ("antenna_S2", "antenna", "S2", [3.0, 24.0, 0.0]),
         ]
     )
@@ -288,6 +288,30 @@ def test_primary_equipment_spatial_qa_allows_same_sector_antenna_rru_contact(
     assert "antenna_S1<->radio_S1" in (
         checks["primary_equipment_aabb_interference_free"].detail or ""
     )
+
+
+def test_primary_equipment_spatial_qa_rejects_total_same_sector_overlap(
+    tmp_path: Path,
+) -> None:
+    scene = _minimal_semantic_scene()
+    payload = _primary_equipment_payload(
+        [
+            ("antenna_S1", "antenna", "S1", [0.0, 24.0, 0.0]),
+            ("radio_S1", "radio", "S1", [0.0, 24.0, 0.0]),
+        ]
+    )
+    glb_path = tmp_path / "spatial_total_overlap.glb"
+    _write_json_glb(glb_path, payload)
+
+    result = _primary_equipment_spatial_checks(
+        glb_path,
+        payload,
+        _build_semantic_index(payload, scene),
+    )
+    checks = {check.name: check for check in result["checks"]}
+
+    assert checks["primary_equipment_aabb_interference_free"].passed is False
+    assert "MESH_PRIMARY_EQUIPMENT_AABB_INTERFERENCE_DETECTED" in result["warnings"]
 
 
 def _scene():

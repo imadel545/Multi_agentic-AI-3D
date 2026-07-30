@@ -38,6 +38,7 @@ memory_recall
 select_assets
 asset_fallback_handler
 validate_requirements
+compose_design_blueprint
 plan_scene
 validate_scene
 scene_repair_handler
@@ -71,7 +72,8 @@ memory_writeback
 - Le checkpoint saver persiste des snapshots locaux sérialisables. Chaque
   création utilise `{workflow_id}:initial` et chaque révision
   `{workflow_id}:revision:{version_id}` afin qu'une révision ne reprenne jamais
-  l'état d'une opération précédente. Il ne
+  l'état d'une opération précédente. Les threads terminaux, y compris le graphe
+  d'adaptation éphémère, sont supprimés. Il ne
   constitue pas encore un gestionnaire de cancellation/reprise durable.
 - Une révision persiste son opération active dans le statut existant, reprend
   le stream après le dernier event durable, normalise les dépendances d'assets,
@@ -82,20 +84,33 @@ memory_writeback
   `edit_patch_rejected`. Une création initiale interrompue reste `failed`.
 - Les nœuds émettent maintenant `node_started`, puis `node_completed`,
   `node_failed` ou `node_skipped` avec phase, label humain, message de
-  progression, détail, durée, warnings et errors.
+  progression, détail, durée, warnings et errors. Chaque trace/event porte
+  aussi `actor_kind` et `decision_authority`: un service, Blender ou une gate
+  QA n'est jamais présenté comme un agent LLM.
 - `workflow_trace.json` reste la preuve complète post-run.
 - `validate_scene` produit une couverture champ par champ des exigences. Toute
   divergence critique sans décision de planning appliquée et prouvée bloque le
   passage vers Blender.
+- `compose_design_blueprint` route les spécialistes requis par les rôles
+  sélectionnés, produit des intents génériques et bornés, puis bloque si les
+  exigences ne sont pas couvertes. `validate_scene` prouve ensuite que chaque
+  intent courant a réellement été compilé dans `SceneSpec`.
 - Après le post-gate, `certify_completion` émet ou rejette une preuve terminale
   liée aux hashes des exigences, de `SceneSpec`, du GLB, de la preview, des
   métadonnées et du build lock. Sans certificat `issued`, le statut final reste `failed` et la
   version n'est pas activée.
+- L'activation vérifiée est le commit canonique. Les projections compatibles
+  (statut racine et événements produit/terminaux) sont best-effort après ce
+  commit; leur panne est journalisée sans transformer un design certifié en
+  échec. Au redémarrage, la projection racine est restaurée depuis le manifeste.
 
 ## Frontend impact
 
 - Afficher `events/stream` comme `push_sse` local-process: replay JSONL puis
-  queue live jusqu'au terminal.
+  queue live jusqu'au terminal, avec curseur durable et rattrapage JSONL sur
+  trou de séquence.
+- En fallback polling, utiliser `/events?after_sequence=N` et insérer le lot
+  delta; ne pas recharger ni redispatcher tout l'historique.
 - Utiliser `/timeline-summary` pour une timeline lisible dérivée des events runtime + trace.
 - Utiliser `/current-operation` pour `current_phase`, `current_node` et action suivante.
 - Utiliser `rag_planning_summary` pour afficher si RAG a seulement fourni du
@@ -106,8 +121,17 @@ memory_writeback
 
 ## À corriger plus tard
 
+- Étendre le `DesignBlueprint` actuel vers plusieurs candidats issus des
+  manifests/RAG/mémoire certifiée et laisser GPT-OSS choisir uniquement un
+  `candidate_id` validé. Ajouter les spécialistes connecteurs/câblage/énergie et
+  un agrégateur de conflits; le graphe courant reste majoritairement fixe et
+  déterministe.
+- Ajouter une seule boucle post-QA de critique/réparation bornée, avec nouvelle
+  génération et recertification; aucun Python Blender LLM.
 - Décider si le versioning doit devenir un nœud LangGraph; les quatre étapes
   d'adaptation émettent déjà une progression fine et persistée.
 - Ajouter cancellation/retry/recovery et reprise durable si l'expérience frontend
   dépasse le modèle local-thread.
 - Décider queue/job manager seulement si le runtime local-thread devient bloquant.
+- Ajouter clés d'idempotence et journal compensatoire pour les mutations
+  multi-store (suppression, pack documentaire, soumission de révision).

@@ -75,7 +75,8 @@ Open `http://127.0.0.1:5173`.
 ## Current Limits
 
 - This is still a frontend product rework, not the final premium UI.
-- Document-pack intake is ZIP-first and follows the existing backend limits.
+- Document-pack intake accepts direct multi-file upload or ZIP and follows the
+  existing backend limits.
 - Edit by prompt and rollback are available only when the backend advertises
   their actions for the active completed workflow. Both reuse the durable event
   cursor and fall back visibly to polling if live SSE cannot resume.

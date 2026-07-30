@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ViewerBundle } from "../../api/schemas";
 import {
+  geometryFidelityBadge,
   hasUsableWebGL,
   resolveViewerSource,
   viewerBadges
@@ -90,6 +91,24 @@ describe("viewer source rules", () => {
     });
   });
 
+  it("keeps quarantined artifacts out of the viewer even if stale URLs are present", () => {
+    for (const status of ["legacy_unverified", "integrity_failed"] as const) {
+      expect(
+        resolveViewerSource(
+          {
+            ...bundle,
+            status,
+            completion_certificate_status: "rejected"
+          },
+          toAbsolute
+        )
+      ).toMatchObject({
+        kind: "error",
+        previewUrl: null
+      });
+    }
+  });
+
   it("does not load GLB when the viewer artifact is explicitly unavailable", () => {
     expect(
       resolveViewerSource(
@@ -145,6 +164,71 @@ describe("viewer source rules", () => {
         mesh_qa_level: "mesh_level_spatial_basic"
       })
     ).toContain("QA spatiale contrôlée");
+  });
+
+  it("surfaces technical-generic equipment with exact count and roles", () => {
+    const fidelity = geometryFidelityBadge({
+      ...bundle,
+      geometry_fidelity_summary: {
+        component_count: 8,
+        counts: {
+          schematic: 1,
+          technical_generic: 6,
+          vendor_qualified: 1
+        },
+        roles: {
+          schematic: ["tower"],
+          technical_generic: ["antenna", "radio"],
+          vendor_qualified: ["power_cabinet"]
+        }
+      }
+    });
+
+    expect(fidelity).toEqual({
+      fidelity: "technical_generic",
+      label: "Équipements génériques techniques · 6 composants · antennes, radios",
+      count: 6,
+      roles: ["antennes", "radios"]
+    });
+    expect(viewerBadges({
+      ...bundle,
+      geometry_fidelity_summary: {
+        component_count: 8,
+        counts: { schematic: 1, technical_generic: 6, vendor_qualified: 1 },
+        roles: {
+          schematic: ["tower"],
+          technical_generic: ["antenna", "radio"],
+          vendor_qualified: ["power_cabinet"]
+        }
+      }
+    })).toContain("Équipements génériques techniques · 6 composants · antennes, radios");
+  });
+
+  it("claims vendor qualification only when every declared component is vendor-qualified", () => {
+    expect(
+      geometryFidelityBadge({
+        ...bundle,
+        geometry_fidelity_summary: {
+          component_count: 2,
+          counts: { schematic: 0, technical_generic: 0, vendor_qualified: 2 },
+          roles: {
+            schematic: [],
+            technical_generic: [],
+            vendor_qualified: ["antenna", "radio"]
+          }
+        }
+      })?.label
+    ).toBe("Modèle fournisseur qualifié · 2 composants · antennes, radios");
+
+    expect(
+      geometryFidelityBadge({
+        ...bundle,
+        generation_mode: "real_blender",
+        mesh_qa_passed: true,
+        completion_certificate_status: "issued",
+        geometry_fidelity_summary: null
+      })
+    ).toBeNull();
   });
 
   it("detects unavailable WebGL before mounting the Three.js canvas", () => {
