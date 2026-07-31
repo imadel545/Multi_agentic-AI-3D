@@ -158,6 +158,9 @@ groq_client = (
         api_key=settings.resolved_groq_api_key,
         model=settings.groq_model,
         base_url=settings.groq_base_url,
+        timeout_s=settings.groq_extraction_timeout_s,
+        max_completion_tokens=settings.groq_extraction_max_completion_tokens,
+        reasoning_effort=settings.groq_extraction_reasoning_effort,
     )
     if settings.resolved_groq_api_key
     else None
@@ -169,6 +172,7 @@ planning_decision_client = (
         base_url=settings.groq_base_url,
         timeout_s=settings.groq_planning_timeout_s,
         max_completion_tokens=settings.groq_planning_max_completion_tokens,
+        reasoning_effort=settings.groq_planning_reasoning_effort,
     )
     if settings.resolved_groq_api_key and settings.enable_groq_planning_decision
     else None
@@ -178,7 +182,9 @@ asset_selection_client = (
         api_key=settings.resolved_groq_api_key,
         model=settings.groq_model,
         base_url=settings.groq_base_url,
-        timeout_s=settings.groq_planning_timeout_s,
+        timeout_s=settings.groq_asset_selection_timeout_s,
+        max_completion_tokens=settings.groq_asset_selection_max_completion_tokens,
+        reasoning_effort=settings.groq_asset_selection_reasoning_effort,
     )
     if settings.resolved_groq_api_key and settings.enable_groq_asset_selection
     else None

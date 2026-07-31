@@ -13,7 +13,11 @@ class AssetInventoryService:
     def inspect(self) -> dict:
         assets = self.registry.list_assets()
         entries = [_entry(self.project_root, asset) for asset in assets]
-        missing = [entry for entry in entries if not entry["asset_file_exists"]]
+        missing = [
+            entry
+            for entry in entries
+            if entry["asset_file_required"] and not entry["asset_file_exists"]
+        ]
         import_ready = [
             entry for entry in entries if entry["asset_import_mode"] == "imported_glb_exact"
         ]
@@ -67,19 +71,20 @@ class AssetInventoryService:
 
 
 def _entry(project_root: Path, asset: AssetManifest) -> dict:
-    path = project_root / asset.file
-    file_exists = path.exists()
+    file_required = not asset.file.startswith("procedural://")
+    path = project_root / asset.file if file_required else None
+    file_exists = bool(path and path.exists())
     dimensions_checked = asset.dimensions_m is not None
     qualification = asset.qualification
     expected_sha256 = qualification.verified_file_sha256
-    actual_sha256 = _sha256_file(path) if file_exists and expected_sha256 else None
+    actual_sha256 = _sha256_file(path) if path and file_exists and expected_sha256 else None
     hash_matches = actual_sha256 == expected_sha256 if expected_sha256 else None
     import_authorized = asset.allows_generation_mode("imported_glb_exact")
     parametric_authorized = asset.allows_generation_mode("parametric_generated")
     import_ready = import_authorized and file_exists and hash_matches is True
     generation_eligible = asset.is_generation_eligible and (parametric_authorized or import_ready)
     warnings = []
-    if not file_exists:
+    if file_required and not file_exists:
         warnings.append("ASSET_FILE_MISSING")
     if asset.source == "internal_test_minimal":
         warnings.append("INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR_GRADE")
@@ -118,6 +123,7 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         "file": asset.file,
         "file_exists": file_exists,
         "asset_file_exists": file_exists,
+        "asset_file_required": file_required,
         "asset_import_mode": asset_import_mode,
         "asset_import_success": None,
         "effective_generation_mode": effective_generation_mode,

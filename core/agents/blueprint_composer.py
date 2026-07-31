@@ -5,6 +5,10 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from core.agents.specialist_router import (
+    SpecialistRegistration,
+    SpecialistRouter,
+)
 from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.design_blueprint import (
@@ -44,12 +48,30 @@ class BlueprintComposer:
     def __init__(
         self,
         specialists: dict[str, SpecialistCallable] | None = None,
+        *,
+        max_parallel_specialists: int = 3,
     ) -> None:
         self._specialists = specialists or {
             "asset_composition": _asset_composition_specialist,
             "rf_layout": _rf_specialist,
             "structural_support": _structural_specialist,
         }
+        dependencies = {
+            "asset_composition": (),
+            "rf_layout": ("asset_composition",),
+            "structural_support": ("asset_composition",),
+        }
+        self._router = SpecialistRouter(
+            [
+                SpecialistRegistration(
+                    domain=domain,
+                    handler=handler,
+                    depends_on=dependencies.get(domain, ()),
+                )
+                for domain, handler in self._specialists.items()
+            ],
+            max_workers=max_parallel_specialists,
+        )
 
     def compose(
         self,
@@ -69,10 +91,21 @@ class BlueprintComposer:
             rf_validation=rf_validation,
         )
         required_domains = _required_specialist_domains(context)
-        missing = [domain for domain in required_domains if domain not in self._specialists]
-        if missing:
-            raise ValueError(f"blueprint specialist registry is missing domains: {missing}")
-        decisions = [self._specialists[domain](context) for domain in required_domains]
+        decisions, waves = self._router.route(required_domains, context)
+        wave_by_domain = {
+            domain: wave_index
+            for wave_index, domains in enumerate(waves)
+            for domain in domains
+        }
+        decisions = [
+            decision.model_copy(
+                update={
+                    "depends_on": list(self._router.dependencies_for(decision.domain)),
+                    "execution_wave": wave_by_domain[decision.domain],
+                }
+            )
+            for decision in decisions
+        ]
         components = _component_intents(requirements, selected_assets, assembly_plan)
         applied_fields = sorted(
             {

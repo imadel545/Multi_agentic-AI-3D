@@ -836,8 +836,8 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert payload["status"] == "qualified_mixed_catalog"
     assert payload["real_glb_asset_count"] == 12
     assert payload["import_qualified_glb_count"] == 4
-    assert payload["generation_eligible_asset_count"] == 10
-    assert payload["reference_only_asset_count"] == 2
+    assert payload["generation_eligible_asset_count"] == 12
+    assert payload["reference_only_asset_count"] == 1
     assert any(entry["asset_import_mode"] == "imported_glb_exact" for entry in payload["entries"])
     assert any(entry["asset_import_mode"] == "parametric_generated" for entry in payload["entries"])
     assert any(entry["asset_import_mode"] == "reference_only" for entry in payload["entries"])

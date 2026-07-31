@@ -52,6 +52,9 @@ def test_gpt_oss_selects_only_validated_candidates() -> None:
     assert calls[0]["timeout"] == 9
     assert calls[0]["json"]["model"] == "openai/gpt-oss-120b"
     assert calls[0]["json"]["max_completion_tokens"] == 512
+    assert calls[0]["json"]["reasoning_effort"] == "medium"
+    assert calls[0]["json"]["stream"] is False
+    assert "tools" not in calls[0]["json"]
     assert calls[0]["json"]["response_format"]["json_schema"]["strict"] is True
     assert (
         "value"

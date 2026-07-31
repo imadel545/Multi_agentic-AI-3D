@@ -10,6 +10,11 @@ from core.contracts.requirements import (
     RequirementSpec,
 )
 from core.contracts.tower import TowerCharacteristics
+from core.llm.groq_policy import (
+    GroqReasoningEffort,
+    GroqRequestPolicy,
+    normalize_groq_base_url,
+)
 from core.services.requirement_parser import parse_requirements_text
 
 REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
@@ -128,11 +133,24 @@ class GroqStructuredClient:
         model: str = "openai/gpt-oss-120b",
         base_url: str = "https://api.groq.com/openai/v1",
         timeout_s: float = 30.0,
+        reasoning_effort: GroqReasoningEffort = "medium",
+        max_completion_tokens: int = 4096,
     ) -> None:
-        self.api_key = api_key
-        self.model = model
-        self.base_url = base_url.rstrip("/")
+        if not api_key.strip():
+            raise ValueError("api_key must not be empty")
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        self.api_key = api_key.strip()
+        self.model = model.strip()
+        if not self.model:
+            raise ValueError("model must not be empty")
+        self.base_url = normalize_groq_base_url(base_url)
         self.timeout_s = timeout_s
+        self._policy = GroqRequestPolicy(
+            capability="requirement_extraction",
+            reasoning_effort=reasoning_effort,
+            max_completion_tokens=max_completion_tokens,
+        )
 
     def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
         baseline = parse_requirements_text(requirements_text, detail_level=detail_level)
@@ -167,7 +185,7 @@ class GroqStructuredClient:
                 ),
             },
         ]
-        strict_payload = {
+        strict_payload = self._policy.apply({
             "model": self.model,
             "temperature": 0,
             "messages": messages,
@@ -179,14 +197,14 @@ class GroqStructuredClient:
                     "strict": True,
                 },
             },
-        }
+        })
         try:
             return self._post_and_validate(strict_payload, baseline, requirements_text)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 400:
                 raise
 
-        json_object_payload = {
+        json_object_payload = self._policy.apply({
             "model": self.model,
             "temperature": 0,
             "messages": messages
@@ -200,7 +218,7 @@ class GroqStructuredClient:
                 }
             ],
             "response_format": {"type": "json_object"},
-        }
+        })
         requirements = self._post_and_validate(
             json_object_payload,
             baseline,
@@ -254,6 +272,7 @@ class GroqStructuredClient:
         )
 
     def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = self._policy.apply(payload)
         response = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={

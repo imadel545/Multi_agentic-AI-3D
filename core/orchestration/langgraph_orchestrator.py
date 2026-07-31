@@ -585,7 +585,16 @@ class DesignOrchestrator:
                 radios.append(self.registry.get(sector.radio_asset_id))
         for accessory in scene.accessory_assets:
             accessories.append(self.registry.get(accessory.asset_id))
-        selected_assets = _unique_assets([tower, *antennas, *radios, *accessories])
+        assembly_assets = []
+        if scene.assembly_plan is not None:
+            assembly_assets = [
+                self.registry.get(component.selected_asset_id)
+                for component in scene.assembly_plan.components
+                if component.selected_asset_id
+            ]
+        selected_assets = _unique_assets(
+            [tower, *antennas, *radios, *accessories, *assembly_assets]
+        )
         if not antennas:
             raise ValueError("scene revision requires at least one antenna asset")
         return selected_assets, tower, antennas[0], radios[0] if radios else None
@@ -652,6 +661,7 @@ class DesignOrchestrator:
                 "radio": radio,
                 "accessory_assets": accessory_assets,
                 "selected_assets": selected_assets,
+                "assembly_plan": scene.assembly_plan,
                 "trace": [
                     *_trace(
                         state,

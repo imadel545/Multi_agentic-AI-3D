@@ -8,6 +8,13 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from core.llm.groq_policy import (
+    GroqReasoningEffort,
+    GroqRequestPolicy,
+    groq_fallback_reason,
+    normalize_groq_base_url,
+)
+
 
 class _Selection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -35,15 +42,26 @@ class GroqAssetSelectionClient:
         model: str = "openai/gpt-oss-120b",
         base_url: str = "https://api.groq.com/openai/v1",
         timeout_s: float = 15.0,
+        max_completion_tokens: int = 1024,
+        reasoning_effort: GroqReasoningEffort = "medium",
         *,
         post: PostCallable | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
         self.api_key = api_key.strip()
-        self.model = model
-        self.base_url = base_url.rstrip("/")
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        self.model = model.strip()
+        if not self.model:
+            raise ValueError("model must not be empty")
+        self.base_url = normalize_groq_base_url(base_url)
         self.timeout_s = timeout_s
+        self._policy = GroqRequestPolicy(
+            capability="asset_selection",
+            reasoning_effort=reasoning_effort,
+            max_completion_tokens=max_completion_tokens,
+        )
         self._post = post or httpx.post
 
     def decide(self, *, slots: list[dict]) -> tuple[dict[str, str], dict]:
@@ -59,12 +77,17 @@ class GroqAssetSelectionClient:
                 timeout=self.timeout_s,
             )
             response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            decision = _Decision.model_validate(json.loads(content))
+            decision = _Decision.model_validate(_response_content(response.json()))
             selections = {item.role_id: item.asset_id for item in decision.selections}
-            if len(selections) != len(slots) or set(selections) != {
-                slot["role_id"] for slot in slots
-            }:
+            allowed = {
+                slot["role_id"]: set(slot["candidate_asset_ids"])
+                for slot in slots
+            }
+            if (
+                len(selections) != len(slots)
+                or set(selections) != set(allowed)
+                or any(asset_id not in allowed[role] for role, asset_id in selections.items())
+            ):
                 raise ValueError("model must select exactly one asset for every role")
             return selections, {
                 "provider": "groq",
@@ -83,7 +106,7 @@ class GroqAssetSelectionClient:
                 "provider": "groq",
                 "model_name": self.model,
                 "latency_ms": _elapsed_ms(started),
-                "fallback_reason": _fallback_reason(exc),
+                "fallback_reason": groq_fallback_reason(exc),
             }
 
     def _payload(self, slots: list[dict]) -> dict[str, Any]:
@@ -109,11 +132,9 @@ class GroqAssetSelectionClient:
             },
             "required": ["selections"],
         }
-        return {
+        return self._policy.apply({
             "model": self.model,
             "temperature": 0,
-            "reasoning_effort": "low",
-            "max_completion_tokens": 1024,
             "messages": [
                 {
                     "role": "system",
@@ -129,18 +150,22 @@ class GroqAssetSelectionClient:
                 "type": "json_schema",
                 "json_schema": {"name": "BoundedAssetSelection", "schema": schema, "strict": True},
             },
-        }
+        })
 
 
 def _elapsed_ms(started: float) -> int:
     return max(0, round((time.monotonic() - started) * 1000))
 
 
-def _fallback_reason(exc: Exception) -> str:
-    if isinstance(exc, httpx.TimeoutException):
-        return "provider_timeout"
-    if isinstance(exc, httpx.HTTPStatusError):
-        return f"provider_http_{exc.response.status_code}"
-    if isinstance(exc, httpx.RequestError):
-        return "provider_transport_error"
-    return "model_output_rejected"
+def _response_content(body: dict[str, Any]) -> dict[str, Any]:
+    content = body["choices"][0]["message"]["content"]
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") for part in content if isinstance(part, dict)
+        )
+    if not isinstance(content, str):
+        raise TypeError("provider message content must be a JSON string")
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise TypeError("provider decision must be a JSON object")
+    return parsed

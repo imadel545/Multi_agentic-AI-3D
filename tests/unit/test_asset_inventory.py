@@ -11,17 +11,17 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
 
     inventory = AssetInventoryService(Path.cwd(), registry).inspect()
 
-    assert inventory["asset_count"] == 12
+    assert inventory["asset_count"] == 13
     assert inventory["status"] == "qualified_mixed_catalog"
     assert inventory["missing_file_count"] == 0
     assert inventory["real_glb_asset_count"] == 12
     assert inventory["import_ready_asset_count"] == 4
     assert inventory["import_qualified_glb_count"] == 4
-    assert inventory["generation_eligible_asset_count"] == 10
-    assert inventory["reference_only_asset_count"] == 2
+    assert inventory["generation_eligible_asset_count"] == 12
+    assert inventory["reference_only_asset_count"] == 1
     assert inventory["qualified_integrity_failure_count"] == 0
     assert inventory["procedural_fallback_count"] == 0
-    assert inventory["parametric_generation_count"] == 6
+    assert inventory["parametric_generation_count"] == 8
     assert inventory["procedural_generation_required"] is True
     entries_by_id = {entry["asset_id"]: entry for entry in inventory["entries"]}
     assert entries_by_id["TOWER_LATTICE_30M"]["asset_file_exists"] is True
@@ -64,6 +64,8 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
     assert entries_by_id["POWER_CABINET_001"]["asset_import_mode"] == "imported_glb_exact"
     assert entries_by_id["CABLE_TRAY_001"]["asset_import_mode"] == "reference_only"
     assert entries_by_id["CABLE_TRAY_001"]["generation_eligible"] is False
+    assert entries_by_id["ANT_PANEL_5G_DUALBAND_V1"]["asset_file_required"] is False
+    assert "ASSET_FILE_MISSING" not in entries_by_id["ANT_PANEL_5G_DUALBAND_V1"]["warnings"]
 
 
 def test_asset_inventory_rejects_a_changed_qualified_glb(tmp_path: Path) -> None:

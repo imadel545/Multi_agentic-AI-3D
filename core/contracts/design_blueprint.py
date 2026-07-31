@@ -136,6 +136,8 @@ class BlueprintConstraint(StrictModel):
 class BlueprintSpecialistDecision(StrictModel):
     specialist_id: BlueprintId
     domain: SemanticRoleId
+    depends_on: list[SemanticRoleId] = Field(default_factory=list, max_length=16)
+    execution_wave: int = Field(default=0, ge=0, le=31)
     status: Literal["passed", "warning", "failed"]
     actor_kind: ActorKind
     decision_authority: DecisionAuthority
@@ -206,6 +208,23 @@ class DesignBlueprint(StrictModel):
         missing = set(self.required_specialist_domains) - set(domains)
         if missing:
             raise ValueError(f"required specialist domains are missing: {sorted(missing)}")
+        decisions_by_domain = {
+            decision.domain: decision for decision in self.specialist_decisions
+        }
+        for decision in self.specialist_decisions:
+            unknown_dependencies = set(decision.depends_on) - set(domains)
+            if unknown_dependencies:
+                raise ValueError(
+                    f"specialist {decision.domain!r} has unknown dependencies: "
+                    f"{sorted(unknown_dependencies)}"
+                )
+            if any(
+                decisions_by_domain[dependency].execution_wave >= decision.execution_wave
+                for dependency in decision.depends_on
+            ):
+                raise ValueError(
+                    f"specialist {decision.domain!r} dependencies must run in earlier waves"
+                )
         failed = [
             decision.domain
             for decision in self.specialist_decisions

@@ -653,7 +653,7 @@ def test_memory_failures_are_visible_but_do_not_abort_the_graph(tmp_path: Path) 
     }
 
 
-def test_invalid_rule_blocks_blender(tmp_path: Path) -> None:
+def test_asset_fallback_recovers_selection_before_blender(tmp_path: Path) -> None:
     registry = MissingRadioRegistry(Path("assets/manifests"))
     orchestrator = DesignOrchestrator(
         registry=registry,
@@ -679,9 +679,10 @@ def test_invalid_rule_blocks_blender(tmp_path: Path) -> None:
 
     nodes = [entry["node"] for entry in result.trace]
     assert result.status == "failed"
-    assert result.generation is None
+    assert result.generation is not None
+    assert result.generation.mode == "fallback_no_blender"
     assert "asset_fallback_handler" in nodes
-    assert "generate_blender" not in nodes
+    assert "generate_blender" in nodes
     assert result.route_history[0]["route"] == "asset_fallback"
 
 

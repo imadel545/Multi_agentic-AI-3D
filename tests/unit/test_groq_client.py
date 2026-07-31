@@ -29,6 +29,10 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
     assert calls[0]["headers"]["Authorization"] == "Bearer test-key"
     assert payload["model"] == "openai/gpt-oss-120b"
     assert payload["temperature"] == 0
+    assert payload["reasoning_effort"] == "medium"
+    assert payload["max_completion_tokens"] == 4096
+    assert payload["stream"] is False
+    assert "tools" not in payload
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
     schema = payload["response_format"]["json_schema"]["schema"]

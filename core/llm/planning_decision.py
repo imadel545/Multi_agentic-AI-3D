@@ -20,6 +20,12 @@ from core.contracts.planning_decision import (
     PlanningModelSelection,
     ResolvedPlanningSelection,
 )
+from core.llm.groq_policy import (
+    GroqReasoningEffort,
+    GroqRequestPolicy,
+    groq_fallback_reason,
+    normalize_groq_base_url,
+)
 
 PLANNING_DECISION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -72,6 +78,7 @@ class GroqPlanningDecisionClient:
         base_url: str = "https://api.groq.com/openai/v1",
         timeout_s: float = 15.0,
         max_completion_tokens: int = 2048,
+        reasoning_effort: GroqReasoningEffort = "medium",
         *,
         post: PostCallable | None = None,
     ) -> None:
@@ -82,10 +89,17 @@ class GroqPlanningDecisionClient:
         if not 128 <= max_completion_tokens <= 2048:
             raise ValueError("max_completion_tokens must be between 128 and 2048")
         self.api_key = api_key.strip()
-        self.model = model
-        self.base_url = base_url.rstrip("/")
+        self.model = model.strip()
+        if not self.model:
+            raise ValueError("model must not be empty")
+        self.base_url = normalize_groq_base_url(base_url)
         self.timeout_s = timeout_s
         self.max_completion_tokens = max_completion_tokens
+        self._policy = GroqRequestPolicy(
+            capability="planning_decision",
+            reasoning_effort=reasoning_effort,
+            max_completion_tokens=max_completion_tokens,
+        )
         self._post = post or httpx.post
 
     def decide(self, request: PlanningDecisionRequest) -> PlanningDecisionResult:
@@ -122,16 +136,14 @@ class GroqPlanningDecisionClient:
             return deterministic_fallback(
                 request,
                 model_name=self.model,
-                reason=_fallback_reason(exc),
+                reason=groq_fallback_reason(exc),
                 latency_ms=_elapsed_ms(started_at),
             )
 
     def _payload(self, request: PlanningDecisionRequest) -> dict[str, Any]:
-        return {
+        return self._policy.apply({
             "model": self.model,
             "temperature": 0,
-            "reasoning_effort": "low",
-            "max_completion_tokens": self.max_completion_tokens,
             "messages": [
                 {
                     "role": "system",
@@ -162,7 +174,7 @@ class GroqPlanningDecisionClient:
                     "strict": True,
                 },
             },
-        }
+        })
 
 
 def resolve_model_decision(
@@ -329,20 +341,6 @@ def _candidate_value(candidate: PlanningCandidate) -> float | bool:
     if candidate.field in {"include_cables", "include_sector_beams"}:
         return bool(candidate.value)
     return float(candidate.value)
-
-
-def _fallback_reason(exc: Exception) -> str:
-    if isinstance(exc, httpx.TimeoutException):
-        return "provider_timeout"
-    if isinstance(exc, httpx.HTTPStatusError):
-        return f"provider_http_{exc.response.status_code}"
-    if isinstance(exc, httpx.RequestError):
-        return "provider_transport_error"
-    if isinstance(exc, (ValidationError, PlanningDecisionValidationError)):
-        return "model_output_rejected"
-    if isinstance(exc, json.JSONDecodeError):
-        return "provider_invalid_json"
-    return "provider_response_invalid"
 
 
 def _elapsed_ms(started_at: float) -> int:

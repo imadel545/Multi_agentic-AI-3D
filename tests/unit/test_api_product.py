@@ -34,9 +34,9 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["completed_designs"] >= 1
         assert "asset_inventory_status" in summary
         assert summary["asset_inventory_status"] == "qualified_mixed_catalog"
-        assert summary["generation_eligible_asset_count"] == 10
-        assert summary["reference_only_asset_count"] == 2
-        assert summary["asset_count"] == 12
+        assert summary["generation_eligible_asset_count"] == 12
+        assert summary["reference_only_asset_count"] == 1
+        assert summary["asset_count"] == 13
         assert summary["real_glb_asset_count"] == 12
         assert summary["import_qualified_glb_count"] == 4
         assert summary["missing_file_count"] == 0

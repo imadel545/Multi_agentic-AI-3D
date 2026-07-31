@@ -54,7 +54,7 @@ def test_resolver_uses_only_manifest_authorized_component_modes() -> None:
     )
 
 
-def test_resolver_quarantines_reference_only_accessory_from_generation() -> None:
+def test_resolver_uses_qualified_parametric_bracket_profile() -> None:
     strategy, source, reason, warnings = _resolver().resolve_accessory(
         SceneAccessoryPlacement(
             asset_id="MOUNTING_BRACKET_001",
@@ -65,7 +65,7 @@ def test_resolver_quarantines_reference_only_accessory_from_generation() -> None
         )
     )
 
-    assert strategy == "procedural_fallback"
-    assert source == "degraded"
-    assert "not qualified" in reason
-    assert warnings == ["ACCESSORY_ASSET_NOT_GENERATION_QUALIFIED:MOUNTING_BRACKET_001"]
+    assert strategy == "internal_project_generated"
+    assert source == "internal_project_generated"
+    assert "qualified SceneSpec-driven accessory profile" in reason
+    assert warnings == []

@@ -38,15 +38,24 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   with explicit decision authority. This is a controlled expert workflow, not
   yet a dynamic swarm/supervisor architecture.
 - `compose_design_blueprint` now creates a generic typed planning intent after
-  requirement validation. It routes the required deterministic specialist
-  domains, records component quantities/asset queries/fidelity/placement,
+  requirement validation. Its typed specialist DAG runs asset composition as a
+  fail-closed gate, then executes the independent RF-layout and structural
+  specialists through bounded parallel fan-out. Every decision records its
+  dependencies and execution wave; unknown domains, cycles, handler exceptions,
+  mismatched outputs, and failed gates are rejected before dependent work.
+  The blueprint records component quantities/asset queries/fidelity/placement,
   persists `design_blueprint.json`, and proves
   `RequirementSpec -> DesignBlueprint -> SceneSpec`. `SceneSpec` remains the
-  sole 3D generation source of truth. The current blueprint is deterministic,
-  has no operational connector catalog, and is not yet selected by an LLM from
-  competing candidates.
+  sole 3D generation source of truth. Routing, contracts and gates are
+  deterministic; GPT-OSS can select only supplied, already validated planning
+  or asset candidates and cannot add a specialist, transformation or Blender
+  operation.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
-  explicit deterministic extraction.
+  explicit deterministic extraction. Extraction, planning and asset selection
+  now share one validated request policy: HTTPS outside localhost, explicit
+  `low|medium|high` reasoning effort, bounded completion budgets, strict JSON
+  Schema where supported, `stream=false`, no tool use, local Pydantic
+  validation, and user-visible deterministic fallback diagnostics.
 - `RequirementSpec` carries typed field evidence, candidate values, assumptions,
   conflicts, and confirmation fields. Explicit unresolved contradictions block
   the natural-language graph before RAG, asset selection, `SceneSpec`, and
@@ -127,13 +136,16 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current assets
 
-- 12 manifests.
+- 13 manifests.
 - 12 GLB files present.
+- The procedural-only dual-band panel intentionally has no companion file and
+  is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
-- 10 manifests are generation-eligible: 4 authorize an exact GLB import and 6
-  authorize SceneSpec-driven parametric generation. The bracket and cable-tray
-  GLBs remain `reference_only` until typed connector/route contracts exist.
+- 12 manifests are generation-eligible: 4 authorize an exact GLB import and 8
+  authorize SceneSpec-driven parametric generation. The cable-tray GLB remains
+  `reference_only`; the bracket companion GLB is not imported, but its typed
+  procedural builder and connector contract are generation-qualified.
 - Exact import authorization is fail-closed: the manifest pins SHA-256, units,
   dimensions, pivot, orientation and mesh-integrity review. A changed file is
   rejected and the controlled fallback is reported.
@@ -336,6 +348,33 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   human-in-loop, and WebSocket runtime are explicitly unsupported in v1.
 - Streaming is local-process only: no cross-process broker, cancellation, or
   durable resume manager yet.
+
+## SPECIALIST ORCHESTRATION AND GROQ GPT-OSS — delivered scope
+
+- The blueprint specialist collaboration is a deterministic DAG rather than a
+  sequential registry loop: `asset_composition` is wave 0;
+  `rf_layout` and `structural_support` depend on it and run in parallel in wave
+  1. Output ordering stays reproducible for hashes and persistence.
+- The router detects duplicate or unknown domains, missing dependencies,
+  dependency cycles, handler exceptions, wrong-domain responses, and failed
+  gates. It fails closed and does not execute dependent specialists after a
+  gate failure.
+- Groq extraction, bounded planning arbitration, and bounded asset selection
+  use the configured `openai/gpt-oss-120b` endpoint with per-capability timeout,
+  reasoning-effort and output-token settings. Structured requests explicitly
+  disable streaming and tools because those combinations are not supported by
+  the selected Groq Structured Outputs path.
+- Asset selection now rejects a returned asset ID unless it belongs to the
+  candidate set of that exact role. Provider authentication, rate-limit,
+  availability, timeout, transport, and model-output failures are classified
+  without exposing the API key.
+- A live local provider smoke on 2026-07-31 used the configured
+  `openai/gpt-oss-120b`, selected two supplied telecom asset IDs with bounded
+  authority, and returned in 933 ms. This proves that operation only; it is not
+  a permanent provider-availability guarantee.
+- This remains a controlled expert workflow, not an autonomous swarm:
+  deterministic code owns routing, dependencies, contracts, transformations,
+  units, QA, persistence and Blender execution.
 
 ## Current verdict
 

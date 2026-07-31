@@ -138,21 +138,24 @@ def evaluate_blueprint_scene_coverage(
             scene.visual_elements.include_sector_beams,
         ),
         _check("scene.accessory_asset_ids", expected_accessories, accessory_ids),
-        _check(
-            "scene.assembly_plan.asset_ids",
-            {
-                intent.resolved_asset_id
-                for values in intents.values()
-                for intent in values
-                if intent.resolved_asset_id and intent.asset_type not in {"cable", "beam"}
-            },
-            {
-                component.selected_asset_id
-                for component in (scene.assembly_plan.components if scene.assembly_plan else [])
-                if component.selected_asset_id
-            },
-        ),
     ]
+    if scene.assembly_plan is not None:
+        checks.append(
+            _check(
+                "scene.assembly_plan.asset_ids",
+                {
+                    intent.resolved_asset_id
+                    for values in intents.values()
+                    for intent in values
+                    if intent.resolved_asset_id and intent.asset_type not in {"cable", "beam"}
+                },
+                {
+                    component.selected_asset_id
+                    for component in scene.assembly_plan.components
+                    if component.selected_asset_id
+                },
+            )
+        )
     return _report(blueprint, "blueprint_to_scene", checks)
 
 

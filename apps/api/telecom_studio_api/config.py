@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from core.llm.groq_policy import normalize_groq_base_url
 
 
 class Settings(BaseSettings):
@@ -21,8 +24,15 @@ class Settings(BaseSettings):
     enable_groq_extraction: bool = True
     enable_groq_planning_decision: bool = True
     enable_groq_asset_selection: bool = True
+    groq_extraction_timeout_s: float = Field(default=30.0, ge=3.0, le=120.0)
+    groq_extraction_max_completion_tokens: int = Field(default=4096, ge=128, le=8192)
+    groq_extraction_reasoning_effort: Literal["low", "medium", "high"] = "medium"
     groq_planning_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
     groq_planning_max_completion_tokens: int = Field(default=2048, ge=128, le=2048)
+    groq_planning_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    groq_asset_selection_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
+    groq_asset_selection_max_completion_tokens: int = Field(default=1024, ge=128, le=2048)
+    groq_asset_selection_reasoning_effort: Literal["low", "medium", "high"] = "medium"
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
     max_concurrent_workflows: int = Field(default=2, ge=1, le=8)
@@ -39,6 +49,19 @@ class Settings(BaseSettings):
     reranker_base_url: str = "https://ai.api.nvidia.com/v1"
     allow_blender_fallback: bool = False
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+
+    @field_validator("groq_model")
+    @classmethod
+    def validate_groq_model(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("groq_model must not be empty")
+        return normalized
+
+    @field_validator("groq_base_url")
+    @classmethod
+    def validate_groq_base_url(cls, value: str) -> str:
+        return normalize_groq_base_url(value)
 
     @property
     def manifests_dir(self) -> Path:

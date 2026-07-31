@@ -36,6 +36,13 @@ def test_blueprint_composer_routes_required_specialists_and_covers_scene() -> No
         blueprint.required_specialist_domains
     )
     assert all(decision.status != "failed" for decision in blueprint.specialist_decisions)
+    decisions = {decision.domain: decision for decision in blueprint.specialist_decisions}
+    assert decisions["asset_composition"].execution_wave == 0
+    assert decisions["asset_composition"].depends_on == []
+    assert decisions["rf_layout"].execution_wave == 1
+    assert decisions["rf_layout"].depends_on == ["asset_composition"]
+    assert decisions["structural_support"].execution_wave == 1
+    assert decisions["structural_support"].depends_on == ["asset_composition"]
     assert evaluate_blueprint_requirement_coverage(requirements, blueprint).passed is True
     assert evaluate_blueprint_scene_coverage(blueprint, scene).passed is True
     assert len(design_blueprint_hash(blueprint)) == 64
