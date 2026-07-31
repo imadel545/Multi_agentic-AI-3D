@@ -290,6 +290,32 @@ def test_primary_equipment_spatial_qa_allows_same_sector_antenna_rru_contact(
     )
 
 
+def test_primary_equipment_spatial_qa_allows_generated_rru_mount_penetration(
+    tmp_path: Path,
+) -> None:
+    scene = _minimal_semantic_scene()
+    payload = _primary_equipment_payload(
+        [
+            ("antenna_S1", "antenna", "S1", [0.0, 24.0, 0.0]),
+            ("radio_S1", "radio", "S1", [0.34, 24.0, 0.0]),
+        ]
+    )
+    glb_path = tmp_path / "spatial_generated_rru_contact.glb"
+    _write_json_glb(glb_path, payload)
+
+    result = _primary_equipment_spatial_checks(
+        glb_path,
+        payload,
+        _build_semantic_index(payload, scene),
+    )
+    checks = {check.name: check for check in result["checks"]}
+
+    assert checks["primary_equipment_aabb_interference_free"].passed is True
+    assert "contact_penetration=0.160m" in (
+        checks["primary_equipment_aabb_interference_free"].detail or ""
+    )
+
+
 def test_primary_equipment_spatial_qa_rejects_total_same_sector_overlap(
     tmp_path: Path,
 ) -> None:

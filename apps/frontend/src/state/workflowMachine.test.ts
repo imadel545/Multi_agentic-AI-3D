@@ -332,13 +332,23 @@ describe("workflow reducer", () => {
 
   it("keeps the active workflow while a revision is generated", () => {
     const state = workflowReducer(
-      { ...initialWorkflowState, phase: "completed", workflowId: "wf_1" },
+      {
+        ...initialWorkflowState,
+        phase: "completed",
+        workflowId: "wf_1",
+        events: [normalizedEvent("evt_old", "workflow_completed")],
+        resourceErrors: { timeline: "old failure" }
+      },
       { type: "REVISION_STARTED", runtimeMode: "sse" }
     );
 
     expect(state.workflowId).toBe("wf_1");
     expect(state.phase).toBe("running");
     expect(state.runtimeMode).toBe("sse");
+    expect(state.events).toEqual([]);
+    expect(state.timeline).toBeNull();
+    expect(state.currentOperation).toBeNull();
+    expect(state.resourceErrors).toEqual({});
   });
 
   it("starts a revision in explicit polling mode when no durable SSE cursor is available", () => {

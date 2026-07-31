@@ -53,6 +53,7 @@ export type WorkflowMachineAction =
   | { type: "DESIGN_CREATED"; workflowId: string }
   | { type: "WORKFLOW_RESTORED"; status: WorkflowStatus }
   | { type: "REVISION_STARTED"; runtimeMode: Exclude<RuntimeMode, "idle"> }
+  | { type: "REVISION_FINISHED" }
   | { type: "EVENT_RECEIVED"; event: NormalizedWorkflowEvent }
   | { type: "EVENTS_RECEIVED"; events: NormalizedWorkflowEvent[] }
   | { type: "SSE_FAILED"; reason: StreamFailureReason }
@@ -161,7 +162,22 @@ export function workflowReducer(
         ...state,
         phase: "running",
         runtimeMode: action.runtimeMode,
-        error: null
+        currentOperation: null,
+        timeline: null,
+        events: [],
+        error: null,
+        transportError: null,
+        resourceErrors: {}
+      };
+    case "REVISION_FINISHED":
+      return {
+        ...state,
+        phase: state.status
+          ? phaseFromStatus(state.status, state.viewerBundle, "completed")
+          : "completed",
+        runtimeMode: "idle",
+        currentOperation: null,
+        transportError: null
       };
     case "EVENT_RECEIVED":
       return reduceReceivedEvents(state, [action.event]);

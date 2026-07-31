@@ -2102,6 +2102,21 @@ def _rebind_revision_accessory(
 def _accessory_from_asset(asset: AssetManifest, *, asset_type: str, position: list[float]):
     from core.contracts.scene import SceneAccessoryPlacement
 
+    if asset.allows_generation_mode("imported_glb_exact"):
+        generation_strategy = "imported_glb_exact"
+        geometry_source = "imported_glb_exact"
+        generation_reason = "qualified exact GLB import authorized by pinned asset manifest"
+    elif asset.allows_generation_mode("parametric_generated"):
+        generation_strategy = "internal_project_generated"
+        geometry_source = "internal_project_generated"
+        generation_reason = "qualified SceneSpec-driven parametric component profile"
+    else:
+        generation_strategy = "procedural_fallback"
+        geometry_source = "degraded"
+        generation_reason = (
+            "asset is not qualified for generation; controlled procedural fallback required"
+        )
+
     return SceneAccessoryPlacement(
         asset_id=asset.asset_id,
         asset_file=asset.file,
@@ -2112,6 +2127,9 @@ def _accessory_from_asset(asset: AssetManifest, *, asset_type: str, position: li
         dimensions_m=asset.dimensions_m,
         position=position,
         rotation_deg=[0.0, 0.0, 0.0],
+        generation_strategy=generation_strategy,
+        geometry_source=geometry_source,
+        generation_reason=generation_reason,
     )
 
 

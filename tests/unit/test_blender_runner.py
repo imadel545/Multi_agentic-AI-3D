@@ -222,18 +222,19 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert metadata["visual_elements"]["include_power_cabinet"] is True
     assert metadata["mechanical_tilts_deg"] == [5, 5, 5]
     assert metadata["asset_import_summary"]["asset_count"] == 9
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 2
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 1
     assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["parametric_generated_count"] == 1
-    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 6
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 7
     records = {record["asset_id"]: record for record in metadata["asset_imports"]}
     assert records["GPS_ANTENNA_001"]["import_mode"] == "imported_glb"
-    assert records["POWER_CABINET_001"]["import_mode"] == "imported_glb"
+    assert records["POWER_CABINET_001"]["import_mode"] == "internal_project_generated"
     assert records["TOWER_LATTICE_30M"]["import_mode"] == "parametric_generated"
     assert records["ANT_PANEL_5G_001"]["import_mode"] == "internal_project_generated"
     assert records["GPS_ANTENNA_001"]["asset_import_success"] is True
-    assert records["POWER_CABINET_001"]["asset_import_success"] is True
-    assert records["POWER_CABINET_001"]["generation_success"] is False
+    assert records["POWER_CABINET_001"]["asset_import_success"] is False
+    assert records["POWER_CABINET_001"]["generation_success"] is True
+    assert records["POWER_CABINET_001"]["generated_object_count"] >= 16
     assert records["POWER_CABINET_001"]["placement_location"][2] == 0.0
     assert records["GPS_ANTENNA_001"]["generation_success"] is False
     assert "label:power_cabinet" in metadata["procedural_objects_created"]
@@ -294,22 +295,29 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
 
     assert result.status == "generated"
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
-    assert metadata["asset_import_summary"]["imported_glb_count"] == 5
+    assert metadata["asset_import_summary"]["imported_glb_count"] == 4
     assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
-    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 3
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 4
     qualified_imports = [
         record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
     ]
     assert {record["asset_id"] for record in qualified_imports} == {
         "ANT_PANEL_4G_001",
         "GPS_ANTENNA_001",
-        "POWER_CABINET_001",
     }
     assert all(
         record["asset_metadata"]["qualification_status"] == "qualified_for_generation"
         for record in qualified_imports
     )
     assert all(record["asset_metadata"]["verified_file_sha256"] for record in qualified_imports)
+    cabinet_record = next(
+        record
+        for record in metadata["asset_imports"]
+        if record["asset_id"] == "POWER_CABINET_001"
+    )
+    assert cabinet_record["import_mode"] == "internal_project_generated"
+    assert cabinet_record["generation_success"] is True
+    assert cabinet_record["generated_object_count"] >= 16
     glb_report = GLBInspector().inspect(
         Path(result.artifacts["glb"]),
         scene,

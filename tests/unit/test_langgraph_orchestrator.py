@@ -150,6 +150,11 @@ def test_scene_revision_rebinds_tower_and_repositions_derived_accessories() -> N
     cabinet = next(item for item in normalized.accessory_assets if item.asset_type == "cabinet")
     assert gps.position[2] == 39.5
     assert cabinet.position[2] == 0.0
+    assert gps.generation_strategy == "imported_glb_exact"
+    assert gps.geometry_source == "imported_glb_exact"
+    assert cabinet.generation_strategy == "internal_project_generated"
+    assert cabinet.geometry_source == "internal_project_generated"
+    assert cabinet.asset_metadata.allowed_generation_modes == ["parametric_generated"]
 
 
 def test_scene_revision_removes_disabled_derived_accessories() -> None:

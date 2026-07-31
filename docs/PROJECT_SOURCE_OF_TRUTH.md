@@ -394,12 +394,28 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `Système`, and specialist activity remains available in `Activité`.
 - Running workflows expose a live, accessible overlay driven only by real
   operation/timeline/SSE data. No synthetic percentage or fake stage is shown.
+- Revision and rollback now clear stale terminal events before streaming the
+  new operation. The certified version stays visible while QA runs, but its
+  terminal message is not reused as the status of the active revision. Rapid
+  duplicate submissions are synchronously blocked and every failure exits the
+  busy state.
+- The duplicated lower workflow-status card was removed. The left rail owns one
+  readable scroll surface, changes its guidance for design versus revision,
+  and keeps document intake collapsed under a compact `Documents techniques`
+  disclosure. QA limitations and long issue lists are collapsed until opened.
+- Fidelity counts now say `modèles sélectionnés`; the viewer separately reports
+  instantiated semantic equipment and GLB nodes. These counts measure different
+  things and are no longer presented with the same `composants` wording.
 - The telecom camera fit includes explicit framing margin for tall assemblies,
   and the viewer offers a retry action when a real GLB load fails.
-- Frontend proof: 119 Vitest tests, TypeScript production build, and local
+- Frontend proof: 122 Vitest tests, TypeScript production build, and local
   browser smoke against FastAPI on port 8000 and Vite on port 5173. The build
   still reports a large lazy-loaded Three.js viewer chunk; this is a performance
   backlog item, not a runtime failure.
+- The latest recorded browser smoke restored active version `v86dc95d0` with a
+  real 217-node GLB, 25 semantic equipment instances, QA score 1.0, issued
+  completion certificate and seven visible limitations. No terminal progress
+  overlay or duplicate workflow card remained on screen.
 
 ## Current verdict
 
@@ -426,16 +442,29 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   selected parametric bracket per sector, and records the missing cable tray as
   a visible `PROCEDURAL_CABLE_ROUTE` fallback. No LLM-generated Blender code is
   accepted or executed.
+- `POWER_CABINET_001` is now qualified through the bounded
+  `ground_cabinet_v1` profile instead of importing its former minimal reference
+  GLB. The deterministic builder derives a 17-object enclosure tree from typed
+  manifest dimensions (plinth, enclosure, weather roof, doors, handles, vents,
+  cable glands and warning placard). Revision dependency rebinding now records
+  the same generation strategy and geometry source in `SceneSpec`, metadata and
+  provenance.
 - The end-to-end acceptance test creates a 5G site with tower, panel antenna,
   RRU, bracket, cable fallback, cabinet and GPS; produces GLB and preview;
   passes real-Blender QA; exposes provenance; then edits the design and creates
   a new active version.
+- A live revision on 2026-07-31 asked GPT-OSS 120B to move the power cabinet to
+  `[5.6, 0.0, 0.0]`. The LLM selected only the declared
+  `/accessory_assets/0/position` capability; deterministic validation,
+  Blender generation and QA produced active version `v86dc95d0` with
+  `real_blender`, score 1.0 and no procedural fallback.
 
 ### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
 
 - The 5G panel role now offers one existing internal reference profile and one
   explicitly procedural generic dual-band profile. RRU, bracket, cabinet and
-  GPS still have one qualified candidate each; additional real candidates
+  GPS still have one qualified candidate each; the cabinet is technical generic,
+  not vendor-specific. Additional real candidates
   require independent qualification, not copied manifests.
 - Preview generation is scene-level. Per-asset preview images and a close-up
   visual QA gate remain future work.

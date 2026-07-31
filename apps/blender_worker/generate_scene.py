@@ -1018,7 +1018,7 @@ def _create_power_cabinet(
         tuple(accessory.get("position") or [offset, 0.0, 0.0]) if accessory else (offset, 0.0, 0.0)
     )
     import_attempted = False
-    if accessory and strategy in {"imported_glb_exact", "internal_project_generated"}:
+    if accessory and strategy == "imported_glb_exact":
         import_attempted = True
         mode = _try_import_glb_asset(
             bpy=bpy,
@@ -1043,6 +1043,15 @@ def _create_power_cabinet(
         bpy=bpy,
         name=cabinet_object_name,
         location=cabinet_location,
+        width=float((accessory.get("dimensions_m") or {}).get("width", 1.0))
+        if accessory
+        else 1.0,
+        depth=float((accessory.get("dimensions_m") or {}).get("depth", 0.45))
+        if accessory
+        else 0.45,
+        height=float((accessory.get("dimensions_m") or {}).get("height", 1.6))
+        if accessory
+        else 1.6,
     )
     if accessory:
         cabinet.rotation_euler = _rotation_deg_to_rad(
@@ -1069,7 +1078,7 @@ def _create_power_cabinet(
             asset_imports,
             object_role="cabinet",
             object_name=cabinet_object_name,
-            generated_object_names=[cabinet.name],
+            generated_object_names=_semantic_tree_names(cabinet),
         )
     else:
         _record_asset_generation(
@@ -1083,11 +1092,13 @@ def _create_power_cabinet(
             asset_metadata=accessory.get("asset_metadata") if accessory else None,
             object_role="cabinet",
             object_name=cabinet_object_name,
-            dimensions={"width": 1.0, "depth": 0.45, "height": 1.6},
+            dimensions=accessory.get("dimensions_m")
+            if accessory
+            else {"width": 1.0, "depth": 0.45, "height": 1.6},
             location=cabinet_location,
             rotation=(0.0, 0.0, 0.0),
             generation_strategy=strategy,
-            generated_object_names=[cabinet.name],
+            generated_object_names=_semantic_tree_names(cabinet),
         )
     procedural_objects.append("power_cabinet")
 

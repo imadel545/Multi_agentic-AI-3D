@@ -57,7 +57,10 @@ export function BackendStatusBar({
 }) {
   const issueCount = displayIssueCount(issues, bundle);
   const fidelityBadge = geometryFidelityBadge(bundle);
+  const workflowActive =
+    phase === "submitting" || phase === "streaming" || phase === "running";
   const certified =
+    !workflowActive &&
     bundle?.status === "completed" &&
     bundle.generation_mode === "real_blender" &&
     bundle.mesh_qa_passed === true &&
@@ -76,7 +79,12 @@ export function BackendStatusBar({
           <span aria-hidden="true" />
           {health?.status === "ok" ? "Studio local connecté" : "Studio indisponible"}
         </span>
-        {bundle ? (
+        {workflowActive ? (
+          <span className="workflow-truth active">
+            <Loader2 className="spin" size={14} aria-hidden="true" />
+            {phase === "submitting" ? "Préparation en cours" : "Modification en cours"}
+          </span>
+        ) : bundle ? (
           <span className={certified ? "topbar-proof ok" : "topbar-proof warn"}>
             {certified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
             {certified ? "Résultat certifié" : workflowStatusLabel(bundle.status)}
@@ -177,30 +185,36 @@ export function ChatCommandPanel({
   }, [canEdit, commandMode]);
 
   const revisionMode = commandMode === "revision" && canEdit;
+  const assistantTitle = revisionBusy
+    ? "Modification et contrôles en cours"
+    : revisionMode
+      ? "Décrivez la modification"
+      : phase === "completed"
+        ? "Le résultat est prêt à inspecter"
+        : phase === "failed"
+          ? "Le résultat nécessite une correction"
+          : "Décrivez le résultat attendu";
+  const assistantMessage = revisionBusy
+    ? "La version actuelle reste visible pendant la création et la validation de la nouvelle version."
+    : revisionMode
+      ? "Demandez un changement précis. Le système conserve la version actuelle si la QA refuse la modification."
+      : phase === "completed"
+        ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
+        : phase === "failed"
+          ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération certifiée."
+          : "Les contraintes sont extraites puis confirmées avant toute génération Blender.";
   return (
     <section className="command-center" aria-label="Conversation de commande">
       <div className="conversation-heading">
         <span className="eyebrow">Conception assistée</span>
-        <h1>Concevoir le site telecom</h1>
+        <h1>{revisionMode ? "Modifier le site telecom" : "Concevoir le site telecom"}</h1>
       </div>
 
-      <div className="assistant-card conversation-message">
-        <RadioTower size={18} aria-hidden="true" />
+      <div className={`assistant-card conversation-message${revisionBusy ? " busy" : ""}`}>
+        {revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <RadioTower size={18} aria-hidden="true" />}
         <div>
-          <strong>
-            {phase === "completed"
-              ? "Le résultat est prêt à inspecter"
-              : phase === "failed"
-                ? "Le résultat nécessite une correction"
-                : "Décrivez le résultat attendu"}
-          </strong>
-          <p>
-            {phase === "completed"
-              ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
-              : phase === "failed"
-                ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération certifiée."
-                : "Les contraintes sont extraites puis confirmées avant toute génération Blender."}
-          </p>
+          <strong>{assistantTitle}</strong>
+          <p>{assistantMessage}</p>
         </div>
       </div>
 
@@ -269,7 +283,15 @@ export function ChatCommandPanel({
         summary={documentPackSummary}
       />
 
-      {editMessage ? <p className="muted command-feedback">{editMessage}</p> : null}
+      {editMessage ? (
+        <p
+          aria-live="polite"
+          className={`command-feedback${editMessage.includes("non appliquée") || editMessage.includes("refusée") ? " warning" : " success"}`}
+          role="status"
+        >
+          {editMessage}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="inline-alert">
@@ -423,7 +445,7 @@ function DocumentPackIntake({
     >
       <summary>
         <FileArchive size={17} aria-hidden="true" />
-        <span>Cahier de charge documentaire</span>
+        <span>Documents techniques</span>
         {summary ? (
           <small>
             {summary.document_count} pièce(s) · {summary.can_generate_design ? "prêt" : "revue requise"}
@@ -682,12 +704,14 @@ export function CurrentOperationStrip({
 
 export function LiveGenerationOverlay({
   events,
+  intent = "generation",
   operation,
   phase,
   runtimeMode,
   timeline
 }: {
   events: NormalizedWorkflowEvent[];
+  intent?: "generation" | "revision" | "rollback";
   operation: CurrentOperation | null;
   phase: WorkflowPhase;
   runtimeMode: RuntimeMode;
@@ -697,6 +721,7 @@ export function LiveGenerationOverlay({
   if (!running) {
     return null;
   }
+  const liveOperation = operation?.is_terminal ? null : operation;
   const timelineRows = (timeline?.timeline_steps ?? [])
     .filter((step) => step.status !== "pending")
     .map((step, index) => ({
@@ -711,12 +736,22 @@ export function LiveGenerationOverlay({
   }));
   const activity = (timelineRows.length ? timelineRows : eventRows).slice(-3);
   const label =
-    operation?.human_label ??
-    operation?.current_operation ??
-    (phase === "submitting" ? "Préparation du design" : "Conception en cours");
+    liveOperation?.human_label ??
+    liveOperation?.current_operation ??
+    (intent === "revision"
+      ? "Modification du design"
+      : intent === "rollback"
+        ? "Restauration de la version"
+        : phase === "submitting"
+          ? "Préparation du design"
+          : "Conception en cours");
   const message =
-    operation?.progress_message ??
-    "Les spécialistes coordonnent la conception et publient leurs preuves au fur et à mesure.";
+    liveOperation?.progress_message ??
+    (intent === "revision"
+      ? "Le patch est interprété, exécuté dans Blender puis contrôlé avant de remplacer la version visible."
+      : intent === "rollback"
+        ? "La version sélectionnée est vérifiée avant de redevenir active."
+        : "Les spécialistes coordonnent la conception et publient leurs preuves au fur et à mesure.");
   return (
     <section
       aria-atomic="true"
@@ -1121,7 +1156,10 @@ export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
             />
           </div>
           <List title="Échecs QA" items={stringArray(qa["checks_failed"])} empty="Aucun échec QA remonté." />
-          <List title="Ce que la QA ne garantit pas" items={bundle.limitations} empty="Aucune limitation remontée." />
+          <details className="drawer-disclosure">
+            <summary>Portée et limites de cette validation</summary>
+            <List title="Ce que la QA ne garantit pas" items={bundle.limitations} empty="Aucune limitation remontée." />
+          </details>
         </>
       ) : (
         <p className="muted">La QA apparaîtra après un viewer bundle réel.</p>
@@ -1132,18 +1170,27 @@ export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
 
 export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
   const summarizedIssues = summarizeUserIssues(issues?.human_readable_issues ?? []);
+  const primaryIssues = summarizedIssues.slice(0, 4);
+  const additionalIssues = summarizedIssues.slice(4);
+  const renderIssue = (issue: UserIssue, index: number) => (
+    <article className={`issue-card ${issue.severity}`} key={`${issue.title}-${issue.technical_code ?? "issue"}-${index}`}>
+      <strong>{issue.title}</strong>
+      <p>{issue.impact}</p>
+      <small>{issue.recommended_action}</small>
+    </article>
+  );
   return (
     <section className="drawer-section" aria-label="Limites et actions">
       <PanelTitle icon={<AlertTriangle size={17} />} title="Limites et actions" />
       {summarizedIssues.length ? (
         <div className="issue-list">
-          {summarizedIssues.map((issue, index) => (
-            <article className={`issue-card ${issue.severity}`} key={`${issue.title}-${issue.technical_code ?? "issue"}-${index}`}>
-              <strong>{issue.title}</strong>
-              <p>{issue.impact}</p>
-              <small>{issue.recommended_action}</small>
-            </article>
-          ))}
+          {primaryIssues.map(renderIssue)}
+          {additionalIssues.length ? (
+            <details className="issue-more">
+              <summary>Afficher {additionalIssues.length} autre{additionalIssues.length > 1 ? "s" : ""} limite{additionalIssues.length > 1 ? "s" : ""}</summary>
+              <div>{additionalIssues.map((issue, index) => renderIssue(issue, index + primaryIssues.length))}</div>
+            </details>
+          ) : null}
         </div>
       ) : (
         <p className="muted">Aucune alerte à examiner.</p>

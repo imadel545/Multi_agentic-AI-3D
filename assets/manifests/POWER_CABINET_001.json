@@ -12,11 +12,12 @@
   "compatible_tower_types": ["lattice_tower", "monopole", "rooftop_mast", "small_cell_pole"],
   "mount_zones": [],
   "status": "validated",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "geometry_fidelity": "technical_generic",
   "source": "internal_cleaned",
   "license": "internal_project_generated",
   "attribution_required": false,
-  "attribution": "Project-authored minimal outdoor power cabinet GLB. Not vendor-grade.",
+  "attribution": "Project-authored bounded outdoor power cabinet profile. Not vendor-grade.",
   "original_author": "Codex Agent",
   "normalized_by": "Codex Agent",
   "pivot_policy": "base_center_ground",
@@ -36,14 +37,16 @@
   ],
   "qualification": {
     "status": "qualified_for_generation",
-    "allowed_generation_modes": ["imported_glb_exact"],
-    "verified_file_sha256": "5c536cb8fbbad178f377e6d65c3f20c259975f2ed6efb14907e8685a4eeaad85",
+    "allowed_generation_modes": ["parametric_generated"],
     "units": "meters",
-    "mesh_integrity_verified": true,
+    "mesh_integrity_verified": false,
     "dimensions_verified": true,
-    "pivot_verified": true,
-    "orientation_verified": true,
-    "qualification_method": "Blender 5.1 import probe plus GLB binary integrity inspection",
-    "limitations": ["Internal generic geometry; not vendor-grade."]
+    "pivot_verified": false,
+    "orientation_verified": false,
+    "qualification_method": "SceneSpec-driven bounded ground_cabinet_v1 procedural assembly",
+    "limitations": [
+      "Internal generic multi-part outdoor cabinet geometry; not vendor-specific and not an electrical certification model.",
+      "The companion GLB is reference-only; Blender generates the qualified component from the typed manifest dimensions."
+    ]
   }
 }

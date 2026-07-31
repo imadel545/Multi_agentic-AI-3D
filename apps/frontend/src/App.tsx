@@ -29,13 +29,13 @@ import type {
   PublicVersionInfo,
   SceneAdaptationCapabilities,
   ViewerBundle,
+  EditDesignResponse,
   WorkflowEvent,
   WorkflowStatus
 } from "./api/schemas";
 import {
   BackendStatusBar,
   ChatCommandPanel,
-  CurrentOperationStrip,
   InspectorDock,
   LiveGenerationOverlay
 } from "./components/StudioKernel";
@@ -100,12 +100,9 @@ export default function App() {
   const streamCursorRef = useRef<string | null>(null);
   const eventSequenceCursorRef = useRef<number | null>(null);
   const submissionInFlightRef = useRef(false);
+  const revisionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
   const restoredDocumentPackRef = useRef(false);
-  const resourceNotice = useMemo(
-    () => firstResourceNotice(state.resourceErrors),
-    [state.resourceErrors]
-  );
   const toArtifactUrl = useCallback(
     (url: string | null | undefined) => apiClient.artifactUrl(url),
     [apiClient]
@@ -727,9 +724,15 @@ export default function App() {
   }, [apiClient, documentPackSummary, loadLiveStatus, loadTerminalBundle]);
 
   const submitRevision = useCallback(async () => {
-    if (!state.workflowId || !revisionPrompt.trim() || revisionBusy) {
+    if (
+      !state.workflowId ||
+      !revisionPrompt.trim() ||
+      revisionBusy ||
+      revisionInFlightRef.current
+    ) {
       return;
     }
+    revisionInFlightRef.current = true;
     const workflowId = state.workflowId;
     setRevisionMessage(null);
     setRevisionBusy(true);
@@ -738,7 +741,7 @@ export default function App() {
     try {
       try {
         const eventHistory = await apiClient.workflowEvents(workflowId);
-        receiveWorkflowEvents(eventHistory);
+        rememberEventSequence(latestEventSequence(eventHistory));
         const cursor = latestEventCursor(eventHistory);
         if (cursor) {
           streamCursorRef.current = cursor;
@@ -753,37 +756,31 @@ export default function App() {
       const result = await apiClient.editDesign(workflowId, {
         edit_prompt: revisionPrompt
       });
-      setRevisionMessage(
-        [
-          result.status === "applied"
-            ? "Modification appliquée et revalidée."
-            : "La modification n’a pas été appliquée; consultez les alertes de validation.",
-          streamNotice
-        ]
-          .filter(Boolean)
-          .join(" · ")
-      );
+      const outcome = revisionOutcomeMessage(result);
+      setRevisionMessage([outcome, streamNotice].filter(Boolean).join(" · "));
       if (result.status !== "applied") {
-        dispatch({
-          type: "REQUEST_FAILED",
-          message: result.message ?? "La révision a été refusée par le backend."
-        });
+        dispatch({ type: "REVISION_FINISHED" });
+        await loadTerminalBundle(workflowId);
         return;
       }
       setRevisionPrompt("");
       setRequirementsAnalysis(null);
       setAnalyzedPrompt(null);
       setSubmittedRequirementsHash(null);
+      dispatch({ type: "REVISION_FINISHED" });
       await loadTerminalBundle(workflowId);
     } catch (error) {
-      setRevisionMessage(userFacingError(error, "edit"));
+      const message = userFacingError(error, "edit");
+      setRevisionMessage(message);
+      dispatch({ type: "REQUEST_FAILED", message });
     } finally {
+      revisionInFlightRef.current = false;
       setRevisionBusy(false);
     }
   }, [
     apiClient,
     loadTerminalBundle,
-    receiveWorkflowEvents,
+    rememberEventSequence,
     revisionBusy,
     revisionPrompt,
     state.workflowId
@@ -800,7 +797,7 @@ export default function App() {
       try {
         try {
           const eventHistory = await apiClient.workflowEvents(state.workflowId);
-          receiveWorkflowEvents(eventHistory);
+          rememberEventSequence(latestEventSequence(eventHistory));
           const cursor = latestEventCursor(eventHistory);
           streamCursorRef.current = cursor;
           runtimeMode = cursor ? "sse" : "polling";
@@ -815,9 +812,11 @@ export default function App() {
         });
         const result = await apiClient.rollbackVersion(state.workflowId, versionId);
         setVersionMessage(result.message);
+        dispatch({ type: "REVISION_FINISHED" });
         await loadTerminalBundle(state.workflowId);
       } catch (error) {
         setVersionMessage(userFacingError(error, "rollback"));
+        dispatch({ type: "REVISION_FINISHED" });
       } finally {
         setRollbackBusyVersionId(null);
       }
@@ -825,7 +824,7 @@ export default function App() {
     [
       apiClient,
       loadTerminalBundle,
-      receiveWorkflowEvents,
+      rememberEventSequence,
       rollbackBusyVersionId,
       state.workflowId
     ]
@@ -918,16 +917,6 @@ export default function App() {
             revisionBusy={revisionBusy}
             revisionPrompt={revisionPrompt}
           />
-          {state.phase === "submitting" ||
-          state.phase === "streaming" ||
-          state.phase === "running" ? (
-            <CurrentOperationStrip
-              notice={state.transportError ?? resourceNotice}
-              operation={state.currentOperation}
-              phase={state.phase}
-              runtimeMode={state.runtimeMode}
-            />
-          ) : null}
         </aside>
         <section className="workbench" aria-label="Studio 3D">
           <Suspense fallback={<ViewerLoadingFallback />}>
@@ -939,6 +928,13 @@ export default function App() {
             phase={state.phase}
             runtimeMode={state.runtimeMode}
             timeline={state.timeline}
+            intent={
+              rollbackBusyVersionId
+                ? "rollback"
+                : revisionBusy
+                  ? "revision"
+                  : "generation"
+            }
           />
           <InspectorDock
             adaptationCapabilities={adaptationCapabilities}
@@ -1207,7 +1203,47 @@ function applyResourceResult<T>(
   });
 }
 
-function firstResourceNotice(errors: Record<string, string>): string | null {
-  const first = Object.entries(errors)[0];
-  return first ? first[1] : null;
+export function revisionOutcomeMessage(result: EditDesignResponse): string {
+  const patch = result.patch as Record<string, unknown> | null | undefined;
+  const unsupported = Array.isArray(patch?.unsupported_requests)
+    ? patch.unsupported_requests.filter(
+        (item): item is string => typeof item === "string" && Boolean(item.trim())
+      ).map(humanUnsupportedEditRequest)
+    : [];
+  const description =
+    typeof patch?.edit_description === "string" && patch.edit_description.trim()
+      ? patch.edit_description.trim()
+      : null;
+  if (result.status === "applied") {
+    const applied = description
+      ? `Modification appliquée : ${description}`
+      : "Modification appliquée et revalidée.";
+    return unsupported.length
+      ? `${applied} Non réalisé : ${unsupported.join(" ")}`
+      : applied;
+  }
+  const errorCodes = (result.errors ?? [])
+    .map((error) => String(error.code ?? "").toUpperCase())
+    .join(" ");
+  if (errorCodes.includes("GEOMETRY_VALIDATION")) {
+    return "La nouvelle version a été refusée par le contrôle géométrique. La version certifiée précédente reste active.";
+  }
+  if (unsupported.length) {
+    return `Modification non appliquée. Capacité indisponible : ${unsupported.join(" ")}`;
+  }
+  return "Modification non appliquée. La version certifiée précédente reste active.";
+}
+
+function humanUnsupportedEditRequest(message: string): string {
+  const normalized = message.toLowerCase();
+  if (
+    (normalized.includes("door") || normalized.includes("porte")) &&
+    (normalized.includes("green space") || normalized.includes("espace vert"))
+  ) {
+    return "L’ajout d’une porte ou barrière au sol pour délimiter un espace vert n’est pas encore disponible.";
+  }
+  if (normalized.includes("not supported") || normalized.includes("is not supported")) {
+    return "Une partie de la demande n’est pas disponible dans les capacités d’édition actuelles.";
+  }
+  return message;
 }

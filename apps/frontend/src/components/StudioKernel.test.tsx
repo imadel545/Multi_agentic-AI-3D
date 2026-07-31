@@ -177,7 +177,9 @@ describe("studio kernel components", () => {
     );
 
     expect(
-      screen.getByText("Équipements génériques techniques · 6 composants · antennes, radios")
+      screen.getByText(
+        "Équipements génériques techniques · 6 modèles sélectionnés · antennes, radios"
+      )
     ).toHaveAttribute("data-geometry-fidelity", "technical_generic");
     expect(screen.queryByText(/Modèle fournisseur qualifié/)).not.toBeInTheDocument();
   });
@@ -1220,5 +1222,38 @@ describe("studio kernel components", () => {
       "Positionnement des composants sélectionnés."
     );
     expect(screen.getByRole("status")).not.toHaveTextContent("%");
+  });
+
+  it("does not reuse a terminal operation as live revision progress", () => {
+    render(
+      <LiveGenerationOverlay
+        events={[]}
+        intent="revision"
+        operation={{
+          has_current_operation: false,
+          workflow_id: "wf_1",
+          status: "completed",
+          current_operation: "Le design est terminé.",
+          is_running: false,
+          is_terminal: true,
+          unsupported_actions: [],
+          available_actions: [],
+          human_label: "Workflow terminé",
+          progress_message: "Le design est terminé.",
+          event_source: "push_sse",
+          last_event_id: "evt_old",
+          updated_at: "2026-07-31T10:00:00Z",
+          polling_hint_seconds: 2,
+          warnings_count: 0,
+          errors_count: 0
+        }}
+        phase="running"
+        runtimeMode="sse"
+        timeline={null}
+      />
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Modification du design");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Workflow terminé");
   });
 });

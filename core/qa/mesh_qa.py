@@ -35,7 +35,11 @@ SemanticInspectionMode = Literal[
 _PER_SECTOR_ROLES = {"antenna", "rru", "cable", "beam", "azimuth_arrow"}
 _PRIMARY_EQUIPMENT_ROLES = {"antenna", "rru", "gps", "power_cabinet"}
 _AABB_INTERFERENCE_EPSILON_M = 0.005
-_ALLOWED_CONTACT_MAX_PENETRATION_M = 0.15
+# Antenna/RRU pairs are deliberately mounted against each other. The generated
+# technical RRU is 0.18 m deep, so a 0.15 m cap incorrectly rejected a valid
+# same-sector mounting contact by a few millimetres. Total enclosure overlap is
+# still rejected by the smaller-extent guard in _is_allowed_primary_equipment_contact.
+_ALLOWED_CONTACT_MAX_PENETRATION_M = 0.20
 _ROLE_ALIASES = {
     "antenna": "antenna",
     "antenna_panel": "antenna",

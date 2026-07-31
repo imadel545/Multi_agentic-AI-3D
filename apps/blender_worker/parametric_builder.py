@@ -852,17 +852,161 @@ def build_parametric_accessory_cabinet(
     depth: float = 0.45,
     height: float = 1.6,
 ) -> object:
-    """Generate a cabinet from a base-center-ground datum."""
-    box = _create_box(
+    """Generate a bounded multi-part outdoor cabinet from a ground datum.
+
+    The builder intentionally represents a generic technical enclosure rather
+    than a vendor product. All proportions are derived from the manifest
+    dimensions so topology remains deterministic and reusable.
+    """
+    width = max(float(width), 0.4)
+    depth = max(float(depth), 0.25)
+    height = max(float(height), 0.8)
+
+    root = bpy.data.objects.new(name, None)
+    bpy.context.collection.objects.link(root)
+    root.location = location
+
+    enclosure_material = _material(
         bpy,
-        name,
+        "cabinet_powder_coated_steel",
+        (0.56, 0.61, 0.56, 1),
+        roughness=0.42,
+        metallic=0.28,
+    )
+    trim_material = _material(
+        bpy,
+        "cabinet_dark_trim",
+        (0.08, 0.1, 0.1, 1),
+        roughness=0.35,
+        metallic=0.45,
+    )
+    warning_material = _material(
+        bpy,
+        "cabinet_warning_yellow",
+        (0.95, 0.66, 0.08, 1),
+        roughness=0.46,
+    )
+
+    plinth_height = height * 0.075
+    roof_height = height * 0.035
+    body_height = height - plinth_height - roof_height
+    body_width = width * 0.92
+    body_depth = depth * 0.86
+    body_center_z = plinth_height + body_height / 2
+
+    plinth = _create_box(
+        bpy,
+        f"{name}_plinth",
+        width * 0.82,
+        depth * 0.78,
+        plinth_height,
+        (0.0, 0.0, plinth_height / 2),
+    )
+    plinth.parent = root
+    plinth.data.materials.append(trim_material)
+    _add_bevel(plinth, min(width, depth) * 0.025, segments=2)
+
+    enclosure = _create_box(
+        bpy,
+        f"{name}_enclosure",
+        body_width,
+        body_depth,
+        body_height,
+        (0.0, 0.0, body_center_z),
+    )
+    enclosure.parent = root
+    enclosure.data.materials.append(enclosure_material)
+    _add_bevel(enclosure, min(width, depth) * 0.025)
+
+    roof = _create_box(
+        bpy,
+        f"{name}_weather_roof",
         width,
         depth,
-        height,
-        (location[0], location[1], location[2] + height / 2),
+        roof_height,
+        (0.0, 0.0, height - roof_height / 2),
     )
-    box.data.materials.append(_material(bpy, "cabinet_green", (0.25, 0.42, 0.28, 1)))
-    return box
+    roof.parent = root
+    roof.data.materials.append(enclosure_material)
+    _add_bevel(roof, min(width, depth) * 0.018, segments=2)
+
+    door_depth = max(depth * 0.025, 0.012)
+    door_width = body_width * 0.445
+    door_height = body_height * 0.82
+    front_y = -(body_depth + door_depth) / 2
+    for index, x_sign in enumerate((-1.0, 1.0), start=1):
+        door = _create_box(
+            bpy,
+            f"{name}_front_door_{index:02d}",
+            door_width,
+            door_depth,
+            door_height,
+            (x_sign * body_width * 0.235, front_y, body_center_z),
+        )
+        door.parent = root
+        door.data.materials.append(enclosure_material)
+        _add_bevel(door, min(width, depth) * 0.012, segments=2)
+
+        handle = _create_box(
+            bpy,
+            f"{name}_door_handle_{index:02d}",
+            max(width * 0.022, 0.012),
+            max(depth * 0.045, 0.016),
+            height * 0.13,
+            (
+                x_sign * body_width * 0.055,
+                front_y - depth * 0.035,
+                body_center_z,
+            ),
+        )
+        handle.parent = root
+        handle.data.materials.append(trim_material)
+        _add_bevel(handle, min(width, depth) * 0.006, segments=2)
+
+    placard = _create_box(
+        bpy,
+        f"{name}_electrical_warning_placard",
+        width * 0.18,
+        door_depth * 1.15,
+        height * 0.11,
+        (body_width * 0.23, front_y - depth * 0.024, body_center_z + body_height * 0.22),
+    )
+    placard.parent = root
+    placard.data.materials.append(warning_material)
+
+    vent_width = max(width * 0.018, 0.012)
+    vent_depth = depth * 0.24
+    for index in range(5):
+        vent = _create_box(
+            bpy,
+            f"{name}_side_vent_{index + 1:02d}",
+            vent_width,
+            vent_depth,
+            height * 0.018,
+            (
+                body_width / 2 + vent_width / 2,
+                0.0,
+                body_center_z + body_height * (0.18 - index * 0.055),
+            ),
+        )
+        vent.parent = root
+        vent.data.materials.append(trim_material)
+
+    gland_radius = min(width, depth) * 0.035
+    for index, x_ratio in enumerate((-0.22, 0.0, 0.22), start=1):
+        gland = _create_cylinder(
+            bpy,
+            name=f"{name}_cable_gland_{index:02d}",
+            radius_bottom=gland_radius,
+            radius_top=gland_radius,
+            height=max(plinth_height * 0.35, 0.025),
+            location=(width * x_ratio, 0.0, plinth_height + body_height * 0.025),
+            vertices=16,
+        )
+        gland.parent = root
+        gland.data.materials.append(trim_material)
+
+    return root
 
 
 def build_parametric_accessory_gps(

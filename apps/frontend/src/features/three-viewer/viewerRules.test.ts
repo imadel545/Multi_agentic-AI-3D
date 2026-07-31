@@ -186,7 +186,7 @@ describe("viewer source rules", () => {
 
     expect(fidelity).toEqual({
       fidelity: "technical_generic",
-      label: "Équipements génériques techniques · 6 composants · antennes, radios",
+      label: "Équipements génériques techniques · 6 modèles sélectionnés · antennes, radios",
       count: 6,
       roles: ["antennes", "radios"]
     });
@@ -201,7 +201,9 @@ describe("viewer source rules", () => {
           vendor_qualified: ["power_cabinet"]
         }
       }
-    })).toContain("Équipements génériques techniques · 6 composants · antennes, radios");
+    })).toContain(
+      "Équipements génériques techniques · 6 modèles sélectionnés · antennes, radios"
+    );
   });
 
   it("claims vendor qualification only when every declared component is vendor-qualified", () => {
@@ -218,7 +220,7 @@ describe("viewer source rules", () => {
           }
         }
       })?.label
-    ).toBe("Modèle fournisseur qualifié · 2 composants · antennes, radios");
+    ).toBe("Modèle fournisseur qualifié · 2 modèles sélectionnés · antennes, radios");
 
     expect(
       geometryFidelityBadge({

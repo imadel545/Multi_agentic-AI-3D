@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiClientError } from "./api/client";
-import type { WorkflowStatus } from "./api/schemas";
+import type { EditDesignResponse, WorkflowStatus } from "./api/schemas";
 import {
   documentPackFilesSizeError,
   documentPackSizeError,
@@ -8,6 +8,7 @@ import {
   latestEventSequence,
   needsPolling,
   parseCorrectionValue,
+  revisionOutcomeMessage,
   selectWorkflowToRestore,
   shouldForgetDocumentPackSession,
   userFacingError
@@ -91,6 +92,51 @@ describe("frontend runtime selection", () => {
       ])
     ).toBe(9);
     expect(latestEventSequence([{ sequence: null }])).toBeNull();
+  });
+
+  it("explains a controlled edit rejection without exposing backend internals", () => {
+    const message = revisionOutcomeMessage({
+      workflow_id: "wf_1",
+      edit_id: "edit_1",
+      status: "failed",
+      available_actions: [],
+      unsupported_actions: [],
+      warnings: [],
+      errors: [
+        {
+          code: "GEOMETRY_VALIDATION_VALID",
+          message: "QA check failed: geometry_validation_valid",
+          severity: "error"
+        }
+      ],
+      patch: null
+    } as EditDesignResponse);
+
+    expect(message).toContain("contrôle géométrique");
+    expect(message).toContain("version certifiée précédente");
+    expect(message).not.toContain("geometry_validation_valid");
+  });
+
+  it("reports the applied part and translates an unsupported edit request", () => {
+    const message = revisionOutcomeMessage({
+      workflow_id: "wf_1",
+      edit_id: "edit_1",
+      status: "applied",
+      available_actions: [],
+      unsupported_actions: [],
+      warnings: [],
+      errors: [],
+      patch: {
+        edit_description: "Ajout d’une armoire d’alimentation.",
+        unsupported_requests: [
+          "Ground door addition to delimit green space is not supported by available capabilities"
+        ]
+      }
+    } as EditDesignResponse);
+
+    expect(message).toContain("Ajout d’une armoire d’alimentation");
+    expect(message).toContain("porte ou barrière au sol");
+    expect(message).not.toContain("Ground door");
   });
 
   it("normalizes simple user correction values without inventing structure", () => {

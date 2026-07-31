@@ -154,7 +154,8 @@ function buildGeometryFidelityBadge(
   roles: string[]
 ): GeometryFidelityBadge {
   const readableRoles = roles.map(humanAssetRole);
-  const componentLabel = count === 1 ? "1 composant" : `${count} composants`;
+  const componentLabel =
+    count === 1 ? "1 modèle sélectionné" : `${count} modèles sélectionnés`;
   const roleLabel = readableRoles.length ? ` · ${readableRoles.join(", ")}` : "";
   return {
     fidelity,
