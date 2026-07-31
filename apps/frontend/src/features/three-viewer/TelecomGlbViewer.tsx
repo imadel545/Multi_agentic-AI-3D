@@ -46,6 +46,13 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const sourceIdentity = "url" in source ? `${source.kind}:${source.url}` : source.kind;
   const renderIsBlank = source.kind === "glb" && viewerHealth === "render_blank";
+  const retryGlb = () => {
+    if (source.kind === "glb") {
+      useGLTF.clear(source.url);
+      setViewerHealth("loading_glb");
+      setResetKey((value) => value + 1);
+    }
+  };
 
   useEffect(() => {
     setObjectSummary(null);
@@ -84,7 +91,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
       ) : source.kind === "preview" ? (
         <PreviewFallback url={source.url} message={source.message} />
       ) : source.kind === "error" ? (
-        <ViewerError message={source.message} previewUrl={source.previewUrl} />
+        <ViewerError message={source.message} previewUrl={source.previewUrl} onRetry={retryGlb} />
       ) : (
         <div className="canvas-frame">
           {webglSupported === false ? (
@@ -96,6 +103,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             ) : (
               <ViewerError
                 message="WebGL indisponible et aucune preview backend n'est disponible."
+                onRetry={retryGlb}
                 previewUrl={null}
               />
             )
@@ -108,6 +116,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             ) : (
               <ViewerError
                 message="GLB chargé mais rendu viewer non visible, sans preview disponible."
+                onRetry={retryGlb}
                 previewUrl={null}
               />
             )
@@ -118,6 +127,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             <GlbErrorBoundary
               key={`${source.url}-${resetKey}`}
               onError={() => setViewerHealth("glb_error")}
+              onRetry={retryGlb}
               previewUrl={source.previewUrl}
             >
               <Canvas
@@ -232,12 +242,43 @@ function ViewerEmpty({ message }: { message: string }) {
   );
 }
 
-function ViewerError({ message, previewUrl }: { message: string; previewUrl: string | null }) {
+function ViewerError({
+  message,
+  onRetry,
+  previewUrl
+}: {
+  message: string;
+  onRetry?: () => void;
+  previewUrl: string | null;
+}) {
+  if (previewUrl) {
+    return (
+      <div className="viewer-degraded-preview">
+        <BackendPreviewImage src={previewUrl} />
+        <div className="viewer-state-banner" role="status">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div>
+            <strong>Aperçu backend actif</strong>
+            <span>{message}</span>
+          </div>
+          {onRetry ? (
+            <button onClick={onRetry} type="button">
+              Réessayer la 3D
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="viewer-empty viewer-error">
       <AlertTriangle size={32} aria-hidden="true" />
       <p>{message}</p>
-      {previewUrl ? <BackendPreviewImage src={previewUrl} /> : null}
+      {onRetry ? (
+        <button className="viewer-retry" onClick={onRetry} type="button">
+          Réessayer
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -408,7 +449,7 @@ function sampleRenderer(renderer: WebGLRenderer, scene: Scene, camera: Camera): 
 }
 
 class GlbErrorBoundary extends Component<
-  { children: ReactNode; previewUrl: string | null; onError: () => void },
+  { children: ReactNode; previewUrl: string | null; onError: () => void; onRetry: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -426,6 +467,7 @@ class GlbErrorBoundary extends Component<
       return (
         <ViewerError
           message="Le GLB backend n'a pas pu être chargé; fallback preview affiché."
+          onRetry={this.props.onRetry}
           previewUrl={this.props.previewUrl}
         />
       );

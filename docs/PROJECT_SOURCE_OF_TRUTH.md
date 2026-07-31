@@ -376,6 +376,31 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   deterministic code owns routing, dependencies, contracts, transformations,
   units, QA, persistence and Blender execution.
 
+## FRONTEND REAL-RUNTIME UX HARDENING — 2026-07-31
+
+- Local development now uses a same-origin Vite proxy for the stable FastAPI
+  routes. This removed a browser-only cross-origin GLB failure while preserving
+  backend artifact URLs as the source of truth.
+- A recorded local smoke restored `wf_a6660b81b929`, loaded its real GLB and
+  reported 121 named nodes, 23 semantic equipment entities and a visible WebGL
+  render. The backend preview remains an explicit retryable degraded state, not
+  a successful 3D result.
+- The top bar now distinguishes a certified result from its remaining
+  limitations. Repeated asset warnings are grouped before display; QA and
+  limitations share one `Contrôles` drawer instead of presenting contradictory
+  peer statuses.
+- Restored document packs stay collapsed until requested. Terminal workflows no
+  longer retain an inactive progress card. Runtime/RAG evidence is grouped in
+  `Système`, and specialist activity remains available in `Activité`.
+- Running workflows expose a live, accessible overlay driven only by real
+  operation/timeline/SSE data. No synthetic percentage or fake stage is shown.
+- The telecom camera fit includes explicit framing margin for tall assemblies,
+  and the viewer offers a retry action when a real GLB load fails.
+- Frontend proof: 119 Vitest tests, TypeScript production build, and local
+  browser smoke against FastAPI on port 8000 and Vite on port 5173. The build
+  still reports a large lazy-loaded Three.js viewer chunk; this is a performance
+  backlog item, not a runtime failure.
+
 ## Current verdict
 
 ## ASSET-DRIVEN TELECOM ASSEMBLY V1 — delivered scope

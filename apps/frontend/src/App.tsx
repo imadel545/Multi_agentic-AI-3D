@@ -36,7 +36,8 @@ import {
   BackendStatusBar,
   ChatCommandPanel,
   CurrentOperationStrip,
-  InspectorDock
+  InspectorDock,
+  LiveGenerationOverlay
 } from "./components/StudioKernel";
 import {
   actionIsSupported,
@@ -919,9 +920,7 @@ export default function App() {
           />
           {state.phase === "submitting" ||
           state.phase === "streaming" ||
-          state.phase === "running" ||
-          state.transportError ||
-          resourceNotice ? (
+          state.phase === "running" ? (
             <CurrentOperationStrip
               notice={state.transportError ?? resourceNotice}
               operation={state.currentOperation}
@@ -934,6 +933,13 @@ export default function App() {
           <Suspense fallback={<ViewerLoadingFallback />}>
             <TelecomGlbViewer bundle={state.viewerBundle} toAbsoluteUrl={toArtifactUrl} />
           </Suspense>
+          <LiveGenerationOverlay
+            events={state.events}
+            operation={state.currentOperation}
+            phase={state.phase}
+            runtimeMode={state.runtimeMode}
+            timeline={state.timeline}
+          />
           <InspectorDock
             adaptationCapabilities={adaptationCapabilities}
             adaptationCatalog={adaptationCatalog}

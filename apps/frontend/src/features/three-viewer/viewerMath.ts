@@ -36,6 +36,7 @@ const CameraFitExcludedRoles = new Set([
   "label"
 ]);
 const CameraFitExcludedNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
+const TelecomCameraFitPadding = 1.4;
 
 export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): CameraFit {
   const center = box.getCenter(new Vector3());
@@ -50,7 +51,9 @@ export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): Cam
     10
   );
   const radius = Math.max(height, horizontal);
-  const distance = fitDistance * 1.08;
+  // Tall telecom assemblies need margin for perspective projection, orbit controls,
+  // labels and the viewer chrome. A tight mathematical fit clips tower extremities.
+  const distance = fitDistance * TelecomCameraFitPadding;
   const direction = new Vector3(0.68, 0.28, 0.88).normalize();
   const target = new Vector3(center.x, box.min.y + height * 0.52, center.z);
   const position = target.clone().add(direction.multiplyScalar(distance));

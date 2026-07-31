@@ -8,6 +8,7 @@ import {
   AssetLibraryPanel,
   BackendStatusBar,
   ChatCommandPanel,
+  LiveGenerationOverlay,
   InspectorDock,
   IssuesPanel,
   QaPanel,
@@ -15,6 +16,7 @@ import {
   RuntimeCapabilitiesPanel,
   SummaryPanel,
   VersionSummary,
+  displayIssueCount,
   humanRagLimitation,
   humanRequirementWarning,
   meshQaLevelLabel,
@@ -660,6 +662,13 @@ describe("studio kernel components", () => {
         impact: "Raison: deterministic_extraction_requested.",
         recommended_action: "Configure GROQ_API_KEY.",
         technical_code: "LLM_FALLBACK"
+      },
+      {
+        title: "No antenna model was confirmed in the document pack",
+        severity: "warning",
+        impact: "A generic network antenna family is used.",
+        recommended_action: "Review.",
+        technical_code: "DOCUMENT_DEFAULT"
       }
     ]);
 
@@ -667,7 +676,8 @@ describe("studio kernel components", () => {
       "Inclinaison mécanique proposée",
       "Azimuts complétés",
       "Recherche documentaire temporairement dégradée",
-      "Compréhension en mode de secours"
+      "Compréhension en mode de secours",
+      "Famille d’antenne générique"
     ]);
     expect(summarized.map((issue) => issue.impact).join(" ")).not.toContain("Error code");
     expect(summarized.map((issue) => issue.impact).join(" ")).not.toContain(
@@ -1136,16 +1146,79 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Résumé" }));
+    fireEvent.click(screen.getByRole("button", { name: "Aperçu" }));
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    fireEvent.click(screen.getByRole("button", { name: /Agents/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Activité/ }));
     expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Narration du workflow");
-    fireEvent.click(screen.getByRole("button", { name: "RAG" }));
+    fireEvent.click(screen.getByRole("button", { name: "Système" }));
     expect(screen.getByLabelText("RAG evidence")).toHaveTextContent(
       "Aucune preuve RAG chargée"
     );
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("groups repeated asset warnings in the displayed issue count", () => {
+    expect(
+      displayIssueCount(
+        {
+          workflow_id: "wf_1",
+          status: "completed",
+          human_readable_issues: [
+            {
+              title: "Asset warning",
+              severity: "warning",
+              impact: "NOT_VENDOR_GRADE",
+              recommended_action: "Review",
+              technical_code: "ASSET_NOT_VENDOR_GRADE"
+            },
+            {
+              title: "Asset warning",
+              severity: "warning",
+              impact: "NOT_VENDOR_GRADE",
+              recommended_action: "Review",
+              technical_code: "ASSET_NOT_VENDOR_GRADE"
+            }
+          ]
+        },
+        bundle
+      )
+    ).toBe(1);
+  });
+
+  it("announces real workflow activity without inventing progress", () => {
+    render(
+      <LiveGenerationOverlay
+        events={[]}
+        operation={{
+          has_current_operation: true,
+          workflow_id: "wf_1",
+          status: "running",
+          current_operation: "assemble_scene",
+          is_running: true,
+          is_terminal: false,
+          unsupported_actions: [],
+          available_actions: [],
+          human_label: "Assemblage Blender",
+          progress_message: "Positionnement des composants sélectionnés.",
+          event_source: "push_sse",
+          last_event_id: null,
+          updated_at: "2026-07-31T10:00:00Z",
+          polling_hint_seconds: 2,
+          warnings_count: 0,
+          errors_count: 0
+        }}
+        phase="running"
+        runtimeMode="sse"
+        timeline={null}
+      />
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Assemblage Blender");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Positionnement des composants sélectionnés."
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent("%");
   });
 });

@@ -17,7 +17,7 @@ describe("viewer math", () => {
 
     expect(fit.target.y).toBeGreaterThan(12);
     expect(fit.target.y).toBeLessThan(20);
-    expect(fit.distance).toBeGreaterThan(35);
+    expect(fit.distance).toBeGreaterThan(55);
     expect(fit.near).toBeLessThan(1);
     expect(fit.far).toBeGreaterThan(90);
   });

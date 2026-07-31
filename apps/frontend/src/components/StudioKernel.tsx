@@ -7,6 +7,7 @@ import {
   Cpu,
   FileArchive,
   Layers3,
+  Loader2,
   MessageSquareText,
   RadioTower,
   RotateCcw,
@@ -54,15 +55,20 @@ export function BackendStatusBar({
   bundle: ViewerBundle | null;
   issues: UserIssues | null;
 }) {
-  const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
+  const issueCount = displayIssueCount(issues, bundle);
   const fidelityBadge = geometryFidelityBadge(bundle);
+  const certified =
+    bundle?.status === "completed" &&
+    bundle.generation_mode === "real_blender" &&
+    bundle.mesh_qa_passed === true &&
+    bundle.completion_certificate_status === "issued";
   return (
     <header className="topbar">
       <div className="brand-lockup">
         <RadioTower size={22} aria-hidden="true" />
         <div>
           <strong>Agentic Telecom Studio</strong>
-          <span>Studio IA 3D telecom local-first</span>
+          <span>Conception 3D telecom vérifiable</span>
         </div>
       </div>
       <div className="topbar-status" aria-label="Studio runtime status">
@@ -70,9 +76,12 @@ export function BackendStatusBar({
           <span aria-hidden="true" />
           {health?.status === "ok" ? "Studio local connecté" : "Studio indisponible"}
         </span>
-        {bundle?.generation_mode === "real_blender" ? (
-          <span className="topbar-proof"><Boxes size={14} aria-hidden="true" /> Blender réel</span>
-        ) : null}
+        {bundle ? (
+          <span className={certified ? "topbar-proof ok" : "topbar-proof warn"}>
+            {certified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
+            {certified ? "Résultat certifié" : workflowStatusLabel(bundle.status)}
+          </span>
+        ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
         {fidelityBadge ? (
           <span
             className={
@@ -85,21 +94,9 @@ export function BackendStatusBar({
             <Boxes size={14} aria-hidden="true" /> {fidelityBadge.label}
           </span>
         ) : null}
-        {bundle ? (
-          <span className={bundle.mesh_qa_passed ? "topbar-proof ok" : "topbar-proof warn"}>
-            <CheckCircle2 size={14} aria-hidden="true" /> {bundle.mesh_qa_passed ? "QA validée" : "QA à vérifier"}
-          </span>
-        ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
-        {bundle?.completion_certificate_status === "issued" ? (
-          <span className="topbar-proof"><ShieldAlert size={14} aria-hidden="true" /> Intégrité vérifiée</span>
-        ) : bundle?.completion_certificate_status === "rejected" ? (
-          <span className="topbar-proof warn">
-            <ShieldAlert size={14} aria-hidden="true" /> Intégrité non vérifiée
-          </span>
-        ) : null}
         {issueCount ? (
           <span className="topbar-issue-count">
-            <AlertTriangle size={14} aria-hidden="true" /> {issueCount} point(s) à vérifier
+            <AlertTriangle size={14} aria-hidden="true" /> {issueCount} limite{issueCount > 1 ? "s" : ""} à examiner
           </span>
         ) : null}
       </div>
@@ -234,7 +231,13 @@ export function ChatCommandPanel({
           title={revisionMode ? "Appliquer la modification" : "Analyser les contraintes"}
           type="button"
         >
-          {revisionMode ? <Send size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+          {revisionMode ? (
+            revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <Send size={18} aria-hidden="true" />
+          ) : analysisBusy ? (
+            <Loader2 className="spin" size={18} aria-hidden="true" />
+          ) : (
+            <Sparkles size={18} aria-hidden="true" />
+          )}
         </button>
       </div>
       <p className="composer-hint">
@@ -411,12 +414,7 @@ function DocumentPackIntake({
   summary: DocumentPackSummary | null;
 }) {
   const canGenerate = summary?.can_generate_design === true;
-  const [expanded, setExpanded] = useState(Boolean(summary || review || message));
-  useEffect(() => {
-    if (summary || review || message) {
-      setExpanded(true);
-    }
-  }, [message, review, summary]);
+  const [expanded, setExpanded] = useState(false);
   return (
     <details
       className="document-intake"
@@ -426,7 +424,11 @@ function DocumentPackIntake({
       <summary>
         <FileArchive size={17} aria-hidden="true" />
         <span>Cahier de charge documentaire</span>
-        {summary ? <small>{summary.document_count} pièce(s)</small> : null}
+        {summary ? (
+          <small>
+            {summary.document_count} pièce(s) · {summary.can_generate_design ? "prêt" : "revue requise"}
+          </small>
+        ) : null}
       </summary>
       <div className="document-intake-body">
         <div className="document-intake-copy">
@@ -678,6 +680,96 @@ export function CurrentOperationStrip({
   );
 }
 
+export function LiveGenerationOverlay({
+  events,
+  operation,
+  phase,
+  runtimeMode,
+  timeline
+}: {
+  events: NormalizedWorkflowEvent[];
+  operation: CurrentOperation | null;
+  phase: WorkflowPhase;
+  runtimeMode: RuntimeMode;
+  timeline: TimelineSummary | null;
+}) {
+  const running = phase === "submitting" || phase === "streaming" || phase === "running";
+  if (!running) {
+    return null;
+  }
+  const timelineRows = (timeline?.timeline_steps ?? [])
+    .filter((step) => step.status !== "pending")
+    .map((step, index) => ({
+      id: `${step.step}-${step.timestamp ?? index}`,
+      label: step.human_label ?? step.label ?? step.human_readable,
+      status: step.status
+    }));
+  const eventRows = events.map((event) => ({
+    id: event.event_id,
+    label: event.human_label,
+    status: event.status ?? event.event_type
+  }));
+  const activity = (timelineRows.length ? timelineRows : eventRows).slice(-3);
+  const label =
+    operation?.human_label ??
+    operation?.current_operation ??
+    (phase === "submitting" ? "Préparation du design" : "Conception en cours");
+  const message =
+    operation?.progress_message ??
+    "Les spécialistes coordonnent la conception et publient leurs preuves au fur et à mesure.";
+  return (
+    <section
+      aria-atomic="true"
+      aria-live="polite"
+      aria-label="Progression de la conception"
+      className="generation-overlay"
+      role="status"
+    >
+      <div className="generation-loader" aria-hidden="true">
+        <span />
+        <span />
+        <RadioTower size={25} />
+      </div>
+      <div className="generation-copy">
+        <span className="eyebrow">
+          {runtimeMode === "sse" ? "Mises à jour en temps réel" : "Synchronisation sécurisée"}
+        </span>
+        <strong>{label}</strong>
+        <p>{message}</p>
+        {activity.length ? (
+          <div className="generation-activity">
+            {activity.map((row) => (
+              <span className={stageStatusTone(row.status)} key={row.id}>
+                <i aria-hidden="true" />
+                {row.label}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="generation-awaiting">
+            <Loader2 size={15} aria-hidden="true" />
+            Initialisation du workflow…
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function stageStatusTone(status: string): string {
+  if (status.includes("failed") || status === "error") {
+    return "warning";
+  }
+  if (
+    status.includes("completed") ||
+    status === "passed" ||
+    status === "generated"
+  ) {
+    return "completed";
+  }
+  return "running";
+}
+
 export function AgentStageRail({
   events,
   timeline,
@@ -748,7 +840,14 @@ export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflow
   );
 }
 
-type DrawerId = "summary" | "agents" | "qa" | "issues" | "artifacts" | "library" | "rag" | "runtime" | "versions";
+type DrawerId =
+  | "summary"
+  | "agents"
+  | "quality"
+  | "artifacts"
+  | "library"
+  | "system"
+  | "versions";
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
 export function InspectorDock({
@@ -804,16 +903,21 @@ export function InspectorDock({
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
+  const issueCount = displayIssueCount(issues, bundle);
   const drawers: DrawerDefinition[] = [];
-  if (bundle) drawers.push({ id: "summary", label: "Résumé", icon: <CheckCircle2 size={16} /> });
-  if (events.length || timeline) drawers.push({ id: "agents", label: "Agents", icon: <Sparkles size={16} /> });
-  if (bundle) drawers.push({ id: "qa", label: "QA", badge: bundle.mesh_qa_passed ? "validée" : "à revoir", icon: <ShieldAlert size={16} /> });
-  if (issueCount) drawers.push({ id: "issues", label: "Alertes", badge: String(issueCount), icon: <AlertTriangle size={16} /> });
+  if (bundle) drawers.push({ id: "summary", label: "Aperçu", icon: <CheckCircle2 size={16} /> });
+  if (events.length || timeline) drawers.push({ id: "agents", label: "Activité", icon: <Sparkles size={16} /> });
+  if (bundle || issueCount) {
+    drawers.push({
+      id: "quality",
+      label: "Contrôles",
+      badge: issueCount ? String(issueCount) : "OK",
+      icon: <ShieldAlert size={16} />
+    });
+  }
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
-  if (assetLibrarySummary?.catalog_available) drawers.push({ id: "library", label: "Bibliothèque", icon: <Boxes size={16} /> });
-  if (bundle) drawers.push({ id: "rag", label: "RAG", icon: <Cpu size={16} /> });
-  if (summary) drawers.push({ id: "runtime", label: "Runtime", icon: <Boxes size={16} /> });
+  if (assetLibrarySummary?.catalog_available) drawers.push({ id: "library", label: "Composants", icon: <Boxes size={16} /> });
+  if (bundle || summary) drawers.push({ id: "system", label: "Système", icon: <Cpu size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -895,8 +999,12 @@ export function InspectorDock({
           </button>
           {activeDrawer === "summary" ? <SummaryPanel bundle={bundle} issues={issues} summary={summary} versions={versions} /> : null}
           {activeDrawer === "agents" ? <AgentTimeline events={events} timeline={timeline} /> : null}
-          {activeDrawer === "qa" ? <QaPanel bundle={bundle} /> : null}
-          {activeDrawer === "issues" ? <IssuesPanel issues={issues} /> : null}
+          {activeDrawer === "quality" ? (
+            <>
+              <QaPanel bundle={bundle} />
+              <IssuesPanel issues={issues} />
+            </>
+          ) : null}
           {activeDrawer === "artifacts" ? <ArtifactsPanel bundle={bundle} toAbsoluteUrl={toAbsoluteUrl} /> : null}
           {activeDrawer === "library" ? (
             <AssetLibraryPanel
@@ -908,23 +1016,23 @@ export function InspectorDock({
               summary={assetLibrarySummary}
             />
           ) : null}
-          {activeDrawer === "rag" ? (
-            <RagEvidencePanel
-              bundle={bundle}
-              error={ragEvidenceError}
-              evidence={ragEvidence}
-              loading={ragEvidenceLoading}
-            />
-          ) : null}
-          {activeDrawer === "runtime" ? (
-            <RuntimeCapabilitiesPanel
-              adaptationCapabilities={adaptationCapabilities}
-              adaptationCatalog={adaptationCatalog}
-              bundle={bundle}
-              documentCapabilities={documentCapabilities ?? null}
-              inventory={assetInventory}
-              summary={summary}
-            />
+          {activeDrawer === "system" ? (
+            <>
+              <RuntimeCapabilitiesPanel
+                adaptationCapabilities={adaptationCapabilities}
+                adaptationCatalog={adaptationCatalog}
+                bundle={bundle}
+                documentCapabilities={documentCapabilities ?? null}
+                inventory={assetInventory}
+                summary={summary}
+              />
+              <RagEvidencePanel
+                bundle={bundle}
+                error={ragEvidenceError}
+                evidence={ragEvidence}
+                loading={ragEvidenceLoading}
+              />
+            </>
           ) : null}
           {activeDrawer === "versions" ? (
             <VersionSummary
@@ -953,7 +1061,7 @@ export function SummaryPanel({
   versions: PublicVersionInfo[];
 }) {
   const activeVersion = versions.find((version) => version.active)?.version_id ?? versions[0]?.version_id ?? "aucune";
-  const issueCount = issues?.human_readable_issues.length ?? bundle?.human_warnings_count ?? 0;
+  const issueCount = displayIssueCount(issues, bundle);
   return (
     <section className="drawer-section" aria-label="Résumé produit">
       <PanelTitle icon={<CheckCircle2 size={17} />} title="Résumé du design" />
@@ -1025,8 +1133,8 @@ export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
 export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
   const summarizedIssues = summarizeUserIssues(issues?.human_readable_issues ?? []);
   return (
-    <section className="drawer-section" aria-label="Alertes utilisateur">
-      <PanelTitle icon={<AlertTriangle size={17} />} title="Alertes à examiner" />
+    <section className="drawer-section" aria-label="Limites et actions">
+      <PanelTitle icon={<AlertTriangle size={17} />} title="Limites et actions" />
       {summarizedIssues.length ? (
         <div className="issue-list">
           {summarizedIssues.map((issue, index) => (
@@ -1705,11 +1813,24 @@ export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
   return [...grouped, ...visible];
 }
 
+export function displayIssueCount(
+  issues: UserIssues | null,
+  bundle: ViewerBundle | null
+): number {
+  if (issues) {
+    return summarizeUserIssues(issues.human_readable_issues).length;
+  }
+  return bundle?.human_warnings_count ?? 0;
+}
+
 function humanizeUserIssue(issue: UserIssue): UserIssue {
   const text = `${issue.title} ${issue.impact} ${issue.technical_code ?? ""}`;
   const normalized = text.toLowerCase();
   const inferredValue = text.match(/inferred as ([\d.]+) degrees?/i)?.[1];
-  if (normalized.includes("mechanical tilt inferred")) {
+  if (
+    normalized.includes("mechanical tilt inferred") ||
+    normalized.includes("mechanical tilt was not confirmed")
+  ) {
     return {
       ...issue,
       title: "Inclinaison mécanique proposée",
@@ -1717,7 +1838,10 @@ function humanizeUserIssue(issue: UserIssue): UserIssue {
       recommended_action: "Confirmez cette valeur avec le cahier de charge radio."
     };
   }
-  if (normalized.includes("electrical tilt inferred")) {
+  if (
+    normalized.includes("electrical tilt inferred") ||
+    normalized.includes("electrical tilt was not confirmed")
+  ) {
     return {
       ...issue,
       title: "Inclinaison électrique proposée",
@@ -1731,6 +1855,25 @@ function humanizeUserIssue(issue: UserIssue): UserIssue {
       title: "Ouverture d’antenne proposée",
       impact: `Une ouverture de ${inferredValue ?? "65"}° a été proposée faute de valeur explicite.`,
       recommended_action: "Vérifiez cette ouverture pour chaque secteur radio."
+    };
+  }
+  if (normalized.includes("no antenna model was confirmed")) {
+    return {
+      ...issue,
+      title: "Famille d’antenne générique",
+      impact: "Aucun modèle d’antenne précis n’a été confirmé; une famille générique a été utilisée.",
+      recommended_action: "Sélectionnez un modèle qualifié avant de présenter le résultat comme fidèle à un constructeur."
+    };
+  }
+  if (
+    normalized.includes("sector beams and labels") &&
+    normalized.includes("controlled product default")
+  ) {
+    return {
+      ...issue,
+      title: "Aides visuelles activées",
+      impact: "Les faisceaux et labels sont affichés pour faciliter l’inspection; ils ne proviennent pas du cahier de charge.",
+      recommended_action: "Conservez-les pour la revue ou désactivez-les dans une prochaine modification."
     };
   }
   if (normalized.includes("sector_count_azimuth_mismatch")) {
@@ -1749,7 +1892,7 @@ function humanizeUserIssue(issue: UserIssue): UserIssue {
       ...issue,
       title: "Recherche documentaire temporairement dégradée",
       impact: "Le classement secondaire des sources n’a pas répondu; l’ordre de recherche initial a été conservé.",
-      recommended_action: "Le design reste inspectable, mais vérifiez les sources dans le panneau RAG."
+      recommended_action: "Le design reste inspectable, mais vérifiez les sources dans le volet Système."
     };
   }
   if (
