@@ -5,6 +5,7 @@ from core.contracts.document_pack import (
     DocumentPackSummary,
     ProjectDesignSpec,
 )
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
@@ -29,6 +30,7 @@ __all__ = [
     "DocumentPackCorrection",
     "DocumentPackQAReport",
     "GeometryValidationReport",
+    "GeometryProgram",
     "GlbInspectionReport",
     "MemoryIndexResult",
     "MemoryRecallResult",

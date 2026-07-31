@@ -36,6 +36,7 @@ import type {
 import {
   BackendStatusBar,
   ChatCommandPanel,
+  CurrentOperationStrip,
   InspectorDock,
   LiveGenerationOverlay
 } from "./components/StudioKernel";
@@ -878,6 +879,14 @@ export default function App() {
     !revisionBusy &&
     rollbackBusyVersionId === null &&
     (state.phase === "completed" || state.phase === "degraded");
+  const operationNotice = [
+    state.transportError,
+    ...new Set(Object.values(state.resourceErrors))
+  ].filter((value): value is string => Boolean(value)).join(" · ");
+  const workflowActive =
+    state.phase === "submitting" ||
+    state.phase === "streaming" ||
+    state.phase === "running";
 
   return (
     <div className="studio-root">
@@ -917,6 +926,14 @@ export default function App() {
             revisionBusy={revisionBusy}
             revisionPrompt={revisionPrompt}
           />
+          {workflowActive || operationNotice ? (
+            <CurrentOperationStrip
+              notice={operationNotice}
+              operation={state.currentOperation}
+              phase={state.phase}
+              runtimeMode={state.runtimeMode}
+            />
+          ) : null}
         </aside>
         <section className="workbench" aria-label="Studio 3D">
           <Suspense fallback={<ViewerLoadingFallback />}>

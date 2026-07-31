@@ -1,3 +1,4 @@
+import logging
 import re
 import threading
 import time
@@ -12,7 +13,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.types import Command
 from pydantic import ValidationError
 
-from core.agents import ScenePlanner
+from core.agents import GeometryProgramPlanner, ScenePlanner
 from core.agents.blueprint_composer import BlueprintComposer
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
@@ -21,6 +22,7 @@ from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.completion import CompletionCertificate, RequirementCoverageReport
 from core.contracts.design_blueprint import BlueprintCoverageReport, DesignBlueprint
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
 from core.contracts.memory import MemoryRecallResult
@@ -32,7 +34,7 @@ from core.contracts.planning_decision import (
     PlanningMemoryRisk,
 )
 from core.contracts.quality import QualityGateReport
-from core.contracts.requirements import RequirementSpec
+from core.contracts.requirements import GeometryRequest, RequirementSpec
 from core.contracts.rf_validation import RfValidationReport
 from core.contracts.runtime import ActorKind, AgentStepTrace, DecisionAuthority, WorkflowTrace
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
@@ -65,6 +67,8 @@ from core.validation.quality_gates import (
     evaluate_pre_blender_gate,
 )
 from core.validation.requirement_coverage import evaluate_requirement_coverage
+
+logger = logging.getLogger(__name__)
 
 RuntimeEventSink = Callable[[str, str, dict], Any]
 _RUNTIME_EVENT_SINKS: dict[str, RuntimeEventSink] = {}
@@ -136,6 +140,8 @@ class WorkflowState(TypedDict, total=False):
     design_blueprint: DesignBlueprint
     blueprint_requirement_coverage: BlueprintCoverageReport
     blueprint_scene_coverage: BlueprintCoverageReport
+    geometry_programs: list[GeometryProgram]
+    geometry_program_error: str
 
 
 @dataclass(frozen=True)
@@ -189,6 +195,7 @@ class DesignOrchestrator:
         allow_blender_fallback: bool = False,
         runtime_event_sink: RuntimeEventSink | None = None,
         blueprint_composer: BlueprintComposer | None = None,
+        geometry_program_planner: GeometryProgramPlanner | None = None,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -201,6 +208,7 @@ class DesignOrchestrator:
         self.planning_decision_client = planning_decision_client
         self.assembly_planner = AssetAssemblyPlanner(registry, asset_selection_client)
         self.blueprint_composer = blueprint_composer or BlueprintComposer()
+        self.geometry_program_planner = geometry_program_planner
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
         self.rf_engineer = RfEngineerAgent()
@@ -417,6 +425,21 @@ class DesignOrchestrator:
             self._runtime_node("compose_design_blueprint", self._compose_design_blueprint),
         )
         graph.add_node("plan_scene", self._runtime_node("plan_scene", self._plan_scene))
+        if self.geometry_program_planner is not None:
+            graph.add_node(
+                "plan_generated_geometry",
+                self._runtime_node(
+                    "plan_generated_geometry",
+                    self._plan_generated_geometry,
+                ),
+            )
+            graph.add_node(
+                "geometry_program_failure_handler",
+                self._runtime_node(
+                    "geometry_program_failure_handler",
+                    self._geometry_program_failure_handler,
+                ),
+            )
         graph.add_node("validate_scene", self._runtime_node("validate_scene", self._validate_scene))
         graph.add_node(
             "scene_repair_handler",
@@ -504,7 +527,26 @@ class DesignOrchestrator:
                 "validate_scene": "validate_scene",
             },
         )
-        graph.add_edge("plan_scene", "validate_scene")
+        if self.geometry_program_planner is not None:
+            graph.add_conditional_edges(
+                "plan_scene",
+                _geometry_request_route,
+                {
+                    "generate": "plan_generated_geometry",
+                    "continue": "validate_scene",
+                },
+            )
+            graph.add_conditional_edges(
+                "plan_generated_geometry",
+                _geometry_program_route,
+                {
+                    "continue": "validate_scene",
+                    "failed": "geometry_program_failure_handler",
+                },
+            )
+            graph.add_edge("geometry_program_failure_handler", terminal_node)
+        else:
+            graph.add_edge("plan_scene", "validate_scene")
         graph.add_conditional_edges(
             "validate_scene",
             _scene_route,
@@ -1264,6 +1306,137 @@ class DesignOrchestrator:
             "trace": _trace(state, "plan_scene", scene.scene_id, started),
         }
 
+    def _plan_generated_geometry(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        planner = self.geometry_program_planner
+        requests = state["requirements"].geometry_requests
+        if planner is None or not requests:
+            return {
+                "trace": _trace(
+                    state,
+                    "plan_generated_geometry",
+                    "skipped:no_geometry_request",
+                    started,
+                    status="skipped",
+                    actor_kind="llm_decision",
+                    decision_authority="llm_bounded",
+                )
+            }
+
+        programs: list[GeometryProgram] = []
+        try:
+            for request in requests:
+                maximum_dimensions = (
+                    request.maximum_dimensions_m.model_dump(mode="json")
+                    if request.maximum_dimensions_m
+                    else None
+                )
+                program = planner.plan(
+                    prompt=request.description,
+                    semantic_role=request.semantic_role,
+                    request_id=request.request_id,
+                    quantity=request.quantity,
+                    source_description=request.description,
+                    source_description_origin="user_requirement",
+                    placement_context=request.placement_context,
+                    maximum_dimensions_m=request.maximum_dimensions_m,
+                    design_context={
+                        "network_type": state["requirements"].network_type,
+                        "tower_type": state["requirements"].tower_type,
+                        "tower_height_m": state["requirements"].tower_height_m,
+                        "site_coordinate_frame": "meters, Z-up, tower center at origin",
+                        "placement_context": request.placement_context,
+                        "maximum_dimensions_m": maximum_dimensions,
+                        "selected_asset_ids": [
+                            asset.asset_id for asset in state.get("selected_assets", [])
+                        ],
+                        "assembly_roles": [
+                            component.role_id
+                            for component in (
+                                state["assembly_plan"].components
+                                if state.get("assembly_plan")
+                                else []
+                            )
+                        ],
+                    },
+                )
+                programs.append(program)
+                if sum(len(item.nodes) for item in programs) > 1024:
+                    raise ValueError(
+                        "aggregate geometry-program node budget exceeds 1024 nodes"
+                    )
+        except Exception as exc:
+            logger.exception("Typed geometry-program planning failed")
+            message = (
+                "La géométrie demandée hors catalogue n'a pas pu être produite par "
+                "le spécialiste LLM sous contrat; Blender n'a pas été lancé."
+            )
+            report = _failed_report(
+                design_id=state["workflow_id"],
+                code="GEOMETRY_PROGRAM_GENERATION_FAILED",
+                message=message,
+            )
+            return {
+                "geometry_program_error": f"{type(exc).__name__}: {exc}",
+                "report": report,
+                "trace": _trace(
+                    state,
+                    "plan_generated_geometry",
+                    "failed:typed_geometry_program",
+                    started,
+                    status="failed",
+                    errors=["GEOMETRY_PROGRAM_GENERATION_FAILED"],
+                    actor_kind="llm_decision",
+                    decision_authority="llm_bounded",
+                ),
+            }
+
+        scene = state["scene"].model_copy(update={"geometry_programs": programs})
+        modes = sorted({program.structured_output_mode for program in programs})
+        return {
+            "geometry_programs": programs,
+            "scene": scene,
+            "scene_spec_hash": scene_spec_hash(scene),
+            "trace": _trace(
+                state,
+                "plan_generated_geometry",
+                (
+                    f"{len(programs)} programme(s), "
+                    f"{sum(len(program.nodes) for program in programs)} nœud(s); "
+                    f"modes={','.join(modes)}"
+                ),
+                started,
+                warnings=[
+                    "GEOMETRY_PROGRAM_LLM_REPAIRED"
+                    for program in programs
+                    if program.structured_output_mode == "json_object_repaired"
+                ],
+                actor_kind="llm_decision",
+                decision_authority="llm_bounded",
+            ),
+        }
+
+    def _geometry_program_failure_handler(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        route = _route_event(
+            state,
+            "geometry_program_failure_handler",
+            "geometry_program_failed",
+        )
+        return {
+            "route_history": route,
+            "report": state["report"],
+            "trace": _trace(
+                state,
+                "geometry_program_failure_handler",
+                "blocked:geometry_program_failed",
+                started,
+                status="failed",
+                errors=["GEOMETRY_PROGRAM_GENERATION_FAILED"],
+                route="geometry_program_failed",
+            ),
+        }
+
     def _validate_scene(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         report = validate_scene_spec(state["scene"], self.registry.list_assets())
@@ -1903,6 +2076,23 @@ def _requirements_from_scene(
         include_labels=scene.visual_elements.include_labels,
         include_power_cabinet=scene.visual_elements.include_power_cabinet,
         include_gps_antenna=scene.visual_elements.include_gps_antenna,
+        geometry_requests=[
+            GeometryRequest(
+                request_id=program.program_id.removesuffix(".llm_v1"),
+                semantic_role=program.semantic_role,
+                description=(
+                    program.source_description
+                    or (
+                        "Composant généré existant conservé pendant la révision : "
+                        f"{program.semantic_role}."
+                    )
+                ),
+                quantity=program.requested_quantity,
+                placement_context=program.placement_context,
+                maximum_dimensions_m=program.maximum_dimensions_m,
+            )
+            for program in scene.geometry_programs
+        ],
         detail_level=detail_level,  # type: ignore[arg-type]
         warnings=[],
         repair_events=[],
@@ -2176,6 +2366,14 @@ def _blueprint_route(state: WorkflowState) -> str:
     return "plan_scene"
 
 
+def _geometry_request_route(state: WorkflowState) -> str:
+    return "generate" if state["requirements"].geometry_requests else "continue"
+
+
+def _geometry_program_route(state: WorkflowState) -> str:
+    return "failed" if state.get("geometry_program_error") else "continue"
+
+
 def _scene_route(state: WorkflowState) -> str:
     if state["scene_report"].status == "passed" and (
         state["requirements"].repair_events and not state.get("scene_repair_recorded")
@@ -2253,8 +2451,11 @@ def _step_truth_defaults(node: str) -> tuple[ActorKind, DecisionAuthority]:
         "plan_scene",
         "validate_scene",
         "scene_repair_handler",
+        "geometry_program_failure_handler",
     }:
         return "deterministic_specialist", "deterministic"
+    if node == "plan_generated_geometry":
+        return "llm_decision", "llm_bounded"
     if node in {
         "pre_blender_gate",
         "qa_generation",
@@ -2376,7 +2577,13 @@ def _phase_for_node(node: str) -> str:
         return "memory"
     if node in {"select_assets", "asset_fallback_handler"}:
         return "assets"
-    if node in {"plan_scene", "validate_scene", "scene_repair_handler"}:
+    if node in {
+        "plan_scene",
+        "plan_generated_geometry",
+        "geometry_program_failure_handler",
+        "validate_scene",
+        "scene_repair_handler",
+    }:
         return "scene"
     if node in {"pre_blender_gate", "post_blender_gate", "quality_gate_failure_handler"}:
         return "quality_gate"
@@ -2402,6 +2609,8 @@ def _human_label_for_node(node: str) -> str:
         "validate_requirements": "Validation des contraintes telecom",
         "rule_violation_handler": "Blocage par règle métier",
         "plan_scene": "Construction de la scène 3D",
+        "plan_generated_geometry": "Conception géométrique spécialisée",
+        "geometry_program_failure_handler": "Blocage de la géométrie spécialisée",
         "validate_scene": "Validation SceneSpec",
         "scene_repair_handler": "Réparation SceneSpec",
         "pre_blender_gate": "Contrôle avant Blender",
@@ -2428,6 +2637,10 @@ def _progress_message_for_node(node: str) -> str:
         "select_assets": "Le backend choisit les assets compatibles avec le site.",
         "validate_requirements": "Le backend vérifie les contraintes radio et pylône.",
         "plan_scene": "Le backend place le pylône, les secteurs, antennes et équipements.",
+        "plan_generated_geometry": (
+            "GPT-OSS écrit un programme géométrique typé; le backend vérifie chaque "
+            "nœud avant Blender."
+        ),
         "validate_scene": "Le backend vérifie que la SceneSpec est cohérente.",
         "pre_blender_gate": "Le backend vérifie que la génération 3D peut démarrer.",
         "generate_blender": "Blender génère le GLB, la preview et les métadonnées.",

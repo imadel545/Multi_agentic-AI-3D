@@ -3,6 +3,24 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rolldownOptions: {
+      output: {
+        strictExecutionOrder: true,
+        codeSplitting: {
+          groups: [
+            {
+              name: "three-runtime",
+              test: /node_modules[\\/](@react-three|three|camera-controls|maath|troika|zustand)/,
+              minSize: 25 * 1024,
+              maxSize: 450 * 1024,
+              priority: 20
+            }
+          ]
+        }
+      }
+    }
+  },
   server: {
     host: "127.0.0.1",
     port: 5173,

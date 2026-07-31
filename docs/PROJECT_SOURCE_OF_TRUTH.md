@@ -40,16 +40,20 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - `compose_design_blueprint` now creates a generic typed planning intent after
   requirement validation. Its typed specialist DAG runs asset composition as a
   fail-closed gate, then executes the independent RF-layout and structural
-  specialists through bounded parallel fan-out. Every decision records its
-  dependencies and execution wave; unknown domains, cycles, handler exceptions,
-  mismatched outputs, and failed gates are rejected before dependent work.
+  specialists and, when an out-of-catalog component is requested, the
+  geometry-generation policy specialist through bounded parallel fan-out. Every
+  decision records its dependencies and execution wave; unknown domains, cycles,
+  handler exceptions, mismatched outputs, and failed gates are rejected before
+  dependent work.
   The blueprint records component quantities/asset queries/fidelity/placement,
   persists `design_blueprint.json`, and proves
-  `RequirementSpec -> DesignBlueprint -> SceneSpec`. `SceneSpec` remains the
-  sole 3D generation source of truth. Routing, contracts and gates are
-  deterministic; GPT-OSS can select only supplied, already validated planning
-  or asset candidates and cannot add a specialist, transformation or Blender
-  operation.
+  `RequirementSpec -> DesignBlueprint -> SceneSpec`. `SceneSpec`, including any
+  embedded `GeometryProgram`, remains the sole 3D generation source of truth.
+  Routing, contracts and gates are deterministic. GPT-OSS can select only
+  supplied planning/asset candidates, or author primitives, polygonal curves,
+  instances, materials and transforms inside the bounded GeometryProgram
+  contract; it cannot add a specialist, execute Python or call arbitrary Blender
+  operations.
 - Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
   explicit deterministic extraction. Extraction, planning and asset selection
   now share one validated request policy: HTTPS outside localhost, explicit
@@ -62,14 +66,20 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   Blender; a late value is accepted automatically only when the prompt marks it
   as an explicit correction.
 - GPT-OSS is the bounded decision layer for ambiguous extraction, controlled
-  RAG candidate arbitration, and edit-patch interpretation. It may revise a
-  typed proposal, but it cannot bypass `RequirementSpec`, `SceneSpec`, telecom
-  rules, Blender's parametric generator, or QA. Governance constrains scope,
-  records evidence, and preserves rollback; it does not invent geometry.
+  RAG candidate arbitration, asset selection, edit interpretation and typed
+  out-of-catalog geometry. Geometry authorship is declarative data, never Python:
+  local validation owns units, references, transformations, envelope bounds and
+  a 1024-node aggregate workflow budget before the deterministic Blender compiler
+  executes it. Governance constrains scope, records evidence and preserves
+  rollback; invalid geometry fails before Blender.
 - Public product responses expose GPT-OSS truth through `extraction_provider`,
   `llm_provider`, `llm_available`, `llm_fallback_used`, and
   `llm_fallback_reason`; the frontend must display fallback/degraded status
   instead of guessing.
+- `/viewer-bundle` also exposes bounded GeometryProgram provenance: generator,
+  model, structured-output mode, source prompt hash, source description,
+  placement context, requested maximum dimensions, deterministic adjustments and
+  declared limitations.
 - Primary RAG: NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024 dimensions.
 - Provider configuration is not runtime proof. `/studio/summary` reports
   `configured_unverified` until a real embedding/search succeeds,
@@ -125,7 +135,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   generation. These mutations were verified at Product API level; the remaining
   frontend limitation is replaying every mutation through browser controls in
   one recorded session.
-- The 2026-07-30 audit extended the frontend baseline to 117 tests, typecheck,
+- The 2026-07-30 audit extended the then-current frontend suite, typecheck,
   production build and npm audit, then restored real workflow
   `wf_a6660b81b929` against the
   current API. Desktop/mobile rendering showed its verified Blender model; a
@@ -142,7 +152,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
-- 12 manifests are generation-eligible: 4 authorize an exact GLB import and 8
+- 12 manifests are generation-eligible: 3 authorize an exact GLB import and 9
   authorize SceneSpec-driven parametric generation. The cable-tray GLB remains
   `reference_only`; the bracket companion GLB is not imported, but its typed
   procedural builder and connector contract are generation-qualified.
@@ -156,8 +166,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   GLB import happens only when the manifest authorizes and the planner selects
   `imported_glb_exact`.
 - The scene planner now stamps the manifest-authorized generation mode and
-  reason into `SceneSpec`. A 4G scene can therefore assemble qualified panel,
-  GPS and power-cabinet GLBs while keeping the tower and RRU parametric. The 5G
+  reason into `SceneSpec`. A 4G scene can therefore assemble qualified panel and
+  GPS GLBs while keeping the tower, RRU and power cabinet parametric. The 5G
   panel and RRU companion GLBs are not imported because their orientation is
   not qualified; this prevents silent non-uniform distortion.
 - The generic 5G panel and RRU carry typed, bounded geometry profiles in their
@@ -197,7 +207,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current 3D and QA
 
-- `SceneSpec + parametric generator` is the source of truth for geometry.
+- `SceneSpec`, including its selected manifests, `AssemblyPlan` and optional
+  `GeometryProgram` values, is the source of truth for geometry. Fixed
+  parametric builders and the deterministic GeometryProgram compiler consume it.
 - GLB is only the exported viewer result, not the source of truth.
 - Blender produces `design.glb`, `preview.png`, `scene_metadata.json`, and
   a runner-owned `build.lock.json` containing the isolated attempt/build ID,
@@ -209,8 +221,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `completion_certificate.json` and the critical QA reports.
 - Successful revisions also persist `adaptation_plan.json`,
   `adaptation_capabilities.json`, `scene_patch.json`, and `scene_diff.json`.
-  Blender still regenerates from the validated `SceneSpec`; the LLM never
-  emits or executes Python.
+  Blender still regenerates from the validated `SceneSpec`; the LLM may author a
+  typed GeometryProgram but never emits or executes Python.
 - Real QA categories:
   - `glb_parse_structural`
   - `mesh_level_spatial_basic` — readable semantic transforms plus real-vertex
@@ -227,7 +239,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   presence, concrete pad presence when requested, real label object presence, and
   primary-equipment AABB interference. Same-sector antenna/RRU contact is the only
   declared primary-equipment overlap allowed by this gate; its minimum-axis
-  penetration is bounded to 0.15 m and a total overlap is rejected.
+  penetration is bounded to 0.20 m and a total overlap is rejected.
 - GLB integrity QA reads actual binary buffers, buffer views, `POSITION`
   accessors and optional index accessors. It rejects JSON-only accessor claims,
   non-finite vertex values, out-of-range indices, incomplete primitives, and
@@ -262,6 +274,12 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   labels so annotations cannot inflate physical subject bounds. A dedicated
   equipment close-up/role-pixel gate is still missing.
 - QA does not yet finely validate materials or vendor exact mesh dimensions.
+- GeometryProgram contract QA proves its graph, typed primitives, transforms,
+  meter units, requested maximum envelope and resource limits. The exported GLB
+  still has no semantic judge proving that the model matches the natural-language
+  intent; placement context is preserved as provenance but is not interpreted or
+  independently validated, and custom roles are not yet included in the
+  primary-equipment AABB gate.
 - Do not call this QA "advanced geometry".
 
 ## Events and runtime
@@ -332,7 +350,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation,
   requirement coverage, completion certificate, and technical report, plus a
-  compact QA summary for drawers.
+  compact QA summary for drawers. It also exposes `assembly_plan_url`,
+  `geometry_fidelity_summary` and `geometry_program_summary`.
 - Public workflow/viewer responses expose `rag_planning_summary` and
   `rag_evidence_url` so the frontend can distinguish retrieved context from
   structured hints that actually influenced SceneSpec planning. RAG is not used
@@ -342,7 +361,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   so the UI does not infer post-action state.
 - `/assets/adaptation-capabilities` exposes the versioned catalog and
   `/designs/{id}/adaptation-capabilities` resolves only the capabilities of the
-  active scene. The frontend capabilities drawer consumes these contracts.
+  active scene. Generated components add bounded dynamic
+  `/geometry_programs/{index}` rebuild capabilities. The frontend capabilities
+  drawer consumes these contracts.
 - Public workflow/product responses expose `runtime_capabilities` and
   `unsupported_actions`; cancel, pause, resume, same-workflow retry,
   human-in-loop, and WebSocket runtime are explicitly unsupported in v1.
@@ -353,17 +374,20 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 - The blueprint specialist collaboration is a deterministic DAG rather than a
   sequential registry loop: `asset_composition` is wave 0;
-  `rf_layout` and `structural_support` depend on it and run in parallel in wave
-  1. Output ordering stays reproducible for hashes and persistence.
+  `rf_layout`, `structural_support` and conditional `geometry_generation` depend
+  on it and run in parallel in wave 1. Output ordering stays reproducible for
+  hashes and persistence.
 - The router detects duplicate or unknown domains, missing dependencies,
   dependency cycles, handler exceptions, wrong-domain responses, and failed
   gates. It fails closed and does not execute dependent specialists after a
   gate failure.
-- Groq extraction, bounded planning arbitration, and bounded asset selection
-  use the configured `openai/gpt-oss-120b` endpoint with per-capability timeout,
-  reasoning-effort and output-token settings. Structured requests explicitly
-  disable streaming and tools because those combinations are not supported by
-  the selected Groq Structured Outputs path.
+- Groq extraction, bounded planning arbitration, bounded asset selection and
+  GeometryProgram authorship use the configured `openai/gpt-oss-120b` endpoint
+  with per-capability timeout, reasoning-effort and output-token settings.
+  Geometry generation tries strict JSON Schema, then locally validated JSON and
+  at most two bounded model repairs. Structured requests explicitly disable
+  streaming and tools because those combinations are not supported by the
+  selected Groq Structured Outputs path.
 - Asset selection now rejects a returned asset ID unless it belongs to the
   candidate set of that exact role. Provider authentication, rate-limit,
   availability, timeout, transport, and model-output failures are classified
@@ -373,8 +397,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   authority, and returned in 933 ms. This proves that operation only; it is not
   a permanent provider-availability guarantee.
 - This remains a controlled expert workflow, not an autonomous swarm:
-  deterministic code owns routing, dependencies, contracts, transformations,
-  units, QA, persistence and Blender execution.
+  deterministic code owns routing, dependencies, contracts, transformation
+  validation/application, units, QA, persistence and Blender execution.
 
 ## FRONTEND REAL-RUNTIME UX HARDENING — 2026-07-31
 
@@ -408,10 +432,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   things and are no longer presented with the same `composants` wording.
 - The telecom camera fit includes explicit framing margin for tall assemblies,
   and the viewer offers a retry action when a real GLB load fails.
-- Frontend proof: 122 Vitest tests, TypeScript production build, and local
-  browser smoke against FastAPI on port 8000 and Vite on port 5173. The build
-  still reports a large lazy-loaded Three.js viewer chunk; this is a performance
-  backlog item, not a runtime failure.
+- Frontend proof on 2026-07-31: 125 Vitest tests, TypeScript production build,
+  and local browser smoke against FastAPI on port 8000 and Vite on port 5173.
+  Rolldown code splitting keeps every production JavaScript chunk below 371 kB
+  uncompressed while preserving lazy loading of the viewer.
 - The latest recorded browser smoke restored active version `v86dc95d0` with a
   real 217-node GLB, 25 semantic equipment instances, QA score 1.0, issued
   completion certificate and seven visible limitations. No terminal progress
@@ -440,7 +464,8 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   allowed parameters, selected builder profile, connectors and fallback truth.
 - Blender remains fully deterministic: it consumes `SceneSpec`, records the
   selected parametric bracket per sector, and records the missing cable tray as
-  a visible `PROCEDURAL_CABLE_ROUTE` fallback. No LLM-generated Blender code is
+  a visible `PROCEDURAL_CABLE_ROUTE` fallback. A bounded LLM-authored
+  GeometryProgram may also be compiled, but no LLM-generated Blender code is
   accepted or executed.
 - `POWER_CABINET_001` is now qualified through the bounded
   `ground_cabinet_v1` profile instead of importing its former minimal reference
@@ -458,6 +483,14 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `/accessory_assets/0/position` capability; deterministic validation,
   Blender generation and QA produced active version `v86dc95d0` with
   `real_blender`, score 1.0 and no procedural fallback.
+- A separate real out-of-catalog proof on 2026-07-31 completed workflow
+  `wf_ead2456914b2`, then regenerated its generated component as version
+  `v2e0a4faf`. Both passes used `real_blender`, produced GLB and preview, scored
+  QA 1.0 and issued a completion certificate. Source description, placement
+  context and requested maximum dimensions are now persisted by the contract
+  and covered by revision tests. The recorded initial workflow predates those
+  two provenance fields, so its revision cannot prove recovery of values that
+  were not persisted originally.
 
 ### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
 

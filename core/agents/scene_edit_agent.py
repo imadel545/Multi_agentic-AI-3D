@@ -1,11 +1,13 @@
 import json
 import logging
 import re
+import unicodedata
 import uuid
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from core.agents.geometry_program_planner import GeometryProgramPlanner
 from core.contracts.adaptation import (
     AdaptationDecision,
     AdaptationOperation,
@@ -16,6 +18,7 @@ from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import PatchOperation, ScenePatch
 from core.contracts.validation import ValidationReport
 from core.llm.groq import GroqStructuredClient
+from core.llm.groq_policy import GroqRequestPolicy
 from core.services.adaptation_capabilities import AdaptationCapabilityService
 from core.services.patch_applier import PatchApplier
 
@@ -43,11 +46,13 @@ class SceneEditAgent:
         groq_client: GroqStructuredClient | None = None,
         capability_service: AdaptationCapabilityService | None = None,
         checkpoint_saver: Any | None = None,
+        geometry_program_planner: GeometryProgramPlanner | None = None,
     ) -> None:
         self.groq = groq_client
         self.capability_service = capability_service
         self.patch_applier = PatchApplier()
         self.checkpoint_saver = checkpoint_saver
+        self.geometry_program_planner = geometry_program_planner
         self.graph = self._build_graph() if capability_service is not None else None
 
     def _build_graph(self):
@@ -71,6 +76,18 @@ class SceneEditAgent:
     ) -> AdaptationDecision:
         if self.graph is None or self.capability_service is None:
             raise RuntimeError("adaptation capability service is unavailable")
+        geometry_index = self._geometry_program_index_for_prompt(scene, edit_prompt)
+        if geometry_index is not None:
+            if self.geometry_program_planner is None:
+                raise RuntimeError(
+                    "La révision du composant généré exige le spécialiste GeometryProgram."
+                )
+            return self._create_geometry_program_adaptation(
+                workflow_id,
+                scene,
+                edit_prompt,
+                geometry_index,
+            )
         thread_id = f"{workflow_id}:adaptation:{uuid.uuid4().hex}"
         try:
             state = self.graph.invoke(
@@ -104,6 +121,221 @@ class SceneEditAgent:
             planner_fallback_used=state["planner_fallback_used"],
             planner_fallback_reason=state.get("planner_fallback_reason"),
             graph_trace=state["graph_trace"],
+        )
+
+    def _geometry_program_index_for_prompt(
+        self,
+        scene: SceneSpec,
+        edit_prompt: str,
+    ) -> int | None:
+        if not scene.geometry_programs:
+            return None
+        semantic_match = _semantic_geometry_program_index(scene, edit_prompt)
+        if semantic_match is not None:
+            return semantic_match
+        program_ids = [program.program_id for program in scene.geometry_programs]
+        if self.groq is not None:
+            try:
+                raw = self.groq.request_json(
+                    {
+                        "model": self.groq.model,
+                        "temperature": 0,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Route one 3D edit. Select regenerate_geometry_program only "
+                                    "when the user targets one of the listed generated components. "
+                                    "Use standard_adaptation for tower, antenna, RF, visibility or "
+                                    "other declared SceneSpec edits. Never invent an ID."
+                                ),
+                            },
+                            {
+                                "role": "user",
+                                "content": json.dumps(
+                                    {
+                                        "edit_prompt": edit_prompt,
+                                        "generated_components": [
+                                            {
+                                                "program_id": program.program_id,
+                                                "semantic_role": program.semantic_role,
+                                                "node_ids": [
+                                                    node.node_id for node in program.nodes
+                                                ],
+                                            }
+                                            for program in scene.geometry_programs
+                                        ],
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        ],
+                        "response_format": {
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "geometry_revision_route",
+                                "strict": True,
+                                "schema": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "action": {
+                                            "type": "string",
+                                            "enum": [
+                                                "regenerate_geometry_program",
+                                                "standard_adaptation",
+                                            ],
+                                        },
+                                        "program_id": {
+                                            "anyOf": [
+                                                {"type": "string", "enum": program_ids},
+                                                {"type": "null"},
+                                            ]
+                                        },
+                                        "reason": {
+                                            "type": "string",
+                                            "maxLength": 240,
+                                        },
+                                    },
+                                    "required": ["action", "program_id", "reason"],
+                                },
+                            },
+                        },
+                    },
+                    policy=GroqRequestPolicy(
+                        capability="geometry_revision_routing",
+                        reasoning_effort="low",
+                        max_completion_tokens=512,
+                    ),
+                )
+                if raw.get("action") != "regenerate_geometry_program":
+                    return None
+                selected = raw.get("program_id")
+                return program_ids.index(selected) if selected in program_ids else None
+            except Exception:
+                logger.warning(
+                    "Geometry-program revision routing failed; using semantic matching.",
+                    exc_info=True,
+                )
+        return None
+
+    def _create_geometry_program_adaptation(
+        self,
+        workflow_id: str,
+        scene: SceneSpec,
+        edit_prompt: str,
+        geometry_index: int,
+    ) -> AdaptationDecision:
+        if self.capability_service is None or self.geometry_program_planner is None:
+            raise RuntimeError("geometry-program adaptation is unavailable")
+        current = scene.geometry_programs[geometry_index]
+        path = f"/geometry_programs/{geometry_index}"
+        capabilities = self.capability_service.resolve(scene)
+        capability = next(
+            (item for item in capabilities.capabilities if item.path == path),
+            None,
+        )
+        if capability is None:
+            raise RuntimeError("geometry-program capability was not resolved")
+        request_id = current.program_id.removesuffix(".llm_v1")
+        source_description_available = (
+            current.source_description is not None
+            and current.source_description_origin != "legacy_unavailable"
+        )
+        original_intent = (
+            current.source_description
+            if source_description_available
+            else "Intention source indisponible pour ce composant historique."
+        )
+        revised = self.geometry_program_planner.plan(
+            prompt=(
+                "Réviser le composant existant selon la demande utilisateur. "
+                "Conserver son rôle, sa quantité et les caractéristiques non modifiées. "
+                f"Demande de révision: {edit_prompt}"
+            ),
+            semantic_role=current.semantic_role,
+            request_id=request_id,
+            quantity=current.requested_quantity,
+            source_description=original_intent,
+            source_description_origin=(
+                "revision_preserved"
+                if source_description_available
+                else "legacy_unavailable"
+            ),
+            placement_context=current.placement_context,
+            maximum_dimensions_m=current.maximum_dimensions_m,
+            design_context={
+                "operation": "revision",
+                "current_geometry_program": current.model_dump(mode="json"),
+                "scene_network_type": scene.network_type,
+                "scene_tower_height_m": scene.tower.height_m,
+                "site_coordinate_frame": "meters, Z-up, tower center at origin",
+            },
+        )
+        operation = AdaptationOperation(
+            capability_id=capability.capability_id,
+            path=path,
+            value=revised.model_dump(mode="json"),
+            execution_tool="geometry_program_rebuild",
+            rationale="Composant ciblé régénéré sous le contrat GeometryProgram validé.",
+        )
+        plan = AssetAdaptationPlan(
+            edit_description=edit_prompt,
+            operations=[operation],
+        )
+        self.capability_service.validate_plan(capabilities, plan)
+        patch = _patch_from_plan(
+            plan,
+            edit_llm_provider=f"groq:{revised.generator_model}",
+            edit_llm_fallback_used=False,
+            capability_catalog_hash=capabilities.catalog_hash,
+            adaptation_tools=["geometry_program_rebuild"],
+        )
+        patched_scene, report = self.patch_applier.apply(
+            scene,
+            patch,
+            allowed_paths=capabilities.allowed_paths,
+        )
+        if report.status == "failed":
+            detail = "; ".join(issue.message for issue in report.errors)
+            raise ValueError(f"GeometryProgram revision failed SceneSpec validation: {detail}")
+        return AdaptationDecision(
+            workflow_id=workflow_id,
+            prompt=edit_prompt,
+            capabilities=capabilities,
+            plan=plan,
+            patch=patch,
+            patched_scene=patched_scene,
+            validation_report=report,
+            planner_provider=f"groq:{revised.generator_model}",
+            planner_fallback_used=False,
+            planner_fallback_reason=None,
+            graph_trace=[
+                {
+                    "node": "discover_capabilities",
+                    "status": "completed",
+                    "capability_count": len(capabilities.capabilities),
+                    "catalog_hash": capabilities.catalog_hash,
+                },
+                {
+                    "node": "plan_geometry_program_revision",
+                    "status": "completed",
+                    "provider": revised.generator_model,
+                    "structured_output_mode": revised.structured_output_mode,
+                    "program_id": revised.program_id,
+                },
+                {
+                    "node": "validate_adaptation",
+                    "status": "completed",
+                    "validated_paths": [path],
+                },
+                {
+                    "node": "execute_adaptation",
+                    "status": "completed",
+                    "tools": ["geometry_program_rebuild"],
+                    "scene_validation": report.status,
+                },
+            ],
         )
 
     def create_patch(
@@ -671,6 +903,48 @@ _ACCESSORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
     "rotation_deg": ("rotation", "tourne", "rotate", "orientation"),
     "scale": ("taille", "échelle", "echelle", "scale", "agrandis", "réduis", "reduis"),
 }
+
+
+def _semantic_geometry_program_index(scene: SceneSpec, edit_prompt: str) -> int | None:
+    normalized_prompt = _normalized_words(edit_prompt)
+    prompt_tokens = set(normalized_prompt.split())
+    ignored = {
+        "component",
+        "generated",
+        "geometry",
+        "program",
+        "technical",
+        "external",
+        "llm",
+    }
+    matches: list[tuple[int, int]] = []
+    for index, program in enumerate(scene.geometry_programs):
+        identifiers = " ".join(
+            [
+                program.program_id,
+                program.semantic_role,
+                *[node.node_id for node in program.nodes],
+            ]
+        )
+        tokens = {
+            token
+            for token in _normalized_words(identifiers).split()
+            if len(token) >= 4 and token not in ignored
+        }
+        score = len(prompt_tokens & tokens)
+        if score:
+            matches.append((score, index))
+    if not matches:
+        return None
+    matches.sort(reverse=True)
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        return None
+    return matches[0][1]
+
+
+def _normalized_words(value: str) -> str:
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", " ", ascii_value.lower()).strip()
 
 
 def _validate_patch_alignment(scene: SceneSpec, edit_prompt: str, patch: ScenePatch) -> None:

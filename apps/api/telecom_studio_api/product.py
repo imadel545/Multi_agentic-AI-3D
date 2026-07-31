@@ -305,6 +305,7 @@ class ProductService:
             "qa_score": status.get("qa_score"),
             "asset_import_summary": status.get("asset_import_summary"),
             "geometry_fidelity_summary": _geometry_fidelity_summary_from_path(scene_spec_path),
+            "geometry_program_summary": _geometry_program_summary_from_path(scene_spec_path),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
             "primary_glb_url": _available_artifact_url(primary_glb),
@@ -722,6 +723,14 @@ def _geometry_fidelity_summary(scene_spec: object) -> dict | None:
     components.extend(
         (accessory.asset_type, accessory.asset_metadata) for accessory in scene.accessory_assets
     )
+    for program in scene.geometry_programs:
+        components.extend(
+            (
+                program.semantic_role,
+                RuntimeAssetMetadata(geometry_fidelity="technical_generic"),
+            )
+            for _ in range(program.requested_quantity)
+        )
 
     counts = {fidelity: 0 for fidelity in _GEOMETRY_FIDELITIES}
     roles: dict[str, list[str]] = {fidelity: [] for fidelity in _GEOMETRY_FIDELITIES}
@@ -735,6 +744,48 @@ def _geometry_fidelity_summary(scene_spec: object) -> dict | None:
         "component_count": len(components),
         "counts": counts,
         "roles": roles,
+    }
+
+
+def _geometry_program_summary_from_path(path: Path | None) -> dict | None:
+    if path is None or not path.is_file():
+        return None
+    try:
+        scene = SceneSpec.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    programs = [
+        {
+            "program_id": program.program_id,
+            "semantic_role": program.semantic_role,
+            "requested_quantity": program.requested_quantity,
+            "node_count": len(program.nodes),
+            "authorship": program.authorship,
+            "generator_provider": program.generator_provider,
+            "generator_model": program.generator_model,
+            "structured_output_mode": program.structured_output_mode,
+            "source_prompt_sha256": program.source_prompt_sha256,
+            "source_description": program.source_description,
+            "source_description_origin": program.source_description_origin,
+            "placement_context": program.placement_context,
+            "maximum_dimensions_m": (
+                program.maximum_dimensions_m.model_dump(mode="json")
+                if program.maximum_dimensions_m is not None
+                else None
+            ),
+            "limitations": program.limitations,
+            "deterministic_adjustments": program.deterministic_adjustments,
+        }
+        for program in scene.geometry_programs
+    ]
+    return {
+        "program_count": len(programs),
+        "generated_component_count": sum(program["requested_quantity"] for program in programs),
+        "total_node_count": sum(program["node_count"] for program in programs),
+        "repaired_program_count": sum(
+            program["structured_output_mode"] == "json_object_repaired" for program in programs
+        ),
+        "programs": programs,
     }
 
 
@@ -1034,8 +1085,13 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
             }
         )
     asset_summary = status.get("asset_import_summary") or {}
+    explicit_procedural_fallback_codes = {
+        "ASSET_IMPORT_PROCEDURAL_FALLBACK",
+        "ASSET_IMPORT_PROCEDURAL_FALLBACK_USED",
+        "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED",
+    }
     if asset_summary.get("procedural_fallback_count", 0) and not any(
-        i.get("technical_code") == "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED" for i in issues
+        i.get("technical_code") in explicit_procedural_fallback_codes for i in issues
     ):
         issues.append(
             {
@@ -1073,13 +1129,38 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
             }
         )
     issues.extend(_collect_runtime_event_issues(events or [], status))
-    return issues
+    return _deduplicate_user_issues(issues)
+
+
+def _deduplicate_user_issues(issues: list[dict]) -> list[dict]:
+    """Collapse repeated sector-level signals into one actionable product issue."""
+    deduplicated: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for issue in issues:
+        technical_code = str(issue.get("technical_code") or issue.get("title") or "")
+        if technical_code in {
+            "ASSET_IMPORT_PROCEDURAL_FALLBACK",
+            "ASSET_IMPORT_PROCEDURAL_FALLBACK_USED",
+            "ASSET_IMPORT_PROCEDURAL_FALLBACK_INFERRED",
+        }:
+            technical_code = "ASSET_IMPORT_PROCEDURAL_FALLBACK"
+        key = (
+            technical_code,
+            str(issue.get("severity") or "warning"),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduplicated.append(issue)
+    return deduplicated
 
 
 def _collect_runtime_event_issues(events: list[dict], status: dict) -> list[dict]:
     issues: list[dict] = []
     seen: set[str] = set()
     workflow_status = status.get("status", "unknown")
+    if workflow_status == "completed" and not status.get("active_operation"):
+        return issues
     for event in events:
         if event.get("event_type") != "node_failed":
             continue
@@ -1090,18 +1171,42 @@ def _collect_runtime_event_issues(events: list[dict], status: dict) -> list[dict
         if node in seen:
             continue
         seen.add(node)
-        errors = payload.get("errors") if isinstance(payload.get("errors"), list) else []
-        detail = str(errors[0]) if errors else str(payload.get("detail") or "Étape échouée.")
         issues.append(
             {
                 "title": f"{_trace_node_label(node)} en mode dégradé",
                 "severity": "error" if workflow_status == "failed" else "warning",
-                "impact": detail,
+                "impact": _runtime_node_user_impact(node),
                 "recommended_action": _runtime_node_recommended_action(node),
                 "technical_code": f"RUNTIME_NODE_FAILED:{node}",
             }
         )
     return issues
+
+
+def _runtime_node_user_impact(node: str) -> str:
+    return {
+        "retrieve_rag_context": (
+            "Le contexte documentaire n'a pas pu être récupéré pour cette opération."
+        ),
+        "generate_blender": (
+            "Blender n'a pas produit les livrables 3D requis pour cette opération."
+        ),
+        "blender_failure_handler": (
+            "La récupération après l'échec Blender n'a pas permis de produire un résultat valide."
+        ),
+        "qa_generation": (
+            "Les contrôles du résultat 3D n'ont pas validé cette opération."
+        ),
+        "qa_failure_handler": (
+            "Le résultat reste refusé après l'échec des contrôles qualité."
+        ),
+        "plan_generated_geometry": (
+            "Le spécialiste géométrique n'a pas produit un programme valide."
+        ),
+        "geometry_program_failure_handler": (
+            "La demande hors catalogue a été bloquée avant Blender."
+        ),
+    }.get(node, "Une étape de cette opération n'a pas abouti.")
 
 
 def _runtime_node_recommended_action(node: str) -> str:
@@ -1147,6 +1252,17 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
         ),
         "recommended_action": "Remplacer par un asset vendor-grade avant livraison finale.",
     },
+    "ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE": {
+        "title": "Composants internes non constructeur",
+        "impact": (
+            "Certains supports ou équipements proviennent de la bibliothèque interne et "
+            "représentent leur fonction, sans fidélité à un modèle constructeur."
+        ),
+        "recommended_action": (
+            "Inspecter la provenance par composant et remplacer les éléments concernés "
+            "si une fidélité constructeur est exigée."
+        ),
+    },
     "ASSET_IMPORT_CC_BY_ASSET_NOT_VENDOR_GRADE": {
         "title": "Asset CC-BY non vendor-grade",
         "impact": "L'asset est réel/importé mais sa qualité et sa licence doivent rester visibles.",
@@ -1171,6 +1287,17 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
         "impact": "La scène contient une géométrie générée à la place d'un asset GLB réel.",
         "recommended_action": (
             "Ajouter le GLB manquant avant de considérer le résultat prêt produit."
+        ),
+    },
+    "ASSET_IMPORT_PROCEDURAL_FALLBACK_USED": {
+        "title": "Composant généré procéduralement",
+        "impact": (
+            "Un composant sans asset GLB qualifié a été produit par le builder "
+            "procédural déterministe."
+        ),
+        "recommended_action": (
+            "Conserver cette provenance visible et ajouter un asset réel si une géométrie "
+            "constructeur est requise."
         ),
     },
     "BLENDER_FALLBACK_USED": {
@@ -1606,6 +1733,8 @@ def _trace_node_label(node: str) -> str:
         "quality_gate_failure_handler": "Blocage qualité",
         "memory_writeback": "Écriture mémoire",
         "edit_prepare_revision": "Préparation de la révision",
+        "plan_generated_geometry": "Conception géométrique spécialisée",
+        "geometry_program_failure_handler": "Analyse de la géométrie générée",
     }
     return mapping.get(node, node.replace("_", " ").capitalize())
 

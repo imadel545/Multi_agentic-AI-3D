@@ -25,6 +25,12 @@ discover_capabilities
   avant toute mutation.
 - `execute_adaptation` applique uniquement les chemins résolus, revalide
   `SceneSpec`, puis le graphe de révision exécute Blender et toute la QA.
+- Une édition ciblant un composant généré est routée vers une branche bornée
+  `geometry_program_rebuild`: le spécialiste régénère uniquement le programme
+  ciblé, conserve `source_description`, `placement_context` et
+  `maximum_dimensions_m`, puis le backend revalide et applique le patch avant le
+  graphe principal de révision. Cette branche spécialisée n'est pas un nouveau
+  interpréteur de code Blender.
 - Les threads d'adaptation sont isolés sous
   `{workflow_id}:adaptation:{invocation_uuid}` et utilisent le même saver SQLite.
 
@@ -40,6 +46,8 @@ asset_fallback_handler
 validate_requirements
 compose_design_blueprint
 plan_scene
+plan_generated_geometry
+geometry_program_failure_handler
 validate_scene
 scene_repair_handler
 pre_blender_gate
@@ -68,7 +76,9 @@ memory_writeback
   reranker.
 - `decide_planning_context` demande à GPT-OSS d'arbitrer uniquement des
   candidats RAG typés et validés; le modèle ne peut ni écrire de géométrie
-  libre ni contourner les règles déterministes.
+  libre dans ce nœud ni contourner les règles déterministes. L'écriture
+  déclarative de géométrie, lorsqu'elle est requise, appartient exclusivement au
+  nœud `plan_generated_geometry`.
 - Le checkpoint saver persiste des snapshots locaux sérialisables. Chaque
   création utilise `{workflow_id}:initial` et chaque révision
   `{workflow_id}:revision:{version_id}` afin qu'une révision ne reprenne jamais
@@ -95,6 +105,12 @@ memory_writeback
   sélectionnés, produit des intents génériques et bornés, puis bloque si les
   exigences ne sont pas couvertes. `validate_scene` prouve ensuite que chaque
   intent courant a réellement été compilé dans `SceneSpec`.
+- `plan_generated_geometry` s'exécute après `plan_scene` uniquement lorsque
+  `RequirementSpec.geometry_requests` n'est pas vide. GPT-OSS produit un
+  `GeometryProgram` typé; le backend valide graphes, unités, enveloppes et le
+  budget agrégé de 1024 nœuds. Un adaptateur uniforme borné peut seulement
+  corriger un dépassement de `maximum_dimensions_m`. Toute autre invalidité
+  route vers `geometry_program_failure_handler` et bloque Blender.
 - Après le post-gate, `certify_completion` émet ou rejette une preuve terminale
   liée aux hashes des exigences, de `SceneSpec`, du GLB, de la preview, des
   métadonnées et du build lock. Sans certificat `issued`, le statut final reste `failed` et la
@@ -117,15 +133,17 @@ memory_writeback
   contexte ou s'il a fourni des hints structurés consommés par le planner.
 - Utiliser `rag_evidence_url` dans le viewer/QA drawer pour montrer les sources
   et la raison d'un mode reranker dégradé.
+- Afficher les événements `plan_generated_geometry` comme décision LLM bornée,
+  puis la provenance, les ajustements et limites via
+  `geometry_program_summary`.
 - Garder raw trace JSON en détail secondaire seulement.
 
 ## À corriger plus tard
 
-- Étendre le `DesignBlueprint` actuel vers plusieurs candidats issus des
-  manifests/RAG/mémoire certifiée et laisser GPT-OSS choisir uniquement un
-  `candidate_id` validé. Ajouter les spécialistes connecteurs/câblage/énergie et
-  un agrégateur de conflits; le graphe courant reste majoritairement fixe et
-  déterministe.
+- Étendre le petit ensemble actuel de candidats qualifiés avec des assets
+  indépendamment vérifiés issus des manifests/RAG/mémoire certifiée. Ajouter les
+  spécialistes câblage/énergie et un agrégateur de conflits; le graphe courant
+  reste majoritairement fixe et déterministe.
 - Ajouter une seule boucle post-QA de critique/réparation bornée, avec nouvelle
   génération et recertification; aucun Python Blender LLM.
 - Décider si le versioning doit devenir un nœud LangGraph; les quatre étapes

@@ -262,6 +262,38 @@ small {
   background: #fff8eb;
 }
 
+.generated-intent-summary,
+.compact-proof-list {
+  display: grid;
+  gap: 7px;
+}
+
+.generated-intent-summary {
+  border: 1px solid #9abcb8;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f1f8f7;
+}
+
+.generated-intent-summary ul,
+.compact-proof-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.generated-intent-summary li,
+.compact-proof-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.generated-intent-summary small,
+.compact-proof-list small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .assistant-card {
   display: grid;
   grid-template-columns: auto 1fr;

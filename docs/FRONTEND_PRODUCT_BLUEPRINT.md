@@ -40,6 +40,9 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 - **No dev logs** : pas de JSON brut, pas de codes techniques comme UI principale.
 - **Fallbacks visibles** : Blender manquant, asset fallback, LLM fallback sont expliqués en langage utilisateur.
 - **Temps réel sur opération active** : progression visible uniquement pendant une opération.
+- **Géométrie explicable** : les composants hors catalogue compris, leur
+  enveloppe demandée, le modèle auteur, le mode structuré/réparé et les
+  ajustements déterministes restent visibles sans exposer le JSON brut.
 
 ## Fonctions obligatoires
 
@@ -51,6 +54,9 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 6. Télécharger les artefacts (GLB, PNG, rapports).
 7. Voir le modèle 3D grand et bien cadré.
 8. Voir les warnings/explications en langage utilisateur.
+9. Confirmer les composants hors catalogue compris avant génération.
+10. Voir la provenance d'un GeometryProgram et régénérer un composant ciblé
+    dans une nouvelle version.
 
 ## Non-inclus
 
@@ -62,7 +68,9 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 ## Statut
 
 - Le kernel dashboard précédent reste rejeté. La baseline active utilise un
-  compositeur unifié, un viewer dominant et des drawers métier à la demande.
+  compositeur de commande unifié, un viewer dominant et des drawers métier à la
+  demande. La cible reste une vraie conversation; la Gate chat complète n'est
+  pas encore déclarée.
 - Les endpoints produit backend sont prêts pour une construction frontend:
   `push_sse`, current operation, timeline lisible, viewer bundle, user issues,
   edit/version/rollback, document-pack capabilities.
@@ -76,3 +84,9 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
   multiple, file d'attente, retrait individuel, limites backend et envoi
   multipart. L'analyse complète depuis le navigateur reste une mutation à
   rejouer avec un pack métier dédié avant la Gate finale.
+- Le chemin backend réel `wf_ead2456914b2` puis révision `v2e0a4faf` prouve la
+  génération et la modification d'un composant GeometryProgram avec
+  `real_blender`, QA 1.0, certificat, GLB et preview. Le frontend rend désormais
+  l'intent, l'enveloppe et la provenance. Le smoke navigateur a confirmé ce
+  résumé et la distinction des sorties réparées; la mutation complète depuis
+  le contrôle navigateur reste ouverte.

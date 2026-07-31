@@ -4,6 +4,7 @@ import pytest
 
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import AdaptationOperation, AssetAdaptationPlan
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.scene import (
     SceneAccessoryPlacement,
     SceneAssetPlacement,
@@ -63,6 +64,72 @@ def _scene(*, accessory: bool = False, tower_strategy: str = "parametric_generat
     )
 
 
+def _geometry_program(*, body_width_m: float, prompt_hash_character: str) -> GeometryProgram:
+    return GeometryProgram.model_validate(
+        {
+            "schema_version": "1.0.0",
+            "program_id": "equipment_shelter.llm_v1",
+            "semantic_role": "equipment_shelter",
+            "requested_quantity": 1,
+            "units": "meters",
+            "authorship": "llm_generated",
+            "generator_provider": "groq",
+            "generator_model": "openai/gpt-oss-120b",
+            "structured_output_mode": "strict_json_schema",
+            "source_prompt_sha256": prompt_hash_character * 64,
+            "materials": [
+                {
+                    "material_id": "steel",
+                    "base_color_rgba": {
+                        "r": 0.55,
+                        "g": 0.6,
+                        "b": 0.62,
+                        "a": 1.0,
+                    },
+                    "metallic": 0.35,
+                    "roughness": 0.42,
+                }
+            ],
+                "nodes": [
+                    {
+                    "kind": "primitive",
+                    "node_id": "shelter_body",
+                    "semantic_role": "equipment_shelter",
+                    "primitive": "box",
+                    "size_m": {"x": body_width_m, "y": 2.2, "z": 2.5},
+                    "material_id": "steel",
+                    "transform": {
+                        "translation_m": {"x": 7.0, "y": 0.0, "z": 1.25}
+                        },
+                        "bevel_m": 0.04,
+                    },
+                    {
+                        "kind": "primitive",
+                        "node_id": "shelter_door",
+                        "primitive": "box",
+                        "size_m": {"x": 0.8, "y": 0.08, "z": 1.8},
+                        "material_id": "steel",
+                        "transform": {
+                            "translation_m": {"x": 7.0, "y": -1.14, "z": 1.0}
+                        },
+                    },
+                    {
+                        "kind": "primitive",
+                        "node_id": "shelter_roof",
+                        "primitive": "box",
+                        "size_m": {"x": body_width_m + 0.2, "y": 2.4, "z": 0.12},
+                        "material_id": "steel",
+                        "transform": {
+                            "translation_m": {"x": 7.0, "y": 0.0, "z": 2.56}
+                        },
+                    },
+                ],
+            "assumptions": ["Generic outdoor technical enclosure."],
+            "limitations": ["Not vendor-qualified."],
+        }
+    )
+
+
 def test_capabilities_are_resolved_from_manifest_profiles() -> None:
     registry, service = _services()
     capabilities = service.resolve(_scene(accessory=True))
@@ -75,6 +142,135 @@ def test_capabilities_are_resolved_from_manifest_profiles() -> None:
     assert "/tower/characteristics/vendor_secret" not in paths
     assert not capabilities.missing_profiles
     assert all(asset.adaptation_profile_id for asset in registry.list_assets())
+
+
+def test_llm_geometry_program_revision_uses_typed_patch_and_produces_new_scene() -> None:
+    class RevisedGeometryPlanner:
+        def __init__(self) -> None:
+            self.call = None
+
+        def plan(self, **kwargs):
+            self.call = kwargs
+            return _geometry_program(body_width_m=4.2, prompt_hash_character="b")
+
+    original_program = _geometry_program(body_width_m=3.0, prompt_hash_character="a")
+    scene = _scene().model_copy(update={"geometry_programs": [original_program]})
+    _, service = _services()
+    planner = RevisedGeometryPlanner()
+    agent = SceneEditAgent(
+        groq_client=None,
+        capability_service=service,
+        geometry_program_planner=planner,  # type: ignore[arg-type]
+    )
+
+    decision = agent.create_adaptation(
+        "wf_geometry_revision",
+        scene,
+        "agrandis equipment shelter à 4,2 m et conserve son rôle",
+    )
+
+    assert decision.validation_report.status == "passed"
+    assert decision.patched_scene is not scene
+    assert decision.patched_scene.geometry_programs[0] is not original_program
+    assert scene.geometry_programs[0].nodes[0].size_m.x == 3.0  # type: ignore[union-attr]
+    revised = decision.patched_scene.geometry_programs[0]
+    assert revised.nodes[0].size_m.x == 4.2  # type: ignore[union-attr]
+    assert revised.semantic_role == original_program.semantic_role
+    assert revised.requested_quantity == original_program.requested_quantity
+    assert revised.source_prompt_sha256 == "b" * 64
+    assert [operation.path for operation in decision.patch.operations] == [
+        "/geometry_programs/0"
+    ]
+    assert decision.patch.adaptation_tools == ["geometry_program_rebuild"]
+    assert decision.plan.operations[0].execution_tool == "geometry_program_rebuild"
+    assert decision.capabilities.capabilities[
+        next(
+            index
+            for index, capability in enumerate(decision.capabilities.capabilities)
+            if capability.path == "/geometry_programs/0"
+        )
+    ].value_type == "geometry_program"
+    assert planner.call["semantic_role"] == "equipment_shelter"
+    assert planner.call["request_id"] == "equipment_shelter"
+    assert planner.call["quantity"] == 1
+    assert planner.call["source_description_origin"] == "legacy_unavailable"
+    assert planner.call["source_description"].startswith("Intention source indisponible")
+    assert planner.call["design_context"]["current_geometry_program"] == (
+        original_program.model_dump(mode="json")
+    )
+    assert [step["node"] for step in decision.graph_trace] == [
+        "discover_capabilities",
+        "plan_geometry_program_revision",
+        "validate_adaptation",
+        "execute_adaptation",
+    ]
+
+
+def test_geometry_revision_preserves_original_intent_and_placement_provenance() -> None:
+    class CapturingPlanner:
+        def __init__(self) -> None:
+            self.call = None
+
+        def plan(self, **kwargs):
+            self.call = kwargs
+            return _geometry_program(body_width_m=3.2, prompt_hash_character="c")
+
+    original = _geometry_program(
+        body_width_m=3.0,
+        prompt_hash_character="a",
+    ).model_copy(
+        update={
+            "source_description": "Créer un shelter technique extérieur à double porte.",
+            "source_description_origin": "user_requirement",
+            "placement_context": "à sept mètres à droite du pylône",
+        }
+    )
+    scene = _scene().model_copy(update={"geometry_programs": [original]})
+    _, service = _services()
+    planner = CapturingPlanner()
+    agent = SceneEditAgent(
+        capability_service=service,
+        geometry_program_planner=planner,  # type: ignore[arg-type]
+    )
+
+    agent.create_adaptation(
+        "wf_geometry_revision_provenance",
+        scene,
+        "ajoute au shelter deux grilles de ventilation sans changer l'implantation",
+    )
+
+    assert planner.call["source_description"] == original.source_description
+    assert planner.call["source_description_origin"] == "revision_preserved"
+    assert planner.call["placement_context"] == original.placement_context
+
+
+def test_geometry_program_capability_rejects_free_form_blender_code() -> None:
+    scene = _scene().model_copy(
+        update={
+            "geometry_programs": [
+                _geometry_program(body_width_m=3.0, prompt_hash_character="a")
+            ]
+        }
+    )
+    _, service = _services()
+    capabilities = service.resolve(scene)
+    unsafe_value = scene.geometry_programs[0].model_dump(mode="json")
+    unsafe_value["python_code"] = "import bpy; bpy.ops.mesh.primitive_cube_add()"
+    plan = AssetAdaptationPlan(
+        edit_description="Injecter un script Blender libre",
+        operations=[
+            AdaptationOperation(
+                capability_id="geometry_program_1:rebuild",
+                path="/geometry_programs/0",
+                value=unsafe_value,
+                execution_tool="geometry_program_rebuild",
+                rationale="Ce champ exécutable doit être refusé.",
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        service.validate_plan(capabilities, plan)
 
 
 def test_non_parametric_tower_does_not_claim_geometry_editing() -> None:

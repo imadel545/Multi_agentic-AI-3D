@@ -21,6 +21,7 @@ _WORKER_ROOT = Path(__file__).resolve().parent
 if str(_WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKER_ROOT))
 
+import geometry_program_compiler  # noqa: E402
 import parametric_builder  # noqa: E402
 
 
@@ -51,6 +52,13 @@ def main() -> int:
         _create_gps_antenna(bpy, scene, procedural_objects, asset_imports, asset_warnings)
     if scene["visual_elements"].get("include_labels", False):
         _create_labels(bpy, scene, procedural_objects)
+    _create_geometry_programs(
+        bpy,
+        scene,
+        procedural_objects,
+        asset_imports,
+        asset_warnings,
+    )
     camera_metadata = _create_camera_and_light(bpy, scene)
     segment_connectivity = _validate_parametric_segment_connectivity(bpy)
 
@@ -75,6 +83,59 @@ def main() -> int:
         _blender_runtime_metadata(bpy),
     )
     return 0
+
+
+def _create_geometry_programs(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
+    programs = list(scene.get("geometry_programs") or [])
+    if not programs:
+        return
+    records = geometry_program_compiler.compile_geometry_programs(bpy, programs)
+    for program, record in zip(programs, records, strict=True):
+        program_payload = json.dumps(
+            program,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        program_sha256 = hashlib.sha256(program_payload).hexdigest()
+        _record_asset_generation(
+            asset_imports,
+            asset_warnings,
+            asset_id=f"GEOMETRY_PROGRAM_{record['program_id'].upper()}",
+            asset_file=None,
+            asset_source="llm_geometry_program"
+            if record["authorship"] == "llm_generated"
+            else "deterministic_geometry_program",
+            asset_metadata={
+                "geometry_fidelity": "technical_generic",
+                "qualification_status": "validated_geometry_program",
+                "allowed_generation_modes": ["internal_project_generated"],
+                "qualification_method": "typed_geometry_program_v1",
+                "qualification_limitations": record["limitations"],
+                "program_sha256": program_sha256,
+                "program_authorship": record["authorship"],
+                "requested_quantity": record["requested_quantity"],
+                "generator_provider": record["generator_provider"],
+                "generator_model": record["generator_model"],
+                "structured_output_mode": record["structured_output_mode"],
+                "source_prompt_sha256": record["source_prompt_sha256"],
+                "deterministic_adjustments": record["deterministic_adjustments"],
+            },
+            object_role=record["semantic_role"],
+            object_name=record["object_name"],
+            dimensions=None,
+            location=(0.0, 0.0, 0.0),
+            rotation=(0.0, 0.0, 0.0),
+            generation_strategy="internal_project_generated",
+            generated_object_names=record["generated_object_names"],
+        )
+        procedural_objects.append(f"geometry_program:{record['program_id']}")
 
 
 def _parse_args(argv: list[str]) -> tuple[Path, Path]:
@@ -1043,9 +1104,7 @@ def _create_power_cabinet(
         bpy=bpy,
         name=cabinet_object_name,
         location=cabinet_location,
-        width=float((accessory.get("dimensions_m") or {}).get("width", 1.0))
-        if accessory
-        else 1.0,
+        width=float((accessory.get("dimensions_m") or {}).get("width", 1.0)) if accessory else 1.0,
         depth=float((accessory.get("dimensions_m") or {}).get("depth", 0.45))
         if accessory
         else 0.45,

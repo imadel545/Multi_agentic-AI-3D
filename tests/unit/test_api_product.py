@@ -8,6 +8,7 @@ from apps.api.telecom_studio_api.main import app, workflow_service
 from apps.api.telecom_studio_api.product import (
     _events_to_timeline,
     _geometry_fidelity_summary,
+    _geometry_program_summary_from_path,
     _studio_warnings,
 )
 from apps.api.telecom_studio_api.runtime_contract import memory_status
@@ -38,7 +39,7 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["reference_only_asset_count"] == 1
         assert summary["asset_count"] == 13
         assert summary["real_glb_asset_count"] == 12
-        assert summary["import_qualified_glb_count"] == 4
+        assert summary["import_qualified_glb_count"] == 3
         assert summary["missing_file_count"] == 0
         assert not any(
             warning.get("technical_code") == "STUDIO_NO_QUALIFIED_ASSETS"
@@ -155,6 +156,69 @@ def test_geometry_fidelity_summary_counts_scene_components_by_declared_role() ->
 
 def test_geometry_fidelity_summary_rejects_invalid_scene_instead_of_guessing() -> None:
     assert _geometry_fidelity_summary({"mesh_qa_passed": True}) is None
+
+
+def test_geometry_program_summary_exposes_bounded_llm_provenance(tmp_path: Path) -> None:
+    scene_path = tmp_path / "scene_spec.json"
+    scene_path.write_text(
+        """
+        {
+          "scene_id":"wf_geometry_summary",
+          "network_type":"5G",
+          "tower":{
+            "asset_id":"TOWER_LATTICE_30M",
+            "position":[0,0,0],
+            "rotation_deg":[0,0,0],
+            "height_m":30
+          },
+          "sectors":[{
+            "sector_id":"S1",
+            "antenna_asset_id":"ANT_PANEL_5G_001",
+            "install_height_m":24,
+            "azimuth_deg":0,
+            "beamwidth_deg":65
+          }],
+          "geometry_programs":[{
+            "program_id":"shelter.llm_v1",
+            "semantic_role":"technical_shelter",
+            "requested_quantity":1,
+            "authorship":"llm_generated",
+            "generator_provider":"groq",
+            "generator_model":"openai/gpt-oss-120b",
+            "structured_output_mode":"json_object_repaired",
+            "source_prompt_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "nodes":[{
+              "kind":"primitive",
+              "node_id":"body",
+              "primitive":"box",
+              "size_m":{"x":3,"y":2.2,"z":2.5},
+              "semantic_role":"technical_shelter"
+            },{
+              "kind":"primitive",
+              "node_id":"door",
+              "primitive":"box",
+              "size_m":{"x":0.8,"y":0.08,"z":1.8}
+            },{
+              "kind":"primitive",
+              "node_id":"roof",
+              "primitive":"box",
+              "size_m":{"x":3.2,"y":2.4,"z":0.12}
+            }],
+            "limitations":["No structural certification."]
+          }]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    summary = _geometry_program_summary_from_path(scene_path)
+
+    assert summary is not None
+    assert summary["program_count"] == 1
+    assert summary["generated_component_count"] == 1
+    assert summary["total_node_count"] == 3
+    assert summary["repaired_program_count"] == 1
+    assert summary["programs"][0]["generator_model"] == "openai/gpt-oss-120b"
 
 
 class _MemoryStatusProbe:
@@ -813,6 +877,56 @@ def test_product_issues_humanize_real_asset_warning_codes() -> None:
     assert "valide techniquement" not in minimal_issue["impact"]
 
 
+def test_product_issues_deduplicate_repeated_sector_warnings() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    repeated = {
+        "code": "ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE",
+        "message": "MOUNTING_BRACKET_001: INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE",
+        "severity": "warning",
+    }
+    status = {
+        "status": "completed",
+        "warnings": [
+            repeated,
+            repeated,
+            {
+                **repeated,
+                "message": (
+                    "ANT_PANEL_5G_DUALBAND_V1: "
+                    "INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
+                ),
+            },
+            {
+                "code": "ASSET_IMPORT_PROCEDURAL_FALLBACK",
+                "message": "PROCEDURAL_CABLE_ROUTE used procedural fallback.",
+                "severity": "warning",
+            },
+            {
+                "code": "ASSET_IMPORT_PROCEDURAL_FALLBACK_USED",
+                "message": "PROCEDURAL_CABLE_ROUTE: PROCEDURAL_FALLBACK_USED",
+                "severity": "warning",
+            },
+        ],
+        "errors": [],
+        "asset_import_summary": {"procedural_fallback_count": 3},
+    }
+
+    issues = _collect_user_issues(status)
+
+    assert [
+        issue["technical_code"]
+        for issue in issues
+        if issue["technical_code"]
+        == "ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
+    ] == ["ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"]
+    assert sum(
+        issue["technical_code"].startswith("ASSET_IMPORT_PROCEDURAL_FALLBACK")
+        for issue in issues
+    ) == 1
+    assert any(issue["title"] == "Composants internes non constructeur" for issue in issues)
+
+
 def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:
     status = {
         "status": "completed",
@@ -851,7 +965,7 @@ def test_product_issues_humanize_ai_rf_and_tower_warning_codes() -> None:
     assert "Balisage aviation à vérifier" in titles
 
 
-def test_product_issues_include_failed_runtime_nodes() -> None:
+def test_product_issues_do_not_replay_failed_runtime_nodes_after_certified_completion() -> None:
     from apps.api.telecom_studio_api.product import _collect_user_issues
 
     status = {"status": "completed", "warnings": [], "errors": []}
@@ -870,18 +984,40 @@ def test_product_issues_include_failed_runtime_nodes() -> None:
 
     issues = _collect_user_issues(status, events)
 
-    assert issues == [
+    assert issues == []
+
+
+def test_product_issues_humanize_failed_runtime_nodes_without_internal_details() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    status = {"status": "failed", "warnings": [], "errors": []}
+    events = [
         {
-            "title": "Recherche RAG en mode dégradé",
-            "severity": "warning",
-            "impact": "Qdrant local storage is locked.",
-            "recommended_action": (
-                "Vérifiez Qdrant ou utilisez un serveur Qdrant externe si plusieurs processus "
-                "accèdent au stockage local."
-            ),
-            "technical_code": "RUNTIME_NODE_FAILED:retrieve_rag_context",
+            "event_type": "node_failed",
+            "payload": {
+                "node": "generate_blender",
+                "status": "failed",
+                "errors": [
+                    "Traceback /Users/private/project.py ModuleNotFoundError: secret"
+                ],
+            },
         }
     ]
+
+    issues = _collect_user_issues(status, events)
+
+    assert issues == [
+        {
+            "title": "Génération Blender en mode dégradé",
+            "severity": "error",
+            "impact": "Blender n'a pas produit les livrables 3D requis pour cette opération.",
+            "recommended_action": (
+                "Vérifiez Blender, les assets et les artefacts avant de relancer."
+            ),
+            "technical_code": "RUNTIME_NODE_FAILED:generate_blender",
+        }
+    ]
+    assert "/Users/" not in str(issues)
 
 
 def test_product_issues_expose_bounded_planning_fallback_without_degrading_3d() -> None:

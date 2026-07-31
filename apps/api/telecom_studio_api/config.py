@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     enable_groq_extraction: bool = True
     enable_groq_planning_decision: bool = True
     enable_groq_asset_selection: bool = True
+    enable_groq_geometry_program: bool = True
     groq_extraction_timeout_s: float = Field(default=30.0, ge=3.0, le=120.0)
     groq_extraction_max_completion_tokens: int = Field(default=4096, ge=128, le=8192)
     groq_extraction_reasoning_effort: Literal["low", "medium", "high"] = "medium"
@@ -33,6 +34,9 @@ class Settings(BaseSettings):
     groq_asset_selection_timeout_s: float = Field(default=15.0, ge=3.0, le=60.0)
     groq_asset_selection_max_completion_tokens: int = Field(default=1024, ge=128, le=2048)
     groq_asset_selection_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    groq_geometry_timeout_s: float = Field(default=90.0, ge=10.0, le=180.0)
+    groq_geometry_max_completion_tokens: int = Field(default=8192, ge=1024, le=16_384)
+    groq_geometry_reasoning_effort: Literal["low", "medium", "high"] = "medium"
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
     max_concurrent_workflows: int = Field(default=2, ge=1, le=8)

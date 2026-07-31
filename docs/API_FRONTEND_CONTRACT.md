@@ -85,6 +85,7 @@ Noms d'artifact utilisés par le frontend :
 - `scene_patch` → `scene_patch.json`
 - `scene_diff` → `scene_diff.json`
 - `design_blueprint` → `design_blueprint.json`
+- `assembly_plan` → `assembly_plan.json`
 - `blueprint_requirement_coverage` → `blueprint_requirement_coverage.json`
 - `blueprint_scene_coverage` → `blueprint_scene_coverage.json`
 
@@ -180,6 +181,15 @@ crée ni `project`, ni `run`, ni nouvelle source d'état produit.
 `confirmation_fields`. `POST /designs` rejette un `confirmed_requirements`
 encore marqué `requires_confirmation=true`.
 
+`RequirementSpec.geometry_requests[]` porte les composants demandés hors
+catalogue. Chaque entrée expose `request_id`, `semantic_role`, `description`,
+`quantity`, `placement_context` et `maximum_dimensions_m`. Les identifiants et
+rôles sont uniques, la liste est bornée à 8 demandes et les quantités à 32.
+`maximum_dimensions_m` est vérifié déterministiquement contre l'enveloppe
+compilable du programme; un adaptateur uniforme borné peut uniquement corriger
+ce dépassement. `placement_context` est conservé comme provenance, pas encore
+interprété ni certifié comme contrainte spatiale.
+
 Le résumé document-pack expose `blocking_fields`; son compteur de champs
 bloquants, le rapport QA, le gate de génération et le formulaire de correction
 doivent rester cohérents.
@@ -205,6 +215,8 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `mesh_qa_passed`
 - `qa_score`
 - `asset_import_summary`
+- `geometry_fidelity_summary`
+- `geometry_program_summary`
 - `human_warnings_count`
 - `human_errors_count`
 - `primary_glb_url`
@@ -212,6 +224,7 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `report_url`
 - `metadata_url`
 - `scene_spec_url`
+- `assembly_plan_url`
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
@@ -241,6 +254,21 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+`geometry_program_summary` expose uniquement une preuve bornée:
+
+- `program_count`, `generated_component_count`, `total_node_count`,
+  `repaired_program_count`;
+- par programme: `program_id`, `semantic_role`, `requested_quantity`,
+  `node_count`, `authorship`, `generator_provider`, `generator_model`,
+  `structured_output_mode`, `source_prompt_sha256`, `source_description`,
+  `source_description_origin` (`user_requirement`, `revision_preserved` ou
+  `legacy_unavailable`), `placement_context`, `maximum_dimensions_m`,
+  `deterministic_adjustments` et `limitations`.
+
+Les modes possibles sont `strict_json_schema`, `json_object_validated` et
+`json_object_repaired`. Le frontend doit montrer une réparation, pas la présenter
+comme une sortie strictement décodée.
 
 `rag_planning_summary` est obligatoire pour l'UI intelligente:
 
@@ -279,6 +307,8 @@ Le frontend doit rendre:
   `payload.progress_message`, `payload.actor_kind` et
   `payload.decision_authority`; ne pas appeler Blender/QA/services « agents LLM »;
 - drawers QA, timeline, scene plan, documents, assets, versions;
+- intent hors catalogue avant génération, puis modèle, mode de sortie, enveloppe,
+  ajustements et provenance GeometryProgram après génération;
 - raw JSON seulement en détail secondaire.
 
 `/designs/{id}/edit` expose, en cas de succès:
@@ -295,6 +325,13 @@ Le frontend doit rendre:
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+Pour un composant généré, les capacités résolues ajoutent un chemin
+`/geometry_programs/{index}`, un `value_type=geometry_program` et
+`execution_tool=geometry_program_rebuild`. Le LLM peut régénérer uniquement le
+programme ciblé; le backend revalide le contrat, applique la mutation à
+`SceneSpec`, relance Blender/QA et crée une nouvelle version. La description
+source, le contexte de placement et l'enveloppe maximale sont conservés.
 
 `/designs/{id}/versions` expose l'historique sans `artifact_dir`; les artefacts
 de chaque version sont des URLs versionnées.

@@ -15,7 +15,12 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - Extracts structured requirements (`RequirementSpec`) with typed field evidence,
   assumptions and conflict gates, or a provenance-backed design spec
   (`ProjectDesignSpec`).
-- Plans a controlled 3D scene (`SceneSpec`).
+- Produces a typed `DesignBlueprint`, a scored multi-candidate `AssemblyPlan`,
+  and a controlled 3D scene (`SceneSpec`).
+- For requested components absent from the qualified catalog, GPT-OSS may author
+  a bounded declarative `GeometryProgram`; deterministic contracts validate its
+  units, topology graph, transforms, requested envelope and aggregate resource
+  budget before the fixed Blender compiler executes it.
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
 - Runs structural and geometry QA.
 - Current mesh QA reaches `mesh_level_spatial_basic` when semantic transforms and
@@ -33,6 +38,10 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - It does not guarantee vendor-grade visual realism (current assets are internal/CC-BY).
 - It does not run without a local Blender install for real 3D output.
 - It does not provide a production-ready frontend today.
+- It is not an unrestricted arbitrary-shape generator: the current
+  `GeometryProgram` vocabulary is limited to validated primitives, polygonal
+  curves, instances, materials and transforms. It does not provide CSG,
+  triangle/BVH engineering QA or vendor certification.
 
 ---
 
@@ -99,7 +108,10 @@ GROQ_API_KEY=...
 # or TELECOM_STUDIO_GROQ_API_KEY=...
 ```
 
-The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to force deterministic extraction.
+The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to
+force deterministic extraction. Components outside the qualified catalog require
+the enabled Groq geometry specialist; there is no fabricated deterministic
+geometry fallback when that specialist cannot return a valid program.
 
 ### Product intelligence: NVIDIA RAG embeddings
 
@@ -152,11 +164,13 @@ requirements_text or document pack
 → NVIDIA Nemotron multilingual query/passage embeddings + Qdrant retrieval
 → NVIDIA reranking + bounded GPT-OSS planning decision
 → SQLite memory recall
-→ asset registry
+→ scored qualified asset candidates + AssemblyPlan
 → rule engine
+→ DesignBlueprint + routed deterministic specialists
 → SceneSpec
+→ optional bounded GPT-OSS GeometryProgram
 → SceneSpec validator
-→ Blender runner
+→ deterministic Blender builders / GeometryProgram compiler
 → GLB structural + geometry validation
 → generation QA
 → SQLite memory writeback
@@ -184,11 +198,16 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 12 manifests, 12 local GLBs, 10 generation-eligible, 4 exact imports,
-  2 reference-only, `qualified_mixed_catalog`, not vendor-grade.
+- Assets: 13 manifests, 12 local GLBs, 12 generation-eligible, 3 exact imports,
+  9 parametric generation profiles, 1 reference-only,
+  `qualified_mixed_catalog`, not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
 - Frontend: `apps/frontend` contains a real-backend product rework in progress.
   The previous dashboard-like kernel is rejected; acceptance requires a
   chat-first / 3D-first smoke with visible GLB or explicit fallback.
+- Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
+  `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
+  and preview. This proves that scenario only. The 2026-07-31 frontend gate
+  passes 125 tests, typecheck and production build.

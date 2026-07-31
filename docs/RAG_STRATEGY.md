@@ -101,8 +101,8 @@ RAG retrieval are separate surfaces.
 
 ## What Can Influence SceneSpec
 
-Only structured `payload.planning_hints` can affect planning. Current applied
-hints are:
+Within the RAG authority, only structured `payload.planning_hints` can affect
+planning. Current applied hints are:
 
 - `antenna_install_height_m`
 - `beamwidth_deg`
@@ -113,6 +113,12 @@ hints are:
 
 Free text retrieved by RAG is audit context. It must not mutate the 3D plan
 silently.
+
+The GeometryProgram specialist does not currently receive retrieved RAG passages
+or claim-level citations directly. It receives the typed request, selected asset
+IDs, assembly roles and bounded design context. Its `source_description`,
+`placement_context`, model/mode and hashes are preserved, but this is not
+claim-level RAG grounding of generated geometry.
 
 RAG must not overwrite an explicit user/document value. A hint can replace only
 a field carrying the matching explicit default-warning code; every applied,
@@ -146,6 +152,8 @@ the design.
   base.
 - RAG does not yet perform claim-level citation into `SceneSpec`.
 - RAG does not yet run conflict resolution against document-pack evidence.
+- Out-of-catalog GeometryProgram nodes are not directly grounded in retrieved
+  passages or vendor citations.
 - Reranker is fail-open: if NVIDIA reranking fails, retrieval still returns
   vector-ranked results and the degraded status is visible.
 - Embedding retrieval is not fail-open as a product-quality success: a provider

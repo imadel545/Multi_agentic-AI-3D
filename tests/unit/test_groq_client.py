@@ -39,11 +39,13 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
     assert "tower_characteristics" in schema["required"]
     assert "include_power_cabinet" in schema["required"]
     assert "include_gps_antenna" in schema["required"]
+    assert "geometry_requests" in schema["required"]
     assert schema["properties"]["tower_characteristics"]["additionalProperties"] is False
     assert schema["properties"]["include_power_cabinet"]["type"] == "boolean"
     assert schema["properties"]["include_gps_antenna"]["type"] == "boolean"
     assert spec.include_power_cabinet is True
     assert spec.include_gps_antenna is True
+    assert spec.geometry_requests == []
 
 
 def test_groq_client_retries_json_object_mode_after_schema_400(monkeypatch) -> None:
@@ -203,6 +205,39 @@ def test_groq_client_does_not_publish_free_form_llm_warning_text(monkeypatch) ->
     assert not any(warning.code == "MODEL_CONFLICT_COMMENT" for warning in spec.warnings)
 
 
+def test_groq_client_extracts_arbitrary_geometry_as_typed_intent(monkeypatch) -> None:
+    def post(url, headers, json, timeout):
+        payload = json_module.loads(_requirements_content())
+        payload["geometry_requests"] = [
+            {
+                "request_id": "maintenance_stair",
+                "semantic_role": "maintenance_stair",
+                "description": ("Escalier métallique extérieur pour accéder au shelter technique."),
+                "quantity": 1,
+                "placement_context": "À droite du shelter, hors emprise du pylône.",
+                "maximum_dimensions_m": {"x": 4.0, "y": 2.0, "z": 4.0},
+            }
+        ]
+        return _response(url, json_module.dumps(payload))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    spec = GroqStructuredClient(api_key="test-key").extract_requirements(
+        (
+            "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m, "
+            "azimuts 0, 120, 240. Ajouter un escalier métallique pour le shelter."
+        ),
+        "high",
+    )
+
+    assert len(spec.geometry_requests) == 1
+    request = spec.geometry_requests[0]
+    assert request.request_id == "maintenance_stair"
+    assert request.maximum_dimensions_m is not None
+    assert request.maximum_dimensions_m.z == 4.0
+    assert spec.field_evidence["geometry_requests"].selected_source == "llm"
+
+
 def _response(url: str, content: str) -> httpx.Response:
     return httpx.Response(
         200,
@@ -244,6 +279,7 @@ def _requirements_content() -> str:
             "include_labels": True,
             "include_power_cabinet": True,
             "include_gps_antenna": True,
+            "geometry_requests": [],
             "detail_level": "high",
             "warnings": [],
         }

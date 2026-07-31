@@ -3,7 +3,7 @@
 Critères obligatoires pour accepter le futur frontend.  
 Si un critère échoue, le frontend n'est pas accepté.
 
-Dernier audit ciblé: 2026-07-29. La baseline visuelle réelle est validée; les
+Dernière synchronisation ciblée: 2026-07-31. La baseline visuelle réelle est validée; les
 cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
@@ -61,6 +61,8 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 - [x] Les warnings sont traduits en langage utilisateur avec impact et action suggérée.
 - [x] Les modes fallback (Blender, asset, LLM) sont explicitement visibles.
+- [x] Une sortie GeometryProgram réparée est distinguée d'une sortie JSON
+  strictement décodée.
 
 ## 8. Timeline cachée
 
@@ -80,18 +82,28 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [ ] Edit design by prompt.
 - [ ] Version rollback.
 - [ ] Download artifacts.
+- [ ] Comprendre et confirmer un composant hors catalogue avant génération.
+- [x] Afficher modèle, mode, hash, enveloppe et ajustements GeometryProgram après
+  génération.
+- [ ] Modifier un composant généré et constater la nouvelle version.
+- [ ] Expliquer un échec du spécialiste géométrique avant tout lancement Blender.
 
 ## 11. Qualité technique
 
-- [x] `npm run typecheck` passe (via `npm run build`).
-- [x] `npm run test` passe (101 tests, 11 fichiers).
-- [x] `npm run build` passe.
+- [x] `npm run typecheck` passe le 2026-07-31.
+- [x] `npm run test -- --run` passe avec 125 tests le 2026-07-31.
+- [x] `npm run build` passe le 2026-07-31; tous les chunks JavaScript restent
+  sous 371 kB non compressés.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
 
 ## 12. Preuve visuelle
 
 - [x] Screenshot final du studio avec un design réel `real_blender` chargé.
 - [x] Preuve que le GLB est visible et grand.
+- [ ] Smoke visuel du parcours GeometryProgram initial + révision. Le backend
+  réel `wf_ead2456914b2` et `v2e0a4faf` a produit `real_blender`, QA 1.0,
+  certificat, GLB et preview, mais cette preuve backend ne remplace pas le smoke
+  navigateur.
 
 ## Rejet automatique
 

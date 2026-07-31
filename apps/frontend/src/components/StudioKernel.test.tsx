@@ -122,6 +122,7 @@ const parsedRequirements = {
     include_labels: true,
     include_power_cabinet: true,
     include_gps_antenna: true,
+    geometry_requests: [],
     detail_level: "high",
     warnings: [],
     repair_events: [],
@@ -224,6 +225,95 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/Source d’analyse : intelligence décisionnelle/)).toBeInTheDocument();
     expect(screen.queryByText(/groq:openai\/gpt-oss-120b/)).not.toBeInTheDocument();
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
+  });
+
+  it("shows new components extracted for typed LLM geometry before generation", () => {
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={{
+          ...parsedRequirements,
+          requirements: {
+            ...parsedRequirements.requirements,
+            geometry_requests: [
+              {
+                request_id: "shelter_1",
+                semantic_role: "technical_shelter",
+                description: "Shelter technique extérieur placé au sol.",
+                quantity: 1,
+                placement_context: "À droite du pylône.",
+                maximum_dimensions_m: { x: 3, y: 2.2, z: 2.5 }
+              }
+            ]
+          }
+        }}
+        prompt="site 5G avec shelter"
+      />
+    );
+
+    expect(screen.getByText("Composants nouveaux compris par l’IA")).toBeInTheDocument();
+    expect(screen.getByText("technical shelter")).toBeInTheDocument();
+    expect(screen.getByText("Placement demandé : À droite du pylône.")).toBeInTheDocument();
+    expect(screen.getByText(/Enveloppe maximale : 3 × 2.2 × 2.5 m/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/programmes géométriques typés, puis contrôlés avant Blender/)
+    ).toBeInTheDocument();
+  });
+
+  it("shows model, repair mode and prompt proof for generated geometry", () => {
+    render(
+      <SummaryPanel
+        bundle={{
+          ...bundle,
+          geometry_program_summary: {
+            program_count: 1,
+            generated_component_count: 1,
+            total_node_count: 5,
+            repaired_program_count: 1,
+            programs: [
+              {
+                program_id: "shelter_1.llm_v1",
+                semantic_role: "technical_shelter",
+                requested_quantity: 1,
+                node_count: 5,
+                authorship: "llm_generated",
+                generator_provider: "groq",
+                generator_model: "openai/gpt-oss-120b",
+                structured_output_mode: "json_object_repaired",
+                source_prompt_sha256: "a".repeat(64),
+                source_description: "Créer un shelter technique extérieur.",
+                source_description_origin: "user_requirement",
+                placement_context: "À droite du pylône.",
+                maximum_dimensions_m: { x: 3, y: 2.2, z: 2.5 },
+                limitations: ["Sans certification structurelle."],
+                deterministic_adjustments: [
+                  "Uniform scale applied by the deterministic envelope adapter."
+                ]
+              }
+            ]
+          }
+        }}
+        issues={null}
+        summary={null}
+        versions={[]}
+      />
+    );
+
+    expect(screen.getByText(/1 composant\(s\) créé\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/JSON réparé puis revalidé/)).toBeInTheDocument();
+    expect(screen.getByText(/preuve aaaaaaaaaa/)).toBeInTheDocument();
+    expect(screen.getByText(/Géométrie écrite par LLM/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Intention source : Créer un shelter technique extérieur.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Implantation demandée : À droite du pylône.")).toBeInTheDocument();
+    expect(screen.getByText(/Enveloppe contrôlée : 3 × 2.2 × 2.5 m max/)).toBeInTheDocument();
+    expect(
+      screen.getByText("Limite déclarée : Sans certification structurelle.")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Adaptation déterministe appliquée/)
+    ).toBeInTheDocument();
   });
 
   it("does not offer a duplicate generation after the analysis launched a design", () => {

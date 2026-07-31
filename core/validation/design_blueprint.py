@@ -54,6 +54,11 @@ def evaluate_blueprint_requirement_coverage(
             _quantity(intents, "beam"),
         ),
         _check(
+            "generated_component.quantity",
+            sum(request.quantity for request in requirements.geometry_requests),
+            _quantity(intents, "generated_component"),
+        ),
+        _check(
             "constraints.tower.height_m",
             requirements.tower_height_m,
             constraints.get("tower.height_m"),
@@ -108,6 +113,10 @@ def evaluate_blueprint_scene_coverage(
         for intent in values
         if intent.resolved_asset_id
     }
+    expected_generated_roles = {
+        intent.semantic_role_id for intent in intents.get("generated_component", [])
+    }
+    actual_generated_roles = {program.semantic_role for program in scene.geometry_programs}
     checks = [
         _check("scene.network_type", blueprint.network_type, scene.network_type),
         _check("scene.detail_level", blueprint.detail_level, scene.detail_level),
@@ -138,6 +147,11 @@ def evaluate_blueprint_scene_coverage(
             scene.visual_elements.include_sector_beams,
         ),
         _check("scene.accessory_asset_ids", expected_accessories, accessory_ids),
+        _check(
+            "scene.geometry_program_roles",
+            expected_generated_roles,
+            actual_generated_roles,
+        ),
     ]
     if scene.assembly_plan is not None:
         checks.append(

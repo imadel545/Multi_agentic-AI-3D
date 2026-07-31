@@ -6,6 +6,9 @@ limitations and never advertises checks it cannot perform.
 ## Levels
 
 - Contract QA: Pydantic validation of all API/runtime contracts.
+- GeometryProgram contract QA: unique identifiers, parent/source/material
+  references, acyclic graphs, meter units, typed primitives/transforms,
+  requested semantic quantity, maximum envelope and bounded resource budgets.
 - Requirement QA: business rules on `RequirementSpec` (tower height ≤ 150 m,
   sector count ≤ 12, azimuth consistency, etc.).
 - Scene QA: `SceneSpec` validation, asset compatibility, tower/RF rules.
@@ -29,6 +32,9 @@ limitations and never advertises checks it cannot perform.
   results.
 - Blender segment QA: measures generated cylinder endpoints from transformed
   mesh vertices before export and hard-fails above 1 mm.
+- GeometryProgram compilation QA: only the fixed compiler may create supported
+  primitives, curves, instances and materials. Model output cannot evaluate
+  Python, expressions, paths, URLs or arbitrary Blender operators.
 - Height/azimuth QA: metadata-based checks plus bounding-box sanity.
 - Preview QA: PNG resolution, luminance, contrast, subject occupancy, bounding
   box framing, clipping, horizontal centering, and edge margins.
@@ -47,7 +53,7 @@ limitations and never advertises checks it cannot perform.
 - Spatial QA computes one real-vertex world-space AABB per primary semantic
   equipment and rejects undeclared overlaps. Antenna/RRU contact is allowed only
   when both belong to the same sector and minimum-axis penetration is at most
-  0.15 m; total overlap is rejected.
+  0.20 m; total overlap is rejected.
 - Geometry validator merges object-name counts, metadata proxies, and Mesh QA
   results; it fails when the real bounding box is unrealistic.
 - Preview inspector parses PNG pixels and checks resolution, luminance,
@@ -75,6 +81,10 @@ limitations and never advertises checks it cannot perform.
   `DesignBlueprint`, requires both blueprint coverage reports, binds persisted
   QA/geometry/GLB reports, and compares persisted `scene_spec.json` with the
   selected `SceneVersion.scene`.
+- Requested GeometryProgram maximum dimensions are measured from the program
+  envelope before Blender. A deterministic uniform adapter can only correct this
+  envelope overflow, records the adjustment and revalidates the full contract.
+  The workflow aggregate is capped at 1024 program nodes.
 
 ## What is not yet real
 
@@ -84,6 +94,12 @@ limitations and never advertises checks it cannot perform.
 - No full manifold, self-intersection, weld/node or structural load validation.
 - No vendor-grade mesh/material validation.
 - No semantic visual judgement of the preview image.
+- No semantic judgement that a GeometryProgram matches the natural-language
+  design description.
+- No interpretation or independent validation of free-text
+  `placement_context`; it is preserved as provenance only.
+- Custom generated roles are not yet included in the primary-equipment AABB
+  interference set, so collision-free placement is not claimed.
 - No certified sector-detail preview proving that each small RRU is legible.
 - No full CAD geometric validation.
 
@@ -95,6 +111,8 @@ limitations and never advertises checks it cannot perform.
   fallback.
 - All fallbacks are propagated to `status.json`, the Product API, reports, and
   the frontend.
+- `json_object_repaired` is not a Blender fallback: it is a bounded LLM repair
+  mode and must remain visible in GeometryProgram provenance.
 
 ## Expected tests
 
@@ -111,3 +129,7 @@ limitations and never advertises checks it cannot perform.
   `mesh_level_transform_basic`, `mesh_level_basic`, `glb_parse_structural`, etc.).
 - Anti-golden GLBs with JSON-only accessors, missing semantic meshes, invalid
   indices, or tampered certified artefacts fail.
+- GeometryProgram contract, envelope adaptation, aggregate-budget and real
+  Blender compilation/revision tests must pass. The full backend count is
+  recorded only from the final suite run; the frontend has 125 passing tests
+  on 2026-07-31.

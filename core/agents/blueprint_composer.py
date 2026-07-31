@@ -53,11 +53,13 @@ class BlueprintComposer:
     ) -> None:
         self._specialists = specialists or {
             "asset_composition": _asset_composition_specialist,
+            "geometry_generation": _geometry_generation_specialist,
             "rf_layout": _rf_specialist,
             "structural_support": _structural_specialist,
         }
         dependencies = {
             "asset_composition": (),
+            "geometry_generation": ("asset_composition",),
             "rf_layout": ("asset_composition",),
             "structural_support": ("asset_composition",),
         }
@@ -93,9 +95,7 @@ class BlueprintComposer:
         required_domains = _required_specialist_domains(context)
         decisions, waves = self._router.route(required_domains, context)
         wave_by_domain = {
-            domain: wave_index
-            for wave_index, domains in enumerate(waves)
-            for domain in domains
+            domain: wave_index for wave_index, domains in enumerate(waves) for domain in domains
         }
         decisions = [
             decision.model_copy(
@@ -129,6 +129,11 @@ class BlueprintComposer:
             specialist_decisions=decisions,
             planning_fields_applied=applied_fields,
             open_issues=issues,
+            composition_mode=(
+                "validated_catalog_with_llm_geometry_program"
+                if requirements.geometry_requests
+                else "validated_catalog_deterministic"
+            ),
         )
 
 
@@ -143,6 +148,8 @@ def _required_specialist_domains(context: BlueprintContext) -> list[str]:
         domains.append("rf_layout")
     if "tower" in asset_types:
         domains.append("structural_support")
+    if context.requirements.geometry_requests:
+        domains.append("geometry_generation")
     return sorted(domains)
 
 
@@ -194,6 +201,29 @@ def _structural_specialist(context: BlueprintContext) -> BlueprintSpecialistDeci
         checks=dict(report.checks),
         warning_codes=[warning.code for warning in report.warnings],
         error_codes=[error.code for error in report.errors],
+    )
+
+
+def _geometry_generation_specialist(
+    context: BlueprintContext,
+) -> BlueprintSpecialistDecision:
+    requests = context.requirements.geometry_requests
+    checks = {
+        "geometry_requests_present": bool(requests),
+        "request_ids_unique": len({request.request_id for request in requests}) == len(requests),
+        "semantic_roles_declared": all(bool(request.semantic_role) for request in requests),
+        "descriptions_bounded": all(len(request.description) <= 1200 for request in requests),
+        "quantities_bounded": all(1 <= request.quantity <= 32 for request in requests),
+    }
+    failures = [name for name, passed in checks.items() if not passed]
+    return BlueprintSpecialistDecision(
+        specialist_id="geometry-program-policy-v1",
+        domain="geometry_generation",
+        status="failed" if failures else "passed",
+        actor_kind="deterministic_specialist",
+        decision_authority="deterministic",
+        checks=checks,
+        error_codes=[f"GEOMETRY_REQUEST_{name.upper()}" for name in failures],
     )
 
 
@@ -290,6 +320,31 @@ def _component_intents(
                 geometry_fidelity="schematic",
                 placement_strategy_id="sector_boresight_volume",
                 provenance=["requirement_spec", "derived_rule:beam_per_sector"],
+            )
+        )
+    for request in requirements.geometry_requests:
+        intents.append(
+            ComponentIntent(
+                intent_id=f"component:generated:{request.request_id}",
+                semantic_role_id=request.semantic_role,
+                asset_type="generated_component",
+                instance_strategy_id="single" if request.quantity == 1 else "quantity",
+                quantity=request.quantity,
+                asset_query=BlueprintAssetQuery(
+                    asset_type="generated_component",
+                    network_type=requirements.network_type,
+                    compatible_tower_type=requirements.tower_type,
+                    required_capability_tags=["typed_geometry_program_v1"],
+                ),
+                resolved_asset_id=None,
+                generation_strategy="internal_project_generated",
+                geometry_profile_id="geometry_program_v1",
+                geometry_fidelity="technical_generic",
+                placement_strategy_id="geometry_program_transform",
+                provenance=[
+                    "requirement_spec",
+                    f"llm_extraction:{request.request_id}",
+                ],
             )
         )
     return intents

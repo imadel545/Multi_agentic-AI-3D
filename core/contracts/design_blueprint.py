@@ -76,7 +76,7 @@ class ComponentIntent(StrictModel):
     intent_id: BlueprintId
     semantic_role_id: SemanticRoleId
     asset_type: AssetType
-    instance_strategy_id: Literal["single", "per_sector"]
+    instance_strategy_id: Literal["single", "per_sector", "quantity"]
     quantity: int = Field(ge=1, le=256)
     asset_query: BlueprintAssetQuery
     resolved_asset_id: str | None = Field(default=None, min_length=1, max_length=120)
@@ -177,7 +177,10 @@ class DesignBlueprint(StrictModel):
     )
     planning_fields_applied: list[str] = Field(default_factory=list, max_length=16)
     open_issues: list[BlueprintIssue] = Field(default_factory=list, max_length=64)
-    composition_mode: Literal["validated_catalog_deterministic"] = "validated_catalog_deterministic"
+    composition_mode: Literal[
+        "validated_catalog_deterministic",
+        "validated_catalog_with_llm_geometry_program",
+    ] = "validated_catalog_deterministic"
     source_of_truth: Literal["planning_only_scene_spec_controls_generation"] = (
         "planning_only_scene_spec_controls_generation"
     )
@@ -208,9 +211,7 @@ class DesignBlueprint(StrictModel):
         missing = set(self.required_specialist_domains) - set(domains)
         if missing:
             raise ValueError(f"required specialist domains are missing: {sorted(missing)}")
-        decisions_by_domain = {
-            decision.domain: decision for decision in self.specialist_decisions
-        }
+        decisions_by_domain = {decision.domain: decision for decision in self.specialist_decisions}
         for decision in self.specialist_decisions:
             unknown_dependencies = set(decision.depends_on) - set(domains)
             if unknown_dependencies:

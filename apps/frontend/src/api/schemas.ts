@@ -152,6 +152,21 @@ const RequirementConflictSchema = UnknownRecord.extend({
   resolution: z.string().nullish()
 });
 
+const GeometryVector3Schema = UnknownRecord.extend({
+  x: z.number().positive(),
+  y: z.number().positive(),
+  z: z.number().positive()
+});
+
+const GeometryRequestSchema = UnknownRecord.extend({
+  request_id: z.string(),
+  semantic_role: z.string(),
+  description: z.string(),
+  quantity: z.number().int().positive(),
+  placement_context: z.string().nullish(),
+  maximum_dimensions_m: GeometryVector3Schema.nullish()
+});
+
 export const RequirementSpecSchema = publicSchema(
   UnknownRecord.extend({
     network_type: z.string(),
@@ -172,6 +187,7 @@ export const RequirementSpecSchema = publicSchema(
     include_labels: z.boolean(),
     include_power_cabinet: z.boolean(),
     include_gps_antenna: z.boolean(),
+    geometry_requests: z.array(GeometryRequestSchema).default([]),
     detail_level: z.string(),
     warnings: z.array(RequirementWarningSchema).default([]),
     repair_events: z.array(UnknownRecord).default([]),
@@ -337,6 +353,64 @@ const GeometryFidelityRolesSchema = UnknownRecord.extend({
   vendor_qualified: z.array(z.string()).default([])
 });
 
+const GeometryProgramItemSchema = UnknownRecord.extend({
+  program_id: z.string(),
+  semantic_role: z.string(),
+  requested_quantity: z.number().int().positive(),
+  node_count: z.number().int().positive(),
+  authorship: z.enum(["llm_generated", "deterministic_generated"]),
+  generator_provider: z.string(),
+  generator_model: z.string(),
+  structured_output_mode: z.enum([
+    "strict_json_schema",
+    "json_object_validated",
+    "json_object_repaired"
+  ]),
+  source_prompt_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  source_description: z.string().nullish(),
+  source_description_origin: z.enum([
+    "user_requirement",
+    "revision_preserved",
+    "legacy_unavailable"
+  ]).default("legacy_unavailable"),
+  placement_context: z.string().nullish(),
+  maximum_dimensions_m: GeometryVector3Schema.nullish(),
+  limitations: z.array(z.string()).default([]),
+  deterministic_adjustments: z.array(z.string()).default([])
+});
+
+const GeometryProgramSummarySchema = UnknownRecord.extend({
+  program_count: z.number().int().nonnegative(),
+  generated_component_count: z.number().int().nonnegative(),
+  total_node_count: z.number().int().nonnegative(),
+  repaired_program_count: z.number().int().nonnegative(),
+  programs: z.array(GeometryProgramItemSchema).default([])
+}).superRefine((value, ctx) => {
+  const expected = {
+    program_count: value.programs.length,
+    generated_component_count: value.programs.reduce(
+      (total, program) => total + program.requested_quantity,
+      0
+    ),
+    total_node_count: value.programs.reduce(
+      (total, program) => total + program.node_count,
+      0
+    ),
+    repaired_program_count: value.programs.filter(
+      (program) => program.structured_output_mode === "json_object_repaired"
+    ).length
+  };
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (value[field as keyof typeof expected] !== expectedValue) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${field} does not match programs`,
+        path: [field]
+      });
+    }
+  }
+});
+
 export const GeometryFidelitySummarySchema = publicSchema(
   UnknownRecord.extend({
     component_count: z.number().int().nonnegative(),
@@ -369,6 +443,7 @@ export const ViewerBundleSchema = publicSchema(
     qa_score: z.number().nullish(),
     asset_import_summary: UnknownRecord.nullish(),
     geometry_fidelity_summary: GeometryFidelitySummarySchema.nullish(),
+    geometry_program_summary: GeometryProgramSummarySchema.nullish(),
     human_warnings_count: z.number().default(0),
     human_errors_count: z.number().default(0),
     primary_glb_url: z.string().nullish(),

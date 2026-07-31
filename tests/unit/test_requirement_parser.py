@@ -36,6 +36,17 @@ def test_hba_only_does_not_become_an_explicit_tower_height() -> None:
     assert "DEFAULT_TOWER_HEIGHT_USED" in {warning.code for warning in spec.warnings}
 
 
+def test_component_offset_is_not_confused_with_tower_height() -> None:
+    spec = parse_requirements_text(
+        "Pylône treillis 30 m, 3 secteurs à 24 m, azimuts 0, 120, 240. "
+        "Placer le shelter à 7 m à droite du pylône."
+    )
+
+    assert spec.tower_height_m == 30
+    assert spec.requires_confirmation is False
+    assert "tower_height_m" not in spec.confirmation_fields
+
+
 def test_parse_professional_tower_characteristics() -> None:
     spec = parse_requirements_text(
         "Créer un site 5G sur pylône treillis 30m, 4 jambes, base 4m, sommet 1m, "

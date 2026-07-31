@@ -16,6 +16,7 @@ AssetType = Literal[
     "beam",
     "marker",
     "label",
+    "generated_component",
 ]
 
 

@@ -494,6 +494,57 @@ class GeometryFidelitySummary(BaseModel):
     roles: GeometryFidelityRoles
 
 
+class GeometryProgramItem(BaseModel):
+    program_id: str
+    semantic_role: str
+    requested_quantity: int = Field(ge=1)
+    node_count: int = Field(ge=1)
+    authorship: Literal["llm_generated", "deterministic_generated"]
+    generator_provider: str
+    generator_model: str
+    structured_output_mode: Literal[
+        "strict_json_schema",
+        "json_object_validated",
+        "json_object_repaired",
+    ]
+    source_prompt_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_description: str | None = None
+    source_description_origin: Literal[
+        "user_requirement",
+        "revision_preserved",
+        "legacy_unavailable",
+    ] = "legacy_unavailable"
+    placement_context: str | None = None
+    maximum_dimensions_m: dict[str, float] | None = None
+    limitations: list[str] = Field(default_factory=list)
+    deterministic_adjustments: list[str] = Field(default_factory=list)
+
+
+class GeometryProgramSummary(BaseModel):
+    program_count: int = Field(ge=0)
+    generated_component_count: int = Field(ge=0)
+    total_node_count: int = Field(ge=0)
+    repaired_program_count: int = Field(ge=0)
+    programs: list[GeometryProgramItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_aggregates(self) -> "GeometryProgramSummary":
+        if self.program_count != len(self.programs):
+            raise ValueError("program_count must equal the number of programs")
+        if self.generated_component_count != sum(
+            program.requested_quantity for program in self.programs
+        ):
+            raise ValueError("generated_component_count does not match programs")
+        if self.total_node_count != sum(program.node_count for program in self.programs):
+            raise ValueError("total_node_count does not match programs")
+        if self.repaired_program_count != sum(
+            program.structured_output_mode == "json_object_repaired"
+            for program in self.programs
+        ):
+            raise ValueError("repaired_program_count does not match programs")
+        return self
+
+
 class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
@@ -506,6 +557,7 @@ class ViewerBundle(BaseModel):
     qa_score: float | None = None
     asset_import_summary: dict | None = None
     geometry_fidelity_summary: GeometryFidelitySummary | None = None
+    geometry_program_summary: GeometryProgramSummary | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
     primary_glb_url: str | None = None

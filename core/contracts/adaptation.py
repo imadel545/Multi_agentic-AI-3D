@@ -7,12 +7,20 @@ from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import ScenePatch
 from core.contracts.validation import ValidationReport
 
-AdaptationValueType = Literal["number", "integer", "boolean", "string", "vector3"]
+AdaptationValueType = Literal[
+    "number",
+    "integer",
+    "boolean",
+    "string",
+    "vector3",
+    "geometry_program",
+]
 AdaptationTool = Literal[
     "parametric_rebuild",
     "sector_layout",
     "asset_transform",
     "scene_visibility",
+    "geometry_program_rebuild",
 ]
 AdaptationEffect = Literal["geometry", "placement", "material", "visibility", "rf"]
 
@@ -49,6 +57,7 @@ class AssetCapabilityProfileDefinition(StrictModel):
         "opaque_glb",
         "scene_controls",
         "reference_only",
+        "geometry_program",
     ]
     editable_parameters: list[EditableParameterDefinition] = Field(default_factory=list)
     unsupported_operations: list[str] = Field(default_factory=list)

@@ -463,9 +463,13 @@ def _tower_height_candidates(text: str, normalized: str) -> list[RequirementCand
                 r"(?:hba|antenn\w*|secteurs?|sectors?)\b[^\d]{0,20}\d", context
             ):
                 continue
+            if mechanism == "height_before_tower" and _is_relative_position_phrase(match.group(0)):
+                continue
             if mechanism == "tower_before_height" and re.search(
                 r"(?:hba|antenn\w*|secteurs?|sectors?)\b[^\d]{0,20}\d", context
             ):
+                continue
+            if mechanism == "tower_before_height" and _is_relative_position_phrase(match.group(0)):
                 continue
             if number_span in seen_spans:
                 continue
@@ -473,6 +477,21 @@ def _tower_height_candidates(text: str, normalized: str) -> list[RequirementCand
             value = float(match.group(group).replace(",", "."))
             candidates.append(_candidate(text, match, value, mechanism))
     return sorted(candidates, key=lambda item: item.span_start or 0)
+
+
+def _is_relative_position_phrase(value: str) -> bool:
+    """Reject site offsets that happen to be close to a tower word."""
+
+    return bool(
+        re.search(
+            r"\b(?:"
+            r"(?:à|a|to\s+the)\s+(?:droite|gauche|right|left)"
+            r"|(?:distance|écart|ecart|offset|décalage|decalage|rayon)"
+            r"|m\s+(?:du|de\s+la|from\s+the)\s+(?:pyl[oô]ne|tower|tour|m[aâ]t|monopole)"
+            r")\b",
+            value,
+        )
+    )
 
 
 def _sector_count_candidates(text: str, normalized: str) -> list[RequirementCandidateEvidence]:

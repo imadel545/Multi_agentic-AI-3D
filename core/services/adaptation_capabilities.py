@@ -11,6 +11,7 @@ from core.contracts.adaptation import (
     ResolvedAdaptationCapability,
     SceneAdaptationCapabilities,
 )
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.scene import SceneSpec
 from core.services.asset_registry import AssetRegistry
 
@@ -80,6 +81,25 @@ class AdaptationCapabilityService:
                 unsupported=unsupported,
                 missing_profiles=missing_profiles,
                 capability_scope=f"accessory_{index + 1}",
+            )
+
+        for index, program in enumerate(scene.geometry_programs):
+            resolved.append(
+                ResolvedAdaptationCapability(
+                    capability_id=f"geometry_program_{index + 1}:rebuild",
+                    asset_id=None,
+                    profile_id="geometry_program_v1",
+                    label=f"Régénérer {program.semantic_role}",
+                    path=f"/geometry_programs/{index}",
+                    value_type="geometry_program",
+                    execution_tool="geometry_program_rebuild",
+                    effect="geometry",
+                    description=(
+                        "Régénère ce composant via un GeometryProgram LLM typé, "
+                        "puis relance Blender et la QA."
+                    ),
+                    requires_regeneration=True,
+                )
             )
 
         unique = {capability.capability_id: capability for capability in resolved}
@@ -188,6 +208,9 @@ class AdaptationCapabilityService:
             if not isinstance(value, str) or not value:
                 raise ValueError(f"{operation.path} requires a non-empty string")
             values = [value]
+        elif value_type == "geometry_program":
+            GeometryProgram.model_validate(value)
+            values = []
         else:
             if (
                 not isinstance(value, list)

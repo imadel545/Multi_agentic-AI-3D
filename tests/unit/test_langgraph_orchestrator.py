@@ -7,6 +7,7 @@ import pytest
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.common import WarningItem
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.planning_decision import PlanningModelDecision
 from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import RequirementSpec
@@ -26,6 +27,7 @@ from core.orchestration import DesignOrchestrator
 from core.orchestration.langgraph_orchestrator import (
     _emit_node_started_runtime_event,
     _initial_checkpoint_thread_id,
+    _requirements_from_scene,
     _revision_checkpoint_thread_id,
     _scene_with_revision_dependencies,
 )
@@ -191,6 +193,83 @@ def test_scene_revision_removes_disabled_derived_accessories() -> None:
     normalized = _scene_with_revision_dependencies(scene, registry)
 
     assert all(item.asset_type != "gps" for item in normalized.accessory_assets)
+
+
+def test_scene_revision_preserves_generated_geometry_intents() -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    program = GeometryProgram.model_validate(
+        {
+            "program_id": "technical_shelter.llm_v1",
+            "semantic_role": "technical_shelter",
+            "requested_quantity": 1,
+            "authorship": "llm_generated",
+            "generator_provider": "groq",
+            "generator_model": "openai/gpt-oss-120b",
+            "structured_output_mode": "strict_json_schema",
+            "source_prompt_sha256": "a" * 64,
+            "source_description": "Créer un shelter technique avec deux portes.",
+            "placement_context": "à 7 m à droite du pylône",
+            "maximum_dimensions_m": {"x": 3.5, "y": 2.5, "z": 2.8},
+            "nodes": [
+                {
+                    "kind": "primitive",
+                    "node_id": "shelter",
+                    "semantic_role": "technical_shelter",
+                    "primitive": "box",
+                    "size_m": {"x": 3.0, "y": 2.2, "z": 2.5},
+                },
+                {
+                    "kind": "primitive",
+                    "node_id": "door",
+                    "primitive": "box",
+                    "size_m": {"x": 0.8, "y": 0.08, "z": 1.8},
+                },
+                {
+                    "kind": "primitive",
+                    "node_id": "roof",
+                    "primitive": "box",
+                    "size_m": {"x": 3.2, "y": 2.4, "z": 0.12},
+                },
+            ],
+        }
+    )
+    scene = SceneSpec(
+        scene_id="wf_revision_generated_geometry",
+        network_type="5G",
+        tower=SceneAssetPlacement(
+            asset_id="TOWER_LATTICE_30M",
+            position=[0.0, 0.0, 0.0],
+            rotation_deg=[0.0, 0.0, 0.0],
+            height_m=30.0,
+        ),
+        sectors=[
+            SectorSpec(
+                sector_id="S1",
+                antenna_asset_id="ANT_PANEL_5G_001",
+                radio_asset_id="RRU_SMALL_001",
+                install_height_m=24.0,
+                azimuth_deg=0.0,
+                beamwidth_deg=65.0,
+            )
+        ],
+        geometry_programs=[program],
+    )
+
+    requirements = _requirements_from_scene(
+        scene,
+        registry.get("TOWER_LATTICE_30M"),
+        registry.get("ANT_PANEL_5G_001"),
+        registry.get("RRU_SMALL_001"),
+        "high",
+    )
+
+    assert len(requirements.geometry_requests) == 1
+    request = requirements.geometry_requests[0]
+    assert request.request_id == "technical_shelter"
+    assert request.semantic_role == "technical_shelter"
+    assert request.description == program.source_description
+    assert request.placement_context == program.placement_context
+    assert request.maximum_dimensions_m == program.maximum_dimensions_m
 
 
 def test_gpt_planning_decision_uses_only_validated_rag_candidates(tmp_path: Path) -> None:

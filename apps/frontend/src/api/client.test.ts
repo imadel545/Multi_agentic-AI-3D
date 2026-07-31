@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ContractValidationError } from "./schemas";
+import {
+  ContractValidationError,
+  ViewerBundleSchema,
+  parseContract
+} from "./schemas";
 import { ApiClientError, TelecomStudioApi } from "./client";
 
 function jsonResponse(payload: unknown, init: ResponseInit = {}) {
@@ -11,6 +15,38 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}) {
 }
 
 describe("TelecomStudioApi", () => {
+  it("rejects inconsistent geometry-program aggregate counts", () => {
+    expect(() =>
+      parseContract("ViewerBundle", ViewerBundleSchema, {
+        workflow_id: "wf_1",
+        status: "completed",
+        available_actions: [],
+        unsupported_actions: [],
+        geometry_program_summary: {
+          program_count: 2,
+          generated_component_count: 1,
+          total_node_count: 3,
+          repaired_program_count: 0,
+          programs: [
+            {
+              program_id: "shelter.llm_v1",
+              semantic_role: "shelter",
+              requested_quantity: 1,
+              node_count: 3,
+              authorship: "llm_generated",
+              generator_provider: "groq",
+              generator_model: "openai/gpt-oss-120b",
+              structured_output_mode: "strict_json_schema",
+              source_prompt_sha256: "a".repeat(64),
+              limitations: [],
+              deterministic_adjustments: []
+            }
+          ]
+        }
+      })
+    ).toThrow(ContractValidationError);
+  });
+
   it("loads the real quarantined asset-library summary", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -158,6 +194,7 @@ describe("TelecomStudioApi", () => {
       include_labels: true,
       include_power_cabinet: true,
       include_gps_antenna: true,
+      geometry_requests: [],
       detail_level: "high",
       warnings: [],
       repair_events: [],

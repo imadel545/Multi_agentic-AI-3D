@@ -16,10 +16,12 @@ FastAPI
   -> SQLite memory recall
   -> asset registry + inventory
   -> qualified asset-library retrieval only (raw CAD stays quarantined)
-  -> manifest-bounded equipment profiles + explicit geometry LOD
+  -> scored asset candidates + AssemblyPlan/connectors
+  -> routed DesignBlueprint specialists
   -> SceneSpec planner
+  -> optional bounded GPT-OSS GeometryProgram
   -> SceneSpec validation + quality gates
-  -> Blender runner
+  -> deterministic Blender builders / GeometryProgram compiler
   -> GLB/preview/metadata artifacts
   -> structural/proxy geometry/preview QA
   -> memory writeback
@@ -31,8 +33,10 @@ Une révision par prompt suit d'abord un graphe spécialisé:
 ```text
 active SceneSpec + prompt
   -> resolve manifest capability profiles
-  -> bounded Groq JSON-Schema plan or visible deterministic fallback
+  -> route standard adaptation or generated-component rebuild
+  -> bounded Groq JSON-Schema plan or visible standard-capability fallback
   -> capability/path/tool/value/grounding validation
+  -> GeometryProgram contract/envelope validation when targeted
   -> SceneSpec mutation
   -> main revision graph -> Blender -> QA -> certified version activation
 ```
@@ -40,12 +44,15 @@ active SceneSpec + prompt
 ## Modules
 
 - `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
-- `apps/blender_worker`: SceneSpec-driven Blender script.
-- `core/contracts`: strict contracts.
+- `apps/blender_worker`: SceneSpec-driven Blender script, fixed parametric
+  builders and deterministic GeometryProgram compiler.
+- `core/contracts`: strict contracts, including `GeometryRequest` and
+  `GeometryProgram`.
 - `core/document_pack`: bounded direct-file/ZIP intake, PDF/OCR/DXF extraction,
   and `ProjectDesignSpec`.
 - `core/orchestration`: LangGraph workflow and route logic.
-- `core/agents`: deterministic/LLM wrappers for extraction, planning, editing, RF/tower checks.
+- `core/agents`: deterministic/LLM wrappers for extraction, planning, editing,
+  RF/tower checks and bounded GeometryProgram authorship.
 - `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
@@ -90,12 +97,13 @@ active SceneSpec + prompt
   sequence-gap catch-up are durable through the JSONL log within this
   single-process scope.
 - The orchestration trace distinguishes bounded LLM decisions, deterministic
-  specialists, services, quality gates and external tools. The fixed graph is
-  not yet a dynamic specialist registry or supervisor.
+  specialists, services, quality gates and external tools. A routed specialist
+  registry exists, but its domains and dependencies remain declared
+  deterministically; it is not an autonomous supervisor.
 - Asset import fallback can still create procedural geometry if an import fails, but the active
-  inventory has 12 manifests and 12 GLB files: 10 manifests are
-  generation-eligible, 4 authorize exact hash-pinned GLB import, and 2 remain
-  reference-only.
+  inventory has 13 manifests and 12 GLB files: 12 manifests are
+  generation-eligible, 3 authorize exact hash-pinned GLB import, 9 use bounded
+  parametric generation, and 1 remains reference-only.
 - The separate 11,974-file CAD library is not part of that active inventory.
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,
@@ -103,6 +111,11 @@ active SceneSpec + prompt
 - Geometry QA combines binary accessor checks, semantic role transforms and a
   real-vertex AABB interference screen for primary equipment. It is not exact
   triangle/BVH collision, RF, structural or vendor-grade QA.
+- GeometryProgram envelopes and a 1024-node aggregate budget are deterministic.
+  One uniform bounded adapter may only reduce a program that exceeds its
+  requested maximum envelope. Placement prose is preserved, not interpreted or
+  independently validated, and free generated roles are outside the current
+  primary-equipment AABB gate.
 - Generic panel/RRU generation is manifest-profiled and LOD-aware, and GLB QA
   requires declared technical sub-parts. These profiles remain generic rather
   than vendor-qualified.

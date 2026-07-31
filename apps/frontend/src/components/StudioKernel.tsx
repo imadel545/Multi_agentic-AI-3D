@@ -82,7 +82,11 @@ export function BackendStatusBar({
         {workflowActive ? (
           <span className="workflow-truth active">
             <Loader2 className="spin" size={14} aria-hidden="true" />
-            {phase === "submitting" ? "Préparation en cours" : "Modification en cours"}
+            {phase === "submitting"
+              ? "Préparation en cours"
+              : bundle
+                ? "Modification en cours"
+                : "Conception en cours"}
           </span>
         ) : bundle ? (
           <span className={certified ? "topbar-proof ok" : "topbar-proof warn"}>
@@ -189,6 +193,8 @@ export function ChatCommandPanel({
     ? "Modification et contrôles en cours"
     : revisionMode
       ? "Décrivez la modification"
+      : disabled
+        ? "Conception et contrôles en cours"
       : phase === "completed"
         ? "Le résultat est prêt à inspecter"
         : phase === "failed"
@@ -198,6 +204,8 @@ export function ChatCommandPanel({
     ? "La version actuelle reste visible pendant la création et la validation de la nouvelle version."
     : revisionMode
       ? "Demandez un changement précis. Le système conserve la version actuelle si la QA refuse la modification."
+      : disabled
+        ? "La demande confirmée est en cours d’assemblage. Le résultat ne sera annoncé qu’après Blender et la QA."
       : phase === "completed"
         ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
         : phase === "failed"
@@ -220,8 +228,8 @@ export function ChatCommandPanel({
 
       {canEdit ? (
         <div className="command-mode" role="group" aria-label="Type de commande">
-          <button className={!revisionMode ? "active" : ""} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
-          <button className={revisionMode ? "active" : ""} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
+          <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
+          <button className={revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
         </div>
       ) : null}
 
@@ -232,6 +240,7 @@ export function ChatCommandPanel({
             ? "Ex: augmente la hauteur à 35 m, ajoute une plateforme, corrige les labels…"
             : "Ex: pylône treillis 30 m, 3 secteurs à 24 m, azimuts 0/120/240, RRU, câbles, GPS…"}
           value={revisionMode ? revisionPrompt : prompt}
+          disabled={disabled || revisionBusy}
           onChange={(event) => revisionMode
             ? onRevisionPromptChange(event.target.value)
             : onPromptChange(event.target.value)}
@@ -260,7 +269,7 @@ export function ChatCommandPanel({
           : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "Vous confirmerez les paramètres extraits avant génération."}
       </p>
 
-      {analysis ? (
+      {analysis && !revisionMode ? (
         <RequirementsUnderstanding
           analysis={analysis}
           failedWorkflow={phase === "failed"}
@@ -271,17 +280,19 @@ export function ChatCommandPanel({
       ) : null}
       {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
 
-      <DocumentPackIntake
-        busy={documentPackBusy}
-        capabilities={documentCapabilities}
-        correctionBusy={correctionBusy}
-        message={documentPackMessage}
-        onCorrect={onDocumentPackCorrection}
-        onGenerate={onDocumentPackGenerate}
-        onUpload={onDocumentPackUpload}
-        review={documentPackReview}
-        summary={documentPackSummary}
-      />
+      {!revisionMode ? (
+        <DocumentPackIntake
+          busy={documentPackBusy}
+          capabilities={documentCapabilities}
+          correctionBusy={correctionBusy}
+          message={documentPackMessage}
+          onCorrect={onDocumentPackCorrection}
+          onGenerate={onDocumentPackGenerate}
+          onUpload={onDocumentPackUpload}
+          review={documentPackReview}
+          summary={documentPackSummary}
+        />
+      ) : null}
 
       {editMessage ? (
         <p
@@ -350,6 +361,38 @@ function RequirementsUnderstanding({
       <p>
         RRU {yesNo(requirements.include_rru)} · câbles {yesNo(requirements.include_cables)} · cabinet {yesNo(requirements.include_power_cabinet)} · GPS {yesNo(requirements.include_gps_antenna)} · labels {yesNo(requirements.include_labels)}
       </p>
+      {requirements.geometry_requests.length ? (
+        <div className="generated-intent-summary">
+          <strong>
+            {analysis.fallback_used
+              ? "Composants hors catalogue détectés"
+              : "Composants nouveaux compris par l’IA"}
+          </strong>
+          <ul>
+            {requirements.geometry_requests.map((request) => (
+              <li key={request.request_id}>
+                <span>
+                  {request.quantity > 1 ? `${request.quantity} × ` : ""}
+                  {humanSemanticRole(request.semantic_role)}
+                </span>
+                <small>{request.description}</small>
+                {request.placement_context ? (
+                  <small>Placement demandé : {request.placement_context}</small>
+                ) : null}
+                {request.maximum_dimensions_m ? (
+                  <small>
+                    Enveloppe maximale : {request.maximum_dimensions_m.x} ×{" "}
+                    {request.maximum_dimensions_m.y} × {request.maximum_dimensions_m.z} m
+                  </small>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+          <small>
+            Ils seront écrits comme programmes géométriques typés, puis contrôlés avant Blender.
+          </small>
+        </div>
+      ) : null}
       <small>
         Source d’analyse : {analysisProviderLabel(analysis.provider, analysis.extraction_provider)}
       </small>
@@ -1110,6 +1153,57 @@ export function SummaryPanel({
         <Metric label="QA" value={qaTruth(bundle)} />
         <Metric label="Version" value={activeVersion} />
       </div>
+      {bundle?.geometry_program_summary?.program_count ? (
+        <div className="summary-card">
+          <strong>
+            {bundle.geometry_program_summary.generated_component_count} composant(s) créé(s)
+            par le spécialiste géométrie
+          </strong>
+          <p>
+            {bundle.geometry_program_summary.total_node_count} nœuds déclaratifs ·{" "}
+            {bundle.geometry_program_summary.repaired_program_count} sortie(s) LLM réparée(s)
+            et revalidée(s).
+          </p>
+          <ul className="compact-proof-list">
+            {bundle.geometry_program_summary.programs.map((program) => (
+              <li key={program.program_id}>
+                <span>{humanSemanticRole(program.semantic_role)}</span>
+                <small>
+                  {program.authorship === "llm_generated" ? "Géométrie écrite par LLM" : "Géométrie déterministe"}
+                  {" · "}
+                  {program.generator_provider}:{program.generator_model}
+                  {" · "}
+                  {humanGeometryOutputMode(program.structured_output_mode)}
+                  {" · preuve "}
+                  {program.source_prompt_sha256.slice(0, 10)}
+                </small>
+                {program.source_description_origin === "legacy_unavailable" ? (
+                  <small>Intention source indisponible pour ce composant historique.</small>
+                ) : program.source_description ? (
+                  <small>Intention source : {program.source_description}</small>
+                ) : null}
+                {program.placement_context ? (
+                  <small>Implantation demandée : {program.placement_context}</small>
+                ) : null}
+                {program.maximum_dimensions_m ? (
+                  <small>
+                    Enveloppe contrôlée : {program.maximum_dimensions_m.x} ×{" "}
+                    {program.maximum_dimensions_m.y} × {program.maximum_dimensions_m.z} m max.
+                  </small>
+                ) : null}
+                {program.limitations.map((limitation) => (
+                  <small key={limitation}>Limite déclarée : {limitation}</small>
+                ))}
+                {program.deterministic_adjustments.map((adjustment) => (
+                  <small key={adjustment}>
+                    Adaptation déterministe appliquée pour respecter les contraintes.
+                  </small>
+                ))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <List title="État des livrables" items={summarySignals(bundle, issueCount)} empty="Aucun livrable chargé." />
       <List
         title="Services de conception"
@@ -1192,8 +1286,13 @@ export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
             </details>
           ) : null}
         </div>
-      ) : (
+      ) : issues ? (
         <p className="muted">Aucune alerte à examiner.</p>
+      ) : (
+        <p className="inline-alert">
+          <AlertTriangle size={15} aria-hidden="true" />
+          Le nombre d’alertes est connu, mais leur détail n’a pas pu être synchronisé.
+        </p>
       )}
     </section>
   );
@@ -1388,6 +1487,18 @@ function libraryFileName(relativePath: string): string {
 
 function humanAssetId(assetId: string): string {
   return assetId.toLowerCase().replaceAll("_", " ");
+}
+
+function humanSemanticRole(role: string): string {
+  return role.replaceAll("_", " ").replaceAll(".", " ");
+}
+
+function humanGeometryOutputMode(mode: string): string {
+  return {
+    strict_json_schema: "schéma JSON strict",
+    json_object_validated: "JSON validé localement",
+    json_object_repaired: "JSON réparé puis revalidé"
+  }[mode] ?? mode;
 }
 
 function humanAssetType(assetType: string): string {
@@ -2061,7 +2172,8 @@ function humanAdaptationTool(tool: string): string {
     parametric_rebuild: "reconstruction paramétrique Blender",
     sector_layout: "placement radio contrôlé",
     asset_transform: "transformation d’asset",
-    scene_visibility: "composition de scène"
+    scene_visibility: "composition de scène",
+    geometry_program_rebuild: "régénération géométrique LLM contrôlée"
   }[tool] ?? "outil backend déclaré";
 }
 
@@ -2076,6 +2188,8 @@ export function summarizeAdaptationCapabilityGroups(
     const sectorMatch = capability.path.match(/^\/sectors\/(\d+)\//);
     const key = sectorMatch
       ? "sectors"
+      : capability.path.startsWith("/geometry_programs/")
+        ? "generated"
       : capability.path.startsWith("/tower/")
         ? "tower"
         : capability.path.startsWith("/visual_elements/")
@@ -2087,6 +2201,8 @@ export function summarizeAdaptationCapabilityGroups(
         label:
           key === "sectors"
             ? "Secteurs radio"
+            : key === "generated"
+              ? "Composants générés"
             : key === "tower"
               ? "Pylône"
               : key === "scene"
@@ -2101,7 +2217,7 @@ export function summarizeAdaptationCapabilityGroups(
     if (sectorMatch) group.sectors.add(Number(sectorMatch[1]) + 1);
     groups.set(key, group);
   }
-  return ["scene", "tower", "sectors", "other"].flatMap((key) => {
+  return ["scene", "tower", "sectors", "generated", "other"].flatMap((key) => {
     const group = groups.get(key);
     if (!group) return [];
     const sectorScope = group.sectors.size ? ` sur ${group.sectors.size} secteurs` : "";
@@ -2227,6 +2343,15 @@ function workflowStatusLabel(status?: string | null): string {
 
 function serviceStatusLabel(status?: string | null): string {
   const normalized = status?.toLowerCase() ?? "";
+  if (
+    [
+      "qualified_mixed_catalog",
+      "primary_nvidia_embedding",
+      "primary_nvidia_reranker"
+    ].includes(normalized)
+  ) {
+    return "opérationnel";
+  }
   if (["ok", "ready", "available", "enabled", "ready_for_import"].some((value) => normalized.includes(value))) {
     return "disponible";
   }
@@ -2396,7 +2521,7 @@ function qaTruth(bundle: ViewerBundle | null): string {
   if (!bundle) {
     return "en attente";
   }
-  return bundle.mesh_qa_passed ? "passed" : "attention";
+  return bundle.mesh_qa_passed ? "validée" : "à examiner";
 }
 
 function generationTruth(bundle: ViewerBundle | null): string {

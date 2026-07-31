@@ -1,8 +1,9 @@
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, field_validator, model_validator
 
 from core.contracts.common import DetailLevel, NetworkType, StrictModel, WarningItem
+from core.contracts.geometry_program import GeometryProgramVector3
 from core.contracts.repair import RepairEvent
 from core.contracts.tower import TowerCharacteristics
 
@@ -15,6 +16,41 @@ RequirementEvidenceSource = Literal[
     "user_confirmation",
     "repair",
 ]
+
+GeometryRequestId = Annotated[
+    str,
+    Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$"),
+]
+
+
+class GeometryRequest(StrictModel):
+    """An arbitrary requested component that needs generated geometry.
+
+    The request is still intent data. It can only become Blender geometry after
+    the bounded GeometryProgram specialist and deterministic compiler validate it.
+    """
+
+    request_id: GeometryRequestId
+    semantic_role: GeometryRequestId
+    description: str = Field(min_length=8, max_length=1200)
+    quantity: int = Field(default=1, ge=1, le=32)
+    placement_context: str | None = Field(default=None, max_length=600)
+    maximum_dimensions_m: GeometryProgramVector3 | None = None
+
+    @model_validator(mode="after")
+    def validate_maximum_dimensions(self) -> "GeometryRequest":
+        if self.maximum_dimensions_m is None:
+            return self
+        if any(
+            value <= 0 or value > 300
+            for value in (
+                self.maximum_dimensions_m.x,
+                self.maximum_dimensions_m.y,
+                self.maximum_dimensions_m.z,
+            )
+        ):
+            raise ValueError("maximum_dimensions_m values must be in ]0, 300]")
+        return self
 
 
 class RequirementCandidateEvidence(StrictModel):
@@ -89,6 +125,7 @@ class RequirementSpec(StrictModel):
     include_labels: bool = True
     include_power_cabinet: bool = False
     include_gps_antenna: bool = False
+    geometry_requests: list[GeometryRequest] = Field(default_factory=list, max_length=8)
     detail_level: DetailLevel = "high"
     warnings: list[WarningItem] = Field(default_factory=list)
     repair_events: list[RepairEvent] = Field(default_factory=list)
@@ -114,4 +151,10 @@ class RequirementSpec(StrictModel):
             raise ValueError("sector_count must match len(azimuths_deg)")
         if self.antenna_install_height_m > self.tower_height_m:
             raise ValueError("antenna_install_height_m cannot exceed tower_height_m")
+        request_ids = [request.request_id for request in self.geometry_requests]
+        if len(request_ids) != len(set(request_ids)):
+            raise ValueError("geometry request IDs must be unique")
+        semantic_roles = [request.semantic_role for request in self.geometry_requests]
+        if len(semantic_roles) != len(set(semantic_roles)):
+            raise ValueError("geometry request semantic roles must be unique")
         return self

@@ -2,14 +2,15 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import (
     DimensionsM,
     GeometryFidelity,
     PanelAntennaGeometryProfile,
     RadioGeometryProfile,
 )
-from core.contracts.assembly import AssemblyPlan
 from core.contracts.common import AssetType, DetailLevel, NetworkType, StrictModel
+from core.contracts.geometry_program import GeometryProgram
 from core.contracts.parametric import GenerationStrategy, GeometrySource
 from core.contracts.tower import TowerCharacteristics
 
@@ -177,6 +178,7 @@ class SceneSpec(StrictModel):
     visual_elements: VisualElements = Field(default_factory=VisualElements)
     accessory_assets: list[SceneAccessoryPlacement] = Field(default_factory=list)
     assembly_plan: AssemblyPlan | None = None
+    geometry_programs: list[GeometryProgram] = Field(default_factory=list, max_length=32)
     preview: PreviewSpec = Field(default_factory=PreviewSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
 
@@ -188,6 +190,9 @@ class SceneSpec(StrictModel):
         accessory_ids = [asset.asset_id for asset in self.accessory_assets]
         if len(accessory_ids) != len(set(accessory_ids)):
             raise ValueError("accessory asset_id values must be unique")
+        program_ids = [program.program_id for program in self.geometry_programs]
+        if len(program_ids) != len(set(program_ids)):
+            raise ValueError("geometry program IDs must be unique")
         if self.tower.position != [0.0, 0.0, 0.0]:
             raise ValueError("tower.position is not operational and must remain [0, 0, 0]")
         if self.tower.rotation_deg != [0.0, 0.0, 0.0]:

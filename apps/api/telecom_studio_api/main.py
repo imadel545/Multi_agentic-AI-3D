@@ -46,6 +46,7 @@ from apps.api.telecom_studio_api.workflow import (
     WorkflowService,
     WorkflowStorageError,
 )
+from core.agents.geometry_program_planner import GeometryProgramPlanner
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import SceneAdaptationCapabilities
@@ -189,6 +190,27 @@ asset_selection_client = (
     if settings.resolved_groq_api_key and settings.enable_groq_asset_selection
     else None
 )
+geometry_program_client = (
+    GroqStructuredClient(
+        api_key=settings.resolved_groq_api_key,
+        model=settings.groq_model,
+        base_url=settings.groq_base_url,
+        timeout_s=settings.groq_geometry_timeout_s,
+        max_completion_tokens=settings.groq_geometry_max_completion_tokens,
+        reasoning_effort=settings.groq_geometry_reasoning_effort,
+    )
+    if settings.resolved_groq_api_key and settings.enable_groq_geometry_program
+    else None
+)
+geometry_program_planner = (
+    GeometryProgramPlanner(
+        geometry_program_client,
+        max_completion_tokens=settings.groq_geometry_max_completion_tokens,
+        reasoning_effort=settings.groq_geometry_reasoning_effort,
+    )
+    if geometry_program_client is not None
+    else None
+)
 document_pack_service = DocumentPackService(
     settings.temp_outputs_dir,
     groq_client=groq_client,
@@ -224,12 +246,14 @@ orchestrator = DesignOrchestrator(
     checkpoint_saver=checkpoint_saver,
     planning_decision_client=planning_decision_client,
     asset_selection_client=asset_selection_client,
+    geometry_program_planner=geometry_program_planner,
     allow_blender_fallback=settings.allow_blender_fallback,
 )
 scene_edit_agent = SceneEditAgent(
     groq_client=groq_client,
     capability_service=adaptation_capability_service,
     checkpoint_saver=checkpoint_saver,
+    geometry_program_planner=geometry_program_planner,
 )
 workflow_service = WorkflowService(
     registry=registry,

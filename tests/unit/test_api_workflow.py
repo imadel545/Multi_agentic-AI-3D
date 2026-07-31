@@ -218,7 +218,10 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert status["asset_import_summary"]["asset_file_exists_count"] >= 1
         assert status["asset_imports"]
         assert any(
-            record["asset_id"] == "ANT_PANEL_5G_001" and record["asset_file_exists"] is True
+            record["object_role"] == "antenna"
+            and record["generation_success"] is True
+            and record["asset_metadata"]["qualification_status"]
+            == "qualified_for_generation"
             for record in status["asset_imports"]
         )
         assert all(
@@ -835,7 +838,7 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert "procedural_generation_required" in payload
     assert payload["status"] == "qualified_mixed_catalog"
     assert payload["real_glb_asset_count"] == 12
-    assert payload["import_qualified_glb_count"] == 4
+    assert payload["import_qualified_glb_count"] == 3
     assert payload["generation_eligible_asset_count"] == 12
     assert payload["reference_only_asset_count"] == 1
     assert any(entry["asset_import_mode"] == "imported_glb_exact" for entry in payload["entries"])

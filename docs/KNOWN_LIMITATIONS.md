@@ -11,9 +11,10 @@ frontend.
 - The first technical kernel was rejected as too dashboard-like; permanent
   stage grids, capability counters, raw workflow ids, and raw JSON surfaces must
   not come back.
-- The Three.js/React Three Fiber viewer is already lazy-loaded, but its production
-  chunk is about 976 kB minified (267 kB gzip); deeper engine-level splitting is
-  still a performance task.
+- The Three.js/React Three Fiber viewer is lazy-loaded and its runtime is split
+  into cacheable production chunks. The 2026-07-31 build keeps every JavaScript
+  chunk below 371 kB uncompressed, but the complete 3D dependency set remains
+  substantial and still benefits from browser caching.
 - Old dashboard patterns remain rejected.
 - No `/projects` or `/runs` API is added in v1. The frontend maps its "run"
   concept to `workflow_id` and "scene plan" to `scene_spec`.
@@ -56,18 +57,38 @@ frontend.
 - Agents are typed deterministic specialists or bounded LLM wrappers; this is
   not a free-form autonomous Blender coding system.
 - The main topology is still predominantly fixed. A typed deterministic
-  `DesignBlueprint` stage now routes the currently required asset-composition,
-  RF and structural specialists, persists composition intent, and proves
-  `RequirementSpec -> DesignBlueprint -> SceneSpec`. It is not yet an
-  LLM-selected blueprint candidate system or an autonomous supervisor.
-  Asset selection is still first-compatible rather than scored across multiple
-  qualified candidates; connector intents, conflict aggregation, recalled
-  designs as planning candidates, and a bounded post-Blender critique/rebuild
-  loop remain missing.
+  `DesignBlueprint` stage routes asset-composition, RF, structural and
+  conditional geometry-generation policy specialists, persists composition
+  intent, and proves `RequirementSpec -> DesignBlueprint -> SceneSpec`. Asset
+  candidates are scored and connector intents are operational, but candidate
+  diversity is still small. There is no autonomous supervisor, conflict
+  aggregator, recalled-design candidate authority or bounded post-Blender
+  critique/rebuild loop.
+- GPT-OSS may now author an out-of-catalog `GeometryProgram`, but this is not an
+  unrestricted arbitrary-design system. The vocabulary is limited to boxes,
+  cylinders, cones, UV spheres, polygonal curves, instances, simple materials
+  and transforms. There is no CSG, boolean modeling, constrained extrusion,
+  surface modeling, arbitrary topology, imported-mesh editing or generalized
+  Geometry Nodes graph.
+- Geometry generation is fail-closed and requires the configured Groq
+  specialist. There is no deterministic substitute that fabricates the missing
+  component. When deterministic requirement extraction is used, it cannot
+  reliably discover every free-form out-of-catalog component.
+- A request can contain at most 8 geometry intents, each program at most 512
+  nodes, and the workflow at most 1024 GeometryProgram nodes in aggregate. These
+  are safety bounds, not a proof that every accepted workload has optimal Blender
+  performance.
+- Requested `maximum_dimensions_m` is compared deterministically with the
+  program envelope. A uniform bounded adapter can correct only an envelope
+  overflow; it cannot repair semantic design mistakes. New workflows preserve
+  `source_description` and `placement_context` through revision. Historical
+  programs that predate these fields remain explicitly `legacy_unavailable`;
+  placement text is not interpreted or independently validated.
 - Prompt workflows, document-pack generated requirements, and scene revisions
   enter the main compiled graph. Edit interpretation now enters a separate
-  checkpointed LangGraph adaptation graph; version bookkeeping remains
-  service-level.
+  checkpointed LangGraph adaptation graph for standard capabilities. Generated
+  component rebuild uses a bounded specialized branch before the main revision
+  graph; version bookkeeping remains service-level.
 - No robust cancellation/retry manager; async execution uses local threads.
 - HTTP workflow/version identifiers are fail-closed (`wf_` + 12 lowercase hex
   characters, `v` + 8 lowercase hex characters), including percent-encoded
@@ -172,14 +193,16 @@ frontend.
   insufficient proof on other hosts.
 - Blender fallback is rejected by default, but missing assets can still become
   visible procedural geometry during a real Blender generation.
-- Geometry source of truth is `SceneSpec + parametric generator`; GLB is only
-  the exported viewer result.
+- Geometry source of truth is `SceneSpec`, including selected manifests,
+  `AssemblyPlan` and optional `GeometryProgram` values. Fixed parametric builders
+  and the deterministic program compiler consume it; GLB is only the exported
+  viewer result.
 - Mesh QA v1 is `mesh_level_spatial_basic` when semantic transforms and all
   primary-equipment bounds are readable, `mesh_level_transform_basic` when only
   transforms are complete, otherwise `mesh_level_basic`. It computes bounds
   from real GLB `POSITION` bytes, verifies basic HBA/azimuth transforms and
   rejects unexpected AABB overlap among antennas, RRUs, GPS and cabinets.
-  Same-sector antenna/RRU contact uses a 0.15 m minimum-axis penetration bound;
+  Same-sector antenna/RRU contact uses a 0.20 m minimum-axis penetration bound;
   this is still a coarse AABB rule, not a connector-zone or triangle test.
   This is conservative broad-phase screening, not triangle-level BVH collision,
   self-intersection, minimum-clearance engineering or exact panel-normal proof.
@@ -209,6 +232,11 @@ frontend.
   sockets unless a future verified capability profile declares and implements
   those operations.
 - No material, RF, structural wind-load, or vendor-grade mesh dimension validation yet.
+- GeometryProgram validation proves schema, references, units, graph acyclicity,
+  envelope and resource bounds. It does not prove that generated geometry
+  semantically satisfies the natural-language request, that placement text was
+  followed, or that the component is collision-free. Custom generated roles are
+  not yet part of the primary-equipment AABB gate.
 - The tower validator uses height only as a conservative trigger for aviation-marking
   review. It does not determine whether lighting is legally required; national rules,
   obstacle location and the competent aviation authority remain authoritative.
@@ -220,9 +248,9 @@ frontend.
 - The overview preview still lacks a certified sector-equipment close-up. Its
   camera bounds now ignore technical annotations, but role-specific pixel
   visibility/contrast remains future work.
-- The curated manifest catalog is intentionally mixed: 4 GLBs are qualified
-  for exact import, 6 component/tower profiles are qualified for controlled
-  parametric generation, and 2 GLBs are reference-only. The 5G panel and RRU
+- The curated manifest catalog is intentionally mixed: 3 GLBs are qualified
+  for exact import, 9 component/tower profiles are qualified for controlled
+  parametric generation, and 1 GLB is reference-only. The 5G panel and RRU
   companion GLBs have not passed orientation qualification and are therefore
   never imported by the product path.
 - Asset qualification proves file identity, basic mesh integrity, declared

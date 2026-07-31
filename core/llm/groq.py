@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from core.contracts.common import WarningItem
 from core.contracts.requirements import (
     RequirementCandidateEvidence,
+    RequirementFieldEvidence,
     RequirementSpec,
 )
 from core.contracts.tower import TowerCharacteristics
@@ -87,6 +88,67 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "include_labels": {"type": "boolean"},
         "include_power_cabinet": {"type": "boolean"},
         "include_gps_antenna": {"type": "boolean"},
+        "geometry_requests": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9._-]*$",
+                        "maxLength": 96,
+                    },
+                    "semantic_role": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9._-]*$",
+                        "maxLength": 96,
+                    },
+                    "description": {"type": "string", "minLength": 8, "maxLength": 1200},
+                    "quantity": {"type": "integer", "minimum": 1, "maximum": 32},
+                    "placement_context": {
+                        "type": ["string", "null"],
+                        "maxLength": 600,
+                    },
+                    "maximum_dimensions_m": {
+                        "anyOf": [
+                            {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "x": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 300,
+                                    },
+                                    "y": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 300,
+                                    },
+                                    "z": {
+                                        "type": "number",
+                                        "exclusiveMinimum": 0,
+                                        "maximum": 300,
+                                    },
+                                },
+                                "required": ["x", "y", "z"],
+                            },
+                            {"type": "null"},
+                        ]
+                    },
+                },
+                "required": [
+                    "request_id",
+                    "semantic_role",
+                    "description",
+                    "quantity",
+                    "placement_context",
+                    "maximum_dimensions_m",
+                ],
+            },
+        },
         "detail_level": {"type": "string", "enum": ["low", "medium", "high"]},
         "warnings": {
             "type": "array",
@@ -120,6 +182,7 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
         "include_labels",
         "include_power_cabinet",
         "include_gps_antenna",
+        "geometry_requests",
         "detail_level",
         "warnings",
     ],
@@ -170,6 +233,13 @@ class GroqStructuredClient:
                     "Extract supported visual equipment flags such as include_power_cabinet "
                     "and include_gps_antenna when the user asks for power boxes, energy "
                     "cabinets, GPS, or GNSS. "
+                    "Extract each explicitly requested component that is not represented by "
+                    "the standard tower, antenna, radio, cable, beam, label, power-cabinet or "
+                    "GPS fields into geometry_requests. Examples include a custom staircase, "
+                    "equipment shelter, solar canopy, fence, platform furniture or site "
+                    "environment element. Use a stable lowercase request_id and semantic_role, "
+                    "preserve the requested quantity, placement context and maximum dimensions. "
+                    "Do not duplicate standard components in geometry_requests. "
                     "Preserve the deterministic baseline values unless the user text "
                     "explicitly contradicts them. "
                     "Do not include explanatory text outside JSON."
@@ -185,40 +255,44 @@ class GroqStructuredClient:
                 ),
             },
         ]
-        strict_payload = self._policy.apply({
-            "model": self.model,
-            "temperature": 0,
-            "messages": messages,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "RequirementSpec",
-                    "schema": REQUIREMENT_SPEC_SCHEMA,
-                    "strict": True,
+        strict_payload = self._policy.apply(
+            {
+                "model": self.model,
+                "temperature": 0,
+                "messages": messages,
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "RequirementSpec",
+                        "schema": REQUIREMENT_SPEC_SCHEMA,
+                        "strict": True,
+                    },
                 },
-            },
-        })
+            }
+        )
         try:
             return self._post_and_validate(strict_payload, baseline, requirements_text)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 400:
                 raise
 
-        json_object_payload = self._policy.apply({
-            "model": self.model,
-            "temperature": 0,
-            "messages": messages
-            + [
-                {
-                    "role": "system",
-                    "content": (
-                        "Retry in JSON Object Mode. Return the same object shape. "
-                        "Use numeric JSON arrays exactly as in the deterministic baseline."
-                    ),
-                }
-            ],
-            "response_format": {"type": "json_object"},
-        })
+        json_object_payload = self._policy.apply(
+            {
+                "model": self.model,
+                "temperature": 0,
+                "messages": messages
+                + [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Retry in JSON Object Mode. Return the same object shape. "
+                            "Use numeric JSON arrays exactly as in the deterministic baseline."
+                        ),
+                    }
+                ],
+                "response_format": {"type": "json_object"},
+            }
+        )
         requirements = self._post_and_validate(
             json_object_payload,
             baseline,
@@ -272,7 +346,17 @@ class GroqStructuredClient:
         )
 
     def _post_raw(self, payload: dict[str, Any]) -> dict[str, Any]:
-        payload = self._policy.apply(payload)
+        return self.request_json(payload)
+
+    def request_json(
+        self,
+        payload: dict[str, Any],
+        *,
+        policy: GroqRequestPolicy | None = None,
+    ) -> dict[str, Any]:
+        """Execute one JSON response request under an explicit capability policy."""
+
+        payload = (policy or self._policy).apply(payload)
         response = httpx.post(
             f"{self.base_url}/chat/completions",
             headers={
@@ -520,6 +604,38 @@ def _merge_llm_provenance(
             )
         else:
             field_evidence[field] = evidence.model_copy(update={"candidates": candidates})
+    if requirements.geometry_requests:
+        geometry_payload = [
+            request.model_dump(mode="json") for request in requirements.geometry_requests
+        ]
+        field_evidence["geometry_requests"] = RequirementFieldEvidence(
+            field="geometry_requests",
+            selected_value=geometry_payload,
+            selected_source="llm",
+            confidence=0.78,
+            explicit=True,
+            defaulted=False,
+            candidates=[
+                RequirementCandidateEvidence(
+                    value=geometry_payload,
+                    source="llm",
+                    source_text=None,
+                    mechanism="groq_structured_extraction",
+                    confidence=0.78,
+                    selected=True,
+                    rationale=(
+                        "Composants hors catalogue extraits du texte pour le spécialiste "
+                        "GeometryProgram."
+                    ),
+                )
+            ],
+            conflict=False,
+            requires_confirmation=False,
+            rationale=(
+                "Demandes géométriques explicites conservées comme intentions typées; "
+                "aucun code Blender n'est accepté."
+            ),
+        )
     return requirements.model_copy(
         update={
             "field_evidence": field_evidence,
