@@ -112,6 +112,7 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         }.issubset(components)
         assert components["support_structure"]["candidate_scores"]
         assert components["sector_antenna"]["selected_asset_id"]
+        assert len(components["sector_antenna"]["candidate_scores"]) >= 2
         assert components["antenna_mount"]["builder_profile_id"] == "mount_bracket_v1"
         assert components["sector_cable_route"]["generation_strategy"] == "procedural_fallback"
         assert assembly_plan["units"] == "meters"

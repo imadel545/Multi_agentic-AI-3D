@@ -369,10 +369,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
 
-- The current qualified sample has only one eligible 5G panel, RRU, bracket,
-  cabinet and GPS candidate. Scoring is operational, but meaningful
-  multi-candidate choice is currently strongest for the tower family; additional
-  candidates require independent qualification, not copied manifests.
+- The 5G panel role now offers one existing internal reference profile and one
+  explicitly procedural generic dual-band profile. RRU, bracket, cabinet and
+  GPS still have one qualified candidate each; additional real candidates
+  require independent qualification, not copied manifests.
 - Preview generation is scene-level. Per-asset preview images and a close-up
   visual QA gate remain future work.
 - Connector roles prove composition contracts and route intent; they are not an
