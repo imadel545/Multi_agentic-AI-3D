@@ -22,6 +22,10 @@ import {
 
 type TelecomGlbViewerProps = {
   bundle: ViewerBundle | null;
+  loadError?: string | null;
+  loading?: boolean;
+  onReloadBundle?: () => void | Promise<void>;
+  probeWebGL?: () => boolean;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 };
 
@@ -34,7 +38,14 @@ type ViewerHealth =
   | "render_blank"
   | "glb_error";
 
-export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProps) {
+export function TelecomGlbViewer({
+  bundle,
+  loadError = null,
+  loading = false,
+  onReloadBundle,
+  probeWebGL = hasUsableWebGL,
+  toAbsoluteUrl
+}: TelecomGlbViewerProps) {
   const source = resolveViewerSource(bundle, toAbsoluteUrl);
   const badges = viewerBadges(bundle).filter((badge) =>
     badge.includes("Fallback") || badge.includes("dégradé") || badge.includes("attention") || badge.includes("rejetée")
@@ -42,23 +53,37 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
   const [resetKey, setResetKey] = useState(0);
   const [objectSummary, setObjectSummary] = useState<ModelObjectSummary | null>(null);
   const [viewerHealth, setViewerHealth] = useState<ViewerHealth>("idle");
-  const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
+  const [webglSupported, setWebglSupported] = useState<boolean | null>(() =>
+    source.kind === "glb" ? probeWebGL() : null
+  );
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const sourceIdentity = "url" in source ? `${source.kind}:${source.url}` : source.kind;
   const renderIsBlank = source.kind === "glb" && viewerHealth === "render_blank";
-  const retryGlb = () => {
-    if (source.kind === "glb") {
-      useGLTF.clear(source.url);
-      setViewerHealth("loading_glb");
-      setResetKey((value) => value + 1);
+  const retryViewer = () => {
+    if (loading) {
+      return;
     }
+    if (source.kind === "glb") {
+      const supported = probeWebGL();
+      setWebglSupported(supported);
+      if (supported) {
+        useGLTF.clear(source.url);
+        setViewerHealth("loading_glb");
+        setResetKey((value) => value + 1);
+      }
+      if (loadError) {
+        void onReloadBundle?.();
+      }
+      return;
+    }
+    void onReloadBundle?.();
   };
 
   useEffect(() => {
     setObjectSummary(null);
     setViewerHealth(source.kind === "glb" ? "loading_glb" : "idle");
-    setWebglSupported(source.kind === "glb" ? hasUsableWebGL() : null);
-  }, [sourceIdentity]);
+    setWebglSupported(source.kind === "glb" ? probeWebGL() : null);
+  }, [probeWebGL, sourceIdentity]);
 
   return (
     <section className="viewer-shell" aria-label="3D viewer">
@@ -86,40 +111,46 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
         </div>
       </div>
 
-      {source.kind === "empty" ? (
-        <ViewerEmpty message={source.message} />
+      {source.kind === "empty" && loadError ? (
+        <ViewerError busy={loading} message={loadError} previewUrl={null} onRetry={retryViewer} />
+      ) : source.kind === "empty" ? (
+        loading ? <ViewerEmpty message="Synchronisation du design vérifié…" /> : <ViewerEmpty message={source.message} />
       ) : source.kind === "preview" ? (
-        <PreviewFallback url={source.url} message={source.message} />
+        <PreviewFallback busy={loading} url={source.url} message={source.message} onRetry={retryViewer} />
       ) : source.kind === "error" ? (
-        <ViewerError message={source.message} previewUrl={source.previewUrl} onRetry={retryGlb} />
+        <ViewerError busy={loading} message={source.message} previewUrl={source.previewUrl} onRetry={retryViewer} />
       ) : (
         <div className="canvas-frame">
+          {loading ? (
+            <div className="viewer-refresh-alert loading" aria-live="polite" role="status">
+              <Loader2 className="spin" size={16} aria-hidden="true" />
+              <span>Resynchronisation du dernier résultat vérifié…</span>
+            </div>
+          ) : loadError ? (
+            <div className="viewer-refresh-alert" role="alert">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span>{loadError} Le dernier résultat vérifié reste affiché.</span>
+              <button onClick={retryViewer} type="button">Resynchroniser</button>
+            </div>
+          ) : null}
           {webglSupported === false ? (
-            source.previewUrl ? (
-              <PreviewVisibilityFallback
-                message="WebGL indisponible dans ce navigateur. Preview backend affichée."
-                url={source.previewUrl}
-              />
-            ) : (
-              <ViewerError
-                message="WebGL indisponible et aucune preview backend n'est disponible."
-                onRetry={retryGlb}
-                previewUrl={null}
-              />
-            )
+            <ViewerError
+              busy={loading}
+              message={source.previewUrl
+                ? "WebGL indisponible dans ce navigateur. Preview backend affichée."
+                : "WebGL indisponible et aucune preview backend n'est disponible."}
+              onRetry={retryViewer}
+              previewUrl={source.previewUrl}
+            />
           ) : renderIsBlank ? (
-            source.previewUrl ? (
-              <PreviewVisibilityFallback
-                message="GLB chargé mais rendu viewer non visible. Preview backend affichée."
-                url={source.previewUrl}
-              />
-            ) : (
-              <ViewerError
-                message="GLB chargé mais rendu viewer non visible, sans preview disponible."
-                onRetry={retryGlb}
-                previewUrl={null}
-              />
-            )
+            <ViewerError
+              busy={loading}
+              message={source.previewUrl
+                ? "GLB chargé mais rendu viewer non visible. Preview backend affichée."
+                : "GLB chargé mais rendu viewer non visible, sans preview disponible."}
+              onRetry={retryViewer}
+              previewUrl={source.previewUrl}
+            />
           ) : (
             <GlbObjectSummary health={viewerHealth} summary={objectSummary} />
           )}
@@ -127,7 +158,7 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
             <GlbErrorBoundary
               key={`${source.url}-${resetKey}`}
               onError={() => setViewerHealth("glb_error")}
-              onRetry={retryGlb}
+              onRetry={retryViewer}
               previewUrl={source.previewUrl}
             >
               <Canvas
@@ -190,13 +221,28 @@ export function TelecomGlbViewer({ bundle, toAbsoluteUrl }: TelecomGlbViewerProp
   );
 }
 
-export function PreviewFallback({ url, message }: { url: string; message: string }) {
+export function PreviewFallback({
+  busy = false,
+  url,
+  message,
+  onRetry
+}: {
+  busy?: boolean;
+  url: string;
+  message: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="preview-fallback">
       <BackendPreviewImage src={url} />
       <p>
         <ImageIcon size={16} aria-hidden="true" /> {message}
       </p>
+      {onRetry ? (
+        <button className="viewer-retry" disabled={busy} onClick={onRetry} type="button">
+          {busy ? "Resynchronisation…" : "Rechercher le GLB"}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -243,10 +289,12 @@ function ViewerEmpty({ message }: { message: string }) {
 }
 
 function ViewerError({
+  busy = false,
   message,
   onRetry,
   previewUrl
 }: {
+  busy?: boolean;
   message: string;
   onRetry?: () => void;
   previewUrl: string | null;
@@ -262,8 +310,8 @@ function ViewerError({
             <span>{message}</span>
           </div>
           {onRetry ? (
-            <button onClick={onRetry} type="button">
-              Réessayer la 3D
+            <button disabled={busy} onClick={onRetry} type="button">
+              {busy ? "Resynchronisation…" : "Réessayer la 3D"}
             </button>
           ) : null}
         </div>
@@ -275,8 +323,8 @@ function ViewerError({
       <AlertTriangle size={32} aria-hidden="true" />
       <p>{message}</p>
       {onRetry ? (
-        <button className="viewer-retry" onClick={onRetry} type="button">
-          Réessayer
+        <button className="viewer-retry" disabled={busy} onClick={onRetry} type="button">
+          {busy ? "Resynchronisation…" : "Réessayer"}
         </button>
       ) : null}
     </div>
@@ -291,18 +339,6 @@ function ViewerLoading() {
         <span>Chargement du GLB backend...</span>
       </div>
     </Html>
-  );
-}
-
-function PreviewVisibilityFallback({ message, url }: { message: string; url: string }) {
-  return (
-    <div className="viewer-preview-overlay">
-      <BackendPreviewImage src={url} />
-      <p>
-        <AlertTriangle size={16} aria-hidden="true" />
-        {message}
-      </p>
-    </div>
   );
 }
 
@@ -478,6 +514,9 @@ class GlbErrorBoundary extends Component<
 
 function BackendPreviewImage({ src }: { src: string }) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
   if (failed) {
     return (
       <div className="preview-image-error" role="status">

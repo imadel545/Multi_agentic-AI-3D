@@ -1,18 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { ApiClientError } from "./api/client";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { createElement, StrictMode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiClientError, TelecomStudioApi } from "./api/client";
 import type { EditDesignResponse, WorkflowStatus } from "./api/schemas";
-import {
+import App, {
   documentPackFilesSizeError,
   documentPackSizeError,
   latestEventCursor,
   latestEventSequence,
   needsPolling,
   parseCorrectionValue,
+  reconcileAfterAmbiguousMutation,
   revisionOutcomeMessage,
   selectWorkflowToRestore,
   shouldForgetDocumentPackSession,
   userFacingError
 } from "./App";
+import { writeDocumentPackSession } from "./state/documentPackSession";
+
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 function workflow(
   workflowId: string,
@@ -30,6 +39,54 @@ function workflow(
     unsupported_actions: [],
     completion_certificate_status: status === "completed" ? "issued" : null
   };
+}
+
+function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi {
+  return {
+    health: vi.fn().mockResolvedValue({
+      status: "ok",
+      service: "agentic_telecom_3d_studio_api",
+      version: "1.0.0",
+      api_contract_version: "2026-07-29"
+    }),
+    studioSummary: vi.fn().mockResolvedValue({
+      status: "ok",
+      available_actions: [],
+      unsupported_actions: []
+    }),
+    assetLibrarySummary: vi.fn().mockResolvedValue({
+      status: "catalogued_quarantined",
+      schema_version: "1.1.0",
+      catalog_available: false,
+      file_count: 0,
+      generation_eligible_count: 0,
+      limitations: []
+    }),
+    assetInventory: vi.fn().mockResolvedValue({
+      status: "qualified_mixed_catalog",
+      entries: [],
+      generation_eligible_asset_count: 0,
+      real_glb_asset_count: 0,
+      import_qualified_glb_count: 0,
+      reference_only_asset_count: 0
+    }),
+    adaptationCapabilityCatalog: vi.fn().mockResolvedValue({
+      schema_version: "1.0.0",
+      catalog_hash: "a".repeat(64),
+      profiles: []
+    }),
+    documentPackCapabilities: vi.fn().mockResolvedValue({
+      document_pack_status: "limited",
+      supported_upload_format: "zip_or_multipart",
+      supported_extensions: [".pdf"],
+      limitations: [],
+      truth: {},
+      capabilities: {}
+    }),
+    listDesigns: vi.fn().mockResolvedValue([]),
+    artifactUrl: vi.fn((url: string | null | undefined) => url ?? null),
+    ...overrides
+  } as unknown as TelecomStudioApi;
 }
 
 describe("frontend runtime selection", () => {
@@ -70,6 +127,17 @@ describe("frontend runtime selection", () => {
     expect(needsPolling("streaming", "sse")).toBe(false);
     expect(needsPolling("running", "polling")).toBe(true);
     expect(needsPolling("completed", "polling")).toBe(false);
+  });
+
+  it("reconciles verified state after an ambiguous mutation response without replacing its error", async () => {
+    const reloadVerifiedState = vi.fn().mockResolvedValue(undefined);
+
+    await expect(reconcileAfterAmbiguousMutation(reloadVerifiedState)).resolves.toBe(true);
+    expect(reloadVerifiedState).toHaveBeenCalledOnce();
+
+    const unavailableReload = vi.fn().mockRejectedValue(new Error("offline"));
+    await expect(reconcileAfterAmbiguousMutation(unavailableReload)).resolves.toBe(false);
+    expect(unavailableReload).toHaveBeenCalledOnce();
   });
 
   it("uses the latest durable event as the revision SSE cursor", () => {
@@ -212,5 +280,97 @@ describe("frontend runtime selection", () => {
       )
     ).toBe(true);
     expect(shouldForgetDocumentPackSession(new TypeError("network failure"))).toBe(false);
+  });
+
+  it("recovers an initial backend error through the visible retry action", async () => {
+    const health = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiClientError(503, "/health", "temporary outage"))
+      .mockResolvedValue({
+        status: "ok",
+        service: "agentic_telecom_3d_studio_api",
+        version: "1.0.0",
+        api_contract_version: "2026-07-29"
+      });
+    const apiClient = bootstrapApi({ health });
+
+    render(createElement(App, { apiClient }));
+
+    expect(
+      await screen.findByRole("button", { name: "Réessayer la connexion" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Studio indisponible")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer la connexion" }));
+
+    await waitFor(() => expect(screen.getByText("Studio local connecté")).toBeInTheDocument());
+    expect(health).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByRole("button", { name: "Réessayer la connexion" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not present an empty viewer when design restoration failed and recovers on retry", async () => {
+    const listDesigns = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiClientError(503, "/designs", "temporary outage"))
+      .mockResolvedValue([]);
+    const apiClient = bootstrapApi({ listDesigns });
+
+    render(createElement(App, { apiClient }));
+
+    const viewer = await screen.findByRole("region", { name: "3D viewer" });
+    expect(within(viewer).getByText(/synchronisation initiale du studio/i)).toBeInTheDocument();
+    expect(within(viewer).queryByText("Aucun design généré pour le moment.")).not.toBeInTheDocument();
+
+    fireEvent.click(within(viewer).getByRole("button", { name: "Réessayer" }));
+
+    await waitFor(() =>
+      expect(within(viewer).getByText("Aucun design généré pour le moment.")).toBeInTheDocument()
+    );
+    expect(listDesigns).toHaveBeenCalledTimes(2);
+    expect(within(viewer).queryByRole("button", { name: "Réessayer" })).not.toBeInTheDocument();
+  });
+
+  it("restores a document review under React strict effects instead of cancelling it silently", async () => {
+    writeDocumentPackSession(window.localStorage, "pack_strict");
+    const summary = {
+      pack_id: "pack_strict",
+      status: "processed",
+      document_count: 1,
+      high_priority_count: 1,
+      missing_blocking_count: 0,
+      blocking_fields: [],
+      conflict_count: 0,
+      can_generate_design: false,
+      qa_score: 0.8,
+      processing_warning_count: 0,
+      tool_status: {}
+    };
+    const documentPackReview = vi.fn().mockResolvedValue({
+      packId: "pack_strict",
+      summary,
+      conflicts: [],
+      missingFields: [],
+      qa: null,
+      documents: [],
+      extractions: [],
+      provenance: {},
+      processing: null,
+      consolidatedSpec: null,
+      sectionErrors: { qa: { status: 503, retryable: true } }
+    });
+    const apiClient = bootstrapApi({ documentPackReview });
+
+    render(
+      createElement(
+        StrictMode,
+        null,
+        createElement(App, { apiClient })
+      )
+    );
+
+    expect(await screen.findByText("pack_strict")).toBeInTheDocument();
+    expect(documentPackReview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

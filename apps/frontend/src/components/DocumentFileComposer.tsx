@@ -5,12 +5,14 @@ import type { DocumentPackCapabilities } from "../api/schemas";
 type DocumentFileComposerProps = {
   busy: boolean;
   capabilities: DocumentPackCapabilities | null;
+  disabledReason?: string | null;
   onSubmit: (files: File[]) => Promise<boolean>;
 };
 
 export function DocumentFileComposer({
   busy,
   capabilities,
+  disabledReason = null,
   onSubmit
 }: DocumentFileComposerProps) {
   const [files, setFiles] = useState<File[]>([]);
@@ -22,6 +24,10 @@ export function DocumentFileComposer({
   );
 
   const addFiles = (incoming: File[]) => {
+    if (disabledReason) {
+      setSelectionError(disabledReason);
+      return;
+    }
     const merged = deduplicateFiles([...files, ...incoming]);
     const error = documentSelectionError(merged, capabilities);
     if (error) {
@@ -33,6 +39,10 @@ export function DocumentFileComposer({
   };
 
   const submit = async () => {
+    if (disabledReason) {
+      setSelectionError(disabledReason);
+      return;
+    }
     const error = documentSelectionError(files, capabilities);
     if (error) {
       setSelectionError(error);
@@ -67,7 +77,7 @@ export function DocumentFileComposer({
         <input
           accept={acceptedExtensions}
           aria-label="Ajouter des pièces techniques"
-          disabled={busy}
+          disabled={busy || Boolean(disabledReason)}
           multiple
           onChange={(event: ChangeEvent<HTMLInputElement>) => {
             addFiles(Array.from(event.target.files ?? []));
@@ -108,7 +118,7 @@ export function DocumentFileComposer({
           </ul>
           <button
             className="secondary-action"
-            disabled={busy}
+            disabled={busy || Boolean(disabledReason)}
             onClick={() => void submit()}
             type="button"
           >

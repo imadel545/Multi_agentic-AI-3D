@@ -23,6 +23,7 @@ const viewerBundlePayload = {
   completion_certificate_status: "issued",
   primary_glb_url: "/designs/wf_123/artifacts/design.glb",
   preview_url: "/designs/wf_123/artifacts/preview.png",
+  component_proofs_url: "/designs/wf_123/artifacts/component_proofs.json",
   geometry_fidelity_summary: {
     component_count: 7,
     counts: {
@@ -80,6 +81,9 @@ describe("frontend contract schemas", () => {
     const parsed = parseContract("ViewerBundle", ViewerBundleSchema, viewerBundlePayload);
 
     expect(parsed.primary_glb_url).toBe("/designs/wf_123/artifacts/design.glb");
+    expect(parsed.component_proofs_url).toBe(
+      "/designs/wf_123/artifacts/component_proofs.json"
+    );
     expect(parsed.viewer_artifacts).toHaveLength(1);
     expect(parsed.geometry_fidelity_summary?.counts.technical_generic).toBe(6);
     expect(parsed.geometry_fidelity_summary?.roles.technical_generic).toEqual([
@@ -123,7 +127,7 @@ describe("frontend contract schemas", () => {
     expect(() =>
       parseContract("ViewerBundle", ViewerBundleSchema, {
         ...viewerBundlePayload,
-        primary_glb_url: "/Users/imad/Desktop/output.glb"
+        primary_glb_url: "/srv/private-output/design.glb"
       })
     ).toThrow(ContractValidationError);
   });
@@ -146,7 +150,13 @@ describe("frontend contract schemas", () => {
   });
 
   it("rejects cross-platform local paths and raw stack traces", () => {
-    for (const forbidden of ["file:///tmp/design.glb", "/home/user/design.glb", "C:\\temp\\design.glb"]) {
+    for (const forbidden of [
+      "file:///tmp/design.glb",
+      "/home/user/design.glb",
+      "/tmp/design.glb",
+      "/Volumes/project/design.glb",
+      "C:\\temp\\design.glb"
+    ]) {
       expect(() =>
         parseContract("ViewerBundle", ViewerBundleSchema, {
           ...viewerBundlePayload,

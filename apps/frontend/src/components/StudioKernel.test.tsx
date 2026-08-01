@@ -422,6 +422,103 @@ describe("studio kernel components", () => {
     expect(screen.getByRole("button", { name: "Analyser la demande" })).toBeDisabled();
   });
 
+  it("shows an initial synchronization failure and runs its retry action", () => {
+    const onRetryBootstrap = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        bootstrapError="La connexion au studio local n’a pas abouti."
+        onRetryBootstrap={onRetryBootstrap}
+      />
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "L’état initial du studio n’a pas pu être entièrement synchronisé."
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    expect(onRetryBootstrap).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a partial document review visible and retries without enabling generation", () => {
+    const onReviewRetry = vi.fn();
+    const summary = {
+      pack_id: "pack_partial",
+      status: "processed",
+      document_count: 2,
+      high_priority_count: 1,
+      missing_blocking_count: 0,
+      blocking_fields: [],
+      conflict_count: 0,
+      can_generate_design: true,
+      qa_score: 1,
+      processing_warning_count: 0,
+      tool_status: {}
+    };
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        documentPackReview={{
+          packId: "pack_partial",
+          summary,
+          conflicts: [],
+          missingFields: [],
+          qa: null,
+          documents: [],
+          extractions: [],
+          provenance: {},
+          processing: null,
+          consolidatedSpec: null,
+          sectionErrors: {
+            qa: { status: 503, retryable: true },
+            processing: { status: 503, retryable: true },
+            consolidatedSpec: { status: 503, retryable: true }
+          }
+        }}
+        documentPackSummary={summary}
+        onDocumentPackReviewRetry={onReviewRetry}
+      />
+    );
+
+    expect(screen.getByText("Revue partielle")).toBeInTheDocument();
+    expect(screen.getByText(/Sections indisponibles : QA documentaire/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Générer depuis le pack" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    expect(onReviewRetry).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a retained document pack visible when its full review fails and retries it", () => {
+    const onReviewRetry = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        documentPackReviewError="Les sections de revue n’ont pas répondu."
+        documentPackSummary={{
+          pack_id: "pack_retained",
+          status: "processed",
+          document_count: 2,
+          high_priority_count: 1,
+          missing_blocking_count: 0,
+          blocking_fields: [],
+          conflict_count: 0,
+          can_generate_design: true,
+          qa_score: 1,
+          processing_warning_count: 0,
+          tool_status: {}
+        }}
+        onDocumentPackReviewRetry={onReviewRetry}
+      />
+    );
+
+    expect(screen.getByText("pack_retained")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Le pack conservé n’est pas présenté comme vide/)
+    ).toBeInTheDocument();
+    expect(screen.getByText("Documents techniques").closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Générer depuis le pack" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
+    expect(onReviewRetry).toHaveBeenCalledOnce();
+  });
+
   it("shows a connected revision command only when edit is available", () => {
     const onRevisionSubmit = vi.fn();
     render(
@@ -1081,6 +1178,30 @@ describe("studio kernel components", () => {
     expect(artifact).toHaveAttribute("aria-disabled", "true");
     expect(artifact?.tagName).toBe("DIV");
     expect(toAbsoluteUrl).not.toHaveBeenCalled();
+  });
+
+  it("labels component assembly proofs as a verifiable deliverable", () => {
+    render(
+      <ArtifactsPanel
+        bundle={{
+          ...bundle,
+          component_proofs_url: "/designs/wf_1/artifacts/component_proofs.json",
+          viewer_artifacts: [
+            {
+              name: "component_proofs.json",
+              url: "/designs/wf_1/artifacts/component_proofs.json",
+              content_type: "application/json",
+              available: true
+            }
+          ]
+        }}
+        toAbsoluteUrl={(url) => url ?? null}
+      />
+    );
+
+    expect(
+      screen.getByRole("link", { name: /Preuves des composants assemblés/ })
+    ).toHaveAttribute("href", "/designs/wf_1/artifacts/component_proofs.json");
   });
 
   it("does not render unsupported actions as buttons", () => {

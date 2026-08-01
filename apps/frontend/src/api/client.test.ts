@@ -245,10 +245,24 @@ describe("TelecomStudioApi", () => {
     );
   });
 
-  it("blocks artifact URLs that expose local paths", () => {
+  it("accepts only public API or HTTP artifact references", () => {
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetch);
 
-    expect(() => client.artifactUrl("/Users/imad/output/design.glb")).toThrow(ApiClientError);
+    expect(client.artifactUrl("/designs/wf_1/artifacts/glb")).toBe(
+      "http://127.0.0.1:8000/designs/wf_1/artifacts/glb"
+    );
+    expect(client.artifactUrl("https://cdn.example.test/design.glb")).toBe(
+      "https://cdn.example.test/design.glb"
+    );
+    for (const invalid of [
+      "/tmp/design.glb",
+      "/Volumes/project/design.glb",
+      "file:///tmp/design.glb",
+      "C:\\temp\\design.glb",
+      "design.glb"
+    ]) {
+      expect(() => client.artifactUrl(invalid)).toThrow(ApiClientError);
+    }
   });
 
   it("prepares edit and rollback calls on the existing /designs contract", async () => {
@@ -497,7 +511,7 @@ describe("TelecomStudioApi", () => {
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
 
     const review = await client.documentPackReview("pack_1");
-    expect(review.missingFields[0]?.field).toBe("radio.hba_m");
+    expect(review.missingFields?.[0]?.field).toBe("radio.hba_m");
     await client.applyDocumentPackCorrection("pack_1", {
       field: "radio.hba_m",
       value: [24, 24, 24],
@@ -517,6 +531,89 @@ describe("TelecomStudioApi", () => {
         method: "POST"
       }
     );
+  });
+
+  it("keeps successful document-review sections and recovers the failed section on retry", async () => {
+    let qaAvailable = false;
+    const fetcher = vi.fn(async (request: RequestInfo | URL) => {
+      const requestUrl =
+        request instanceof URL
+          ? request
+          : new URL(typeof request === "string" ? request : request.url);
+      const path = requestUrl.pathname;
+      if (path.endsWith("/qa")) {
+        if (!qaAvailable) {
+          return jsonResponse({ detail: "temporary QA outage" }, { status: 503 });
+        }
+        return jsonResponse({
+          pack_id: "pack_retry",
+          status: "passed",
+          score: 1,
+          checks: [],
+          warnings: [],
+          blocking_issues: [],
+          ready_to_generate: true,
+          ready_confidence: 1,
+          recommended_user_actions: [],
+          tool_failures: [],
+          memory_writeback: {}
+        });
+      }
+      if (path.endsWith("/conflicts") || path.endsWith("/missing-fields")) {
+        return jsonResponse([]);
+      }
+      if (path.endsWith("/documents") || path.endsWith("/extractions")) {
+        return jsonResponse([]);
+      }
+      if (path.endsWith("/provenance")) {
+        return jsonResponse({});
+      }
+      if (path.endsWith("/processing")) {
+        return jsonResponse({
+          pack_id: "pack_retry",
+          documents: [],
+          warnings: [],
+          tool_status: {},
+          groq_rejected_fields: []
+        });
+      }
+      if (path.endsWith("/consolidated-spec")) {
+        return jsonResponse({
+          pack_id: "pack_retry",
+          source_mode: "deterministic",
+          llm_provider: null,
+          llm_fallback_used: true,
+          confidence_summary: {},
+          processing_warnings: [],
+          document_references: [],
+          provenance_map: {}
+        });
+      }
+      return jsonResponse({
+        pack_id: "pack_retry",
+        status: "processed",
+        document_count: 1,
+        missing_blocking_count: 0,
+        conflict_count: 0,
+        can_generate_design: true,
+        qa_score: 1
+      });
+    });
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const partial = await client.documentPackReview("pack_retry");
+    expect(partial.summary?.pack_id).toBe("pack_retry");
+    expect(partial.documents).toEqual([]);
+    expect(partial.qa).toBeNull();
+    expect(partial.sectionErrors?.qa).toEqual({ status: 503, retryable: true });
+
+    qaAvailable = true;
+    const recovered = await client.documentPackReview("pack_retry");
+    expect(recovered.qa?.ready_to_generate).toBe(true);
+    expect(recovered.sectionErrors).toEqual({});
+    expect(
+      fetcher.mock.calls.filter(([request]) => (request as URL).pathname.endsWith("/qa"))
+    ).toHaveLength(2);
   });
 
   it("starts document-pack generation through the existing workflow_id contract", async () => {

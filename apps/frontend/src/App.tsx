@@ -3,7 +3,6 @@ import {
   lazy,
   useCallback,
   useEffect,
-  useMemo,
   useReducer,
   useRef,
   useState,
@@ -22,6 +21,7 @@ import type {
   DocumentPackReview,
   DocumentPackSummary,
   Health,
+  LLMDecisionProvenance,
   AssetInventory,
   AssetLibrarySearch,
   AssetLibrarySummary,
@@ -60,7 +60,11 @@ const TelecomGlbViewer = lazy(() =>
   }))
 );
 
-export default function App() {
+type AppProps = {
+  apiClient?: TelecomStudioApi;
+};
+
+export default function App({ apiClient = api }: AppProps) {
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState);
   const [health, setHealth] = useState<Health | null>(null);
   const [assetLibrarySummary, setAssetLibrarySummary] =
@@ -74,9 +78,9 @@ export default function App() {
     useState<AdaptationCapabilityCatalog | null>(null);
   const [adaptationCapabilities, setAdaptationCapabilities] =
     useState<SceneAdaptationCapabilities | null>(null);
+  const [qaEvidence, setQaEvidence] = useState<unknown | null>(null);
+  const [llmProvenance, setLlmProvenance] = useState<LLMDecisionProvenance | null>(null);
   const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
-  const [ragEvidenceError, setRagEvidenceError] = useState<string | null>(null);
-  const [ragEvidenceLoading, setRagEvidenceLoading] = useState(false);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
   const [documentPackSummary, setDocumentPackSummary] = useState<DocumentPackSummary | null>(null);
@@ -96,14 +100,15 @@ export default function App() {
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [rollbackBusyVersionId, setRollbackBusyVersionId] = useState<string | null>(null);
   const [versionMessage, setVersionMessage] = useState<string | null>(null);
-  const apiClient = useMemo(() => api, []);
   const streamRef = useRef<{ close: () => void } | null>(null);
   const streamCursorRef = useRef<string | null>(null);
   const eventSequenceCursorRef = useRef<number | null>(null);
   const submissionInFlightRef = useRef(false);
   const revisionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
-  const restoredDocumentPackRef = useRef(false);
+  const resourceRequestRef = useRef<Record<string, number>>({});
+  const mountedRef = useRef(true);
+  const lastAssetLibraryQueryRef = useRef<string | null>(null);
   const toArtifactUrl = useCallback(
     (url: string | null | undefined) => apiClient.artifactUrl(url),
     [apiClient]
@@ -128,146 +133,236 @@ export default function App() {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    void apiClient
-      .health()
-      .then((nextHealth) => {
-        if (!cancelled) setHealth(nextHealth);
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "connection") });
-        }
-      });
-    void apiClient
-      .studioSummary()
-      .then((summary) => {
-        if (!cancelled) {
-          dispatch({ type: "BOOTSTRAP_LOADED", summary });
-          dispatch({ type: "RESOURCE_RECOVERED", resource: "studio_summary" });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          dispatch({
-            type: "RESOURCE_FAILED",
-            resource: "studio_summary",
-            message: userFacingError(error, "resource")
-          });
-        }
-      });
-    void apiClient
-      .assetLibrarySummary()
-      .then((librarySummary) => {
-        if (!cancelled) setAssetLibrarySummary(librarySummary);
-      })
-      .catch(() => {
-        if (!cancelled) setAssetLibrarySummary(null);
-      });
-    void apiClient
-      .assetInventory()
-      .then((inventory) => {
-        if (!cancelled) setAssetInventory(inventory);
-      })
-      .catch(() => {
-        if (!cancelled) setAssetInventory(null);
-      });
-    void apiClient
-      .adaptationCapabilityCatalog()
-      .then((catalog) => {
-        if (!cancelled) setAdaptationCatalog(catalog);
-      })
-      .catch(() => {
-        if (!cancelled) setAdaptationCatalog(null);
-      });
-    void apiClient
-      .documentPackCapabilities()
-      .then((caps) => {
-        if (!cancelled) {
-          setDocumentCapabilities(caps);
-          dispatch({ type: "RESOURCE_RECOVERED", resource: "document_capabilities" });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          dispatch({
-            type: "RESOURCE_FAILED",
-            resource: "document_capabilities",
-            message: userFacingError(error, "resource")
-          });
-        }
-      });
+    mountedRef.current = true;
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
+      for (const resource of Object.keys(resourceRequestRef.current)) {
+        resourceRequestRef.current[resource] += 1;
+      }
     };
-  }, [apiClient]);
+  }, []);
+
+  const loadSurfaceResource = useCallback(
+    async <T,>(
+      resource: string,
+      loader: () => Promise<T>,
+      onValue: (value: T) => void,
+      context: UserActionContext = "resource",
+      onStart?: () => void
+    ): Promise<T> => {
+      const requestId = (resourceRequestRef.current[resource] ?? 0) + 1;
+      resourceRequestRef.current[resource] = requestId;
+      dispatch({ type: "RESOURCE_LOADING", resource });
+      onStart?.();
+      try {
+        const value = await loader();
+        if (
+          mountedRef.current &&
+          resourceRequestRef.current[resource] === requestId
+        ) {
+          onValue(value);
+          dispatch({ type: "RESOURCE_RECOVERED", resource });
+        }
+        return value;
+      } catch (error) {
+        if (
+          mountedRef.current &&
+          resourceRequestRef.current[resource] === requestId
+        ) {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource,
+            message: userFacingError(error, context)
+          });
+        }
+        throw error;
+      }
+    },
+    []
+  );
+
+  const loadHealth = useCallback(
+    () =>
+      loadSurfaceResource(
+        "health",
+        () => apiClient.health(),
+        setHealth,
+        "connection",
+        () => setHealth(null)
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+  const loadStudioSummary = useCallback(
+    () =>
+      loadSurfaceResource(
+        "studio_summary",
+        () => apiClient.studioSummary(),
+        (summary) => dispatch({ type: "BOOTSTRAP_LOADED", summary }),
+        "bootstrap"
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+  const loadAssetLibrarySummary = useCallback(
+    () =>
+      loadSurfaceResource(
+        "asset_library",
+        () => apiClient.assetLibrarySummary(),
+        setAssetLibrarySummary,
+        "assets",
+        () => setAssetLibrarySummary(null)
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+  const loadAssetInventory = useCallback(
+    () =>
+      loadSurfaceResource(
+        "asset_inventory",
+        () => apiClient.assetInventory(),
+        setAssetInventory,
+        "assets",
+        () => setAssetInventory(null)
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+  const loadAdaptationCatalog = useCallback(
+    () =>
+      loadSurfaceResource(
+        "adaptation_catalog",
+        () => apiClient.adaptationCapabilityCatalog(),
+        setAdaptationCatalog,
+        "resource",
+        () => setAdaptationCatalog(null)
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+  const loadDocumentCapabilities = useCallback(
+    () =>
+      loadSurfaceResource(
+        "document_capabilities",
+        () => apiClient.documentPackCapabilities(),
+        setDocumentCapabilities,
+        "documents",
+        () => setDocumentCapabilities(null)
+      ),
+    [apiClient, loadSurfaceResource]
+  );
+
+  useEffect(() => {
+    void loadHealth().catch(() => undefined);
+    void loadStudioSummary().catch(() => undefined);
+    void loadAssetLibrarySummary().catch(() => undefined);
+    void loadAssetInventory().catch(() => undefined);
+    void loadAdaptationCatalog().catch(() => undefined);
+    void loadDocumentCapabilities().catch(() => undefined);
+  }, [
+    loadAdaptationCatalog,
+    loadAssetInventory,
+    loadAssetLibrarySummary,
+    loadDocumentCapabilities,
+    loadHealth,
+    loadStudioSummary
+  ]);
 
   useEffect(() => {
     const bundle = state.viewerBundle;
+    for (const resource of ["adaptation_scene", "qa_evidence", "llm_provenance", "rag_evidence"]) {
+      resourceRequestRef.current[resource] =
+        (resourceRequestRef.current[resource] ?? 0) + 1;
+    }
     setAdaptationCapabilities(null);
+    setQaEvidence(null);
+    setLlmProvenance(null);
     setRagEvidence(null);
-    setRagEvidenceError(null);
-    setRagEvidenceLoading(Boolean(bundle?.rag_evidence_url));
     if (!bundle) {
       return;
     }
-    let cancelled = false;
-    void apiClient
-      .designAdaptationCapabilities(bundle.workflow_id)
-      .then((capabilities) => {
-        if (!cancelled) setAdaptationCapabilities(capabilities);
-      })
-      .catch(() => {
-        if (!cancelled) setAdaptationCapabilities(null);
-      });
-    if (bundle.rag_evidence_url) {
-      void apiClient
-        .artifactJson(bundle.rag_evidence_url)
-        .then((evidence) => {
-          if (!cancelled) {
-            setRagEvidence(evidence);
-            setRagEvidenceError(null);
-          }
-        })
-        .catch((error) => {
-          if (!cancelled) {
-            setRagEvidence(null);
-            setRagEvidenceError(userFacingError(error, "resource"));
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setRagEvidenceLoading(false);
-        });
+    void loadSurfaceResource(
+      "adaptation_scene",
+      () => apiClient.designAdaptationCapabilities(bundle.workflow_id),
+      setAdaptationCapabilities,
+      "resource",
+      () => setAdaptationCapabilities(null)
+    ).catch(() => undefined);
+    if (bundle.qa_report_url) {
+      void loadSurfaceResource(
+        "qa_evidence",
+        () => apiClient.artifactJson(bundle.qa_report_url),
+        setQaEvidence,
+        "resource",
+        () => setQaEvidence(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "qa_evidence" });
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [apiClient, state.viewerBundle]);
+    if (bundle.llm_decision_provenance) {
+      setLlmProvenance(bundle.llm_decision_provenance);
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
+    } else if (bundle.llm_decision_provenance_url) {
+      void loadSurfaceResource(
+        "llm_provenance",
+        () => apiClient.llmDecisionProvenance(bundle.llm_decision_provenance_url),
+        setLlmProvenance,
+        "resource",
+        () => setLlmProvenance(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
+    }
+    if (bundle.rag_evidence_url) {
+      void loadSurfaceResource(
+        "rag_evidence",
+        () => apiClient.artifactJson(bundle.rag_evidence_url),
+        setRagEvidence,
+        "resource",
+        () => setRagEvidence(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
+    }
+  }, [apiClient, loadSurfaceResource, state.viewerBundle]);
 
   const searchAssetLibrary = useCallback(
     async (query: string) => {
       const normalizedQuery = query.trim();
       if (!normalizedQuery) return;
+      lastAssetLibraryQueryRef.current = normalizedQuery;
       setAssetLibrarySearchBusy(true);
       setAssetLibrarySearchError(null);
       try {
-        setAssetLibrarySearch(await apiClient.searchAssetLibrary(normalizedQuery));
+        await loadSurfaceResource(
+          "asset_search",
+          () => apiClient.searchAssetLibrary(normalizedQuery),
+          setAssetLibrarySearch,
+          "assets",
+          () => setAssetLibrarySearch(null)
+        );
       } catch (error) {
-        setAssetLibrarySearch(null);
         setAssetLibrarySearchError(userFacingError(error, "assets"));
       } finally {
         setAssetLibrarySearchBusy(false);
       }
     },
-    [apiClient]
+    [apiClient, loadSurfaceResource]
   );
 
   const loadLiveStatus = useCallback(
     async (workflowId: string) => {
-      const status = await apiClient.workflowStatus(workflowId);
+      dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
+      let status: WorkflowStatus;
+      try {
+        status = await apiClient.workflowStatus(workflowId);
+      } catch (error) {
+        dispatch({
+          type: "RESOURCE_FAILED",
+          resource: "workflow_status",
+          message: userFacingError(error, "resource")
+        });
+        throw error;
+      }
       dispatch({ type: "STATUS_LOADED", status });
       dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
       try {
+        dispatch({ type: "RESOURCE_LOADING", resource: "current_operation" });
         const operation = await apiClient.currentOperation(workflowId);
         dispatch({ type: "CURRENT_OPERATION_LOADED", currentOperation: operation });
         dispatch({ type: "RESOURCE_RECOVERED", resource: "current_operation" });
@@ -285,10 +380,37 @@ export default function App() {
 
   const loadTerminalBundle = useCallback(
     async (workflowId: string) => {
-      const status = await apiClient.workflowStatus(workflowId);
+      dispatch({ type: "RESOURCE_LOADING", resource: "terminal_bundle" });
+      dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
+      let status: WorkflowStatus;
+      try {
+        status = await apiClient.workflowStatus(workflowId);
+      } catch (error) {
+        dispatch({
+          type: "RESOURCE_FAILED",
+          resource: "workflow_status",
+          message: userFacingError(error, "resource")
+        });
+        dispatch({
+          type: "RESOURCE_FAILED",
+          resource: "terminal_bundle",
+          message: userFacingError(error, "resource")
+        });
+        throw error;
+      }
       dispatch({ type: "STATUS_LOADED", status });
       dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
 
+      for (const resource of [
+        "current_operation",
+        "viewer_bundle",
+        "timeline",
+        "user_issues",
+        "versions",
+        "studio_summary"
+      ]) {
+        dispatch({ type: "RESOURCE_LOADING", resource });
+      }
       const [
         operationResult,
         bundleResult,
@@ -296,8 +418,7 @@ export default function App() {
         issuesResult,
         versionsResult,
         summaryResult
-      ] =
-        await Promise.allSettled([
+      ] = await Promise.allSettled([
           apiClient.currentOperation(workflowId),
           apiClient.viewerBundle(workflowId),
           apiClient.timelineSummary(workflowId),
@@ -342,9 +463,21 @@ export default function App() {
         (summary) => dispatch({ type: "BOOTSTRAP_LOADED", summary }),
         dispatch
       );
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "terminal_bundle" });
     },
     [apiClient]
   );
+
+  const reloadViewerBundle = useCallback(async () => {
+    if (!state.workflowId) {
+      return;
+    }
+    await loadSurfaceResource(
+      "viewer_bundle",
+      () => apiClient.viewerBundle(state.workflowId!),
+      (viewerBundle) => dispatch({ type: "VIEWER_BUNDLE_LOADED", viewerBundle })
+    );
+  }, [apiClient, loadSurfaceResource, state.workflowId]);
 
   const startEventStream = useCallback(
     (workflowId: string, afterEventId?: string | null) => {
@@ -419,17 +552,14 @@ export default function App() {
     [apiClient, loadTerminalBundle, receiveWorkflowEvents]
   );
 
-  useEffect(() => {
+  const restoreLatestDesign = useCallback(async () => {
     if (restoredWorkflowRef.current || state.workflowId || state.phase !== "idle") {
       return;
     }
-    let cancelled = false;
-    apiClient
-      .listDesigns()
-      .then((designs) => {
-        if (cancelled) {
-          return;
-        }
+    await loadSurfaceResource(
+      "design_list",
+      () => apiClient.listDesigns(),
+      (designs) => {
         const latest = selectWorkflowToRestore(designs);
         if (!latest) {
           return;
@@ -457,33 +587,45 @@ export default function App() {
               type: "RESOURCE_FAILED",
               resource: "terminal_bundle",
               message: userFacingError(error, "resource")
-            });
+              });
           });
         }
-      })
-      .catch(() => {
-        // Resume is best-effort; bootstrap health/errors are handled separately.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [apiClient, loadLiveStatus, loadTerminalBundle, state.phase, state.workflowId]);
+      },
+      "bootstrap"
+    );
+  }, [
+    apiClient,
+    loadLiveStatus,
+    loadSurfaceResource,
+    loadTerminalBundle,
+    state.phase,
+    state.workflowId
+  ]);
+
+  useEffect(() => {
+    void restoreLatestDesign().catch(() => undefined);
+  }, [restoreLatestDesign]);
 
   const loadDocumentPackReview = useCallback(
     async (packId: string) => {
-      const review = await apiClient.documentPackReview(packId);
-      setDocumentPackReview(review);
-      setDocumentPackSummary(review.summary);
-      const storage = documentPackBrowserStorage();
-      if (storage) writeDocumentPackSession(storage, review.summary.pack_id);
-      return review;
+      return loadSurfaceResource(
+        "document_review",
+        () => apiClient.documentPackReview(packId),
+        (review) => {
+          setDocumentPackReview(review);
+          if (review.summary) {
+            setDocumentPackSummary(review.summary);
+          }
+          const storage = documentPackBrowserStorage();
+          if (storage) writeDocumentPackSession(storage, review.summary?.pack_id ?? packId);
+        },
+        "documents"
+      );
     },
-    [apiClient]
+    [apiClient, loadSurfaceResource]
   );
 
   useEffect(() => {
-    if (restoredDocumentPackRef.current) return;
-    restoredDocumentPackRef.current = true;
     const storage = documentPackBrowserStorage();
     const packId = storage ? readDocumentPackSession(storage) : null;
     if (!packId) return;
@@ -493,9 +635,11 @@ export default function App() {
       .then((review) => {
         if (!cancelled) {
           setDocumentPackMessage(
-            review.summary.can_generate_design
-              ? "Revue documentaire restaurée; le pack est prêt à générer."
-              : "Revue documentaire restaurée; des points restent à confirmer."
+            documentPackReviewIsComplete(review)
+              ? review.summary?.can_generate_design
+                ? "Revue documentaire restaurée; le pack est prêt à générer."
+                : "Revue documentaire restaurée; des points restent à confirmer."
+              : "Revue documentaire partiellement restaurée. Les sections indisponibles restent signalées et peuvent être rechargées."
           );
         }
       })
@@ -503,12 +647,11 @@ export default function App() {
         const missingPack = shouldForgetDocumentPackSession(error);
         if (missingPack && storage) clearDocumentPackSession(storage);
         if (!cancelled) {
-          setDocumentPackSummary(null);
           setDocumentPackReview(null);
           setDocumentPackMessage(
             missingPack
               ? "La revue documentaire précédente n’est plus disponible. Importez de nouveau les pièces."
-              : "La revue documentaire n’a pas pu être resynchronisée. Le pack est conservé; rechargez le studio pour réessayer."
+              : "La revue documentaire n’a pas pu être resynchronisée. Le pack est conservé; utilisez Réessayer pour reprendre la synchronisation."
           );
         }
       })
@@ -519,6 +662,31 @@ export default function App() {
       cancelled = true;
     };
   }, [loadDocumentPackReview]);
+
+  const retryDocumentPackReview = useCallback(async () => {
+    const storage = documentPackBrowserStorage();
+    const packId =
+      documentPackSummary?.pack_id ??
+      documentPackReview?.packId ??
+      (storage ? readDocumentPackSession(storage) : null);
+    if (!packId) {
+      return;
+    }
+    setDocumentPackBusy(true);
+    setDocumentPackMessage(null);
+    try {
+      const review = await loadDocumentPackReview(packId);
+      setDocumentPackMessage(
+        documentPackReviewIsComplete(review)
+          ? "Revue documentaire resynchronisée."
+          : "Certaines sections restent indisponibles; les données chargées sont conservées sans inventer le reste."
+      );
+    } catch (error) {
+      setDocumentPackMessage(userFacingError(error, "documents"));
+    } finally {
+      setDocumentPackBusy(false);
+    }
+  }, [documentPackReview?.packId, documentPackSummary?.pack_id, loadDocumentPackReview]);
 
   const analyzePrompt = useCallback(async () => {
     if (!state.prompt.trim()) {
@@ -636,9 +804,11 @@ export default function App() {
         setDocumentPackSummary(summary);
         const review = await loadDocumentPackReview(summary.pack_id);
         setDocumentPackMessage(
-          review.summary.can_generate_design
-            ? "Pack analysé: génération possible."
-            : "Pack analysé: corrigez les champs bloquants avant génération."
+          documentPackReviewIsComplete(review)
+            ? review.summary?.can_generate_design
+              ? "Pack analysé: génération possible."
+              : "Pack analysé: corrigez les champs bloquants avant génération."
+            : "Pack créé, mais sa revue est partielle. Rechargez les sections indisponibles avant de générer."
         );
         return true;
       } catch (error) {
@@ -672,9 +842,11 @@ export default function App() {
         setDocumentPackSummary(summary);
         const review = await loadDocumentPackReview(summary.pack_id);
         setDocumentPackMessage(
-          review.summary.can_generate_design
-            ? "Correction enregistrée. Le pack est prêt à générer."
-            : "Correction enregistrée. D’autres points restent à vérifier."
+          documentPackReviewIsComplete(review)
+            ? review.summary?.can_generate_design
+              ? "Correction enregistrée. Le pack est prêt à générer."
+              : "Correction enregistrée. D’autres points restent à vérifier."
+            : "Correction enregistrée, mais la revue n’est que partiellement resynchronisée."
         );
       } catch (error) {
         setDocumentPackMessage(
@@ -774,6 +946,7 @@ export default function App() {
       const message = userFacingError(error, "edit");
       setRevisionMessage(message);
       dispatch({ type: "REQUEST_FAILED", message });
+      await reconcileAfterAmbiguousMutation(() => loadTerminalBundle(workflowId));
     } finally {
       revisionInFlightRef.current = false;
       setRevisionBusy(false);
@@ -818,6 +991,7 @@ export default function App() {
       } catch (error) {
         setVersionMessage(userFacingError(error, "rollback"));
         dispatch({ type: "REVISION_FINISHED" });
+        await reconcileAfterAmbiguousMutation(() => loadTerminalBundle(state.workflowId!));
       } finally {
         setRollbackBusyVersionId(null);
       }
@@ -852,14 +1026,109 @@ export default function App() {
     const poll = () => {
       if (inFlight) return;
       inFlight = true;
-      void loadPollingSnapshot(state.workflowId!).finally(() => {
-        inFlight = false;
-      });
+      void loadPollingSnapshot(state.workflowId!)
+        .catch((error) => {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "terminal_bundle",
+            message: userFacingError(error, "resource")
+          });
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     };
     poll();
     const timer = window.setInterval(poll, 2500);
     return () => window.clearInterval(timer);
   }, [loadPollingSnapshot, state.phase, state.runtimeMode, state.workflowId]);
+
+  const retryWorkflowSynchronization = useCallback(async () => {
+    if (!state.workflowId) {
+      await restoreLatestDesign();
+      return;
+    }
+    const status = await loadLiveStatus(state.workflowId);
+    if (isTerminalStatus(status.status)) {
+      await loadTerminalBundle(state.workflowId);
+    }
+  }, [loadLiveStatus, loadTerminalBundle, restoreLatestDesign, state.workflowId]);
+  const retryBootstrap = useCallback(async () => {
+    await Promise.allSettled([
+      loadHealth(),
+      loadStudioSummary(),
+      retryWorkflowSynchronization()
+    ]);
+  }, [loadHealth, loadStudioSummary, retryWorkflowSynchronization]);
+  const retryViewerSurface = useCallback(async () => {
+    if (state.workflowId) {
+      await reloadViewerBundle();
+      return;
+    }
+    await retryWorkflowSynchronization();
+  }, [reloadViewerBundle, retryWorkflowSynchronization, state.workflowId]);
+  const retryAssetSurfaces = useCallback(async () => {
+    await Promise.allSettled([loadAssetInventory(), loadAssetLibrarySummary()]);
+  }, [loadAssetInventory, loadAssetLibrarySummary]);
+  const retryAdaptationSurfaces = useCallback(async () => {
+    const requests: Promise<unknown>[] = [loadAdaptationCatalog()];
+    if (state.workflowId) {
+      requests.push(
+        loadSurfaceResource(
+          "adaptation_scene",
+          () => apiClient.designAdaptationCapabilities(state.workflowId!),
+          setAdaptationCapabilities,
+          "resource",
+          () => setAdaptationCapabilities(null)
+        )
+      );
+    }
+    await Promise.allSettled(requests);
+  }, [apiClient, loadAdaptationCatalog, loadSurfaceResource, state.workflowId]);
+  const retryAssetSearch = useCallback(async () => {
+    if (lastAssetLibraryQueryRef.current) {
+      await searchAssetLibrary(lastAssetLibraryQueryRef.current);
+    }
+  }, [searchAssetLibrary]);
+  const retryQaEvidence = useCallback(async () => {
+    const url = state.viewerBundle?.qa_report_url;
+    if (!url) return;
+    await loadSurfaceResource(
+      "qa_evidence",
+      () => apiClient.artifactJson(url),
+      setQaEvidence,
+      "resource",
+      () => setQaEvidence(null)
+    );
+  }, [apiClient, loadSurfaceResource, state.viewerBundle?.qa_report_url]);
+  const retryLlmProvenance = useCallback(async () => {
+    const inline = state.viewerBundle?.llm_decision_provenance;
+    if (inline) {
+      setLlmProvenance(inline);
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
+      return;
+    }
+    const url = state.viewerBundle?.llm_decision_provenance_url;
+    if (!url) return;
+    await loadSurfaceResource(
+      "llm_provenance",
+      () => apiClient.llmDecisionProvenance(url),
+      setLlmProvenance,
+      "resource",
+      () => setLlmProvenance(null)
+    );
+  }, [apiClient, loadSurfaceResource, state.viewerBundle]);
+  const retryRagEvidence = useCallback(async () => {
+    const url = state.viewerBundle?.rag_evidence_url;
+    if (!url) return;
+    await loadSurfaceResource(
+      "rag_evidence",
+      () => apiClient.artifactJson(url),
+      setRagEvidence,
+      "resource",
+      () => setRagEvidence(null)
+    );
+  }, [apiClient, loadSurfaceResource, state.viewerBundle?.rag_evidence_url]);
 
   const canEditCurrentDesign =
     state.viewerBundle?.status === "completed" &&
@@ -879,21 +1148,48 @@ export default function App() {
     !revisionBusy &&
     rollbackBusyVersionId === null &&
     (state.phase === "completed" || state.phase === "degraded");
-  const operationNotice = [
-    state.transportError,
-    ...new Set(Object.values(state.resourceErrors))
-  ].filter((value): value is string => Boolean(value)).join(" · ");
+  const operationNotice = Array.from(
+    new Set([
+      state.transportError,
+      state.resourceErrors.workflow_status,
+      state.resourceErrors.current_operation,
+      state.resourceErrors.terminal_bundle,
+      state.resourceErrors.timeline,
+      state.resourceErrors.events
+    ].filter((value): value is string => Boolean(value)))
+  ).join(" · ");
   const workflowActive =
     state.phase === "submitting" ||
     state.phase === "streaming" ||
     state.phase === "running";
+  const bootstrapError = Array.from(
+    new Set([
+      state.resourceErrors.studio_summary,
+      state.resourceErrors.design_list,
+      state.resourceErrors.workflow_status,
+      state.resourceErrors.terminal_bundle
+    ].filter((message): message is string => Boolean(message)))
+  ).join(" · ") || null;
+  const bootstrapLoading = ["studio_summary", "design_list", "workflow_status", "terminal_bundle"].some(
+    (resource) => state.resourceLoads[resource]?.status === "loading"
+  );
+  const viewerSurfaceError =
+    state.resourceErrors.viewer_bundle ??
+    (!state.workflowId ? state.resourceErrors.design_list : null) ??
+    null;
+  const viewerSurfaceLoading =
+    state.resourceLoads.viewer_bundle?.status === "loading" ||
+    (!state.workflowId && state.resourceLoads.design_list?.status === "loading");
 
   return (
     <div className="studio-root">
       <BackendStatusBar
         bundle={state.viewerBundle}
         health={health}
+        healthError={state.resourceErrors.health ?? null}
+        healthLoading={state.resourceLoads.health?.status === "loading"}
         issues={state.userIssues}
+        onRetryHealth={() => void loadHealth().catch(() => undefined)}
         phase={state.phase}
       />
       <main className="studio-layout">
@@ -903,12 +1199,18 @@ export default function App() {
             analysisBusy={analysisBusy}
             analysisError={analysisError}
             analysisSubmitted={analysisWasSubmitted}
+            bootstrapError={bootstrapError}
+            bootstrapLoading={bootstrapLoading}
             canEdit={canEditCurrentDesign}
             correctionBusy={documentCorrectionBusy}
             documentCapabilities={documentCapabilities}
+            documentCapabilitiesError={state.resourceErrors.document_capabilities ?? null}
+            documentCapabilitiesLoading={state.resourceLoads.document_capabilities?.status === "loading"}
             documentPackBusy={documentPackBusy}
             documentPackMessage={documentPackMessage}
             documentPackReview={documentPackReview}
+            documentPackReviewError={state.resourceErrors.document_review ?? null}
+            documentPackReviewLoading={state.resourceLoads.document_review?.status === "loading"}
             documentPackSummary={documentPackSummary}
             editMessage={revisionMessage}
             error={state.error}
@@ -916,10 +1218,13 @@ export default function App() {
             onConfirm={submitPrompt}
             onDocumentPackCorrection={applyDocumentPackCorrection}
             onDocumentPackGenerate={generateFromDocumentPack}
+            onDocumentPackReviewRetry={retryDocumentPackReview}
             onDocumentPackUpload={uploadDocumentPack}
+            onDocumentCapabilitiesRetry={() => void loadDocumentCapabilities().catch(() => undefined)}
             onPromptChange={changePrompt}
             onRevisionPromptChange={setRevisionPrompt}
             onRevisionSubmit={submitRevision}
+            onRetryBootstrap={() => void retryBootstrap()}
             phase={state.phase}
             prompt={state.prompt}
             submissionPending={state.pendingSubmission}
@@ -937,7 +1242,13 @@ export default function App() {
         </aside>
         <section className="workbench" aria-label="Studio 3D">
           <Suspense fallback={<ViewerLoadingFallback />}>
-            <TelecomGlbViewer bundle={state.viewerBundle} toAbsoluteUrl={toArtifactUrl} />
+            <TelecomGlbViewer
+              bundle={state.viewerBundle}
+              loadError={viewerSurfaceError}
+              loading={viewerSurfaceLoading}
+              onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
+              toAbsoluteUrl={toArtifactUrl}
+            />
           </Suspense>
           <LiveGenerationOverlay
             events={state.events}
@@ -955,24 +1266,51 @@ export default function App() {
           />
           <InspectorDock
             adaptationCapabilities={adaptationCapabilities}
+            adaptationCapabilitiesError={state.resourceErrors.adaptation_scene ?? null}
+            adaptationLoading={
+              state.resourceLoads.adaptation_scene?.status === "loading" ||
+              state.resourceLoads.adaptation_catalog?.status === "loading"
+            }
             adaptationCatalog={adaptationCatalog}
+            adaptationCatalogError={state.resourceErrors.adaptation_catalog ?? null}
             assetInventory={assetInventory}
+            assetInventoryError={state.resourceErrors.asset_inventory ?? null}
+            assetLibraryLoading={
+              state.resourceLoads.asset_inventory?.status === "loading" ||
+              state.resourceLoads.asset_library?.status === "loading"
+            }
             assetLibrarySearch={assetLibrarySearch}
             assetLibrarySearchBusy={assetLibrarySearchBusy}
             assetLibrarySearchError={assetLibrarySearchError}
             assetLibrarySummary={assetLibrarySummary}
+            assetLibrarySummaryError={state.resourceErrors.asset_library ?? null}
             bundle={state.viewerBundle}
             canRollback={canRollbackVersions}
             events={state.events}
             documentCapabilities={documentCapabilities}
             issues={state.userIssues}
             ragEvidence={ragEvidence}
-            ragEvidenceError={ragEvidenceError}
-            ragEvidenceLoading={ragEvidenceLoading}
+            ragEvidenceError={state.resourceErrors.rag_evidence ?? null}
+            ragEvidenceLoading={state.resourceLoads.rag_evidence?.status === "loading"}
+            qaEvidence={qaEvidence}
+            qaEvidenceError={state.resourceErrors.qa_evidence ?? null}
+            qaEvidenceLoading={state.resourceLoads.qa_evidence?.status === "loading"}
+            llmProvenance={llmProvenance}
+            llmProvenanceError={state.resourceErrors.llm_provenance ?? null}
+            llmProvenanceLoading={state.resourceLoads.llm_provenance?.status === "loading"}
+            viewerBundleError={state.resourceErrors.viewer_bundle ?? null}
+            viewerBundleLoading={state.resourceLoads.viewer_bundle?.status === "loading"}
             summary={state.summary}
             timeline={state.timeline}
             toAbsoluteUrl={toArtifactUrl}
             onRollbackVersion={rollbackVersion}
+            onRetryAdaptation={() => void retryAdaptationSurfaces()}
+            onRetryAssets={() => void retryAssetSurfaces()}
+            onRetryAssetSearch={() => void retryAssetSearch()}
+            onRetryLlmProvenance={() => void retryLlmProvenance().catch(() => undefined)}
+            onRetryQaEvidence={() => void retryQaEvidence().catch(() => undefined)}
+            onRetryRagEvidence={() => void retryRagEvidence().catch(() => undefined)}
+            onRetryViewerBundle={() => void reloadViewerBundle().catch(() => undefined)}
             onSearchAssetLibrary={searchAssetLibrary}
             rollbackBusyVersionId={rollbackBusyVersionId}
             versionMessage={versionMessage}
@@ -1005,9 +1343,21 @@ export function needsPolling(phase: WorkflowPhase, runtimeMode: string): boolean
   return runtimeMode === "polling" && (phase === "running" || phase === "streaming");
 }
 
+export async function reconcileAfterAmbiguousMutation(
+  reloadVerifiedState: () => Promise<void>
+): Promise<boolean> {
+  try {
+    await reloadVerifiedState();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 type UserActionContext =
   | "analysis"
   | "assets"
+  | "bootstrap"
   | "connection"
   | "documents"
   | "edit"
@@ -1019,6 +1369,7 @@ export function userFacingError(error: unknown, context: UserActionContext): str
   const action = {
     analysis: "L’analyse de la demande",
     assets: "La recherche de composants",
+    bootstrap: "La synchronisation initiale du studio",
     connection: "La connexion au studio",
     documents: "L’analyse documentaire",
     edit: "La modification du design",
@@ -1079,6 +1430,21 @@ export function selectWorkflowToRestore(designs: WorkflowStatus[]): WorkflowStat
 
 export function shouldForgetDocumentPackSession(error: unknown): boolean {
   return error instanceof ApiClientError && error.status === 404;
+}
+
+export function documentPackReviewIsComplete(review: DocumentPackReview): boolean {
+  return (
+    review.summary !== null &&
+    review.conflicts !== null &&
+    review.missingFields !== null &&
+    review.qa !== null &&
+    review.documents !== null &&
+    review.extractions !== null &&
+    review.provenance !== null &&
+    review.processing !== null &&
+    review.consolidatedSpec !== null &&
+    Object.keys(review.sectionErrors ?? {}).length === 0
+  );
 }
 
 export function latestEventCursor(

@@ -29,6 +29,7 @@ import type {
   DocumentPackReview,
   DocumentPackSummary,
   Health,
+  LLMDecisionProvenance,
   ParseRequirementsResponse,
   PublicVersionInfo,
   SceneAdaptationCapabilities,
@@ -46,11 +47,17 @@ import { DocumentFileComposer } from "./DocumentFileComposer";
 
 export function BackendStatusBar({
   health,
+  healthError,
+  healthLoading,
+  onRetryHealth,
   phase,
   bundle,
   issues
 }: {
   health: Health | null;
+  healthError?: string | null;
+  healthLoading?: boolean;
+  onRetryHealth?: () => void;
   phase: WorkflowPhase;
   bundle: ViewerBundle | null;
   issues: UserIssues | null;
@@ -77,8 +84,17 @@ export function BackendStatusBar({
       <div className="topbar-status" aria-label="Studio runtime status">
         <span className={health?.status === "ok" ? "runtime-presence ok" : "runtime-presence warn"}>
           <span aria-hidden="true" />
-          {health?.status === "ok" ? "Studio local connecté" : "Studio indisponible"}
+          {health?.status === "ok"
+            ? "Studio local connecté"
+            : healthLoading
+              ? "Connexion au studio…"
+              : "Studio indisponible"}
         </span>
+        {healthError && onRetryHealth ? (
+          <button className="topbar-retry" onClick={onRetryHealth} type="button">
+            Réessayer la connexion
+          </button>
+        ) : null}
         {workflowActive ? (
           <span className="workflow-truth active">
             <Loader2 className="spin" size={14} aria-hidden="true" />
@@ -121,6 +137,8 @@ export function ChatCommandPanel({
   analysisBusy,
   analysisError,
   analysisSubmitted,
+  bootstrapError,
+  bootstrapLoading,
   prompt,
   submissionPending,
   phase,
@@ -131,7 +149,11 @@ export function ChatCommandPanel({
   revisionBusy,
   editMessage,
   documentCapabilities = null,
+  documentCapabilitiesError,
+  documentCapabilitiesLoading,
   documentPackReview,
+  documentPackReviewError,
+  documentPackReviewLoading,
   documentPackSummary,
   documentPackMessage,
   documentPackBusy,
@@ -139,15 +161,20 @@ export function ChatCommandPanel({
   onConfirm,
   onDocumentPackCorrection,
   onDocumentPackGenerate,
+  onDocumentPackReviewRetry,
   onDocumentPackUpload,
+  onDocumentCapabilitiesRetry,
   onPromptChange,
   onRevisionPromptChange,
-  onRevisionSubmit
+  onRevisionSubmit,
+  onRetryBootstrap
 }: {
   analysis: ParseRequirementsResponse | null;
   analysisBusy: boolean;
   analysisError: string | null;
   analysisSubmitted: boolean;
+  bootstrapError?: string | null;
+  bootstrapLoading?: boolean;
   prompt: string;
   submissionPending: boolean;
   phase: WorkflowPhase;
@@ -158,7 +185,11 @@ export function ChatCommandPanel({
   revisionBusy: boolean;
   editMessage: string | null;
   documentCapabilities: DocumentPackCapabilities | null;
+  documentCapabilitiesError?: string | null;
+  documentCapabilitiesLoading?: boolean;
   documentPackReview: DocumentPackReview | null;
+  documentPackReviewError?: string | null;
+  documentPackReviewLoading?: boolean;
   documentPackSummary: DocumentPackSummary | null;
   documentPackMessage: string | null;
   documentPackBusy: boolean;
@@ -166,10 +197,13 @@ export function ChatCommandPanel({
   onConfirm: () => void;
   onDocumentPackCorrection: (field: string, value: string, reason: string) => void;
   onDocumentPackGenerate: () => void;
+  onDocumentPackReviewRetry?: () => void;
   onDocumentPackUpload: (files: File[]) => Promise<boolean>;
+  onDocumentCapabilitiesRetry?: () => void;
   onPromptChange: (value: string) => void;
   onRevisionPromptChange: (value: string) => void;
   onRevisionSubmit: () => void;
+  onRetryBootstrap?: () => void;
 }) {
   const disabled =
     submissionPending || phase === "submitting" || phase === "streaming" || phase === "running";
@@ -225,6 +259,19 @@ export function ChatCommandPanel({
           <p>{assistantMessage}</p>
         </div>
       </div>
+
+      {bootstrapError ? (
+        <ResourceRecovery
+          busy={bootstrapLoading}
+          label="L’état initial du studio n’a pas pu être entièrement synchronisé."
+          message={bootstrapError}
+          onRetry={onRetryBootstrap}
+        />
+      ) : bootstrapLoading ? (
+        <p className="resource-loading" aria-live="polite" role="status">
+          <Loader2 className="spin" size={15} aria-hidden="true" /> Synchronisation de l’état vérifié du studio…
+        </p>
+      ) : null}
 
       {canEdit ? (
         <div className="command-mode" role="group" aria-label="Type de commande">
@@ -284,12 +331,18 @@ export function ChatCommandPanel({
         <DocumentPackIntake
           busy={documentPackBusy}
           capabilities={documentCapabilities}
+          capabilitiesError={documentCapabilitiesError}
+          capabilitiesLoading={documentCapabilitiesLoading}
           correctionBusy={correctionBusy}
           message={documentPackMessage}
           onCorrect={onDocumentPackCorrection}
           onGenerate={onDocumentPackGenerate}
+          onCapabilitiesRetry={onDocumentCapabilitiesRetry}
+          onReviewRetry={onDocumentPackReviewRetry}
           onUpload={onDocumentPackUpload}
           review={documentPackReview}
+          reviewError={documentPackReviewError}
+          reviewLoading={documentPackReviewLoading}
           summary={documentPackSummary}
         />
       ) : null}
@@ -460,26 +513,44 @@ function RequirementsUnderstanding({
 function DocumentPackIntake({
   busy,
   capabilities,
+  capabilitiesError,
+  capabilitiesLoading,
   correctionBusy,
   message,
   onCorrect,
+  onCapabilitiesRetry,
   onGenerate,
+  onReviewRetry,
   onUpload,
   review,
+  reviewError,
+  reviewLoading,
   summary
 }: {
   busy: boolean;
   capabilities: DocumentPackCapabilities | null;
+  capabilitiesError?: string | null;
+  capabilitiesLoading?: boolean;
   correctionBusy: boolean;
   message: string | null;
   onCorrect: (field: string, value: string, reason: string) => void;
+  onCapabilitiesRetry?: () => void;
   onGenerate: () => void;
+  onReviewRetry?: () => void;
   onUpload: (files: File[]) => Promise<boolean>;
   review: DocumentPackReview | null;
+  reviewError?: string | null;
+  reviewLoading?: boolean;
   summary: DocumentPackSummary | null;
 }) {
-  const canGenerate = summary?.can_generate_design === true;
+  const reviewComplete = review ? documentReviewComplete(review) : false;
+  const canGenerate = summary?.can_generate_design === true && reviewComplete;
   const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (reviewError) {
+      setExpanded(true);
+    }
+  }, [reviewError]);
   return (
     <details
       className="document-intake"
@@ -500,14 +571,34 @@ function DocumentPackIntake({
           <span className="eyebrow">Cahier de charge</span>
           <strong>Pièces techniques et cahier de charge</strong>
           <p>
-            {capabilities?.document_pack_status === "limited"
+            {capabilitiesError
+              ? "Les limites d’import ne sont pas disponibles; aucun fichier n’est envoyé sans ce contrat."
+              : capabilities?.document_pack_status === "limited"
               ? "Joignez directement plusieurs PDF, images, plans et tableaux, ou déposez un ZIP. Le backend local inventorie, déduplique et conserve la provenance avant de construire le design."
-              : "Capacités documentaires en cours de chargement."}
+              : capabilitiesLoading
+                ? "Capacités documentaires en cours de chargement."
+                : "Capacités documentaires indisponibles."}
           </p>
         </div>
+        {capabilitiesError ? (
+          <ResourceRecovery
+            busy={capabilitiesLoading}
+            label="Le contrat d’import documentaire n’a pas été chargé."
+            message={capabilitiesError}
+            onRetry={onCapabilitiesRetry}
+          />
+        ) : null}
         <DocumentFileComposer
           busy={busy}
           capabilities={capabilities}
+          disabledReason={
+            capabilities
+              ? null
+              : capabilitiesLoading
+                ? "Le contrat d’import documentaire est en cours de chargement."
+                : capabilitiesError ??
+                  "Le contrat d’import documentaire est indisponible. Réessayez avant de joindre des fichiers."
+          }
           onSubmit={onUpload}
         />
         {summary ? (
@@ -523,10 +614,23 @@ function DocumentPackIntake({
         ) : null}
         {review ? (
         <DocumentPackReviewPanel
-          busy={correctionBusy}
+          busy={busy || correctionBusy}
           onCorrect={onCorrect}
+          onRetry={onReviewRetry}
           review={review}
         />
+        ) : null}
+        {!review && reviewError ? (
+          <ResourceRecovery
+            busy={reviewLoading || busy}
+            label="La revue documentaire n’a pas pu être synchronisée. Le pack conservé n’est pas présenté comme vide."
+            message={reviewError}
+            onRetry={onReviewRetry}
+          />
+        ) : !review && reviewLoading ? (
+          <p className="resource-loading" aria-live="polite" role="status">
+            <Loader2 className="spin" size={15} aria-hidden="true" /> Chargement de la revue documentaire…
+          </p>
         ) : null}
         {message ? <p className="muted">{message}</p> : null}
       </div>
@@ -537,40 +641,49 @@ function DocumentPackIntake({
 function DocumentPackReviewPanel({
   busy,
   onCorrect,
+  onRetry,
   review
 }: {
   busy: boolean;
   onCorrect: (field: string, value: string, reason: string) => void;
+  onRetry?: () => void;
   review: DocumentPackReview;
 }) {
-  const correctionFields = [...review.conflicts, ...review.missingFields].filter(
+  const conflicts = review.conflicts ?? [];
+  const missingFields = review.missingFields ?? [];
+  const qa = review.qa;
+  const documents = review.documents ?? [];
+  const provenance = review.provenance;
+  const processing = review.processing;
+  const consolidatedSpec = review.consolidatedSpec;
+  const correctionFields = [...conflicts, ...missingFields].filter(
     (field, index, items) => items.findIndex((candidate) => candidate.field === field.field) === index
   );
   const correctionFieldNames = Array.from(
     new Set([
       ...correctionFields.map((candidate) => candidate.field),
-      ...review.qa.blocking_issues
+      ...(qa?.blocking_issues ?? [])
     ])
   );
   const [field, setField] = useState("");
   const [value, setValue] = useState("");
   const [reason, setReason] = useState("");
   const selectedField = field || correctionFieldNames[0] || "";
-  const failedChecks = review.qa.checks.filter((check) => !check.passed);
-  const usedDocuments = review.documents.filter((document) => document.used_for_design);
-  const ignoredDocuments = review.documents.filter((document) => !document.used_for_design);
-  const failedDocuments = review.documents.filter((document) =>
+  const failedChecks = (qa?.checks ?? []).filter((check) => !check.passed);
+  const usedDocuments = documents.filter((document) => document.used_for_design);
+  const ignoredDocuments = documents.filter((document) => !document.used_for_design);
+  const failedDocuments = documents.filter((document) =>
     ["failed", "unavailable", "unsupported"].includes(document.extraction_status)
   );
-  const criticalEvidence = Object.entries(review.provenance)
+  const criticalEvidence = Object.entries(provenance ?? {})
     .filter(([name]) => isCriticalDocumentField(name))
     .flatMap(([name, sources]) => sources.map((source) => ({ name, source })))
     .sort((left, right) => (right.source.confidence ?? 0) - (left.source.confidence ?? 0))
     .slice(0, 12);
   const processingWarnings = Array.from(
     new Set([
-      ...review.processing.warnings,
-      ...review.documents.flatMap((document) => document.processing_warnings)
+      ...(processing?.warnings ?? []),
+      ...documents.flatMap((document) => document.processing_warnings)
     ])
   );
 
@@ -586,8 +699,20 @@ function DocumentPackReviewPanel({
 
   return (
     <div className="pack-summary" aria-label="Revue du cahier de charge">
-      <strong>{review.qa.ready_to_generate ? "Cahier de charge prêt" : "Revue nécessaire"}</strong>
-      <small>Confiance {formatScore(review.qa.ready_confidence)} · {review.conflicts.length} conflit(s) · {review.missingFields.length} champ(s) manquant(s)</small>
+      <strong>{qa?.ready_to_generate ? "Cahier de charge prêt" : qa ? "Revue nécessaire" : "Revue partielle"}</strong>
+      {qa ? (
+        <small>Confiance {formatScore(qa.ready_confidence)} · {conflicts.length} conflit(s) · {missingFields.length} champ(s) manquant(s)</small>
+      ) : (
+        <small>Le statut QA documentaire n’est pas disponible.</small>
+      )}
+      {Object.keys(review.sectionErrors ?? {}).length ? (
+        <ResourceRecovery
+          busy={busy}
+          label="Certaines parties de la revue n’ont pas été chargées. Les autres restent consultables."
+          message={documentReviewFailureMessage(review)}
+          onRetry={onRetry}
+        />
+      ) : null}
       <div className="document-triage-summary" aria-label="Tri documentaire">
         <span><strong>{usedDocuments.length}</strong> utile(s)</span>
         <span><strong>{ignoredDocuments.length}</strong> écarté(s)</span>
@@ -596,9 +721,11 @@ function DocumentPackReviewPanel({
       <div className="document-intelligence-summary">
         <strong>Compréhension utilisée pour le design</strong>
         <small>
-          {review.consolidatedSpec.source_mode === "groq" || review.consolidatedSpec.source_mode === "mixed"
-            ? `Compréhension structurée${review.consolidatedSpec.llm_fallback_used ? " avec mode de secours signalé" : " validée"}.`
-            : "Extraction déterministe; aucun raisonnement LLM n’est revendiqué."}
+          {consolidatedSpec
+            ? consolidatedSpec.source_mode === "groq" || consolidatedSpec.source_mode === "mixed"
+              ? `Compréhension structurée${consolidatedSpec.llm_fallback_used ? " avec mode de secours signalé" : " validée"}.`
+              : "Extraction déterministe; aucun raisonnement LLM n’est revendiqué."
+            : "La synthèse consolidée n’a pas pu être chargée."}
         </small>
         {criticalEvidence.length ? (
           <ul className="evidence-list">
@@ -681,11 +808,44 @@ function DocumentPackReviewPanel({
       ) : null}
       <List
         title="Actions recommandées"
-        items={review.qa.recommended_user_actions}
-        empty="Aucune action documentaire supplémentaire."
+        items={qa?.recommended_user_actions ?? []}
+        empty={qa ? "Aucune action documentaire supplémentaire." : "Actions indisponibles tant que la QA documentaire n’est pas resynchronisée."}
       />
     </div>
   );
+}
+
+function documentReviewComplete(review: DocumentPackReview): boolean {
+  return (
+    review.summary !== null &&
+    review.conflicts !== null &&
+    review.missingFields !== null &&
+    review.qa !== null &&
+    review.documents !== null &&
+    review.extractions !== null &&
+    review.provenance !== null &&
+    review.processing !== null &&
+    review.consolidatedSpec !== null &&
+    Object.keys(review.sectionErrors ?? {}).length === 0
+  );
+}
+
+function documentReviewFailureMessage(review: DocumentPackReview): string {
+  const labels: Record<string, string> = {
+    summary: "résumé",
+    conflicts: "conflits",
+    missingFields: "champs manquants",
+    qa: "QA documentaire",
+    documents: "tri des documents",
+    extractions: "extractions",
+    provenance: "provenance",
+    processing: "traitement",
+    consolidatedSpec: "synthèse consolidée"
+  };
+  const sections = Object.keys(review.sectionErrors ?? {}).map(
+    (section) => labels[section] ?? section
+  );
+  return `Sections indisponibles : ${sections.join(", ")}.`;
 }
 
 function isCriticalDocumentField(field: string): boolean {
@@ -930,12 +1090,18 @@ type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: Rea
 
 export function InspectorDock({
   adaptationCapabilities = null,
+  adaptationCapabilitiesError = null,
+  adaptationLoading = false,
   adaptationCatalog = null,
+  adaptationCatalogError = null,
   assetInventory = null,
+  assetInventoryError = null,
   assetLibrarySearch = null,
   assetLibrarySearchBusy = false,
   assetLibrarySearchError = null,
   assetLibrarySummary = null,
+  assetLibrarySummaryError = null,
+  assetLibraryLoading = false,
   bundle,
   canRollback,
   documentCapabilities,
@@ -944,22 +1110,43 @@ export function InspectorDock({
   ragEvidence = null,
   ragEvidenceError = null,
   ragEvidenceLoading = false,
+  qaEvidence = null,
+  qaEvidenceError = null,
+  qaEvidenceLoading = false,
+  llmProvenance = null,
+  llmProvenanceError = null,
+  llmProvenanceLoading = false,
+  viewerBundleError = null,
+  viewerBundleLoading = false,
   summary,
   timeline,
   toAbsoluteUrl,
   onRollbackVersion,
+  onRetryAdaptation,
+  onRetryAssets,
+  onRetryAssetSearch,
+  onRetryLlmProvenance,
+  onRetryQaEvidence,
+  onRetryRagEvidence,
+  onRetryViewerBundle,
   onSearchAssetLibrary,
   rollbackBusyVersionId,
   versionMessage,
   versions
 }: {
   adaptationCapabilities?: SceneAdaptationCapabilities | null;
+  adaptationCapabilitiesError?: string | null;
+  adaptationLoading?: boolean;
   adaptationCatalog?: AdaptationCapabilityCatalog | null;
+  adaptationCatalogError?: string | null;
   assetInventory?: AssetInventory | null;
+  assetInventoryError?: string | null;
   assetLibrarySearch?: AssetLibrarySearch | null;
   assetLibrarySearchBusy?: boolean;
   assetLibrarySearchError?: string | null;
   assetLibrarySummary?: AssetLibrarySummary | null;
+  assetLibrarySummaryError?: string | null;
+  assetLibraryLoading?: boolean;
   bundle: ViewerBundle | null;
   canRollback: boolean;
   documentCapabilities?: DocumentPackCapabilities | null;
@@ -968,10 +1155,25 @@ export function InspectorDock({
   ragEvidence?: unknown | null;
   ragEvidenceError?: string | null;
   ragEvidenceLoading?: boolean;
+  qaEvidence?: unknown | null;
+  qaEvidenceError?: string | null;
+  qaEvidenceLoading?: boolean;
+  llmProvenance?: LLMDecisionProvenance | null;
+  llmProvenanceError?: string | null;
+  llmProvenanceLoading?: boolean;
+  viewerBundleError?: string | null;
+  viewerBundleLoading?: boolean;
   summary: StudioSummary | null;
   timeline: TimelineSummary | null;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
   onRollbackVersion: (versionId: string) => void;
+  onRetryAdaptation?: () => void;
+  onRetryAssets?: () => void;
+  onRetryAssetSearch?: () => void;
+  onRetryLlmProvenance?: () => void;
+  onRetryQaEvidence?: () => void;
+  onRetryRagEvidence?: () => void;
+  onRetryViewerBundle?: () => void;
   onSearchAssetLibrary?: (query: string) => void | Promise<void>;
   rollbackBusyVersionId: string | null;
   versionMessage: string | null;
@@ -983,9 +1185,9 @@ export function InspectorDock({
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
   const issueCount = displayIssueCount(issues, bundle);
   const drawers: DrawerDefinition[] = [];
-  if (bundle) drawers.push({ id: "summary", label: "Aperçu", icon: <CheckCircle2 size={16} /> });
+  if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Aperçu", icon: <CheckCircle2 size={16} /> });
   if (events.length || timeline) drawers.push({ id: "agents", label: "Activité", icon: <Sparkles size={16} /> });
-  if (bundle || issueCount) {
+  if (bundle || issueCount || viewerBundleError || qaEvidenceError || qaEvidenceLoading) {
     drawers.push({
       id: "quality",
       label: "Contrôles",
@@ -994,8 +1196,8 @@ export function InspectorDock({
     });
   }
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
-  if (assetLibrarySummary?.catalog_available) drawers.push({ id: "library", label: "Composants", icon: <Boxes size={16} /> });
-  if (bundle || summary) drawers.push({ id: "system", label: "Système", icon: <Cpu size={16} /> });
+  if (assetLibrarySummary?.catalog_available || assetInventory || assetLibrarySummaryError || assetInventoryError || assetLibraryLoading) drawers.push({ id: "library", label: "Composants", icon: <Boxes size={16} /> });
+  if (bundle || summary || adaptationCapabilitiesError || adaptationCatalogError || llmProvenanceError || llmProvenanceLoading) drawers.push({ id: "system", label: "Système", icon: <Cpu size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -1075,11 +1277,22 @@ export function InspectorDock({
           <button aria-label="Fermer les détails" className="drawer-close" onClick={closeDrawer} ref={closeButtonRef} title="Fermer" type="button">
             <X size={16} aria-hidden="true" />
           </button>
-          {activeDrawer === "summary" ? <SummaryPanel bundle={bundle} issues={issues} summary={summary} versions={versions} /> : null}
+          {activeDrawer === "summary" ? (
+            <>
+              {viewerBundleError ? <ResourceRecovery busy={viewerBundleLoading} label="Le résumé vérifié du design n’a pas été resynchronisé." message={viewerBundleError} onRetry={onRetryViewerBundle} /> : null}
+              <SummaryPanel bundle={bundle} issues={issues} summary={summary} versions={versions} />
+            </>
+          ) : null}
           {activeDrawer === "agents" ? <AgentTimeline events={events} timeline={timeline} /> : null}
           {activeDrawer === "quality" ? (
             <>
-              <QaPanel bundle={bundle} />
+              <QaPanel
+                bundle={bundle}
+                evidence={qaEvidence}
+                error={qaEvidenceError ?? viewerBundleError}
+                loading={qaEvidenceLoading || viewerBundleLoading}
+                onRetry={qaEvidenceError ? onRetryQaEvidence : onRetryViewerBundle}
+              />
               <IssuesPanel issues={issues} />
             </>
           ) : null}
@@ -1089,19 +1302,28 @@ export function InspectorDock({
               busy={assetLibrarySearchBusy}
               error={assetLibrarySearchError}
               inventory={assetInventory}
+              inventoryError={assetInventoryError}
+              loading={assetLibraryLoading}
+              onRetry={onRetryAssets}
+              onRetrySearch={onRetryAssetSearch}
               onSearch={onSearchAssetLibrary}
               search={assetLibrarySearch}
               summary={assetLibrarySummary}
+              summaryError={assetLibrarySummaryError}
             />
           ) : null}
           {activeDrawer === "system" ? (
             <>
               <RuntimeCapabilitiesPanel
                 adaptationCapabilities={adaptationCapabilities}
+                adaptationCapabilitiesError={adaptationCapabilitiesError}
+                adaptationLoading={adaptationLoading}
                 adaptationCatalog={adaptationCatalog}
+                adaptationCatalogError={adaptationCatalogError}
                 bundle={bundle}
                 documentCapabilities={documentCapabilities ?? null}
                 inventory={assetInventory}
+                onRetryAdaptation={onRetryAdaptation}
                 summary={summary}
               />
               <RagEvidencePanel
@@ -1109,6 +1331,14 @@ export function InspectorDock({
                 error={ragEvidenceError}
                 evidence={ragEvidence}
                 loading={ragEvidenceLoading}
+                onRetry={onRetryRagEvidence}
+              />
+              <LlmProvenancePanel
+                bundle={bundle}
+                error={llmProvenanceError}
+                loading={llmProvenanceLoading}
+                onRetry={onRetryLlmProvenance}
+                provenance={llmProvenance}
               />
             </>
           ) : null}
@@ -1218,12 +1448,37 @@ export function SummaryPanel({
   );
 }
 
-export function QaPanel({ bundle }: { bundle: ViewerBundle | null }) {
+export function QaPanel({
+  bundle,
+  evidence,
+  error = null,
+  loading = false,
+  onRetry
+}: {
+  bundle: ViewerBundle | null;
+  evidence?: unknown | null;
+  error?: string | null;
+  loading?: boolean;
+  onRetry?: () => void;
+}) {
   const qa = bundle?.qa_summary ?? {};
   const passed = bundle?.mesh_qa_passed === true;
   return (
     <section className="drawer-section" aria-label="Validation QA">
       <PanelTitle icon={<ShieldAlert size={17} />} title="Validation honnête" />
+      {loading ? (
+        <p className="muted" aria-live="polite">Synchronisation du rapport QA vérifié…</p>
+      ) : error ? (
+        <ResourceRecovery
+          label="Le détail QA n’a pas pu être resynchronisé. Aucun contrôle manquant n’est supposé réussi."
+          message={error}
+          onRetry={onRetry}
+        />
+      ) : evidence ? (
+        <p className="resource-proof" role="status">
+          <CheckCircle2 size={15} aria-hidden="true" /> Rapport QA détaillé chargé depuis l’artefact backend.
+        </p>
+      ) : null}
       {bundle ? (
         <>
           <div className="metric-grid">
@@ -1351,16 +1606,26 @@ export function AssetLibraryPanel({
   busy = false,
   error = null,
   inventory = null,
+  inventoryError = null,
+  loading = false,
   onSearch,
+  onRetry,
+  onRetrySearch,
   search = null,
-  summary
+  summary,
+  summaryError = null
 }: {
   busy?: boolean;
   error?: string | null;
   inventory?: AssetInventory | null;
+  inventoryError?: string | null;
+  loading?: boolean;
   onSearch?: (query: string) => void | Promise<void>;
+  onRetry?: () => void;
+  onRetrySearch?: () => void;
   search?: AssetLibrarySearch | null;
   summary: AssetLibrarySummary | null;
+  summaryError?: string | null;
 }) {
   const [query, setQuery] = useState("");
   const dimensions = summary?.claimed_dimension_counts ?? {};
@@ -1374,6 +1639,15 @@ export function AssetLibraryPanel({
   return (
     <section className="drawer-section" aria-label="Bibliothèque de designs">
       <PanelTitle icon={<Boxes size={17} />} title="Bibliothèque telecom" />
+      {loading ? <p className="muted" aria-live="polite">Synchronisation des manifests et du catalogue…</p> : null}
+      {inventoryError ? (
+        <ResourceRecovery
+          busy={loading}
+          label="Les composants qualifiés n’ont pas pu être chargés."
+          message={inventoryError}
+          onRetry={onRetry}
+        />
+      ) : null}
       {inventory ? (
         <>
           <div className="summary-card">
@@ -1444,7 +1718,14 @@ export function AssetLibraryPanel({
               </button>
             </div>
           </form>
-          {error ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> Recherche indisponible : {error}</p> : null}
+          {error ? (
+            <ResourceRecovery
+              busy={busy}
+              label="La dernière recherche du catalogue n’a pas abouti."
+              message={error}
+              onRetry={onRetrySearch}
+            />
+          ) : null}
           {search ? (
             <div className="library-results" aria-live="polite">
               <div className="library-results-heading">
@@ -1476,7 +1757,16 @@ export function AssetLibraryPanel({
           </div>
           <List title="Limites actuelles" items={summary.limitations} empty="Aucune limitation remontée." />
         </>
-      ) : <p className="muted">La bibliothèque locale n'est pas cataloguée.</p>}
+      ) : summaryError ? (
+        <ResourceRecovery
+          busy={loading}
+          label="Le catalogue local n’a pas pu être chargé; son absence n’est pas supposée."
+          message={summaryError}
+          onRetry={onRetry}
+        />
+      ) : loading ? null : (
+        <p className="muted">Aucun catalogue n’a encore été publié par le backend.</p>
+      )}
     </section>
   );
 }
@@ -1533,12 +1823,14 @@ export function RagEvidencePanel({
   bundle,
   error = null,
   evidence,
-  loading = false
+  loading = false,
+  onRetry
 }: {
   bundle: ViewerBundle | null;
   error?: string | null;
   evidence: unknown | null;
   loading?: boolean;
+  onRetry?: () => void;
 }) {
   const summary = summarizeRagEvidence(evidence);
   return (
@@ -1560,9 +1852,11 @@ export function RagEvidencePanel({
       {loading ? (
         <p className="muted" aria-live="polite">Chargement des preuves RAG vérifiées…</p>
       ) : error ? (
-        <p className="inline-alert" role="alert">
-          <AlertTriangle size={16} aria-hidden="true" /> {error}
-        </p>
+        <ResourceRecovery
+          label="Les preuves RAG n’ont pas pu être chargées."
+          message={error}
+          onRetry={onRetry}
+        />
       ) : evidence ? (
         <>
           <List
@@ -1601,20 +1895,85 @@ export function RagEvidencePanel({
   );
 }
 
+export function LlmProvenancePanel({
+  bundle,
+  error = null,
+  loading = false,
+  onRetry,
+  provenance
+}: {
+  bundle: ViewerBundle | null;
+  error?: string | null;
+  loading?: boolean;
+  onRetry?: () => void;
+  provenance: LLMDecisionProvenance | null;
+}) {
+  return (
+    <section className="drawer-section" aria-label="Provenance de décision LLM">
+      <PanelTitle icon={<Sparkles size={17} />} title="Provenance de décision" />
+      {loading ? (
+        <p className="muted" aria-live="polite">Chargement de la décision structurée…</p>
+      ) : error ? (
+        <ResourceRecovery
+          label="La provenance LLM n’a pas pu être chargée; aucune décision n’est reconstruite côté navigateur."
+          message={error}
+          onRetry={onRetry}
+        />
+      ) : provenance ? (
+        <>
+          <div className="metric-grid">
+            <Metric label="Provider" value={provenance.provider} />
+            <Metric label="Modèle" value={provenance.model ?? "non déclaré"} />
+            <Metric label="Capacité" value={humanSemanticRole(provenance.capability_called)} />
+            <Metric label="Contrat" value={provenance.decision_contract_version} />
+            <Metric label="Candidats" value={String(provenance.candidates_considered.length)} />
+            <Metric label="Fallback" value={provenance.fallback_used ? "signalé" : "non"} />
+          </div>
+          <List
+            title="Stratégies retenues"
+            items={provenance.strategy_selected.map(humanSemanticRole)}
+            empty="Aucune stratégie retenue n’est déclarée."
+          />
+          <List
+            title="Justification enregistrée"
+            items={provenance.rationale}
+            empty="Aucune justification n’est déclarée."
+          />
+          <p className="resource-proof">
+            <CheckCircle2 size={15} aria-hidden="true" /> Décision liée à la version active et conservée par le backend.
+          </p>
+        </>
+      ) : bundle?.llm_decision_provenance_url ? (
+        <p className="muted">La provenance est publiée mais n’a pas encore été chargée.</p>
+      ) : (
+        <p className="muted">Aucune provenance de décision versionnée n’est publiée pour ce résultat.</p>
+      )}
+    </section>
+  );
+}
+
 export function RuntimeCapabilitiesPanel({
   adaptationCapabilities = null,
+  adaptationCapabilitiesError = null,
+  adaptationLoading = false,
   adaptationCatalog = null,
+  adaptationCatalogError = null,
   summary,
   bundle,
   inventory,
-  documentCapabilities
+  documentCapabilities,
+  onRetryAdaptation
 }: {
   adaptationCapabilities?: SceneAdaptationCapabilities | null;
+  adaptationCapabilitiesError?: string | null;
+  adaptationLoading?: boolean;
   adaptationCatalog?: AdaptationCapabilityCatalog | null;
+  adaptationCatalogError?: string | null;
   summary: StudioSummary | null;
   bundle: ViewerBundle | null;
   inventory: AssetInventory | null;
   documentCapabilities: DocumentPackCapabilities | null;
+  onRetryAdaptation?: () => void;
 }) {
   const unsupported = bundle?.unsupported_actions ?? summary?.unsupported_actions ?? [];
   const runtime = bundle?.runtime_capabilities ?? summary?.runtime_capabilities;
@@ -1624,15 +1983,35 @@ export function RuntimeCapabilitiesPanel({
   return (
     <section className="drawer-section" aria-label="Capacités runtime">
       <PanelTitle icon={<Boxes size={17} />} title="Capacités réelles" />
+      {adaptationCapabilitiesError || adaptationCatalogError ? (
+        <ResourceRecovery
+          busy={adaptationLoading}
+          label="Les capacités d’adaptation ne sont pas disponibles; aucune capacité n’est supposée absente ou égale à zéro."
+          message={[adaptationCapabilitiesError, adaptationCatalogError].filter(Boolean).join(" · ")}
+          onRetry={onRetryAdaptation}
+        />
+      ) : null}
       <div className="metric-grid">
         <Metric label="Assets" value={inventory?.status ?? "unknown"} />
         <Metric
           label="Paramètres 3D actifs"
-          value={String(adaptationCapabilities?.capabilities.length ?? 0)}
+          value={adaptationLoading
+            ? "chargement"
+            : adaptationCapabilitiesError
+              ? "indisponible"
+              : adaptationCapabilities
+                ? String(adaptationCapabilities.capabilities.length)
+                : "non résolu"}
         />
         <Metric
           label="Profils d’adaptation"
-          value={String(adaptationCatalog?.profiles.length ?? 0)}
+          value={adaptationLoading
+            ? "chargement"
+            : adaptationCatalogError
+              ? "indisponible"
+              : adaptationCatalog
+                ? String(adaptationCatalog.profiles.length)
+                : "non résolu"}
         />
         <Metric label="Documents" value={documentCapabilities?.document_pack_status ?? "unknown"} />
         <Metric label="Download" value={showDownload ? "supporté" : "non supporté"} />
@@ -1641,7 +2020,11 @@ export function RuntimeCapabilitiesPanel({
       <List
         title="Modifications vérifiées du design actif"
         items={summarizeAdaptationCapabilityGroups(adaptationCapabilities)}
-        empty="Aucun design actif: les paramètres seront résolus après génération."
+        empty={adaptationCapabilitiesError
+          ? "Liste indisponible jusqu’à la prochaine synchronisation réussie."
+          : bundle
+            ? "Aucune capacité n’est déclarée pour ce design actif."
+            : "Aucun design actif: les paramètres seront résolus après génération."}
       />
       <List
         title="Limites d’adaptation"
@@ -2446,6 +2829,34 @@ function PanelTitle({ icon, title }: { icon: ReactNode; title: string }) {
   );
 }
 
+export function ResourceRecovery({
+  busy = false,
+  label,
+  message,
+  onRetry
+}: {
+  busy?: boolean;
+  label: string;
+  message: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="resource-recovery" role="alert">
+      <AlertTriangle size={17} aria-hidden="true" />
+      <div>
+        <strong>{label}</strong>
+        <span>{message}</span>
+      </div>
+      {onRetry ? (
+        <button disabled={busy} onClick={onRetry} type="button">
+          {busy ? <Loader2 className="spin" size={14} aria-hidden="true" /> : <RotateCcw size={14} aria-hidden="true" />}
+          {busy ? "Chargement…" : "Réessayer"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function StatusPill({
   label,
   tone = "muted",
@@ -2622,6 +3033,7 @@ function artifactLabel(name: string): string {
     "rag_evidence.json": "Preuves du contexte IA",
     "planning_decision.json": "Décisions de planification",
     "geometry_validation.json": "Validation géométrie",
+    "component_proofs.json": "Preuves des composants assemblés",
     "requirement_coverage.json": "Couverture des exigences",
     "completion_certificate.json": "Preuve locale de complétion",
     "technical_report.md": "Rapport technique"

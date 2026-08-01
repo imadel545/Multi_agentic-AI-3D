@@ -270,6 +270,28 @@ describe("workflow reducer", () => {
     expect(state.providerHealth).toBe("degraded");
   });
 
+  it("recovers a degraded terminal phase when a later verified bundle is valid", () => {
+    const recovered = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "degraded",
+        status: completedStatus,
+        viewerBundle: {
+          ...baseBundle,
+          asset_import_summary: { procedural_fallback_count: 1 }
+        },
+        designQuality: "degraded"
+      },
+      {
+        type: "VIEWER_BUNDLE_LOADED",
+        viewerBundle: baseBundle
+      }
+    );
+
+    expect(recovered.phase).toBe("completed");
+    expect(recovered.designQuality).toBe("valid");
+  });
+
   it("activates polling mode when SSE fails", () => {
     const state = workflowReducer(
       { ...initialWorkflowState, phase: "streaming", workflowId: "wf_1" },
@@ -313,6 +335,54 @@ describe("workflow reducer", () => {
     expect(state.phase).toBe("completed");
     expect(state.error).toBeNull();
     expect(state.resourceErrors.rag_evidence).toBe("404");
+    expect(state.resourceLoads.rag_evidence).toEqual({ status: "error", error: "404" });
+  });
+
+  it("clears a resource error while retrying and removes stale failure state after recovery", () => {
+    const failed = workflowReducer(initialWorkflowState, {
+      type: "RESOURCE_FAILED",
+      resource: "asset_inventory",
+      message: "Catalogue indisponible"
+    });
+
+    const retrying = workflowReducer(failed, {
+      type: "RESOURCE_LOADING",
+      resource: "asset_inventory"
+    });
+    expect(retrying.resourceErrors.asset_inventory).toBeUndefined();
+    expect(retrying.resourceLoads.asset_inventory).toEqual({
+      status: "loading",
+      error: null
+    });
+
+    const recovered = workflowReducer(retrying, {
+      type: "RESOURCE_RECOVERED",
+      resource: "asset_inventory"
+    });
+    expect(recovered.resourceErrors.asset_inventory).toBeUndefined();
+    expect(recovered.resourceLoads.asset_inventory).toEqual({
+      status: "ready",
+      error: null
+    });
+  });
+
+  it("does not carry resource success or failure state into a newly accepted design", () => {
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        workflowId: "wf_old",
+        phase: "completed",
+        resourceErrors: { viewer_bundle: "Ancienne erreur" },
+        resourceLoads: {
+          viewer_bundle: { status: "error", error: "Ancienne erreur" },
+          qa_evidence: { status: "ready", error: null }
+        }
+      },
+      { type: "DESIGN_CREATED", workflowId: "wf_new" }
+    );
+
+    expect(state.resourceErrors).toEqual({});
+    expect(state.resourceLoads).toEqual({});
   });
 
   it("does not turn a completed workflow into failed when a command request fails", () => {

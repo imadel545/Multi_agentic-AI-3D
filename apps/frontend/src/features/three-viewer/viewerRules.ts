@@ -189,11 +189,16 @@ export function hasUsableWebGL(
   }
   const canvas = ownerDocument.createElement("canvas");
   try {
-    return Boolean(
+    const context = (
       canvas.getContext("webgl2") ||
         canvas.getContext("webgl") ||
         canvas.getContext("experimental-webgl")
-    );
+    ) as (WebGLRenderingContext | WebGL2RenderingContext | null);
+    if (!context) {
+      return false;
+    }
+    context.getExtension?.("WEBGL_lose_context")?.loseContext();
+    return true;
   } catch {
     return false;
   }

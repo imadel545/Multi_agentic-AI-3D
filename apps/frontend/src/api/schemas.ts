@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publicPathIssue } from "./publicUrl";
 
 const ForbiddenPublicFields = new Set([
   "artifact_dir",
@@ -9,7 +10,6 @@ const ForbiddenPublicFields = new Set([
   "stacktrace",
   "traceback"
 ]);
-const ForbiddenStringMarkers = ["/Users/", "/home/", "/private/var/", "/var/folders/", "file://"];
 
 const UnknownRecord = z.object({}).catchall(z.unknown());
 const WorkflowLifecycleStatusSchema = z.enum([
@@ -33,19 +33,11 @@ export class ContractValidationError extends Error {
 
 function forbidInternalPaths(value: unknown, ctx: z.RefinementCtx, path: string[] = []) {
   if (typeof value === "string") {
-    for (const marker of ForbiddenStringMarkers) {
-      if (value.includes(marker)) {
-        ctx.addIssue({
-          code: "custom",
-          message: `internal filesystem marker ${marker} is not allowed`,
-          path
-        });
-      }
-    }
-    if (/^[A-Za-z]:[\\/]/.test(value)) {
+    const issue = publicPathIssue(value, path.at(-1));
+    if (issue) {
       ctx.addIssue({
         code: "custom",
-        message: "absolute Windows filesystem paths are not allowed",
+        message: issue,
         path
       });
     }
@@ -264,6 +256,29 @@ export const StudioSummarySchema = publicSchema(
   })
 );
 
+export const LLMDecisionProvenanceSchema = publicSchema(
+  UnknownRecord.extend({
+    schema_version: z.string(),
+    workflow_id: z.string(),
+    version_id: z.string(),
+    parent_version_id: z.string().nullish(),
+    provider: z.string(),
+    model: z.string().nullish(),
+    capability_called: z.string(),
+    structured_decision: UnknownRecord,
+    candidates_considered: z.array(UnknownRecord).default([]),
+    strategy_selected: z.array(z.string()).default([]),
+    rationale: z.array(z.string()).default([]),
+    fallback_used: z.boolean(),
+    fallback_reason: z.string().nullish(),
+    timestamp: z.string(),
+    decision_contract_version: z.string(),
+    source_prompt_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    capability_catalog_hash: z.string().regex(/^[a-f0-9]{64}$/),
+    links: UnknownRecord
+  })
+);
+
 export const CreateDesignResponseSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string().min(1),
@@ -294,6 +309,7 @@ export const WorkflowStatusSchema = publicSchema(
     llm_available: z.boolean().nullish(),
     llm_fallback_used: z.boolean().nullish(),
     llm_fallback_reason: z.string().nullish(),
+    llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
     rag_context_count: z.number().nullish(),
     rag_planning_summary: UnknownRecord.nullish(),
     rag_reranker_provider: z.string().nullish(),
@@ -455,6 +471,7 @@ export const ViewerBundleSchema = publicSchema(
     qa_report_url: z.string().nullish(),
     generation_report_url: z.string().nullish(),
     geometry_validation_url: z.string().nullish(),
+    component_proofs_url: z.string().nullish(),
     requirement_coverage_url: z.string().nullish(),
     completion_certificate_url: z.string().nullish(),
     requirement_coverage_passed: z.boolean().nullish(),
@@ -467,6 +484,8 @@ export const ViewerBundleSchema = publicSchema(
     llm_available: z.boolean().nullish(),
     llm_fallback_used: z.boolean().nullish(),
     llm_fallback_reason: z.string().nullish(),
+    llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
+    llm_decision_provenance_url: z.string().nullish(),
     rag_context_count: z.number().nullish(),
     rag_planning_summary: UnknownRecord.nullish(),
     rag_reranker_provider: z.string().nullish(),
@@ -833,6 +852,7 @@ export const PublicVersionInfoSchema = publicSchema(
     artifacts: z.record(z.string(), z.string()).default({}),
     qa_score: z.number().nullish(),
     generation_mode: z.string().nullish(),
+    llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
     edit_description: z.string().nullish(),
     diff_summary: UnknownRecord.nullish(),
     status: z.string().nullish()
@@ -858,6 +878,7 @@ export const EditDesignResponseSchema = publicSchema(
     llm_available: z.boolean().nullish(),
     llm_fallback_used: z.boolean().nullish(),
     llm_fallback_reason: z.string().nullish(),
+    llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
     viewer_bundle_url: z.string().nullish(),
     timeline_url: z.string().nullish(),
     user_issues_url: z.string().nullish(),
@@ -907,6 +928,7 @@ export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
 export type ViewerBundle = z.infer<typeof ViewerBundleSchema>;
+export type LLMDecisionProvenance = z.infer<typeof LLMDecisionProvenanceSchema>;
 export type GeometryFidelitySummary = z.infer<typeof GeometryFidelitySummarySchema>;
 export type TimelineSummary = z.infer<typeof TimelineSummarySchema>;
 export type TimelineStep = z.infer<typeof TimelineStepSchema>;
@@ -930,16 +952,32 @@ export type DocumentSourceEvidence = z.infer<typeof DocumentSourceEvidenceSchema
 export type DocumentPackProcessing = z.infer<typeof DocumentPackProcessingSchema>;
 export type DocumentPackProvenance = z.infer<typeof DocumentPackProvenanceSchema>;
 export type DocumentPackConsolidatedSpec = z.infer<typeof DocumentPackConsolidatedSpecSchema>;
+export type DocumentPackReviewSection =
+  | "summary"
+  | "conflicts"
+  | "missingFields"
+  | "qa"
+  | "documents"
+  | "extractions"
+  | "provenance"
+  | "processing"
+  | "consolidatedSpec";
+export type DocumentPackReviewSectionError = {
+  status: number;
+  retryable: boolean;
+};
 export type DocumentPackReview = {
-  summary: DocumentPackSummary;
-  conflicts: DocumentPackField[];
-  missingFields: DocumentPackField[];
-  qa: DocumentPackQA;
-  documents: DocumentReference[];
-  extractions: DocumentExtraction[];
-  provenance: DocumentPackProvenance;
-  processing: DocumentPackProcessing;
-  consolidatedSpec: DocumentPackConsolidatedSpec;
+  packId?: string;
+  summary: DocumentPackSummary | null;
+  conflicts: DocumentPackField[] | null;
+  missingFields: DocumentPackField[] | null;
+  qa: DocumentPackQA | null;
+  documents: DocumentReference[] | null;
+  extractions: DocumentExtraction[] | null;
+  provenance: DocumentPackProvenance | null;
+  processing: DocumentPackProcessing | null;
+  consolidatedSpec: DocumentPackConsolidatedSpec | null;
+  sectionErrors?: Partial<Record<DocumentPackReviewSection, DocumentPackReviewSectionError>>;
 };
 export type DocumentPackGenerateDesignResponse = z.infer<typeof DocumentPackGenerateDesignResponseSchema>;
 export type PublicVersionInfo = z.infer<typeof PublicVersionInfoSchema>;

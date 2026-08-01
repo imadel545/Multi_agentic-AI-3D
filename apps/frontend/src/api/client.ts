@@ -17,6 +17,7 @@ import {
   DocumentReferenceSchema,
   EditDesignResponseSchema,
   HealthSchema,
+  LLMDecisionProvenanceSchema,
   ParseRequirementsResponseSchema,
   RollbackVersionResponseSchema,
   SceneAdaptationCapabilitiesSchema,
@@ -36,10 +37,13 @@ import {
   type CurrentOperation,
   type DocumentPackCapabilities,
   type DocumentPackReview,
+  type DocumentPackReviewSection,
+  type DocumentPackReviewSectionError,
   type DocumentPackGenerateDesignResponse,
   type DocumentPackSummary,
   type EditDesignResponse,
   type Health,
+  type LLMDecisionProvenance,
   type ParseRequirementsResponse,
   type PublicVersionInfo,
   type RequirementSpec,
@@ -52,6 +56,7 @@ import {
   type WorkflowEvent,
   type WorkflowStatus
 } from "./schemas";
+import { isPublicArtifactReference } from "./publicUrl";
 
 export class ApiClientError extends Error {
   constructor(
@@ -187,16 +192,16 @@ export class TelecomStudioApi {
 
   async documentPackReview(packId: string): Promise<DocumentPackReview> {
     const [
-      summary,
-      conflicts,
-      missingFields,
-      qa,
-      documents,
-      extractions,
-      provenance,
-      processing,
-      consolidatedSpec
-    ] = await Promise.all([
+      summaryResult,
+      conflictsResult,
+      missingFieldsResult,
+      qaResult,
+      documentsResult,
+      extractionsResult,
+      provenanceResult,
+      processingResult,
+      consolidatedSpecResult
+    ] = await Promise.allSettled([
       this.getJson(`/document-packs/${packId}`),
       this.getJson(`/document-packs/${packId}/conflicts`),
       this.getJson(`/document-packs/${packId}/missing-fields`),
@@ -207,33 +212,66 @@ export class TelecomStudioApi {
       this.getJson(`/document-packs/${packId}/processing`),
       this.getJson(`/document-packs/${packId}/consolidated-spec`)
     ]);
-    return {
-      summary: parseContract("DocumentPackSummary", DocumentPackSummarySchema, summary),
-      conflicts: parseContract(
-        "DocumentPackConflicts",
-        DocumentPackFieldSchema.array(),
-        conflicts
-      ),
-      missingFields: parseContract(
-        "DocumentPackMissingFields",
-        DocumentPackFieldSchema.array(),
-        missingFields
-      ),
-      qa: parseContract("DocumentPackQA", DocumentPackQASchema, qa),
-      documents: parseContract("DocumentPackDocuments", DocumentReferenceSchema.array(), documents),
-      extractions: parseContract("DocumentPackExtractions", DocumentExtractionSchema.array(), extractions),
-      provenance: parseContract(
-        "DocumentPackProvenance",
-        DocumentPackProvenanceSchema,
-        provenance
-      ),
-      processing: parseContract("DocumentPackProcessing", DocumentPackProcessingSchema, processing),
-      consolidatedSpec: parseContract(
-        "DocumentPackConsolidatedSpec",
-        DocumentPackConsolidatedSpecSchema,
-        consolidatedSpec
-      )
+    const sectionErrors: Partial<
+      Record<DocumentPackReviewSection, DocumentPackReviewSectionError>
+    > = {};
+    const failures: unknown[] = [];
+    const section = <T,>(
+      name: DocumentPackReviewSection,
+      result: PromiseSettledResult<unknown>,
+      parse: (payload: unknown) => T
+    ): T | null => {
+      if (result.status === "rejected") {
+        failures.push(result.reason);
+        sectionErrors[name] = documentPackSectionError(result.reason);
+        return null;
+      }
+      try {
+        return parse(result.value);
+      } catch (error) {
+        failures.push(error);
+        sectionErrors[name] = documentPackSectionError(error);
+        return null;
+      }
     };
+    const review: DocumentPackReview = {
+      packId,
+      summary: section("summary", summaryResult, (payload) =>
+        parseContract("DocumentPackSummary", DocumentPackSummarySchema, payload)
+      ),
+      conflicts: section("conflicts", conflictsResult, (payload) =>
+        parseContract("DocumentPackConflicts", DocumentPackFieldSchema.array(), payload)
+      ),
+      missingFields: section("missingFields", missingFieldsResult, (payload) =>
+        parseContract("DocumentPackMissingFields", DocumentPackFieldSchema.array(), payload)
+      ),
+      qa: section("qa", qaResult, (payload) =>
+        parseContract("DocumentPackQA", DocumentPackQASchema, payload)
+      ),
+      documents: section("documents", documentsResult, (payload) =>
+        parseContract("DocumentPackDocuments", DocumentReferenceSchema.array(), payload)
+      ),
+      extractions: section("extractions", extractionsResult, (payload) =>
+        parseContract("DocumentPackExtractions", DocumentExtractionSchema.array(), payload)
+      ),
+      provenance: section("provenance", provenanceResult, (payload) =>
+        parseContract("DocumentPackProvenance", DocumentPackProvenanceSchema, payload)
+      ),
+      processing: section("processing", processingResult, (payload) =>
+        parseContract("DocumentPackProcessing", DocumentPackProcessingSchema, payload)
+      ),
+      consolidatedSpec: section("consolidatedSpec", consolidatedSpecResult, (payload) =>
+        parseContract("DocumentPackConsolidatedSpec", DocumentPackConsolidatedSpecSchema, payload)
+      ),
+      sectionErrors
+    };
+    const loadedSectionCount = Object.entries(review).filter(
+      ([name, value]) => !["packId", "sectionErrors"].includes(name) && value !== null
+    ).length;
+    if (loadedSectionCount === 0) {
+      throw failures[0] ?? new ApiClientError(0, `/document-packs/${packId}`, "Review unavailable.");
+    }
+    return review;
   }
 
   async applyDocumentPackCorrection(
@@ -348,8 +386,8 @@ export class TelecomStudioApi {
     if (!relativeUrl) {
       return null;
     }
-    if (relativeUrl.includes("/Users/")) {
-      throw new ApiClientError(0, relativeUrl, "Backend returned a local filesystem path.");
+    if (!isPublicArtifactReference(relativeUrl)) {
+      throw new ApiClientError(0, relativeUrl, "Backend returned an invalid public artifact URL.");
     }
     return new URL(relativeUrl, this.baseUrl).toString();
   }
@@ -364,6 +402,20 @@ export class TelecomStudioApi {
     }
     const response = await this.fetcher(url);
     return this.responseJson(response, relativeUrl);
+  }
+
+  async llmDecisionProvenance(
+    relativeUrl: string | null | undefined
+  ): Promise<LLMDecisionProvenance | null> {
+    const payload = await this.artifactJson(relativeUrl);
+    if (payload === null) {
+      return null;
+    }
+    return parseContract(
+      "LLMDecisionProvenance",
+      LLMDecisionProvenanceSchema,
+      payload
+    );
   }
 
   streamUrl(workflowId: string, afterEventId?: string | null): string {
@@ -414,6 +466,14 @@ export class TelecomStudioApi {
     }
     return response.json();
   }
+}
+
+function documentPackSectionError(error: unknown): DocumentPackReviewSectionError {
+  const status = error instanceof ApiClientError ? error.status : 0;
+  return {
+    status,
+    retryable: status === 0 || status === 408 || status === 429 || status >= 500
+  };
 }
 
 export function defaultApiBaseUrl(): string {

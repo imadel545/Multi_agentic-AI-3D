@@ -24,6 +24,12 @@ export type ProviderHealth = "unknown" | "primary" | "degraded";
 export type ArtifactReadiness = "unknown" | "waiting" | "ready" | "missing";
 
 export type ResourceErrorMap = Record<string, string>;
+export type ResourceLoadStatus = "idle" | "loading" | "ready" | "error";
+export type ResourceLoadState = {
+  status: ResourceLoadStatus;
+  error: string | null;
+};
+export type ResourceLoadMap = Record<string, ResourceLoadState>;
 
 export type WorkflowMachineState = {
   phase: WorkflowPhase;
@@ -44,6 +50,7 @@ export type WorkflowMachineState = {
   error: string | null;
   transportError: string | null;
   resourceErrors: ResourceErrorMap;
+  resourceLoads: ResourceLoadMap;
 };
 
 export type WorkflowMachineAction =
@@ -63,6 +70,7 @@ export type WorkflowMachineAction =
   | { type: "VIEWER_BUNDLE_LOADED"; viewerBundle: ViewerBundle }
   | { type: "TIMELINE_LOADED"; timeline: TimelineSummary }
   | { type: "USER_ISSUES_LOADED"; userIssues: UserIssues }
+  | { type: "RESOURCE_LOADING"; resource: string }
   | { type: "RESOURCE_FAILED"; resource: string; message: string }
   | { type: "RESOURCE_RECOVERED"; resource: string }
   | { type: "REQUEST_FAILED"; message: string }
@@ -86,7 +94,8 @@ export const initialWorkflowState: WorkflowMachineState = {
   events: [],
   error: null,
   transportError: null,
-  resourceErrors: {}
+  resourceErrors: {},
+  resourceLoads: {}
 };
 
 export function workflowReducer(
@@ -118,7 +127,8 @@ export function workflowReducer(
         pendingSubmission: true,
         error: null,
         transportError: null,
-        resourceErrors: {}
+        resourceErrors: {},
+        resourceLoads: {}
       };
     case "DESIGN_CREATED":
       return {
@@ -137,7 +147,9 @@ export function workflowReducer(
         providerHealth: "unknown",
         artifactReadiness: "waiting",
         error: null,
-        transportError: null
+        transportError: null,
+        resourceErrors: {},
+        resourceLoads: {}
       };
     case "WORKFLOW_RESTORED": {
       const live = action.status.status === "pending" || action.status.status === "running";
@@ -154,6 +166,7 @@ export function workflowReducer(
         error: null,
         transportError: null,
         resourceErrors: {},
+        resourceLoads: {},
         events: []
       };
     }
@@ -167,7 +180,8 @@ export function workflowReducer(
         events: [],
         error: null,
         transportError: null,
-        resourceErrors: {}
+        resourceErrors: {},
+        resourceLoads: {}
       };
     case "REVISION_FINISHED":
       return {
@@ -215,7 +229,7 @@ export function workflowReducer(
       return {
         ...state,
         viewerBundle: action.viewerBundle,
-        phase: isDegraded(action.viewerBundle, state.status) ? "degraded" : state.phase,
+        phase: phaseFromViewerBundle(action.viewerBundle, state.phase),
         designQuality: qualityFrom(action.viewerBundle),
         providerHealth: providerHealthFrom(action.viewerBundle),
         artifactReadiness: artifactsFrom(action.viewerBundle)
@@ -224,15 +238,32 @@ export function workflowReducer(
       return { ...state, timeline: action.timeline };
     case "USER_ISSUES_LOADED":
       return { ...state, userIssues: action.userIssues };
+    case "RESOURCE_LOADING":
+      return {
+        ...state,
+        resourceErrors: withoutResource(state.resourceErrors, action.resource),
+        resourceLoads: {
+          ...state.resourceLoads,
+          [action.resource]: { status: "loading", error: null }
+        }
+      };
     case "RESOURCE_FAILED":
       return {
         ...state,
-        resourceErrors: { ...state.resourceErrors, [action.resource]: action.message }
+        resourceErrors: { ...state.resourceErrors, [action.resource]: action.message },
+        resourceLoads: {
+          ...state.resourceLoads,
+          [action.resource]: { status: "error", error: action.message }
+        }
       };
     case "RESOURCE_RECOVERED":
       return {
         ...state,
-        resourceErrors: withoutResource(state.resourceErrors, action.resource)
+        resourceErrors: withoutResource(state.resourceErrors, action.resource),
+        resourceLoads: {
+          ...state.resourceLoads,
+          [action.resource]: { status: "ready", error: null }
+        }
       };
     case "REQUEST_FAILED":
       return {
@@ -355,6 +386,23 @@ function phaseFromStatus(
   }
   if (status.status === "pending" || status.status === "running") {
     return "running";
+  }
+  return currentPhase;
+}
+
+function phaseFromViewerBundle(
+  viewerBundle: ViewerBundle,
+  currentPhase: WorkflowPhase
+): WorkflowPhase {
+  if (
+    viewerBundle.status === "failed" ||
+    viewerBundle.status === "legacy_unverified" ||
+    viewerBundle.status === "integrity_failed"
+  ) {
+    return "failed";
+  }
+  if (viewerBundle.status === "completed") {
+    return isDegraded(viewerBundle, null) ? "degraded" : "completed";
   }
   return currentPhase;
 }
