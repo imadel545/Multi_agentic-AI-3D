@@ -93,9 +93,12 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - RAG evidence is written to `rag_evidence.json` and exposed through
   `/viewer-bundle`; it lists retrieved sources, controlled candidate hints,
   reranker status, and limitations.
-- Memory: local SQLite with writeback; optional Qdrant for some summaries.
-  Incompatible legacy runtime collections are preserved and new vectors are
-  routed to provider/dimension-versioned collections.
+- Memory: local SQLite is authoritative. Qdrant is an optional derived
+  projection published through a durable SQLite outbox. A canonical mutation
+  and its projection intent commit in the same SQLite transaction; failed or
+  interrupted projection attempts remain visible, retryable and recoverable at
+  startup. Incompatible legacy runtime collections are preserved and new
+  vectors are routed to provider/dimension-versioned collections.
 - Document-pack: synchronous direct multi-file or ZIP intake with bounded
   archive assembly, limited PDF/OCR/DXF extraction, consolidation, conflicts,
   corrections, and QA. A missing or tower-incompatible foundation blocks
@@ -146,19 +149,21 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current assets
 
-- 13 manifests.
+- 13 manifests, all generation-eligible in the current qualified catalog.
 - 12 GLB files present.
 - The procedural-only dual-band panel intentionally has no companion file and
   is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
-- 12 manifests are generation-eligible: 3 authorize an exact GLB import and 9
-  authorize SceneSpec-driven parametric generation. The cable-tray GLB remains
-  `reference_only`; the bracket companion GLB is not imported, but its typed
-  procedural builder and connector contract are generation-qualified.
+- 13 manifests are generation-eligible: 3 authorize an exact GLB import and 10
+  authorize SceneSpec-driven parametric generation; 0 is `reference_only`.
+  The cable-tray family is now qualified through its typed parametric route,
+  not through an exact mesh import. The bracket companion GLB is not imported,
+  but its typed procedural builder and connector contract are
+  generation-qualified.
 - Exact import authorization is fail-closed: the manifest pins SHA-256, units,
   dimensions, pivot, orientation and mesh-integrity review. A changed file is
-  rejected and the controlled fallback is reported.
+  rejected; it is not silently replaced by procedural geometry.
 - The three historically missing towers (monopole, rooftop, small-cell) are now
   internal project generated assets produced with Blender.
 - Current assets are internal/CC-BY and not vendor-grade.
@@ -210,15 +215,28 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - `SceneSpec`, including its selected manifests, `AssemblyPlan` and optional
   `GeometryProgram` values, is the source of truth for geometry. Fixed
   parametric builders and the deterministic GeometryProgram compiler consume it.
+- `AssemblyPlan` schema `1.1.0` is executable rather than descriptive: it binds
+  manifest and builder snapshots, allowed parameters, anchors, connectors and
+  hashed operations. The isolated Blender worker independently revalidates the
+  current manifest catalog, exact asset bytes, builder registry and operations
+  before constructing geometry. An exact import without this trusted plan fails
+  closed.
 - GLB is only the exported viewer result, not the source of truth.
 - Blender produces `design.glb`, `preview.png`, `scene_metadata.json`, and
-  a runner-owned `build.lock.json` containing the isolated attempt/build ID,
-  the raw SceneSpec hash, a canonical bundle hash for the immutable copy of
-  every Python source under `apps/blender_worker` that Blender actually
-  executes, Blender runtime identity and artifact hashes. Blender starts in
-  background factory mode and every retry uses a fresh staging directory. The
-  workflow also persists `requirement_coverage.json`,
+  `component_proofs.json` when trusted assembly or generated geometry requires
+  it, and a runner-owned `build.lock.json` schema `1.2.0`. The lock contains the
+  isolated attempt/build ID, raw SceneSpec hash, immutable worker-bundle hash,
+  Blender runtime identity, artifact hashes and a self-bound `trusted_inputs`
+  envelope for manifest/catalog, builder profiles, exact files, assembly
+  operations and GeometryPrograms. Blender starts in background factory mode
+  and every retry uses a fresh staging directory. The workflow also persists
+  `requirement_coverage.json`,
   `completion_certificate.json` and the critical QA reports.
+- `component_proofs.json` records each catalog or generated component, its
+  semantic strategy (`reuse`, `adapt`, `compose` or `procedural_generate`),
+  geometry source, resolved parameters, transform, bounds, geometry
+  fingerprint, executed assembly operations and local QA. These are auditable
+  construction proofs, not vendor or engineering certification.
 - Successful revisions also persist `adaptation_plan.json`,
   `adaptation_capabilities.json`, `scene_patch.json`, and `scene_diff.json`.
   Blender still regenerates from the validated `SceneSpec`; the LLM may author a
@@ -260,10 +278,15 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   real-Blender mode, requirement coverage, both quality gates, GLB binary
   integrity, geometry QA and preview QA. The persistence boundary re-verifies
   those hashes before activation.
+- Certificate schema `1.2.0` is required when `AssemblyPlan 1.1` or a
+  `GeometryProgram` requires component proof. It additionally certifies
+  `component_proofs.json` and the `component_proof_verified` check. Legacy
+  schema `1.1.0` remains valid only for scenes that do not require this M0
+  evidence.
 - Persisted completion is also revalidated on active status reads, rollback and
   artifact serving: full certificate schema/check set, RequirementSpec/SceneSpec
   hashes, selected `SceneVersion.scene`, build-lock evidence, every certified
-  artifact hash and, for schema 1.1, critical report hashes. A historical
+  artifact hash and, for schemas 1.1/1.2, critical report hashes. A historical
   result without this chain becomes `legacy_unverified`; a changed active
   artifact becomes `integrity_failed`. Files remain on disk but are not served.
 - Mesh QA v1 does **not** verify exact antenna azimuth from vertices and does
@@ -313,10 +336,11 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   version and status.
 - `active_design.json` is the canonical, atomically published active-version
   commit. It is created only for a completed version whose completion
-  certificate, persisted `SceneVersion.scene`, four certified artifacts and,
-  for schema 1.1, critical QA reports revalidate. `active_version.json`, root
-  status and terminal/product events are compatibility projections; a failure
-  in one of them cannot downgrade the canonical commit.
+  certificate, persisted `SceneVersion.scene`, schema-required certified
+  artifacts and, for schemas 1.1/1.2, critical QA reports revalidate.
+  `active_version.json`, root status and terminal/product events are
+  compatibility projections; a failure in one of them cannot downgrade the
+  canonical commit.
 - Startup recovery distinguishes an interrupted initial generation from an
   interrupted revision. Initial generation fails without a valid product
   version; an interrupted revision marks only its candidate version failed,
@@ -329,7 +353,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   retaining unbounded disk space without vacuuming every startup.
 - Deleting a design purges its workflow/design/error memory, unlinks
   document-pack references, removes its checkpoint threads and invalidates the
-  complete derived Qdrant memory projection. SQLite remains canonical and
+  complete derived Qdrant memory projection. SQLite remains canonical; the
+  durable projection outbox survives Qdrant failure and startup interruption,
+  retries without creating a second authority, and
   `/memory/vector/reindex` rebuilds the remaining projection.
 - Qdrant accepts logical search collections only; runtime invalidation also
   removes abandoned build collections and serializes concurrent reads/writes.
@@ -432,6 +458,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   things and are no longer presented with the same `composants` wording.
 - The telecom camera fit includes explicit framing margin for tall assemblies,
   and the viewer offers a retry action when a real GLB load fails.
+- Frontend regression proof after the M0 recovery changes: 139 Vitest tests,
+  TypeScript typecheck and production build pass. The earlier connected browser
+  smoke on 2026-07-31 remains historical evidence; a new connected M0 smoke is
+  still a release gate.
 - Frontend proof on 2026-07-31: 125 Vitest tests, TypeScript production build,
   and local browser smoke against FastAPI on port 8000 and Vite on port 5173.
   Rolldown code splitting keeps every production JavaScript chunk below 371 kB
@@ -442,6 +472,15 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   overlay or duplicate workflow card remained on screen.
 
 ## Current verdict
+
+`M0_TRUSTED_ASSEMBLY_AND_RECOVERY_PARTIAL`
+
+The implementation now contains the trusted assembly, component-proof,
+build-lock, completion-proof, SQLite/Qdrant recovery and frontend recovery
+contracts described below. This is not a global convergence claim. The isolated
+real-Blender E2E and the real HTTP generation/edit/version scenario are
+confirmed on the current tree. The M0 gate remains partial only until a
+connected browser smoke is recorded on this exact tree.
 
 ## ASSET-DRIVEN TELECOM ASSEMBLY V1 — delivered scope
 
@@ -455,18 +494,26 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   generation; its companion GLB remains reference-only.
 - `AssetAssemblyPlanner` ranks every generation-eligible candidate with
   reproducible compatibility, generation-permission and dimensional scores.
-  When Groq is configured, its bounded selector may choose only a supplied
-  candidate ID for each role. If unavailable or rejected, deterministic top
-  ranking is used and recorded as `deterministic_fallback`.
+  Groq receives only the supplied candidates plus their scores, dimensions,
+  compatibility, allowed strategies, parameter IDs and limitations. It chooses
+  a candidate/strategy pair governed by `bounded_asset_selection@1.1.0`; an
+  unknown ID or strategy is rejected. If unavailable or rejected,
+  deterministic top ranking is used and recorded as `deterministic_fallback`.
 - `AssemblyPlan` is persisted as `assembly_plan.json`, embedded in `SceneSpec`,
   linked to the blueprint, exposed in `/viewer-bundle`, and listed by the
   frontend artifact drawer. It records component candidates, selection reason,
   allowed parameters, selected builder profile, connectors and fallback truth.
 - Blender remains fully deterministic: it consumes `SceneSpec`, records the
-  selected parametric bracket per sector, and records the missing cable tray as
-  a visible `PROCEDURAL_CABLE_ROUTE` fallback. A bounded LLM-authored
-  GeometryProgram may also be compiled, but no LLM-generated Blender code is
-  accepted or executed.
+  selected parametric bracket per sector and builds the cable route through its
+  qualified typed parametric handler. A genuinely absent requested component
+  may be supplied by a bounded LLM-authored GeometryProgram, but no
+  LLM-generated Blender code is accepted or executed.
+- Builder dispatch is profile-driven. `geometry_family` is signed inside the
+  builder snapshot (`panel` or `microwave_dish`) and revalidated by the worker;
+  asset IDs and network names no longer select worker geometry. Historical
+  snapshots that genuinely predate this field retain a narrowly checked legacy
+  hash path. Manifest parameters, types, enums, finite values and bounds are
+  revalidated by the contract, compiler and worker.
 - `POWER_CABINET_001` is now qualified through the bounded
   `ground_cabinet_v1` profile instead of importing its former minimal reference
   GLB. The deterministic builder derives a 17-object enclosure tree from typed
@@ -474,10 +521,25 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   cable glands and warning placard). Revision dependency rebinding now records
   the same generation strategy and geometry source in `SceneSpec`, metadata and
   provenance.
-- The end-to-end acceptance test creates a 5G site with tower, panel antenna,
-  RRU, bracket, cable fallback, cabinet and GPS; produces GLB and preview;
-  passes real-Blender QA; exposes provenance; then edits the design and creates
-  a new active version.
+- The isolated M0 acceptance test covers a 4G/5G site with a dynamically chosen
+  exact asset, an adapted component, connector-driven assembly, a typed
+  GeometryProgram fallback, bounded Groq selection, real Blender 4.5.12 LTS,
+  GLB/previews, component proofs, QA, certification, edit and new version. Its
+  final rerun passed on 2026-08-01 with Blender 4.5 LTS (`1 passed`).
+- The real HTTP acceptance workflow `wf_42ccbfbb6318` selected seven catalog
+  roles through bounded Groq, reused exact `ANT_PANEL_4G_001` and
+  `GPS_ANTENNA_001` GLBs, generated the other qualified components and authored
+  two bounded GeometryPrograms for a staircase and slab. Blender produced a
+  1.58 MB GLB and 1920×1080 preview; component/operation proofs, QA 1.0 and the
+  completion certificate passed without public local-path leakage. A bounded
+  Groq edit changed only the S1 RRU vertical offset to 1.45 m, regenerated with
+  Blender, reported `sectors_changed=true`, and created active version
+  `v4fc11460` from `v4bdb73cf`.
+- The same live request exposed and drove fixes for an azimuth parser spillover
+  into the token `4G`, French `armoire d'énergie` recognition, nested sector
+  diff reporting, repeated per-sector warnings and recovery from invalid legacy
+  memory rows. Invalid persisted rows are preserved and counted as skipped;
+  they no longer terminate the vector reconciliation worker.
 - A live revision on 2026-07-31 asked GPT-OSS 120B to move the power cabinet to
   `[5.6, 0.0, 0.0]`. The LLM selected only the declared
   `/accessory_assets/0/position` capability; deterministic validation,
@@ -507,9 +569,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline. It is not yet
-the final product gate because document-pack mutation, rollback, and every
-degraded path have not been replayed in one recorded acceptance session.
+frontend now has a verified chat-first/3D-first product baseline and 139 passing
+component/contract tests. It is not yet the final M0 product gate because the
+current-tree connected smoke and all relevant degraded/retry paths have not
+been replayed in one recorded acceptance session.
 
 The frontend must keep these limitations visible: `mesh_level_spatial_basic`,
 `mesh_level_transform_basic` or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack

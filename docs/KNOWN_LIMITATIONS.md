@@ -5,9 +5,11 @@ frontend.
 
 ## Visible during frontend build
 
-- `apps/frontend` has a visually verified real-backend product baseline, but the
-  complete frontend gate is still limited: document-pack generation, edit,
-  rollback and degraded fallbacks need one recorded end-to-end acceptance pass.
+- `apps/frontend` has a visually verified historical real-backend product
+  baseline and 139 passing M0 Vitest tests plus green typecheck/build. The
+  current-tree connected smoke is still missing; document-pack generation,
+  edit, rollback and relevant degraded/retry paths still need one recorded
+  end-to-end acceptance pass.
 - The first technical kernel was rejected as too dashboard-like; permanent
   stage grids, capability counters, raw workflow ids, and raw JSON surfaces must
   not come back.
@@ -108,6 +110,10 @@ frontend.
 - Memory has no TTL/retention-by-age policy yet. Design deletion now purges its
   canonical SQLite rows and invalidates the derived Qdrant projection, which
   must then be rebuilt by the supported reindex flow.
+- Qdrant publication is now recoverable through a durable SQLite outbox, but
+  its retry worker is local-process and not a distributed delivery service.
+  `pending`, `attempt` or `failed` means the projection is degraded while the
+  committed SQLite state remains authoritative.
 
 - NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024 dimensions is the
   product provider. `baai/bge-m3` remains supported as an explicit model choice.
@@ -127,6 +133,10 @@ frontend.
   are compacted into technical signatures/patterns before embedding. A failed
   rebuild leaves the previously published vector index active, and
   `/studio/summary` exposes migration/degradation state.
+- Persisted design rows that no longer satisfy the current `SceneSpec` contract
+  remain in canonical SQLite but are skipped from the derived vector projection
+  and counted in `skipped_source_counts`. They require an explicit migration if
+  they must become searchable again; they are not silently rewritten.
 - RAG search accepts logical collection names only. Runtime invalidation removes
   active, obsolete, base and abandoned `__build_` collections and serializes
   searches/writes across the publication boundary.
@@ -213,12 +223,16 @@ frontend.
 - The completion certificate is a deterministic local integrity record with
   SHA-256 hashes and full persisted revalidation, not a signed third-party
   engineering approval.
-- New schema `1.1.0` commits also bind persisted QA, geometry-validation and
+- Schema `1.1.0` commits bind persisted QA, geometry-validation and
   GLB-inspection reports and compare `SceneVersion.scene` with the persisted
-  `scene_spec.json`. Historical `1.0.0` results remain legacy evidence.
+  `scene_spec.json`. Schema `1.2.0` is required for `AssemblyPlan 1.1` or
+  GeometryProgram component evidence and additionally certifies
+  `component_proofs.json`. Historical `1.0.0` results remain legacy evidence.
 - New Blender builds copy the complete Python worker-source bundle into an
   immutable per-attempt snapshot, execute that copy, then hash it in the lock.
-  Historical schema `1.0.0` locks contain only the entry-script hash and remain
+  Build lock `1.2.0` also binds current manifests/catalog, builder profiles,
+  exact asset bytes, assembly operations and GeometryPrograms. Historical
+  schema `1.0.0` locks contain only the entry-script hash and remain
   recognizable as legacy evidence.
 - Blender builds are reproducible at the recorded
   SceneSpec/worker-bundle/runtime identity level, but cross-version bit-for-bit
@@ -248,14 +262,34 @@ frontend.
 - The overview preview still lacks a certified sector-equipment close-up. Its
   camera bounds now ignore technical annotations, but role-specific pixel
   visibility/contrast remains future work.
-- The curated manifest catalog is intentionally mixed: 3 GLBs are qualified
-  for exact import, 9 component/tower profiles are qualified for controlled
-  parametric generation, and 1 GLB is reference-only. The 5G panel and RRU
+- The curated manifest catalog is intentionally small: all 13 manifests are
+  generation-eligible, with 3 GLBs qualified for exact import, 10
+  component/tower profiles qualified for controlled parametric generation and
+  0 reference-only entry. The 5G panel and RRU
   companion GLBs have not passed orientation qualification and are therefore
   never imported by the product path.
 - Asset qualification proves file identity, basic mesh integrity, declared
   dimensions, pivot and orientation for the authorized use. It does not prove
   vendor identity, RF performance, structural capacity or fabrication fitness.
+- `component_proofs.json` records strategy, source, transform, bounds,
+  fingerprint and executed operations. It does not prove that two meshes are
+  semantically equivalent, that a component is manufacturer-authentic, or that
+  connector intent satisfies electrical, RF, grounding, load, maintenance or
+  regulatory rules.
+
+## M0 release gate
+
+- Trusted assembly/recovery remains
+  `M0_TRUSTED_ASSEMBLY_AND_RECOVERY_PARTIAL`. The isolated real-Blender E2E and
+  a real HTTP 4G generation/edit/version run passed on the final backend tree;
+  the connected frontend smoke on the exact final tree is still unrecorded.
+- The current output is technical generic/schematic: the accepted live scene
+  has zero vendor-qualified components, a compact simplified staircase and
+  crowded summit annotations. Two GeometryPrograms used visible
+  `json_object_repaired` mode. QA 1.0 certifies the implemented bounded checks,
+  not manufacturer authenticity or semantic visual quality.
+- A green test suite, HTTP scenario or older browser capture does not close the
+  remaining browser gate. No global convergence is claimed.
 
 ## Can wait
 

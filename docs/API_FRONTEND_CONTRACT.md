@@ -86,6 +86,7 @@ Noms d'artifact utilisés par le frontend :
 - `scene_diff` → `scene_diff.json`
 - `design_blueprint` → `design_blueprint.json`
 - `assembly_plan` → `assembly_plan.json`
+- `component_proofs` → `component_proofs.json`
 - `blueprint_requirement_coverage` → `blueprint_requirement_coverage.json`
 - `blueprint_scene_coverage` → `blueprint_scene_coverage.json`
 
@@ -167,19 +168,27 @@ signifie donc plus qu'il est automatiquement utilisable par Blender.
   `rag_last_operation`, `rag_reindex_url`
 - `memory_status`, `memory_backend`, `workflow_memory_count`,
   `design_memory_count`, `document_pack_memory_count`,
-  `memory_vector_status`, `memory_vector_errors`, `memory_vector_reindex_url`
+  `memory_vector_status`, `memory_vector_errors`, `memory_vector_reindex_url`.
+  La santé vectorielle reflète l'outbox SQLite durable (`pending`, `attempt`,
+  `failed`, `succeeded` ou état inactif) et ne transforme jamais Qdrant en
+  source d'autorité.
 - `runtime_capabilities`, `unsupported_actions`
 
 `POST /memory/vector/reindex` reconstruit uniquement la projection Qdrant à
-partir de SQLite. La réponse typée expose les volumes source, les candidats
-après compaction, le provider/dimension, le fingerprint source et confirme que
-SQLite et les collections legacy sont préservés. Cette route de maintenance ne
+partir de SQLite. La réponse typée expose les volumes source,
+`skipped_source_counts` pour les lignes legacy invalides préservées mais non
+indexées, les candidats après compaction, le provider/dimension, le fingerprint
+source et confirme que SQLite et les collections legacy sont préservés. Cette route de maintenance ne
 crée ni `project`, ni `run`, ni nouvelle source d'état produit.
 
 `POST /requirements/parse` retourne un `RequirementSpec` avec
 `field_evidence`, `conflicts`, `assumptions`, `requires_confirmation` et
 `confirmation_fields`. `POST /designs` rejette un `confirmed_requirements`
 encore marqué `requires_confirmation=true`.
+Le `requirements_hash` de confirmation est un jeton HMAC process-local lié au
+texte exact, au niveau de détail et au `RequirementSpec` complet (warnings,
+réparations, preuves et conflits inclus). Il est invalide après redémarrage et
+ne constitue ni un identifiant persistant ni une signature externe.
 
 `RequirementSpec.geometry_requests[]` porte les composants demandés hors
 catalogue. Chaque entrée expose `request_id`, `semantic_role`, `description`,
@@ -225,6 +234,7 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `metadata_url`
 - `scene_spec_url`
 - `assembly_plan_url`
+- `component_proofs_url`
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
@@ -254,6 +264,19 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+`component_proofs_url` vaut `null` quand l'artefact n'existe pas ou n'est pas
+certifié pour la version servie. Le frontend doit alors afficher une preuve
+indisponible, jamais inventer une provenance. Lorsqu'elle est disponible, cette
+URL ouvre la preuve par composant (`reuse`, `adapt`, `compose` ou
+`procedural_generate`), ses paramètres, sa transformation, son empreinte et ses
+contrôles locaux.
+
+`assembly_plan.json` schema `1.1.0` expose notamment les candidats scorés, le
+candidat choisi, la stratégie choisie, `selection_provider`, `selection_model`,
+la capability et la version `bounded_asset_selection@1.1.0`, les snapshots de manifest/builder, les
+connecteurs et les opérations hashées. Une décision Groq reste limitée aux IDs
+fournis; la validation, les unités et les opérations restent déterministes.
 
 `geometry_program_summary` expose uniquement une preuve bornée:
 
@@ -307,9 +330,17 @@ Le frontend doit rendre:
   `payload.progress_message`, `payload.actor_kind` et
   `payload.decision_authority`; ne pas appeler Blender/QA/services « agents LLM »;
 - drawers QA, timeline, scene plan, documents, assets, versions;
+- la provenance composant via `component_proofs_url`, avec état de chargement,
+  erreur et retry indépendants des autres drawers;
 - intent hors catalogue avant génération, puis modèle, mode de sortie, enveloppe,
   ajustements et provenance GeometryProgram après génération;
 - raw JSON seulement en détail secondaire.
+
+Le frontend M0 ne doit conserver aucun succès obsolète après une erreur ou un
+changement de version. Les ressources GLB/WebGL, assets, QA, RAG, provenance,
+documents et versions ont des états de chargement/erreur/retry indépendants. La
+suite courante compte 139 tests Vitest et passe le typecheck/build; le smoke
+navigateur connecté reste une gate distincte et non encore confirmée.
 
 `/designs/{id}/edit` expose, en cas de succès:
 

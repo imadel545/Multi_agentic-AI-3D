@@ -17,6 +17,13 @@ limitations and never advertises checks it cannot perform.
 - Quality gates: pre-Blender and post-Blender pass/fail thresholds.
 - Generation QA: metadata consistency, artefacts, generation mode, fallback
   warnings, and asset import records.
+- Trusted assembly QA: `AssemblyPlan 1.1` manifest/catalog and builder snapshot
+  hashes, exact-file identity, allowed parameters, connector/anchor contracts,
+  operation hashes and isolated-worker revalidation before Blender construction.
+- Component proof QA: verifies every catalog/GeometryProgram component,
+  semantic strategy (`reuse`, `adapt`, `compose`, `procedural_generate`),
+  geometry source, resolved parameters, transforms, bounds, fingerprint,
+  declared/executed operations and local pass state.
 - GLB binary integrity QA: strict GLB container/chunk parsing, buffer and
   buffer-view ranges, real `POSITION` bytes, finite values, optional index
   ranges, primitive completeness, and semantic entity mesh coverage.
@@ -40,8 +47,10 @@ limitations and never advertises checks it cannot perform.
   box framing, clipping, horizontal centering, and edge margins.
 - Document-pack QA: evidence, conflicts, blocking fields, plausibility, OCR/CAD
   limits.
-- Completion proof: binds requirement/SceneSpec and GLB/preview/metadata/build-lock
-  SHA-256 hashes to successful real-Blender, gate, QA and coverage results.
+- Completion proof: binds requirement/SceneSpec and certified artifact hashes to
+  successful real-Blender, gate, QA and coverage results. Schema `1.2.0` also
+  binds `component_proofs.json` when trusted assembly or generated geometry
+  requires it.
 
 ## What is real
 
@@ -71,16 +80,22 @@ limitations and never advertises checks it cannot perform.
   and artifact size/hash evidence before activation, active reads, rollback and
   artifact serving.
 - Build provenance QA verifies a unique attempt/build ID, factory-startup
-  command profile, immutable worker-source snapshot actually executed, SceneSpec hash, Blender
-  runtime version/build hash, and the three generated artifact hashes before
-  promotion.
-- Version activation revalidates the issued completion certificate and all four
-  generated binary/render provenance artifacts before atomically committing
+  command profile, immutable worker-source snapshot actually executed,
+  SceneSpec hash, Blender runtime version/build hash and generated artifact
+  hashes before promotion. Build lock schema `1.2.0` also self-binds trusted
+  inputs: manifest catalog/files, builder catalog/profiles, exact asset bytes,
+  assembly operations and GeometryPrograms.
+- Version activation revalidates the issued completion certificate and every
+  schema-required generated/provenance artifact before atomically committing
   `active_design.json`.
 - Certificate schema 1.1 additionally hash-binds the typed
   `DesignBlueprint`, requires both blueprint coverage reports, binds persisted
   QA/geometry/GLB reports, and compares persisted `scene_spec.json` with the
   selected `SceneVersion.scene`.
+- Certificate schema 1.2 preserves those checks and additionally requires a
+  verified, hash-bound component proof artifact. Version activation, reads,
+  rollback and artifact serving revalidate this evidence; tampering is
+  fail-closed.
 - Requested GeometryProgram maximum dimensions are measured from the program
   envelope before Blender. A deterministic uniform adapter can only correct this
   envelope overflow, records the adjustment and revalidates the full contract.
@@ -102,6 +117,9 @@ limitations and never advertises checks it cannot perform.
   interference set, so collision-free placement is not claimed.
 - No certified sector-detail preview proving that each small RRU is legible.
 - No full CAD geometric validation.
+- Component fingerprints and AABBs prove recorded construction evidence only;
+  they do not prove semantic equivalence, manufacturer identity, RF behavior,
+  loads, clearance, installation compliance or fabrication fitness.
 
 ## Fallbacks
 
@@ -109,6 +127,8 @@ limitations and never advertises checks it cannot perform.
   are **not** accepted as a default result.
 - A missing asset GLB can produce `procedural_fallback` if the manifest allows
   fallback.
+- An `imported_glb_exact` asset with missing or changed bytes fails closed; its
+  identity cannot be downgraded silently to procedural geometry.
 - All fallbacks are propagated to `status.json`, the Product API, reports, and
   the frontend.
 - `json_object_repaired` is not a Blender fallback: it is a bounded LLM repair
@@ -130,6 +150,14 @@ limitations and never advertises checks it cannot perform.
 - Anti-golden GLBs with JSON-only accessors, missing semantic meshes, invalid
   indices, or tampered certified artefacts fail.
 - GeometryProgram contract, envelope adaptation, aggregate-budget and real
-  Blender compilation/revision tests must pass. The full backend count is
-  recorded only from the final suite run; the frontend has 125 passing tests
-  on 2026-07-31.
+  Blender compilation/revision tests must pass.
+- M0 fault tests must reject changed exact assets, manifest/catalog tampering,
+  invalid component proofs/build locks/certificates and Qdrant failure without
+  losing the canonical SQLite mutation.
+- The current M0 tree passed 151 targeted backend integration tests, 23
+  requirement/Groq tests after the live-input parser fix, the isolated
+  real-Blender E2E (`1 passed`), and the real HTTP 4G generation/edit/version
+  scenario with QA 1.0 and an issued certificate.
+- The frontend has 139 passing Vitest tests plus green typecheck/build. The
+  connected browser smoke on the exact final tree remains the sole M0 release
+  gate; no global convergence is claimed.
