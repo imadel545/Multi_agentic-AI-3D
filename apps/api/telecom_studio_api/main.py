@@ -61,7 +61,7 @@ from core.llm.asset_selection import GroqAssetSelectionClient
 from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
-from core.performance import requirements_hash as compute_requirements_hash
+from core.performance import confirmation_tokens_match, requirements_confirmation_hash
 from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
@@ -81,10 +81,12 @@ OptionalVersionId = Annotated[str | None, Query(pattern=VERSION_ID_PATTERN)]
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     try:
+        memory_service.start()
         workflow_service.reconcile_interrupted_workflows()
         yield
     finally:
         workflow_service.shutdown()
+        memory_service.close()
         rag_service.close()
 
 
@@ -286,15 +288,19 @@ def get_studio_summary() -> dict:
 def create_design(request: CreateDesignRequest) -> dict:
     try:
         if request.confirmed_requirements is not None:
-            actual_hash = compute_requirements_hash(request.confirmed_requirements)
-            if actual_hash != request.confirmed_requirements_hash:
+            actual_hash = requirements_confirmation_hash(
+                request.confirmed_requirements,
+                requirements_text=request.requirements_text,
+                detail_level=request.options.detail_level,
+            )
+            if not confirmation_tokens_match(actual_hash, request.confirmed_requirements_hash):
                 raise HTTPException(
                     status_code=422,
                     detail="confirmed RequirementSpec hash does not match its payload",
                 )
             return workflow_service.create_design_from_requirements(
                 request.confirmed_requirements,
-                detail_level=request.options.detail_level,
+                detail_level=request.confirmed_requirements.detail_level,
                 source_label="confirmed_requirement_spec",
                 source_text=request.requirements_text,
             )

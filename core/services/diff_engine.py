@@ -48,7 +48,7 @@ class DiffEngine:
         # Sector diff
         orig_sectors = {s.sector_id: s for s in original.sectors}
         patch_sectors = {s.sector_id: s for s in patched.sectors}
-        for sid in set(orig_sectors) | set(patch_sectors):
+        for sid in sorted(set(orig_sectors) | set(patch_sectors)):
             if sid not in orig_sectors:
                 summary["sectors_changed"] = True
                 summary["sector_changes"].append({"sector_id": sid, "change": "added"})
@@ -56,20 +56,14 @@ class DiffEngine:
                 summary["sectors_changed"] = True
                 summary["sector_changes"].append({"sector_id": sid, "change": "removed"})
             else:
-                sorig = orig_sectors[sid]
-                spatch = patch_sectors[sid]
+                original_payload = orig_sectors[sid].model_dump(mode="json")
+                patched_payload = patch_sectors[sid].model_dump(mode="json")
                 sdiff = {}
-                for field in (
-                    "azimuth_deg",
-                    "install_height_m",
-                    "mechanical_tilt_deg",
-                    "electrical_tilt_deg",
-                    "beamwidth_deg",
-                    "include_cable",
-                    "include_label",
-                ):
-                    old_val = getattr(sorig, field)
-                    new_val = getattr(spatch, field)
+                for field in sorted(set(original_payload) | set(patched_payload)):
+                    if field == "sector_id":
+                        continue
+                    old_val = original_payload.get(field)
+                    new_val = patched_payload.get(field)
                     if old_val != new_val:
                         sdiff[field] = {"old": old_val, "new": new_val}
                 if sdiff:

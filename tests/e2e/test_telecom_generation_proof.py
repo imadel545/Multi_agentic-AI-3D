@@ -114,7 +114,11 @@ def test_designs_contract_proves_product_e2e_generation(tmp_path: Path) -> None:
         assert components["sector_antenna"]["selected_asset_id"]
         assert len(components["sector_antenna"]["candidate_scores"]) >= 2
         assert components["antenna_mount"]["builder_profile_id"] == "mount_bracket_v1"
-        assert components["sector_cable_route"]["generation_strategy"] == "procedural_fallback"
+        assert (
+            components["sector_cable_route"]["generation_strategy"] == "internal_project_generated"
+        )
+        assert components["sector_cable_route"]["selected_asset_id"]
+        assert components["sector_cable_route"]["manifest_snapshot"]["asset_type"] == "cable"
         assert assembly_plan["units"] == "meters"
 
         validation_report = client.get(f"/designs/{workflow_id}/artifacts/validation_report").json()

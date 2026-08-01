@@ -534,7 +534,8 @@ def _azimuth_candidates(text: str, normalized: str) -> list[RequirementCandidate
         end = len(normalized)
         boundary = re.search(
             r"(?:[.!?\n]|\b(?:tilt|inclinaison|hba|hauteur|height|c[âa]bles?|"
-            r"labels?|rru|cabinet|gps|secteurs?|sectors?|pyl[oô]ne|tower|tour|m[aâ]t|"
+            r"labels?|rru|cabinet|gps|antennes?|antennas?|secteurs?|sectors?|"
+            r"pyl[oô]ne|tower|tour|m[aâ]t|"
             r"monopole|treillis|lattice|rooftop|small[- ]cell)\b)",
             normalized[match.end() :],
         )

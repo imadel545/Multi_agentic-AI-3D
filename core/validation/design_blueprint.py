@@ -161,7 +161,7 @@ def evaluate_blueprint_scene_coverage(
                     intent.resolved_asset_id
                     for values in intents.values()
                     for intent in values
-                    if intent.resolved_asset_id and intent.asset_type not in {"cable", "beam"}
+                    if intent.resolved_asset_id and intent.asset_type != "beam"
                 },
                 {
                     component.selected_asset_id

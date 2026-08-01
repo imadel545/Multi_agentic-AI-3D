@@ -21,8 +21,31 @@
   "normalized_by": "Codex Agent",
   "pivot_policy": "center_mount",
   "front_axis": "+Y",
-  "import_fallback_allowed": true,
+  "import_fallback_allowed": false,
   "adaptation_profile_id": "sector_antenna_pose_v1",
+  "builder_profile_id": "sector_panel_v1",
+  "capability_tags": ["4g", "sector_panel", "rf"],
+  "anchors": [
+    {"anchor_id": "rear_mount", "position_m": [0, -0.0845, 0], "normal": [0, -1, 0], "roles": ["mechanical_mount"]},
+    {"anchor_id": "rf_port", "position_m": [0, 0, -0.7], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["rf", "routing"]}
+  ],
+  "connectors": [
+    {"connector_id": "rear_mount", "kind": "mechanical", "gender": "source", "anchor_id": "rear_mount", "compatible_connector_kinds": ["mechanical"]},
+    {"connector_id": "rf_port", "kind": "rf", "gender": "source", "anchor_id": "rf_port", "compatible_connector_kinds": ["rf"]},
+    {"connector_id": "cable_exit", "kind": "routing", "gender": "source", "anchor_id": "rf_port", "compatible_connector_kinds": ["routing"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "azimuth_deg", "value_type": "number", "unit": "degrees", "minimum": 0, "maximum": 359.99},
+    {"parameter_id": "mechanical_tilt_deg", "value_type": "number", "unit": "degrees", "minimum": -15, "maximum": 30}
+  ],
+  "transform_permissions": {
+    "translation_axes": ["x", "y", "z"],
+    "rotation_axes": ["x", "z"],
+    "maximum_translation_m": 100,
+    "maximum_rotation_deg": 360,
+    "uniform_scale_allowed": false,
+    "non_uniform_scale_allowed": false
+  },
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["imported_glb_exact"],

@@ -89,6 +89,20 @@ def test_parse_power_cabinet_and_concrete_pad_from_prompt() -> None:
     assert spec.tower_characteristics.foundation_type == "concrete_pad"
 
 
+def test_azimuth_list_stops_before_4g_antenna_and_detects_energy_cabinet() -> None:
+    spec = parse_requirements_text(
+        "Créer un site 4G complet sur pylône treillis de 30 m avec trois secteurs à 24 m "
+        "aux azimuts 0, 120 et 240 degrés, antennes panneaux 4G réelles, RRU, supports, "
+        "chemins de câbles, armoire d'énergie au sol, antenne GPS et dalle béton."
+    )
+
+    assert spec.azimuths_deg == [0, 120, 240]
+    assert spec.sector_count == 3
+    assert spec.include_power_cabinet is True
+    assert spec.requires_confirmation is False
+    assert spec.confirmation_fields == []
+
+
 def test_parser_extracts_rf_controls_and_marks_only_real_defaults() -> None:
     spec = parse_requirements_text(
         "Créer un site 4G sur monopole 42m avec 2 secteurs à 36m. "

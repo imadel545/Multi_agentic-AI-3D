@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0.0",
+  "profiles": [
+    {
+      "profile_id": "tower_structure_v1",
+      "version": "1.0.0",
+      "asset_types": ["tower"],
+      "allowed_generation_modes": ["parametric_generated"],
+      "worker_handler": "tower_structure",
+      "geometry_family": null,
+      "instance_strategy": "single",
+      "allowed_parameter_ids": ["height_m", "base_width_m"]
+    },
+    {
+      "profile_id": "sector_panel_v1",
+      "version": "1.0.0",
+      "asset_types": ["antenna"],
+      "allowed_generation_modes": ["parametric_generated", "imported_glb_exact"],
+      "worker_handler": "sector_equipment",
+      "geometry_family": "panel",
+      "instance_strategy": "per_sector",
+      "allowed_parameter_ids": ["azimuth_deg", "mechanical_tilt_deg"]
+    },
+    {
+      "profile_id": "sector_microwave_dish_v1",
+      "version": "1.0.0",
+      "asset_types": ["antenna"],
+      "allowed_generation_modes": ["imported_glb_exact"],
+      "worker_handler": "sector_equipment",
+      "geometry_family": "microwave_dish",
+      "instance_strategy": "per_sector",
+      "allowed_parameter_ids": ["azimuth_deg", "mechanical_tilt_deg"]
+    },
+    {
+      "profile_id": "mount_bracket_v1",
+      "version": "1.0.0",
+      "asset_types": ["bracket"],
+      "allowed_generation_modes": ["parametric_generated"],
+      "worker_handler": "mount_bracket",
+      "geometry_family": null,
+      "instance_strategy": "per_sector",
+      "allowed_parameter_ids": ["arm_length_m"]
+    },
+    {
+      "profile_id": "rru_enclosure_v1",
+      "version": "1.0.0",
+      "asset_types": ["radio"],
+      "allowed_generation_modes": ["parametric_generated"],
+      "worker_handler": "radio_enclosure",
+      "geometry_family": null,
+      "instance_strategy": "per_sector",
+      "allowed_parameter_ids": ["vertical_offset_m", "radial_inset_m"]
+    },
+    {
+      "profile_id": "cable_route_v1",
+      "version": "1.0.0",
+      "asset_types": ["cable"],
+      "allowed_generation_modes": ["parametric_generated"],
+      "worker_handler": "cable_route",
+      "geometry_family": null,
+      "instance_strategy": "per_sector",
+      "allowed_parameter_ids": ["route_clearance_m", "cable_diameter_m"]
+    },
+    {
+      "profile_id": "ground_cabinet_v1",
+      "version": "1.0.0",
+      "asset_types": ["cabinet"],
+      "allowed_generation_modes": ["parametric_generated"],
+      "worker_handler": "ground_cabinet",
+      "geometry_family": null,
+      "instance_strategy": "single",
+      "allowed_parameter_ids": ["ground_offset_m"]
+    },
+    {
+      "profile_id": "gps_radome_v1",
+      "version": "1.0.0",
+      "asset_types": ["gps"],
+      "allowed_generation_modes": ["imported_glb_exact"],
+      "worker_handler": "gps_radome",
+      "geometry_family": null,
+      "instance_strategy": "single",
+      "allowed_parameter_ids": []
+    }
+  ]
+}

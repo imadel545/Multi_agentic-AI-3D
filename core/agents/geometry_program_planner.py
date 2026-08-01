@@ -364,17 +364,16 @@ def _fit_to_maximum_dimensions(payload: dict[str, Any]) -> dict[str, Any] | None
     if not root_nodes:
         return None
     pivot = {
-        axis: sum(node["transform"]["translation_m"][axis] for node in root_nodes)
-        / len(root_nodes)
+        axis: sum(node["transform"]["translation_m"][axis] for node in root_nodes) / len(root_nodes)
         for axis in ("x", "y", "z")
     }
     for node in root_nodes:
         transform = node["transform"]
         for axis in ("x", "y", "z"):
             translation = transform["translation_m"][axis]
-            transform["translation_m"][axis] = pivot[axis] + (
-                translation - pivot[axis]
-            ) * uniform_ratio
+            transform["translation_m"][axis] = (
+                pivot[axis] + (translation - pivot[axis]) * uniform_ratio
+            )
             transform["scale"][axis] *= uniform_ratio
     fitted["deterministic_adjustments"] = [
         *fitted.get("deterministic_adjustments", []),

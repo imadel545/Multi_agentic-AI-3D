@@ -8,6 +8,7 @@ from core.contracts.document_pack import (
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.geometry_validation import GeometryValidationReport
 from core.contracts.glb_inspection import GlbInspectionReport, PreviewInspectionReport
+from core.contracts.llm_provenance import LLMDecisionProvenance
 from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
 from core.contracts.planning_decision import (
     PlanningCandidate,
@@ -32,6 +33,7 @@ __all__ = [
     "GeometryValidationReport",
     "GeometryProgram",
     "GlbInspectionReport",
+    "LLMDecisionProvenance",
     "MemoryIndexResult",
     "MemoryRecallResult",
     "MemorySummary",

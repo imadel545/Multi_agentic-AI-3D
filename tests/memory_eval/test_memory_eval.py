@@ -24,7 +24,11 @@ def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_quer
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
     )
-    memory_service = MemoryService(tmp_path / "memory.db", rag_service=rag_service)
+    memory_service = MemoryService(
+        tmp_path / "memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
     orchestrator = DesignOrchestrator(
         registry=AssetRegistry(Path("assets/manifests")),
         extractor=RequirementExtractor(enabled=False),
@@ -60,4 +64,5 @@ def test_memory_eval_successful_5g_lattice_design_recalled_for_next_similar_quer
     assert second.memory_recall is not None
     assert second.memory_recall.memory_context_count >= 1
     assert second.memory_recall.similar_workflows[0]["workflow_id"] == "wf_memory_eval_seed"
+    assert memory_service.reconcile_vector_outbox()["status"] == "succeeded"
     assert memory_service.last_index_result.status == "indexed"

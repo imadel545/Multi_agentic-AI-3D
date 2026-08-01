@@ -194,13 +194,28 @@ def memory_status(memory_service: Any | None) -> dict[str, Any]:
         }
     latest = index_health.get("latest_index_result") or {}
     compatibility = index_health.get("vector_compatibility") or {}
+    outbox = index_health.get("vector_outbox") or {}
     latest_status = str(latest.get("status") or "not_indexed")
     index_failed = latest_status in {"failed", "partial"}
+    outbox_status = str(outbox.get("status") or "idle")
+    outbox_pending = outbox_status in {"pending", "attempt"}
+    outbox_failed = outbox_status == "failed"
     migration_pending = bool(compatibility.get("degraded"))
-    vector_status = "failed" if index_failed else str(compatibility.get("status") or latest_status)
-    vector_errors = ["vector_index_write_failed"] if latest.get("errors") else []
-    if index_failed:
+    if outbox_failed or index_failed:
+        vector_status = "failed"
+    elif outbox_pending:
+        vector_status = outbox_status
+    else:
+        vector_status = str(compatibility.get("status") or latest_status)
+    vector_errors = []
+    if outbox_failed or latest.get("errors"):
+        vector_errors.append("vector_index_write_failed")
+    elif outbox_pending:
+        vector_errors.append("vector_projection_pending")
+    if outbox_failed or index_failed:
         status = "degraded:vector_index"
+    elif outbox_pending:
+        status = "degraded:vector_projection_pending"
     elif migration_pending:
         status = "degraded:vector_migration_pending"
     else:

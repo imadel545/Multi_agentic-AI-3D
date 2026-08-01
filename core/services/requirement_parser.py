@@ -165,6 +165,10 @@ def parse_requirements_text(
             [
                 "armoire énergie",
                 "armoire energie",
+                "armoire d'énergie",
+                "armoire d'energie",
+                "armoire d’énergie",
+                "armoire d’energie",
                 "armoire électrique",
                 "armoire electrique",
                 "boîte alimentation",
@@ -181,6 +185,10 @@ def parse_requirements_text(
             [
                 "armoire énergie",
                 "armoire energie",
+                "armoire d'énergie",
+                "armoire d'energie",
+                "armoire d’énergie",
+                "armoire d’energie",
                 "boîte alimentation",
                 "boite alimentation",
                 "power cabinet",

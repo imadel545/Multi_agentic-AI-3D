@@ -3,6 +3,7 @@ from typing import Any, Literal
 from pydantic import Field, field_validator
 
 from core.contracts.common import StrictModel
+from core.contracts.llm_provenance import LLMDecisionProvenance
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
 
@@ -51,5 +52,6 @@ class SceneEditResult(StrictModel):
     llm_provider: str | None = None
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = Field(default=None, max_length=160)
+    llm_decision_provenance: LLMDecisionProvenance | None = None
     errors: list[ValidationIssue] = Field(default_factory=list)
     warnings: list[ValidationIssue] = Field(default_factory=list)

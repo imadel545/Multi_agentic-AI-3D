@@ -12,7 +12,7 @@
   "compatible_tower_types": ["lattice_tower", "monopole", "rooftop_mast", "small_cell_pole"],
   "mount_zones": [],
   "status": "validated",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "source": "internal_cleaned",
   "license": "internal_project_generated",
   "attribution_required": false,
@@ -22,17 +22,31 @@
   "pivot_policy": "center_mount",
   "front_axis": "+X",
   "import_fallback_allowed": true,
-  "adaptation_profile_id": "reference_only_v1",
+  "adaptation_profile_id": "sector_cable_route_v1",
+  "builder_profile_id": "cable_route_v1",
+  "capability_tags": ["routing", "scene_spec_parametric_route"],
+  "anchors": [
+    {"anchor_id": "route_start", "position_m": [0, 0, 0], "normal": [0, 0, 1], "up": [0, 1, 0], "placement_policy": "ground_route", "roles": ["routing"]},
+    {"anchor_id": "route_end", "position_m": [0, 0, 1], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["routing"]}
+  ],
+  "connectors": [
+    {"connector_id": "route_start", "kind": "routing", "gender": "target", "anchor_id": "route_start", "compatible_connector_kinds": ["routing"]},
+    {"connector_id": "route_end", "kind": "routing", "gender": "bidirectional", "anchor_id": "route_end", "compatible_connector_kinds": ["routing"]}
+  ],
+  "allowed_parameters": [
+    {"parameter_id": "route_clearance_m", "value_type": "number", "unit": "meters", "minimum": 0.05, "maximum": 2},
+    {"parameter_id": "cable_diameter_m", "value_type": "number", "unit": "meters", "minimum": 0.005, "maximum": 0.1}
+  ],
   "qualification": {
-    "status": "reference_only",
-    "allowed_generation_modes": [],
+    "status": "qualified_for_generation",
+    "allowed_generation_modes": ["parametric_generated"],
     "verified_file_sha256": "8ede9863ae55f69adb791c1d2ce953bb5683c01e094e71351b4dcf51f645db22",
     "units": "meters",
     "mesh_integrity_verified": true,
-    "dimensions_verified": false,
+    "dimensions_verified": true,
     "pivot_verified": false,
     "orientation_verified": false,
-    "qualification_method": "GLB binary integrity inspection only",
-    "limitations": ["No route/connectors contract; cables remain generated from SceneSpec route points."]
+    "qualification_method": "SceneSpec-driven bounded cable_route_v1 procedural assembly",
+    "limitations": ["The companion GLB remains reference-only; cable geometry is generated from the resolved connector route."]
   }
 }

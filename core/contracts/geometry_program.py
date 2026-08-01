@@ -302,12 +302,10 @@ def _geometry_corners(node: GeometryProgramNode) -> list[tuple[float, float, flo
     if isinstance(node, GeometryCurveNode):
         depth = node.bevel_depth_m
         minimum = tuple(
-            min(getattr(point, axis) for point in node.points_m) - depth
-            for axis in ("x", "y", "z")
+            min(getattr(point, axis) for point in node.points_m) - depth for axis in ("x", "y", "z")
         )
         maximum = tuple(
-            max(getattr(point, axis) for point in node.points_m) + depth
-            for axis in ("x", "y", "z")
+            max(getattr(point, axis) for point in node.points_m) + depth for axis in ("x", "y", "z")
         )
         return _bounds_corners(minimum, maximum)
     if not isinstance(node, GeometryPrimitiveNode):
@@ -368,8 +366,7 @@ def _matrix_multiply(
 ) -> tuple[tuple[float, ...], ...]:
     return tuple(
         tuple(
-            sum(left[row][item] * right[item][column] for item in range(4))
-            for column in range(4)
+            sum(left[row][item] * right[item][column] for item in range(4)) for column in range(4)
         )
         for row in range(4)
     )
@@ -381,6 +378,5 @@ def _transform_point(
 ) -> tuple[float, float, float]:
     vector = (*point, 1.0)
     return tuple(
-        sum(matrix[row][column] * vector[column] for column in range(4))
-        for row in range(3)
+        sum(matrix[row][column] * vector[column] for column in range(4)) for row in range(3)
     )

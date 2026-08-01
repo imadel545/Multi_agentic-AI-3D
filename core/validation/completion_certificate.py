@@ -20,7 +20,14 @@ from core.contracts.validation import ValidationReport
 from core.performance import requirements_hash, scene_spec_hash
 from core.services.blender_runner import GenerationResult
 
-_CERTIFIED_ARTIFACTS = ("glb", "preview", "metadata", "build_lock")
+_BASE_CERTIFIED_ARTIFACTS = ("glb", "preview", "metadata", "build_lock")
+_M0_CERTIFIED_ARTIFACTS = (
+    "glb",
+    "preview",
+    "metadata",
+    "component_proofs",
+    "build_lock",
+)
 
 
 def build_completion_certificate(
@@ -40,7 +47,17 @@ def build_completion_certificate(
     pre_blender_gate: QualityGateReport | None,
     post_blender_gate: QualityGateReport | None,
 ) -> CompletionCertificate:
-    artifacts = _artifact_evidence(generation)
+    component_proof_required = bool(
+        scene
+        and (
+            scene.geometry_programs
+            or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
+        )
+    )
+    certified_artifact_names = (
+        _M0_CERTIFIED_ARTIFACTS if component_proof_required else _BASE_CERTIFIED_ARTIFACTS
+    )
+    artifacts = _artifact_evidence(generation, certified_artifact_names)
     requirements_sha256 = requirements_hash(requirements) if requirements else "0" * 64
     blueprint_sha256 = (
         design_blueprint_hash(design_blueprint) if design_blueprint is not None else None
@@ -62,8 +79,8 @@ def build_completion_certificate(
         "real_blender_generation": bool(
             generation and generation.status == "generated" and generation.mode == "real_blender"
         ),
-        "required_artifacts_regular_files": len(artifacts) == len(_CERTIFIED_ARTIFACTS),
-        "artifact_hashes_recorded": len(artifacts) == len(_CERTIFIED_ARTIFACTS)
+        "required_artifacts_regular_files": len(artifacts) == len(certified_artifact_names),
+        "artifact_hashes_recorded": len(artifacts) == len(certified_artifact_names)
         and all(artifact.size_bytes > 0 and bool(artifact.sha256) for artifact in artifacts),
         "qa_report_passed": bool(qa_report and qa_report.status == "passed"),
         "glb_binary_integrity_passed": bool(
@@ -86,9 +103,14 @@ def build_completion_certificate(
             generation and generation.mode == "real_blender" and generation.status == "generated"
         ),
     }
+    if component_proof_required:
+        checks["component_proof_verified"] = _component_proof_verified(
+            generation,
+            scene,
+        )
     blockers = [name for name, passed in checks.items() if not passed]
     return CompletionCertificate(
-        schema_version="1.1.0",
+        schema_version="1.2.0" if component_proof_required else "1.1.0",
         workflow_id=workflow_id,
         status="issued" if not blockers else "rejected",
         evaluated_at=datetime.now(UTC),
@@ -124,10 +146,15 @@ def verify_completion_certificate(
         or certificate.scene_spec_sha256 != scene_spec_hash(scene)
     ):
         return False
+    certified_artifact_names = (
+        _M0_CERTIFIED_ARTIFACTS
+        if certificate.schema_version == "1.2.0"
+        else _BASE_CERTIFIED_ARTIFACTS
+    )
     expected = {artifact.logical_name: artifact for artifact in certificate.artifacts}
-    if set(expected) != set(_CERTIFIED_ARTIFACTS):
+    if set(expected) != set(certified_artifact_names):
         return False
-    for logical_name in _CERTIFIED_ARTIFACTS:
+    for logical_name in certified_artifact_names:
         path_value = generation.artifacts.get(logical_name)
         if not path_value:
             return False
@@ -143,11 +170,14 @@ def verify_completion_certificate(
     return True
 
 
-def _artifact_evidence(generation: GenerationResult | None) -> list[CertifiedArtifact]:
+def _artifact_evidence(
+    generation: GenerationResult | None,
+    logical_names: tuple[str, ...],
+) -> list[CertifiedArtifact]:
     if generation is None:
         return []
     artifacts: list[CertifiedArtifact] = []
-    for logical_name in _CERTIFIED_ARTIFACTS:
+    for logical_name in logical_names:
         value = generation.artifacts.get(logical_name)
         path = Path(value) if value else None
         if path is None or not path.is_file() or path.stat().st_size <= 0:
@@ -161,6 +191,74 @@ def _artifact_evidence(generation: GenerationResult | None) -> list[CertifiedArt
             )
         )
     return artifacts
+
+
+def _component_proof_verified(
+    generation: GenerationResult | None,
+    scene: SceneSpec,
+) -> bool:
+    if generation is None:
+        return False
+    value = generation.artifacts.get("component_proofs")
+    metadata_value = generation.artifacts.get("metadata")
+    if not value or not metadata_value:
+        return False
+    proof_path = Path(value)
+    metadata_path = Path(metadata_value)
+    try:
+        import json
+
+        proof = json.loads(proof_path.read_text(encoding="utf-8"))
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    expected = proof.get("report_sha256")
+    unsigned = {key: value for key, value in proof.items() if key != "report_sha256"}
+    actual = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    proof_metadata = metadata.get("component_proof")
+    expected_roles = (
+        {component.role_id for component in scene.assembly_plan.components}
+        if scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
+        else set()
+    )
+    component_roles = {
+        component.get("role_id")
+        for component in proof.get("components", [])
+        if isinstance(component, dict)
+    }
+    program_ids = {
+        item.get("geometry_program", {}).get("program_id")
+        for item in proof.get("geometry_programs", [])
+        if isinstance(item, dict)
+    }
+    proofs = [
+        *proof.get("components", []),
+        *proof.get("geometry_programs", []),
+    ]
+    proof_strategies = {"reuse", "adapt", "compose", "procedural_generate"}
+    return bool(
+        proof_path.is_file()
+        and metadata_path.is_file()
+        and proof.get("scene_id") == scene.scene_id
+        and isinstance(expected, str)
+        and expected == actual
+        and isinstance(proof_metadata, dict)
+        and proof_metadata.get("sha256") == _sha256(proof_path)
+        and proof_metadata.get("report_sha256") == expected
+        and proof_metadata.get("passed") is True
+        and component_roles == expected_roles
+        and program_ids == {program.program_id for program in scene.geometry_programs}
+        and proof.get("operation_execution", {}).get("passed") is True
+        and all(item.get("strategy") in proof_strategies for item in proofs)
+        and all(item.get("qa", {}).get("passed") is True for item in proofs)
+    )
 
 
 def _sha256(path: Path) -> str:

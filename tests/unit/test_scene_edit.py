@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.assets import RadioGeometryProfile
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
 from core.contracts.scene_edit import PatchOperation, ScenePatch
 from core.services.diff_engine import DiffEngine
@@ -105,6 +106,35 @@ def test_diff_engine_detects_changes(sample_scene):
     diff = DiffEngine.diff_scenes(sample_scene, patched)
     assert diff["visual_elements_changed"] is True
     assert diff["visual_changes"]["include_gps_antenna"]["new"] is True
+
+
+def test_diff_engine_detects_nested_sector_profile_changes(sample_scene):
+    original_profile = RadioGeometryProfile(vertical_offset_m=1.2)
+    original_sector = sample_scene.sectors[0].model_copy(
+        update={
+            "radio_asset_id": "rru_01",
+            "radio_geometry_profile": original_profile,
+        }
+    )
+    original_scene = sample_scene.model_copy(
+        update={"sectors": [original_sector, *sample_scene.sectors[1:]]}
+    )
+    patched_profile = original_profile.model_copy(update={"vertical_offset_m": 1.45})
+    patched_sector = original_sector.model_copy(update={"radio_geometry_profile": patched_profile})
+    patched_scene = original_scene.model_copy(
+        update={"sectors": [patched_sector, *sample_scene.sectors[1:]]}
+    )
+
+    diff = DiffEngine.diff_scenes(original_scene, patched_scene)
+
+    assert diff["sectors_changed"] is True
+    sector_change = diff["sector_changes"][0]
+    assert sector_change["sector_id"] == sample_scene.sectors[0].sector_id
+    assert (
+        sector_change["fields"]["radio_geometry_profile"]["old"]["vertical_offset_m"]
+        == original_profile.vertical_offset_m
+    )
+    assert sector_change["fields"]["radio_geometry_profile"]["new"]["vertical_offset_m"] == 1.45
 
 
 def test_scene_edit_agent_fallback_height(sample_scene):

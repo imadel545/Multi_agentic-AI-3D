@@ -28,7 +28,7 @@
   "capability_tags": ["5g", "sector", "rru_rf"],
   "anchors": [
     {"anchor_id": "rear_mount", "position_m": [0, -0.09, 0], "normal": [0, -1, 0], "roles": ["mechanical_mount"]},
-    {"anchor_id": "rf_port", "position_m": [0, 0, -0.8], "normal": [0, 0, -1], "roles": ["rf", "routing"]}
+    {"anchor_id": "rf_port", "position_m": [0, 0, -0.8], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["rf", "routing"]}
   ],
   "connectors": [
     {"connector_id": "rear_mount", "kind": "mechanical", "gender": "source", "anchor_id": "rear_mount", "compatible_connector_kinds": ["mechanical"]},

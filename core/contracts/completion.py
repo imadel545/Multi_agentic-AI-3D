@@ -26,14 +26,20 @@ class RequirementCoverageReport(StrictModel):
 
 
 class CertifiedArtifact(StrictModel):
-    logical_name: Literal["glb", "preview", "metadata", "build_lock"]
+    logical_name: Literal[
+        "glb",
+        "preview",
+        "metadata",
+        "component_proofs",
+        "build_lock",
+    ]
     file_name: str = Field(min_length=1)
     size_bytes: int = Field(gt=0)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class CompletionCertificate(StrictModel):
-    schema_version: Literal["1.0.0", "1.1.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0"] = "1.0.0"
     workflow_id: str = Field(min_length=1)
     status: Literal["issued", "rejected"]
     evaluated_at: datetime

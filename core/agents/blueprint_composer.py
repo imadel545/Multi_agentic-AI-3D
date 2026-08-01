@@ -247,7 +247,7 @@ def _component_intents(
     for asset in selected_assets:
         type_counts[asset.type] = type_counts.get(asset.type, 0) + 1
         suffix = type_counts[asset.type]
-        per_sector = asset.type in {"antenna", "radio"}
+        per_sector = asset.type in {"antenna", "radio", "cable", "beam"}
         role_id = role_by_asset.get(
             asset.asset_id,
             {
@@ -280,10 +280,11 @@ def _component_intents(
                 ],
             )
         )
-    if requirements.include_cables:
+    if requirements.include_cables and not type_counts.get("cable"):
+        type_counts["cable"] = type_counts.get("cable", 0) + 1
         intents.append(
             ComponentIntent(
-                intent_id="component:cable:1",
+                intent_id=f"component:cable:{type_counts['cable']}",
                 semantic_role_id="sector_cable_route",
                 asset_type="cable",
                 instance_strategy_id="per_sector",
@@ -301,10 +302,11 @@ def _component_intents(
                 provenance=["requirement_spec", "derived_rule:cable_per_sector"],
             )
         )
-    if requirements.include_beams:
+    if requirements.include_beams and not type_counts.get("beam"):
+        type_counts["beam"] = type_counts.get("beam", 0) + 1
         intents.append(
             ComponentIntent(
-                intent_id="component:beam:1",
+                intent_id=f"component:beam:{type_counts['beam']}",
                 semantic_role_id="sector_coverage_volume",
                 asset_type="beam",
                 instance_strategy_id="per_sector",

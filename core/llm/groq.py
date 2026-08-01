@@ -701,6 +701,10 @@ _EXPLICIT_TEXT_TERMS_BY_FIELD = {
     "include_power_cabinet": (
         "armoire énergie",
         "armoire energie",
+        "armoire d'énergie",
+        "armoire d'energie",
+        "armoire d’énergie",
+        "armoire d’energie",
         "boîte alimentation",
         "boite alimentation",
         "power cabinet",

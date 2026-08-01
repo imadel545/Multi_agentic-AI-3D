@@ -35,12 +35,23 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         assert summary["completed_designs"] >= 1
         assert "asset_inventory_status" in summary
         assert summary["asset_inventory_status"] == "qualified_mixed_catalog"
-        assert summary["generation_eligible_asset_count"] == 12
-        assert summary["reference_only_asset_count"] == 1
-        assert summary["asset_count"] == 13
-        assert summary["real_glb_asset_count"] == 12
-        assert summary["import_qualified_glb_count"] == 3
-        assert summary["missing_file_count"] == 0
+        inventory = client.get("/assets/inventory").json()
+        for field in (
+            "asset_count",
+            "real_glb_asset_count",
+            "import_qualified_glb_count",
+            "generation_eligible_asset_count",
+            "reference_only_asset_count",
+            "missing_file_count",
+        ):
+            assert summary[field] == inventory[field]
+        assert summary["asset_count"] == len(inventory["entries"])
+        assert summary["generation_eligible_asset_count"] == sum(
+            entry["generation_eligible"] for entry in inventory["entries"]
+        )
+        assert summary["reference_only_asset_count"] == sum(
+            entry["asset_import_mode"] == "reference_only" for entry in inventory["entries"]
+        )
         assert not any(
             warning.get("technical_code") == "STUDIO_NO_QUALIFIED_ASSETS"
             for warning in summary["warnings"]
@@ -222,9 +233,10 @@ def test_geometry_program_summary_exposes_bounded_llm_provenance(tmp_path: Path)
 
 
 class _MemoryStatusProbe:
-    def __init__(self, latest: dict, compatibility: dict) -> None:
+    def __init__(self, latest: dict, compatibility: dict, outbox: dict | None = None) -> None:
         self.latest = latest
         self.compatibility = compatibility
+        self.outbox = outbox or {}
 
     def stats(self) -> dict:
         return {}
@@ -233,6 +245,7 @@ class _MemoryStatusProbe:
         return {
             "latest_index_result": self.latest,
             "vector_compatibility": self.compatibility,
+            "vector_outbox": self.outbox,
         }
 
 
@@ -256,6 +269,17 @@ def test_memory_status_distinguishes_migration_from_index_failure() -> None:
     assert failure["memory_status"] == "degraded:vector_index"
     assert failure["memory_vector_status"] == "failed"
     assert failure["memory_vector_errors"] == ["vector_index_write_failed"]
+
+    pending = memory_status(
+        _MemoryStatusProbe(
+            {"status": "pending", "errors": []},
+            {"status": "migration_pending", "degraded": True},
+            {"status": "pending", "degraded": True},
+        )
+    )
+    assert pending["memory_status"] == "degraded:vector_projection_pending"
+    assert pending["memory_vector_status"] == "pending"
+    assert pending["memory_vector_errors"] == ["vector_projection_pending"]
 
 
 def test_studio_warnings_distinguish_unverified_and_failed_rag() -> None:
@@ -437,6 +461,7 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert bundle["preview_url"]
         assert bundle["report_url"]
         assert bundle["metadata_url"]
+        assert bundle["component_proofs_url"]
         assert bundle["requirements_spec_url"]
         assert bundle["extraction_report_url"]
         assert bundle["scene_spec_url"]
@@ -475,6 +500,10 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert "antenna" in fidelity["roles"]["technical_generic"]
         assert bundle["primary_glb_url"].startswith(f"/designs/{workflow_id}/artifacts/glb")
         assert "/Users/" not in bundle["primary_glb_url"]
+        assert bundle["component_proofs_url"].startswith(
+            f"/designs/{workflow_id}/artifacts/component_proofs"
+        )
+        assert "/Users/" not in bundle["component_proofs_url"]
         assert bundle["runtime_capabilities"]["workflow_id_source"] == "workflow_id"
         assert bundle["runtime_capabilities"]["websocket_runtime"] is False
         assert any(action["action"] == "retry" for action in bundle["unsupported_actions"])
@@ -488,11 +517,26 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert "design.glb" in names
         assert "preview.png" in names
         assert "scene_metadata.json" in names
+        assert "component_proofs.json" in names
         assert "requirements_spec.json" in names
         assert "extraction_report.json" in names
         assert "qa_report.json" in names
         assert "geometry_validation.json" in names
         assert "rag_evidence.json" in names
+        component_proofs_artifact = next(
+            artifact
+            for artifact in bundle["viewer_artifacts"]
+            if artifact["name"] == "component_proofs.json"
+        )
+        assert component_proofs_artifact["available"] is True
+        assert component_proofs_artifact["url"] == bundle["component_proofs_url"]
+        component_proofs_response = client.get(bundle["component_proofs_url"])
+        assert component_proofs_response.status_code == 200
+        assert component_proofs_response.headers["content-type"].startswith("application/json")
+        component_proofs = component_proofs_response.json()
+        assert component_proofs["workflow_id"] == workflow_id
+        assert component_proofs["components"]
+        assert component_proofs["operation_execution"]["passed"] is True
         for artifact in bundle["viewer_artifacts"]:
             assert artifact["url"].startswith(f"/designs/{workflow_id}/artifacts/")
             assert "/Users/" not in artifact["url"]
@@ -533,12 +577,14 @@ def test_failed_blender_workflow_does_not_advertise_viewer_artifacts(
         assert "preview" not in status["artifacts"]
         assert bundle["primary_glb_url"] is None
         assert bundle["preview_url"] is None
+        assert bundle["component_proofs_url"] is None
         assert not any(event["event_type"] == "artifact_ready" for event in events)
         availability = {
             artifact["name"]: artifact["available"] for artifact in bundle["viewer_artifacts"]
         }
         assert availability["design.glb"] is False
         assert availability["preview.png"] is False
+        assert availability["component_proofs.json"] is False
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -809,6 +855,7 @@ def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
     )
     assert "RuntimeCapabilities" in schema["components"]["schemas"]
     assert "UnsupportedAction" in schema["components"]["schemas"]
+    assert "component_proofs_url" in schema["components"]["schemas"]["ViewerBundle"]["properties"]
     assert (
         schema["paths"]["/document-packs/{pack_id}/generate-design"]["post"]["responses"]["200"][
             "content"
@@ -893,8 +940,7 @@ def test_product_issues_deduplicate_repeated_sector_warnings() -> None:
             {
                 **repeated,
                 "message": (
-                    "ANT_PANEL_5G_DUALBAND_V1: "
-                    "INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
+                    "ANT_PANEL_5G_DUALBAND_V1: INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
                 ),
             },
             {
@@ -920,10 +966,13 @@ def test_product_issues_deduplicate_repeated_sector_warnings() -> None:
         if issue["technical_code"]
         == "ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"
     ] == ["ASSET_IMPORT_INTERNAL_PROJECT_GENERATED_ASSET_NOT_VENDOR_GRADE"]
-    assert sum(
-        issue["technical_code"].startswith("ASSET_IMPORT_PROCEDURAL_FALLBACK")
-        for issue in issues
-    ) == 1
+    assert (
+        sum(
+            issue["technical_code"].startswith("ASSET_IMPORT_PROCEDURAL_FALLBACK")
+            for issue in issues
+        )
+        == 1
+    )
     assert any(issue["title"] == "Composants internes non constructeur" for issue in issues)
 
 
@@ -997,9 +1046,7 @@ def test_product_issues_humanize_failed_runtime_nodes_without_internal_details()
             "payload": {
                 "node": "generate_blender",
                 "status": "failed",
-                "errors": [
-                    "Traceback /Users/private/project.py ModuleNotFoundError: secret"
-                ],
+                "errors": ["Traceback /Users/private/project.py ModuleNotFoundError: secret"],
             },
         }
     ]

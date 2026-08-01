@@ -14,11 +14,62 @@ from apps.api.telecom_studio_api.workflow import (
     WorkflowBusyError,
     WorkflowService,
     WorkflowStorageError,
+    _public_status_payload,
 )
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
 from core.contracts.validation import ValidationReport
-from core.performance import requirements_hash
+from core.performance import requirements_confirmation_hash
+
+
+def test_public_workflow_status_sanitizes_legacy_asset_file_paths() -> None:
+    payload = _public_status_payload(
+        "wf_public_paths",
+        {
+            "status": "completed",
+            "completion_certificate_status": "issued",
+            "artifacts": {},
+            "asset_imports": [
+                {
+                    "asset_id": "catalog_antenna",
+                    "asset_file": ("/Users/imad/project/assets/antennas/panel_antenna.glb"),
+                    "resolved_path": ("/Users/imad/project/assets/antennas/panel_antenna.glb"),
+                },
+                {
+                    "asset_id": "external_file",
+                    "asset_file": "/Users/imad/Downloads/external_radio.glb",
+                    "local_path": "/Users/imad/Downloads/external_radio.glb",
+                },
+                {
+                    "asset_id": "catalog_radio",
+                    "asset_file": "assets/radios/rru.glb",
+                },
+                {
+                    "asset_id": "windows_catalog_support",
+                    "asset_file": r"C:\project\assets\supports\mount.glb",
+                },
+                {
+                    "asset_id": "remote_uri",
+                    "asset_file": "https://example.invalid/assets/radios/remote.glb",
+                },
+                {
+                    "asset_id": "unresolved_home",
+                    "asset_file": "~/project/assets/radios/home.glb",
+                },
+            ],
+        },
+    )
+
+    imports = payload["asset_imports"]
+    assert imports[0]["asset_file"] == "assets/antennas/panel_antenna.glb"
+    assert "resolved_path" not in imports[0]
+    assert imports[1]["asset_file"] is None
+    assert "local_path" not in imports[1]
+    assert imports[2]["asset_file"] == "assets/radios/rru.glb"
+    assert imports[3]["asset_file"] == "assets/supports/mount.glb"
+    assert imports[4]["asset_file"] is None
+    assert imports[5]["asset_file"] is None
+    assert "/Users/" not in json.dumps(payload)
 
 
 def test_workflow_admission_is_bounded_and_rejected_work_has_no_orphan(tmp_path: Path) -> None:
@@ -220,8 +271,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         assert any(
             record["object_role"] == "antenna"
             and record["generation_success"] is True
-            and record["asset_metadata"]["qualification_status"]
-            == "qualified_for_generation"
+            and record["asset_metadata"]["qualification_status"] == "qualified_for_generation"
             for record in status["asset_imports"]
         )
         assert all(
@@ -505,6 +555,9 @@ def test_api_design_with_use_llm_false_does_not_call_configured_provider(
 
 
 def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
+    requirements_text = (
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0, 120, 240."
+    )
     extractor = workflow_service.orchestrator.extractor
     original_provider = extractor.provider
     original_provider_name = extractor.provider_name
@@ -517,10 +570,7 @@ def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
         response = client.post(
             "/requirements/parse",
             json={
-                "requirements_text": (
-                    "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-                    "Azimuts : 0, 120, 240."
-                ),
+                "requirements_text": requirements_text,
                 "detail_level": "high",
                 "use_llm": True,
             },
@@ -537,8 +587,10 @@ def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
     assert payload["fallback_used"] is True
     assert payload["llm_fallback_reason"] == "RuntimeError: forced provider failure"
     assert payload["requirements"]["tower_type"] == "lattice_tower"
-    assert payload["requirements_hash"] == requirements_hash(
-        RequirementSpec.model_validate(payload["requirements"])
+    assert payload["requirements_hash"] == requirements_confirmation_hash(
+        RequirementSpec.model_validate(payload["requirements"]),
+        requirements_text=requirements_text,
+        detail_level="high",
     )
     assert payload["errors"][0]["code"] == "LLM_EXTRACTION_ERROR"
 
@@ -568,7 +620,11 @@ def test_create_design_uses_exact_confirmed_requirements(monkeypatch) -> None:
     payload = {
         "requirements_text": "Créer le site confirmé.",
         "confirmed_requirements": requirements.model_dump(),
-        "confirmed_requirements_hash": requirements_hash(requirements),
+        "confirmed_requirements_hash": requirements_confirmation_hash(
+            requirements,
+            requirements_text="Créer le site confirmé.",
+            detail_level="high",
+        ),
         "options": {"detail_level": "high"},
     }
 
@@ -583,6 +639,159 @@ def test_create_design_uses_exact_confirmed_requirements(monkeypatch) -> None:
     payload["confirmed_requirements_hash"] = "0" * 64
     rejected = client.post("/designs", json=payload)
     assert rejected.status_code == 422
+
+
+def test_confirmed_requirements_hash_survives_javascript_number_serialization(
+    monkeypatch,
+) -> None:
+    requirements_text = (
+        "Créer un site 5G sur pylône treillis 30 m avec 3 secteurs à 24 m, "
+        "azimuts 0, 120, 240, RRU, câbles, armoire énergie et GPS."
+    )
+    parsed = workflow_service.parse_requirements(
+        requirements_text,
+        detail_level="high",
+        use_llm=False,
+    )
+    browser_payload = _javascript_number_round_trip(parsed["requirements"])
+    assert json.dumps(browser_payload, sort_keys=True) != json.dumps(
+        parsed["requirements"], sort_keys=True
+    )
+    captured: dict = {}
+
+    def _capture(confirmed: RequirementSpec, **kwargs) -> dict:
+        captured["requirements"] = confirmed
+        captured.update(kwargs)
+        return {"workflow_id": "wf_browser_confirmed", "status": "pending"}
+
+    monkeypatch.setattr(workflow_service, "create_design_from_requirements", _capture)
+    response = TestClient(app).post(
+        "/designs",
+        json={
+            "requirements_text": requirements_text,
+            "confirmed_requirements": browser_payload,
+            "confirmed_requirements_hash": parsed["requirements_hash"],
+            "options": {"detail_level": "high", "use_llm": None},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"workflow_id": "wf_browser_confirmed", "status": "pending"}
+    assert captured["requirements"] == RequirementSpec.model_validate(browser_payload)
+
+
+def test_confirmed_requirements_token_binds_full_provenance_text_and_detail_level() -> None:
+    requirements_text = "Créer un site 5G vérifiable avec trois secteurs."
+    requirements = RequirementSpec(
+        network_type="5G",
+        tower_type="lattice_tower",
+        tower_height_m=30,
+        sector_count=3,
+        antenna_type="panel_5g",
+        antenna_install_height_m=24,
+        azimuths_deg=[0, 120, 240],
+        detail_level="high",
+        warnings=[{"code": "USER_VISIBLE_LIMIT", "message": "Limite visible."}],
+        repair_events=[
+            {
+                "attempt": 1,
+                "handler": "bounded_repair",
+                "reason": "normalisation contrôlée",
+                "before": {"height": 30.0},
+                "after": {"height": 30},
+                "warning_code": "BOUNDED_REPAIR",
+                "success": True,
+            }
+        ],
+    )
+    token = requirements_confirmation_hash(
+        requirements,
+        requirements_text=requirements_text,
+        detail_level="high",
+    )
+    original = requirements.model_dump(mode="json")
+    tampered_payloads = []
+
+    changed_geometry = json.loads(json.dumps(original))
+    changed_geometry["tower_height_m"] = 42
+    tampered_payloads.append(
+        {
+            "requirements_text": requirements_text,
+            "confirmed_requirements": changed_geometry,
+            "options": {"detail_level": "high"},
+        }
+    )
+    removed_warning = json.loads(json.dumps(original))
+    removed_warning["warnings"] = []
+    tampered_payloads.append(
+        {
+            "requirements_text": requirements_text,
+            "confirmed_requirements": removed_warning,
+            "options": {"detail_level": "high"},
+        }
+    )
+    removed_repair = json.loads(json.dumps(original))
+    removed_repair["repair_events"] = []
+    tampered_payloads.append(
+        {
+            "requirements_text": requirements_text,
+            "confirmed_requirements": removed_repair,
+            "options": {"detail_level": "high"},
+        }
+    )
+    tampered_payloads.append(
+        {
+            "requirements_text": "Texte remplacé après analyse.",
+            "confirmed_requirements": original,
+            "options": {"detail_level": "high"},
+        }
+    )
+    tampered_payloads.append(
+        {
+            "requirements_text": requirements_text,
+            "confirmed_requirements": original,
+            "options": {"detail_level": "low"},
+        }
+    )
+
+    client = TestClient(app)
+    for payload in tampered_payloads:
+        response = client.post(
+            "/designs",
+            json={**payload, "confirmed_requirements_hash": token},
+        )
+        assert response.status_code == 422, payload
+
+
+def test_confirmed_requirements_token_rejects_confirmation_state_downgrade() -> None:
+    requirements_text = (
+        "Créer un pylône de 30 m puis un pylône de 42 m avec 3 secteurs. Azimuts 0, 120, 240."
+    )
+    parsed = workflow_service.parse_requirements(
+        requirements_text,
+        detail_level="high",
+        use_llm=False,
+    )
+    requirements = parsed["requirements"]
+    assert requirements["requires_confirmation"] is True
+
+    downgraded = json.loads(json.dumps(requirements))
+    downgraded["requires_confirmation"] = False
+    downgraded["confirmation_fields"] = []
+    downgraded["conflicts"] = []
+    downgraded["field_evidence"] = {}
+    response = TestClient(app).post(
+        "/designs",
+        json={
+            "requirements_text": requirements_text,
+            "confirmed_requirements": downgraded,
+            "confirmed_requirements_hash": parsed["requirements_hash"],
+            "options": {"detail_level": "high"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "hash does not match" in response.text
 
 
 def test_create_design_rejects_unresolved_requirement_conflicts(monkeypatch) -> None:
@@ -611,8 +820,10 @@ def test_create_design_rejects_unresolved_requirement_conflicts(monkeypatch) -> 
         json={
             "requirements_text": "Demande contradictoire.",
             "confirmed_requirements": requirements,
-            "confirmed_requirements_hash": requirements_hash(
-                RequirementSpec.model_validate(requirements)
+            "confirmed_requirements_hash": requirements_confirmation_hash(
+                RequirementSpec.model_validate(requirements),
+                requirements_text="Demande contradictoire.",
+                detail_level="high",
             ),
             "options": {"detail_level": "high"},
         },
@@ -621,6 +832,16 @@ def test_create_design_rejects_unresolved_requirement_conflicts(monkeypatch) -> 
     assert response.status_code == 422
     assert "unresolved input conflicts" in response.text
     assert called is False
+
+
+def _javascript_number_round_trip(value):
+    if isinstance(value, dict):
+        return {key: _javascript_number_round_trip(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_javascript_number_round_trip(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
 
 def test_startup_reconciliation_terminates_only_interrupted_workflows(tmp_path: Path) -> None:
@@ -837,13 +1058,21 @@ def test_assets_inventory_route_is_not_shadowed() -> None:
     assert "asset_count" in payload
     assert "procedural_generation_required" in payload
     assert payload["status"] == "qualified_mixed_catalog"
-    assert payload["real_glb_asset_count"] == 12
-    assert payload["import_qualified_glb_count"] == 3
-    assert payload["generation_eligible_asset_count"] == 12
-    assert payload["reference_only_asset_count"] == 1
+    entries = payload["entries"]
+    assert payload["asset_count"] == len(entries)
+    assert payload["real_glb_asset_count"] == sum(entry["asset_file_exists"] for entry in entries)
+    assert payload["import_qualified_glb_count"] == sum(
+        entry["asset_import_mode"] == "imported_glb_exact" and entry["generation_eligible"]
+        for entry in entries
+    )
+    assert payload["generation_eligible_asset_count"] == sum(
+        entry["generation_eligible"] for entry in entries
+    )
+    assert payload["reference_only_asset_count"] == sum(
+        entry["asset_import_mode"] == "reference_only" for entry in entries
+    )
     assert any(entry["asset_import_mode"] == "imported_glb_exact" for entry in payload["entries"])
     assert any(entry["asset_import_mode"] == "parametric_generated" for entry in payload["entries"])
-    assert any(entry["asset_import_mode"] == "reference_only" for entry in payload["entries"])
 
 
 def test_asset_adaptation_catalog_is_typed_and_not_shadowed() -> None:

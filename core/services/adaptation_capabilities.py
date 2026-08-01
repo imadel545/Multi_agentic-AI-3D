@@ -70,6 +70,25 @@ class AdaptationCapabilityService:
                 missing_profiles=missing_profiles,
                 capability_scope=f"sector_{index + 1}",
             )
+            if sector.radio_asset_id is None:
+                continue
+            radio_manifest = self.registry.get(sector.radio_asset_id)
+            if sector.radio_geometry_profile is None:
+                missing_profiles.append(f"{radio_manifest.asset_id}:radio_geometry_profile")
+                unsupported.append(
+                    f"Le radio du secteur {index + 1} n'expose pas de profil géométrique "
+                    "typé; son adaptation reste désactivée."
+                )
+                continue
+            self._resolve_profile(
+                profile_id=radio_manifest.adaptation_profile_id,
+                asset_id=radio_manifest.asset_id,
+                substitutions={"index": index},
+                output=resolved,
+                unsupported=unsupported,
+                missing_profiles=missing_profiles,
+                capability_scope=f"sector_{index + 1}_radio",
+            )
 
         for index, accessory in enumerate(scene.accessory_assets):
             manifest = self.registry.get(accessory.asset_id)

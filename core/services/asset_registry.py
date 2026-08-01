@@ -1,7 +1,8 @@
+import hashlib
 import json
 from pathlib import Path
 
-from core.contracts.assembly import AssetCandidateScore
+from core.contracts.assembly import AssetCandidateScore, AssetManifestSnapshot, _canonical_sha256
 from core.contracts.assets import AssetManifest
 from core.performance import asset_manifest_hash
 
@@ -22,6 +23,53 @@ class AssetRegistry:
         if asset_id not in assets:
             raise KeyError(f"unknown asset_id: {asset_id}")
         return assets[asset_id]
+
+    def manifest_snapshot(
+        self,
+        asset_id: str,
+        *,
+        generation_mode: str,
+    ) -> AssetManifestSnapshot:
+        """Create a self-hashed immutable snapshot from the authoritative manifest file."""
+
+        asset = self.get(asset_id)
+        manifest_path = self.manifests_dir / f"{asset_id}.json"
+        if not manifest_path.is_file():
+            raise ValueError(f"ASSET_MANIFEST_FILE_MISSING:{asset_id}")
+        try:
+            source_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"ASSET_MANIFEST_FILE_INVALID:{asset_id}") from exc
+        if source_payload.get("asset_id") != asset_id:
+            raise ValueError(f"ASSET_MANIFEST_ID_MISMATCH:{asset_id}")
+        if generation_mode not in asset.qualification.allowed_generation_modes:
+            raise ValueError(f"ASSET_GENERATION_MODE_NOT_AUTHORIZED:{asset_id}:{generation_mode}")
+        snapshot_payload = {
+            "asset_id": asset.asset_id,
+            "asset_type": asset.type,
+            "manifest_version": asset.version,
+            "manifest_file_name": manifest_path.name,
+            "source_manifest_sha256": _sha256(manifest_path),
+            "asset_file": asset.file,
+            "generation_mode": generation_mode,
+            "units": asset.qualification.units,
+            "verified_file_sha256": asset.qualification.verified_file_sha256,
+            "builder_profile_id": asset.builder_profile_id,
+            "dimensions_m": asset.dimensions_m.model_dump(mode="json")
+            if asset.dimensions_m
+            else None,
+            "anchors": [anchor.model_dump(mode="json") for anchor in asset.anchors],
+            "connectors": [connector.model_dump(mode="json") for connector in asset.connectors],
+            "allowed_parameters": [
+                parameter.model_dump(mode="json") for parameter in asset.allowed_parameters
+            ],
+            "transform_permissions": asset.transform_permissions.model_dump(mode="json")
+            if asset.transform_permissions
+            else None,
+            "import_fallback_allowed": asset.import_fallback_allowed,
+        }
+        snapshot_payload["snapshot_sha256"] = _canonical_sha256(snapshot_payload)
+        return AssetManifestSnapshot.model_validate(snapshot_payload)
 
     def select_tower(
         self, tower_type: str, network_type: str, min_height_m: float
@@ -251,3 +299,11 @@ def _candidate_score(
         dimensional_score=round(dimensional, 2),
         reasons=reasons,
     )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

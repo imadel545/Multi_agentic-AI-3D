@@ -30,6 +30,7 @@ class RuntimeAssetMetadata(StrictModel):
     verified_file_sha256: str | None = None
     qualification_method: str | None = None
     qualification_limitations: list[str] = Field(default_factory=list)
+    builder_profile_id: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class SceneAssetPlacement(StrictModel):

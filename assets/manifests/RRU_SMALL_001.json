@@ -27,14 +27,17 @@
   "builder_profile_id": "rru_enclosure_v1",
   "capability_tags": ["4g", "5g", "rru", "rf"],
   "anchors": [
-    {"anchor_id": "rf_port", "position_m": [0, 0, -0.3], "normal": [0, 0, -1], "roles": ["rf", "routing"]}
+    {"anchor_id": "rear_mount", "position_m": [0, -0.09, 0], "normal": [0, -1, 0], "roles": ["mechanical_mount"]},
+    {"anchor_id": "rf_port", "position_m": [0, 0, -0.3], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["rf", "routing"]}
   ],
   "connectors": [
+    {"connector_id": "rear_mount", "kind": "mechanical", "gender": "source", "anchor_id": "rear_mount", "compatible_connector_kinds": ["mechanical"]},
     {"connector_id": "rf_port", "kind": "rf", "gender": "target", "anchor_id": "rf_port", "compatible_connector_kinds": ["rf"]},
     {"connector_id": "cable_exit", "kind": "routing", "gender": "source", "anchor_id": "rf_port", "compatible_connector_kinds": ["routing"]}
   ],
   "allowed_parameters": [
-    {"parameter_id": "vertical_offset_m", "value_type": "number", "unit": "meters", "minimum": 0.25, "maximum": 3}
+    {"parameter_id": "vertical_offset_m", "value_type": "number", "unit": "meters", "minimum": 0.25, "maximum": 3},
+    {"parameter_id": "radial_inset_m", "value_type": "number", "unit": "meters", "minimum": 0, "maximum": 0.5}
   ],
   "radio_geometry_profile": {
     "family": "rru_enclosure_v1",

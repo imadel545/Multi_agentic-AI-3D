@@ -240,6 +240,9 @@ class ProductService:
         viewer_artifacts.append(_artifact("preview.png", "image/png", "preview"))
         viewer_artifacts.append(_artifact("scene_metadata.json", "application/json", "metadata"))
         viewer_artifacts.append(
+            _artifact("component_proofs.json", "application/json", "component_proofs")
+        )
+        viewer_artifacts.append(
             _artifact("requirements_spec.json", "application/json", "requirements_spec")
         )
         viewer_artifacts.append(
@@ -273,9 +276,17 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("technical_report.md", "text/markdown", "technical_report")
         )
+        viewer_artifacts.append(
+            _artifact(
+                "llm_decision_provenance.json",
+                "application/json",
+                "llm_decision_provenance",
+            )
+        )
         primary_glb = _artifact_by_name(viewer_artifacts, "design.glb")
         preview = _artifact_by_name(viewer_artifacts, "preview.png")
         metadata = _artifact_by_name(viewer_artifacts, "scene_metadata.json")
+        component_proofs = _artifact_by_name(viewer_artifacts, "component_proofs.json")
         requirements_spec = _artifact_by_name(viewer_artifacts, "requirements_spec.json")
         extraction_report = _artifact_by_name(viewer_artifacts, "extraction_report.json")
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
@@ -287,6 +298,9 @@ class ProductService:
         requirement_coverage = _artifact_by_name(viewer_artifacts, "requirement_coverage.json")
         completion_certificate = _artifact_by_name(viewer_artifacts, "completion_certificate.json")
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
+        llm_decision_provenance = _artifact_by_name(
+            viewer_artifacts, "llm_decision_provenance.json"
+        )
         scene_spec_path = self._artifact_path_or_none(
             workflow_id,
             "scene_spec",
@@ -312,6 +326,7 @@ class ProductService:
             "preview_url": _available_artifact_url(preview),
             "report_url": _available_artifact_url(report),
             "metadata_url": _available_artifact_url(metadata),
+            "component_proofs_url": _available_artifact_url(component_proofs),
             "requirements_spec_url": _available_artifact_url(requirements_spec),
             "extraction_report_url": _available_artifact_url(extraction_report),
             "scene_spec_url": _available_artifact_url(scene_spec),
@@ -330,6 +345,8 @@ class ProductService:
             "llm_available": llm["llm_available"],
             "llm_fallback_used": status.get("llm_fallback_used"),
             "llm_fallback_reason": llm["llm_fallback_reason"],
+            "llm_decision_provenance": status.get("llm_decision_provenance"),
+            "llm_decision_provenance_url": _available_artifact_url(llm_decision_provenance),
             "rag_context_count": status.get("rag_context_count"),
             "rag_planning_summary": status.get("rag_planning_summary"),
             "rag_reranker_provider": status.get("rag_reranker_provider"),
@@ -1194,12 +1211,8 @@ def _runtime_node_user_impact(node: str) -> str:
         "blender_failure_handler": (
             "La récupération après l'échec Blender n'a pas permis de produire un résultat valide."
         ),
-        "qa_generation": (
-            "Les contrôles du résultat 3D n'ont pas validé cette opération."
-        ),
-        "qa_failure_handler": (
-            "Le résultat reste refusé après l'échec des contrôles qualité."
-        ),
+        "qa_generation": ("Les contrôles du résultat 3D n'ont pas validé cette opération."),
+        "qa_failure_handler": ("Le résultat reste refusé après l'échec des contrôles qualité."),
         "plan_generated_geometry": (
             "Le spécialiste géométrique n'a pas produit un programme valide."
         ),

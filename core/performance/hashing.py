@@ -1,13 +1,51 @@
 import hashlib
+import hmac
 import json
+import math
+import secrets
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+# A confirmation is valid only for the API process that issued it. Restarting
+# the local runtime intentionally requires the client to parse the request again.
+_REQUIREMENTS_CONFIRMATION_SECRET = secrets.token_bytes(32)
+
 
 def requirements_hash(requirements: Any) -> str:
     return _hash_payload(_model_payload(requirements, exclude={"warnings", "repair_events"}))
+
+
+def requirements_confirmation_hash(
+    requirements: Any,
+    *,
+    requirements_text: str,
+    detail_level: str,
+) -> str:
+    """Return a process-bound, JavaScript-safe token for a confirmed requirement.
+
+    Untyped evidence can contain ``30.0`` which JavaScript serializes as ``30``.
+    Canonicalizing integral floats keeps a genuine JSON round trip stable without
+    dropping conflicts, confirmation state, assumptions, or evidence from the
+    integrity boundary.
+    """
+
+    payload = {
+        "confirmation_contract_version": "2.0",
+        "requirements_text": requirements_text,
+        "detail_level": detail_level,
+        "requirements": _canonicalize_json_numbers(_model_payload(requirements)),
+    }
+    return hmac.new(
+        _REQUIREMENTS_CONFIRMATION_SECRET,
+        _encode_payload(payload),
+        digestmod=hashlib.sha256,
+    ).hexdigest()
+
+
+def confirmation_tokens_match(expected: str, actual: str) -> bool:
+    return hmac.compare_digest(expected, actual)
 
 
 def scene_spec_hash(scene: Any) -> str:
@@ -82,7 +120,27 @@ def _model_payload(value: Any, exclude: set[str] | None = None) -> Any:
 
 
 def _hash_payload(payload: Any) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
-        "utf-8"
-    )
-    return hashlib.sha256(encoded).hexdigest()
+    return hashlib.sha256(_encode_payload(payload)).hexdigest()
+
+
+def _encode_payload(payload: Any) -> bytes:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _canonicalize_json_numbers(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _canonicalize_json_numbers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_json_numbers(item) for item in value]
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("confirmation payload contains a non-finite number")
+        if value.is_integer():
+            return int(value)
+    return value

@@ -33,7 +33,7 @@
   "builder_profile_id": "tower_structure_v1",
   "capability_tags": ["lattice", "sector_mount", "grounded"],
   "anchors": [
-    {"anchor_id": "mount_zone", "position_m": [0, 0, 24], "normal": [0, 1, 0], "roles": ["mechanical_mount"]}
+    {"anchor_id": "mount_zone", "position_m": [0, 0, 24], "normal": [0, 1, 0], "placement_policy": "sector_tower_surface", "roles": ["mechanical_mount"]}
   ],
   "connectors": [
     {"connector_id": "mount_zone", "kind": "mechanical", "gender": "target", "anchor_id": "mount_zone", "compatible_connector_kinds": ["mechanical"]}

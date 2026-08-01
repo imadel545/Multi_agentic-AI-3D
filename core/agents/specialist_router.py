@@ -83,9 +83,7 @@ class SpecialistRouter[ContextT, ResultT: DomainResult]:
                 domain for domain, result in wave_results.items() if result.status == "failed"
             )
             if failed:
-                raise SpecialistRoutingError(
-                    f"required specialist decisions failed: {failed}"
-                )
+                raise SpecialistRoutingError(f"required specialist decisions failed: {failed}")
             completed.update(wave_results)
             pending.difference_update(ready)
             waves.append(ready)

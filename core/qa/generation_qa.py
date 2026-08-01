@@ -254,23 +254,33 @@ def _asset_fallbacks_visible(asset_imports: list) -> bool:
 
 def _asset_import_warnings(asset_imports: list) -> list[ValidationIssue]:
     warnings: list[ValidationIssue] = []
+    seen: set[tuple[str, str]] = set()
     for record in asset_imports:
         if not isinstance(record, dict):
             continue
         asset_id = record.get("asset_id", "unknown_asset")
         mode = record.get("import_mode")
         if mode == "procedural_fallback":
-            warnings.append(
-                ValidationIssue(
-                    code="ASSET_IMPORT_PROCEDURAL_FALLBACK",
-                    message=f"{asset_id} used procedural fallback instead of a real GLB import.",
-                    severity="warning",
+            key = ("ASSET_IMPORT_PROCEDURAL_FALLBACK", str(asset_id))
+            if key not in seen:
+                seen.add(key)
+                warnings.append(
+                    ValidationIssue(
+                        code=key[0],
+                        message=(
+                            f"{asset_id} used procedural fallback instead of a real GLB import."
+                        ),
+                        severity="warning",
+                    )
                 )
-            )
         for warning in record.get("warnings", []):
+            key = (f"ASSET_IMPORT_{warning}", str(asset_id))
+            if key in seen:
+                continue
+            seen.add(key)
             warnings.append(
                 ValidationIssue(
-                    code=f"ASSET_IMPORT_{warning}",
+                    code=key[0],
                     message=f"{asset_id}: {warning}",
                     severity="warning",
                 )

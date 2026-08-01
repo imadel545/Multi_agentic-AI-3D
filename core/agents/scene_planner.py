@@ -16,6 +16,7 @@ from core.contracts.scene import (
 )
 from core.contracts.tower import TowerCharacteristics
 from core.rag.planning import RagPlanningResolution, resolve_planning_hints
+from core.services.assembly_compiler import resolve_scene_assembly
 
 
 class ScenePlanner:
@@ -113,7 +114,7 @@ class ScenePlanner:
             )
             for index, azimuth in enumerate(requirements.azimuths_deg)
         ]
-        return SceneSpec(
+        scene = SceneSpec(
             scene_id=workflow_id,
             network_type=requirements.network_type,
             detail_level=requirements.detail_level,
@@ -146,6 +147,9 @@ class ScenePlanner:
             ),
             assembly_plan=assembly_plan,
         )
+        if scene.assembly_plan is not None:
+            scene.assembly_plan = resolve_scene_assembly(scene)
+        return scene
 
 
 def _panel_profile_for_detail(
@@ -229,6 +233,7 @@ def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
         verified_file_sha256=asset.qualification.verified_file_sha256,
         qualification_method=asset.qualification.qualification_method,
         qualification_limitations=list(asset.qualification.limitations),
+        builder_profile_id=asset.builder_profile_id,
     )
 
 

@@ -258,9 +258,7 @@ class SceneEditAgent:
             quantity=current.requested_quantity,
             source_description=original_intent,
             source_description_origin=(
-                "revision_preserved"
-                if source_description_available
-                else "legacy_unavailable"
+                "revision_preserved" if source_description_available else "legacy_unavailable"
             ),
             placement_context=current.placement_context,
             maximum_dimensions_m=current.maximum_dimensions_m,
@@ -641,6 +639,52 @@ class SceneEditAgent:
                     PatchOperation(op="replace", path=path.format(idx=sector_idx), value=val)
                 )
 
+        # RRU placement changes. The parser only writes profile fields declared by
+        # the active radio manifest; capability validation remains the authority.
+        radio_terms = ("rru", "radio", "remote radio")
+        vertical_terms = (
+            "décalage vertical",
+            "decalage vertical",
+            "vertical offset",
+            "distance verticale",
+        )
+        radial_terms = (
+            "retrait radial",
+            "radial inset",
+            "distance radiale",
+            "rapproche",
+        )
+        if any(term in text for term in radio_terms):
+            radio_path_field = None
+            match = None
+            if any(term in text for term in vertical_terms):
+                radio_path_field = "vertical_offset_m"
+                match = _target_value_match(text, vertical_terms)
+            elif any(term in text for term in radial_terms):
+                radio_path_field = "radial_inset_m"
+                match = _target_value_match(text, radial_terms)
+            if radio_path_field is not None and match is not None:
+                value = float(match.group(1).replace(",", "."))
+                requested_sector = self._extract_sector_index(text)
+                candidate_indices = (
+                    [requested_sector]
+                    if requested_sector is not None
+                    else list(range(len(scene.sectors)))
+                )
+                for index in candidate_indices:
+                    if index is None or index < 0 or index >= len(scene.sectors):
+                        continue
+                    sector = scene.sectors[index]
+                    if sector.radio_asset_id is None or sector.radio_geometry_profile is None:
+                        continue
+                    operations.append(
+                        PatchOperation(
+                            op="replace",
+                            path=(f"/sectors/{index}/radio_geometry_profile/{radio_path_field}"),
+                            value=value,
+                        )
+                    )
+
         # Visual elements toggles
         transform_terms = (
             "taille",
@@ -896,6 +940,22 @@ _SECTOR_FIELD_TERMS: dict[str, tuple[str, ...]] = {
     "beamwidth_deg": ("beamwidth", "ouverture", "faisceau", "beam"),
     "include_cable": ("câble", "cable"),
     "include_label": ("label", "étiquette", "etiquette"),
+    "vertical_offset_m": (
+        "rru",
+        "radio",
+        "décalage vertical",
+        "decalage vertical",
+        "vertical offset",
+        "distance verticale",
+    ),
+    "radial_inset_m": (
+        "rru",
+        "radio",
+        "retrait radial",
+        "radial inset",
+        "distance radiale",
+        "rapproche",
+    ),
 }
 
 _ACCESSORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
@@ -1061,7 +1121,12 @@ def _current_numeric_value(scene: SceneSpec, path: str) -> float | None:
         index = int(parts[2])
         if index >= len(scene.sectors):
             return None
-        value = getattr(scene.sectors[index], parts[3], None)
+        sector = scene.sectors[index]
+        if len(parts) == 5 and parts[3] == "radio_geometry_profile":
+            profile = sector.radio_geometry_profile
+            value = getattr(profile, parts[4], None) if profile is not None else None
+        else:
+            value = getattr(sector, parts[3], None)
         if isinstance(value, int | float) and not isinstance(value, bool):
             return float(value)
     if path.startswith("/tower/characteristics/"):

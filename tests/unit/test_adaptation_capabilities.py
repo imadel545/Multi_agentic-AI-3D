@@ -4,6 +4,7 @@ import pytest
 
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import AdaptationOperation, AssetAdaptationPlan
+from core.contracts.assets import RadioGeometryProfile
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.scene import (
     SceneAccessoryPlacement,
@@ -25,7 +26,12 @@ def _services() -> tuple[AssetRegistry, AdaptationCapabilityService]:
     return registry, AdaptationCapabilityService(PROJECT_ROOT, registry)
 
 
-def _scene(*, accessory: bool = False, tower_strategy: str = "parametric_generated") -> SceneSpec:
+def _scene(
+    *,
+    accessory: bool = False,
+    radio: bool = False,
+    tower_strategy: str = "parametric_generated",
+) -> SceneSpec:
     accessories = []
     visuals = VisualElements()
     if accessory:
@@ -57,6 +63,8 @@ def _scene(*, accessory: bool = False, tower_strategy: str = "parametric_generat
                 install_height_m=24.0,
                 azimuth_deg=0.0,
                 beamwidth_deg=65.0,
+                radio_asset_id="RRU_SMALL_001" if radio else None,
+                radio_geometry_profile=RadioGeometryProfile() if radio else None,
             )
         ],
         visual_elements=visuals,
@@ -90,40 +98,34 @@ def _geometry_program(*, body_width_m: float, prompt_hash_character: str) -> Geo
                     "roughness": 0.42,
                 }
             ],
-                "nodes": [
-                    {
+            "nodes": [
+                {
                     "kind": "primitive",
                     "node_id": "shelter_body",
                     "semantic_role": "equipment_shelter",
                     "primitive": "box",
                     "size_m": {"x": body_width_m, "y": 2.2, "z": 2.5},
                     "material_id": "steel",
-                    "transform": {
-                        "translation_m": {"x": 7.0, "y": 0.0, "z": 1.25}
-                        },
-                        "bevel_m": 0.04,
-                    },
-                    {
-                        "kind": "primitive",
-                        "node_id": "shelter_door",
-                        "primitive": "box",
-                        "size_m": {"x": 0.8, "y": 0.08, "z": 1.8},
-                        "material_id": "steel",
-                        "transform": {
-                            "translation_m": {"x": 7.0, "y": -1.14, "z": 1.0}
-                        },
-                    },
-                    {
-                        "kind": "primitive",
-                        "node_id": "shelter_roof",
-                        "primitive": "box",
-                        "size_m": {"x": body_width_m + 0.2, "y": 2.4, "z": 0.12},
-                        "material_id": "steel",
-                        "transform": {
-                            "translation_m": {"x": 7.0, "y": 0.0, "z": 2.56}
-                        },
-                    },
-                ],
+                    "transform": {"translation_m": {"x": 7.0, "y": 0.0, "z": 1.25}},
+                    "bevel_m": 0.04,
+                },
+                {
+                    "kind": "primitive",
+                    "node_id": "shelter_door",
+                    "primitive": "box",
+                    "size_m": {"x": 0.8, "y": 0.08, "z": 1.8},
+                    "material_id": "steel",
+                    "transform": {"translation_m": {"x": 7.0, "y": -1.14, "z": 1.0}},
+                },
+                {
+                    "kind": "primitive",
+                    "node_id": "shelter_roof",
+                    "primitive": "box",
+                    "size_m": {"x": body_width_m + 0.2, "y": 2.4, "z": 0.12},
+                    "material_id": "steel",
+                    "transform": {"translation_m": {"x": 7.0, "y": 0.0, "z": 2.56}},
+                },
+            ],
             "assumptions": ["Generic outdoor technical enclosure."],
             "limitations": ["Not vendor-qualified."],
         }
@@ -142,6 +144,54 @@ def test_capabilities_are_resolved_from_manifest_profiles() -> None:
     assert "/tower/characteristics/vendor_secret" not in paths
     assert not capabilities.missing_profiles
     assert all(asset.adaptation_profile_id for asset in registry.list_assets())
+
+
+def test_rru_capabilities_are_resolved_from_the_active_radio_manifest() -> None:
+    _, service = _services()
+
+    capabilities = service.resolve(_scene(radio=True))
+    by_path = {item.path: item for item in capabilities.capabilities}
+
+    vertical_path = "/sectors/0/radio_geometry_profile/vertical_offset_m"
+    radial_path = "/sectors/0/radio_geometry_profile/radial_inset_m"
+    assert by_path[vertical_path].asset_id == "RRU_SMALL_001"
+    assert by_path[vertical_path].profile_id == "rru_installation_v1"
+    assert by_path[vertical_path].execution_tool == "sector_layout"
+    assert by_path[vertical_path].minimum == 0.25
+    assert by_path[vertical_path].maximum == 3.0
+    assert by_path[radial_path].maximum == 0.5
+
+
+def test_rru_capabilities_fail_closed_without_a_typed_scene_profile() -> None:
+    _, service = _services()
+    scene = _scene(radio=True)
+    sector = scene.sectors[0].model_copy(update={"radio_geometry_profile": None})
+
+    capabilities = service.resolve(scene.model_copy(update={"sectors": [sector]}))
+
+    assert not any("radio_geometry_profile" in path for path in capabilities.allowed_paths)
+    assert "RRU_SMALL_001:radio_geometry_profile" in capabilities.missing_profiles
+    assert any(
+        "adaptation reste désactivée" in item for item in capabilities.unsupported_operations
+    )
+
+
+def test_bounded_fallback_applies_explicit_rru_vertical_offset() -> None:
+    _, service = _services()
+    agent = SceneEditAgent(groq_client=None, capability_service=service)
+
+    decision = agent.create_adaptation(
+        "wf_rru_adaptation",
+        _scene(radio=True),
+        "mets le décalage vertical du RRU du secteur 1 à 1,6 m",
+    )
+
+    assert [operation.path for operation in decision.patch.operations] == [
+        "/sectors/0/radio_geometry_profile/vertical_offset_m"
+    ]
+    assert decision.patched_scene.sectors[0].radio_geometry_profile is not None
+    assert decision.patched_scene.sectors[0].radio_geometry_profile.vertical_offset_m == 1.6
+    assert decision.patch.adaptation_tools == ["sector_layout"]
 
 
 def test_llm_geometry_program_revision_uses_typed_patch_and_produces_new_scene() -> None:
@@ -178,18 +228,19 @@ def test_llm_geometry_program_revision_uses_typed_patch_and_produces_new_scene()
     assert revised.semantic_role == original_program.semantic_role
     assert revised.requested_quantity == original_program.requested_quantity
     assert revised.source_prompt_sha256 == "b" * 64
-    assert [operation.path for operation in decision.patch.operations] == [
-        "/geometry_programs/0"
-    ]
+    assert [operation.path for operation in decision.patch.operations] == ["/geometry_programs/0"]
     assert decision.patch.adaptation_tools == ["geometry_program_rebuild"]
     assert decision.plan.operations[0].execution_tool == "geometry_program_rebuild"
-    assert decision.capabilities.capabilities[
-        next(
-            index
-            for index, capability in enumerate(decision.capabilities.capabilities)
-            if capability.path == "/geometry_programs/0"
-        )
-    ].value_type == "geometry_program"
+    assert (
+        decision.capabilities.capabilities[
+            next(
+                index
+                for index, capability in enumerate(decision.capabilities.capabilities)
+                if capability.path == "/geometry_programs/0"
+            )
+        ].value_type
+        == "geometry_program"
+    )
     assert planner.call["semantic_role"] == "equipment_shelter"
     assert planner.call["request_id"] == "equipment_shelter"
     assert planner.call["quantity"] == 1
@@ -247,9 +298,7 @@ def test_geometry_revision_preserves_original_intent_and_placement_provenance() 
 def test_geometry_program_capability_rejects_free_form_blender_code() -> None:
     scene = _scene().model_copy(
         update={
-            "geometry_programs": [
-                _geometry_program(body_width_m=3.0, prompt_hash_character="a")
-            ]
+            "geometry_programs": [_geometry_program(body_width_m=3.0, prompt_hash_character="a")]
         }
     )
     _, service = _services()

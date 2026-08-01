@@ -4,6 +4,8 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api import main as api_main
+from core.memory import MemoryService
+from core.rag import RagService
 from core.rag.embeddings import HashEmbeddingProvider
 from core.rag.reranker import PassthroughReranker
 from core.rag.service import RagIndexCompatibilityError
@@ -113,6 +115,11 @@ def test_memory_vector_reindex_api_exposes_compaction_proof(monkeypatch) -> None
             "error_memory": 30,
             "document_pack_memory": 1,
         },
+        "skipped_source_counts": {
+            "design_memory": 1,
+            "error_memory": 0,
+            "document_pack_memory": 0,
+        },
         "candidate_counts": {
             "design_memory": 2,
             "error_memory": 3,
@@ -129,3 +136,58 @@ def test_memory_vector_reindex_api_exposes_compaction_proof(monkeypatch) -> None
 
     assert response.status_code == 200
     assert response.json() == report
+
+
+def test_memory_stats_api_exposes_bounded_vector_outbox_status() -> None:
+    response = TestClient(api_main.app).get("/memory/stats")
+
+    assert response.status_code == 200
+    outbox = response.json()["vector_outbox"]
+    assert outbox["status"] in {
+        "idle",
+        "pending",
+        "attempt",
+        "succeeded",
+        "failed",
+    }
+    assert "last_error" not in outbox
+    assert "last_error_code" in outbox
+
+
+def test_fastapi_lifespan_restarts_memory_reconciliation_on_reentry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    memory_service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
+    starts = 0
+    original_start = memory_service.start
+
+    def observed_start() -> None:
+        nonlocal starts
+        starts += 1
+        original_start()
+
+    monkeypatch.setattr(memory_service, "start", observed_start)
+    monkeypatch.setattr(api_main, "memory_service", memory_service)
+    monkeypatch.setattr(api_main.workflow_service, "reconcile_interrupted_workflows", lambda: [])
+    monkeypatch.setattr(api_main.workflow_service, "shutdown", lambda: None)
+    monkeypatch.setattr(api_main.rag_service, "close", lambda: None)
+
+    try:
+        with TestClient(api_main.app) as client:
+            assert client.get("/memory/stats").status_code == 200
+        with TestClient(api_main.app) as client:
+            assert client.get("/memory/stats").status_code == 200
+        assert starts == 2
+    finally:
+        memory_service.close()
+        rag_service.close()

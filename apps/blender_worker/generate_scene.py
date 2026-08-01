@@ -21,14 +21,18 @@ _WORKER_ROOT = Path(__file__).resolve().parent
 if str(_WORKER_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKER_ROOT))
 
+import component_proofs  # noqa: E402
 import geometry_program_compiler  # noqa: E402
 import parametric_builder  # noqa: E402
+import trusted_assembly  # noqa: E402
 
 
 def main() -> int:
     scene_spec_path, output_dir = _parse_args(sys.argv)
     output_dir.mkdir(parents=True, exist_ok=True)
     scene = json.loads(scene_spec_path.read_text(encoding="utf-8"))
+    project_root = Path.cwd().resolve()
+    assembly_validation = trusted_assembly.validate_trusted_assembly(scene, project_root)
 
     try:
         import bpy  # type: ignore[import-not-found]
@@ -59,8 +63,40 @@ def main() -> int:
         asset_imports,
         asset_warnings,
     )
+    _create_remaining_assembly_routes(
+        bpy,
+        scene,
+        procedural_objects,
+        asset_imports,
+        asset_warnings,
+    )
     camera_metadata = _create_camera_and_light(bpy, scene)
     segment_connectivity = _validate_parametric_segment_connectivity(bpy)
+    component_proof_report = None
+    component_proof_metadata = None
+    if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0" or scene.get(
+        "geometry_programs"
+    ):
+        component_proof_report = component_proofs.build_component_proof_report(
+            bpy,
+            scene,
+            asset_imports,
+            assembly_validation,
+        )
+        component_proofs.verify_component_proof_report(component_proof_report, scene)
+        component_proof_path = output_dir / "component_proofs.json"
+        component_proof_path.write_text(
+            json.dumps(component_proof_report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        component_proof_metadata = {
+            "file_name": component_proof_path.name,
+            "sha256": _sha256_file(component_proof_path),
+            "report_sha256": component_proof_report["report_sha256"],
+            "component_count": len(component_proof_report["components"]),
+            "geometry_program_count": len(component_proof_report["geometry_programs"]),
+            "passed": True,
+        }
 
     glb_path = output_dir / "design.glb"
     preview_path = output_dir / "preview.png"
@@ -81,6 +117,8 @@ def main() -> int:
         bounding_box_m,
         segment_connectivity,
         _blender_runtime_metadata(bpy),
+        assembly_validation,
+        component_proof_metadata,
     )
     return 0
 
@@ -232,7 +270,7 @@ def _create_tower(
             leg_count=int(characteristics.get("leg_count") or 4),
             material_name=material_name,
         )
-        _create_semantic_group(
+        tower_root = _create_semantic_group(
             bpy,
             semantic_root,
             created,
@@ -245,6 +283,14 @@ def _create_tower(
                 ),
             },
         )
+        if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+            _stamp_component_execution(
+                tower_root,
+                scene,
+                "support_structure",
+                "global",
+                expected_handler="tower_structure",
+            )
         procedural_objects.append(f"tower:{structure}_parametric")
         _record_asset_generation(
             asset_imports,
@@ -262,6 +308,12 @@ def _create_tower(
             generated_object_names=[semantic_root, *[obj.name for obj in created]],
         )
     else:
+        exact_boundary = trusted_assembly.exact_asset_boundary(
+            scene,
+            role_id="support_structure",
+            asset_id=scene["tower"]["asset_id"],
+            project_root=Path.cwd().resolve(),
+        )
         tower_location = _asset_placement_location(
             (0.0, 0.0, height / 2),
             scene["tower"].get("asset_metadata"),
@@ -270,15 +322,19 @@ def _create_tower(
         tower_mode = _try_import_glb_asset(
             bpy=bpy,
             asset_id=scene["tower"]["asset_id"],
-            asset_file=scene["tower"].get("asset_file"),
+            asset_file=exact_boundary["asset_file"],
             asset_source=scene["tower"].get("asset_source"),
-            asset_metadata=scene["tower"].get("asset_metadata"),
-            fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
+            asset_metadata={
+                **(scene["tower"].get("asset_metadata") or {}),
+                "verified_file_sha256": exact_boundary["verified_file_sha256"],
+            },
+            fallback_allowed=False,
             object_role="tower",
             object_name=semantic_root,
             location=tower_location,
             rotation=(0.0, 0.0, 0.0),
-            dimensions=scene["tower"].get("dimensions_m")
+            dimensions=exact_boundary.get("dimensions_m")
+            or scene["tower"].get("dimensions_m")
             or {
                 "width": base_width,
                 "depth": base_width,
@@ -286,7 +342,16 @@ def _create_tower(
             },
             asset_imports=asset_imports,
             warnings=asset_warnings,
-            semantic_properties={"tower_material": material_name},
+            semantic_properties={
+                "tower_material": material_name,
+                **_component_execution_properties(
+                    scene,
+                    "support_structure",
+                    "global",
+                    expected_handler="tower_structure",
+                ),
+            },
+            exact_boundary=exact_boundary,
         )
         if not _is_imported_mode(tower_mode) and scene["tower"].get(
             "import_fallback_allowed", True
@@ -521,19 +586,72 @@ def _create_sectors(
         tilt_deg = float(sector.get("mechanical_tilt_deg") or 0.0)
         sector_id = str(sector["sector_id"])
 
-        # Mounting bracket arm
-        bracket = _create_mounting_bracket(bpy, tower_radius, mount_radius, azimuth, z)
-        _set_semantic_properties(
-            bracket,
-            role="mount_bracket",
-            semantic_root=f"mount_bracket_{sector_id}",
-            sector_id=sector_id,
-            properties={
-                "requested_azimuth_deg": azimuth_deg,
-                "requested_hba_m": z,
-                **_classification_properties("internal_project_generated"),
-            },
+        # The bracket is built in its manifest-local frame and then placed by
+        # the connector compiler.  Legacy SceneSpecs keep the previous bounded
+        # geometric placement path.
+        bracket_instance = _assembly_operation_instance(
+            scene,
+            "mount-to-support",
+            sector_id,
         )
+        if bracket_instance is not None:
+            bracket_component = trusted_assembly.component_boundary(scene, "antenna_mount")
+            bracket_snapshot = bracket_component["manifest_snapshot"]
+            anchors = {anchor["anchor_id"]: anchor for anchor in bracket_snapshot["anchors"]}
+            clamp = tuple(anchors["tower_clamp"]["position_m"])
+            rail = tuple(anchors["antenna_rail"]["position_m"])
+            bracket_part = _create_cylinder_between(
+                bpy,
+                clamp,
+                rail,
+                0.035,
+                f"mount_bracket_{sector_id}_arm",
+                _material(bpy, "mount_steel", (0.42, 0.44, 0.46, 1)),
+            )
+            bracket = _create_semantic_group(
+                bpy,
+                f"mount_bracket_{sector_id}",
+                [bracket_part],
+                role="mount_bracket",
+                sector_id=sector_id,
+                properties={
+                    "requested_azimuth_deg": azimuth_deg,
+                    "requested_hba_m": z,
+                    **_classification_properties("internal_project_generated"),
+                },
+            )
+            _apply_resolved_instance_transform(bracket, bracket_instance)
+            bracket_operation_ids = ["assembly:mount-to-support"]
+        else:
+            bracket_part = _create_mounting_bracket(
+                bpy,
+                tower_radius,
+                mount_radius,
+                azimuth,
+                z,
+            )
+            bracket = _create_semantic_group(
+                bpy,
+                f"mount_bracket_{sector_id}",
+                [bracket_part],
+                role="mount_bracket",
+                sector_id=sector_id,
+                properties={
+                    "requested_azimuth_deg": azimuth_deg,
+                    "requested_hba_m": z,
+                    **_classification_properties("internal_project_generated"),
+                },
+            )
+            bracket_operation_ids = []
+        if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+            _stamp_component_execution(
+                bracket,
+                scene,
+                "antenna_mount",
+                sector_id,
+                expected_handler="mount_bracket",
+                operation_ids=bracket_operation_ids,
+            )
         bracket_plan = _assembly_component(scene, "antenna_mount")
         if bracket_plan:
             _record_asset_generation(
@@ -546,20 +664,33 @@ def _create_sectors(
                 object_role="mount_bracket",
                 object_name=f"mount_bracket_{sector_id}",
                 dimensions=None,
-                location=(x, y, z),
-                rotation=(0.0, 0.0, -azimuth),
+                location=tuple(bracket.location),
+                rotation=tuple(bracket.rotation_euler),
                 generation_strategy="internal_project_generated",
-                generated_object_names=[bracket.name],
+                generated_object_names=_semantic_tree_names(bracket),
             )
         procedural_objects.append(f"mount_bracket:{sector_id}")
 
         electrical_tilt_deg = float(sector.get("electrical_tilt_deg") or 0.0)
         beam_downtilt_deg = tilt_deg + electrical_tilt_deg
         antenna_strategy = sector.get("antenna_generation_strategy", "internal_project_generated")
-        antenna_location = (x, y, z)
+        antenna_instance = _assembly_operation_instance(
+            scene,
+            "antenna-to-mount",
+            sector_id,
+        )
+        antenna_location = (
+            tuple(float(value) for value in antenna_instance["translation_m"])
+            if antenna_instance is not None
+            else (x, y, z)
+        )
         # The record uses equivalent engineering angles. The actual transform
         # is quaternion yaw(Z) followed by downtilt(local X).
         antenna_rotation = (math.radians(-tilt_deg), 0.0, -azimuth)
+        if antenna_instance is not None:
+            antenna_rotation = tuple(
+                math.radians(float(value)) for value in antenna_instance["rotation_deg"]
+            )
         antenna_object_name = f"antenna_{sector_id}_{sector['antenna_asset_id']}"
         antenna_front_axis = str(
             (sector.get("antenna_asset_metadata") or {}).get("front_axis") or "+Y"
@@ -575,24 +706,46 @@ def _create_sectors(
             "front_axis": antenna_front_axis,
             "geometry_family": _antenna_geometry_family(scene, sector),
         }
+        if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+            antenna_properties.update(
+                _component_execution_properties(
+                    scene,
+                    "sector_antenna",
+                    sector_id,
+                    expected_handler="sector_equipment",
+                    operation_ids=["assembly:antenna-to-mount"],
+                )
+            )
         if antenna_strategy == "imported_glb_exact":
+            antenna_boundary = trusted_assembly.exact_asset_boundary(
+                scene,
+                role_id="sector_antenna",
+                asset_id=sector["antenna_asset_id"],
+                project_root=Path.cwd().resolve(),
+            )
             antenna_mode = _try_import_glb_asset(
                 bpy=bpy,
                 asset_id=sector["antenna_asset_id"],
-                asset_file=sector.get("antenna_asset_file"),
+                asset_file=antenna_boundary["asset_file"],
                 asset_source=sector.get("antenna_asset_source"),
-                asset_metadata=sector.get("antenna_asset_metadata"),
-                fallback_allowed=sector.get("antenna_import_fallback_allowed", True),
+                asset_metadata={
+                    **(sector.get("antenna_asset_metadata") or {}),
+                    "verified_file_sha256": antenna_boundary["verified_file_sha256"],
+                },
+                fallback_allowed=False,
                 object_role="antenna",
                 object_name=antenna_object_name,
                 location=antenna_location,
                 rotation=antenna_rotation,
-                rotation_mode="ZXY",
-                dimensions=sector.get("antenna_dimensions_m"),
+                # Compiled assembly rotations are an XYZ Euler decomposition.
+                # Legacy scenes retain the historical ZXY sector convention.
+                rotation_mode="XYZ" if antenna_instance is not None else "ZXY",
+                dimensions=antenna_boundary.get("dimensions_m")
+                or sector.get("antenna_dimensions_m"),
                 asset_imports=asset_imports,
                 warnings=asset_warnings,
                 semantic_properties=antenna_properties,
-                sector_pose=(azimuth_deg, tilt_deg, antenna_front_axis),
+                exact_boundary=antenna_boundary,
             )
             if not _is_imported_mode(antenna_mode) and sector.get(
                 "antenna_import_fallback_allowed", True
@@ -635,6 +788,17 @@ def _create_sectors(
                 azimuth_deg,
                 tilt_deg,
             )
+            if antenna_instance is not None:
+                _apply_resolved_instance_transform(antenna_root, antenna_instance)
+            if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+                _stamp_component_execution(
+                    antenna_root,
+                    scene,
+                    "sector_antenna",
+                    sector_id,
+                    expected_handler="sector_equipment",
+                    operation_ids=["assembly:antenna-to-mount"],
+                )
             procedural_objects.append(
                 f"antenna_{_antenna_geometry_family(scene, sector)}:{sector_id}"
             )
@@ -664,34 +828,63 @@ def _create_sectors(
                 y - (math.cos(azimuth) * radio_radial_inset),
                 z - radio_vertical_offset,
             )
+            radio_instance = _assembly_operation_instance(
+                scene,
+                "radio-to-mount",
+                sector_id,
+            )
+            if radio_instance is not None:
+                radio_location = tuple(float(value) for value in radio_instance["translation_m"])
+            radio_rotation = (
+                tuple(math.radians(float(value)) for value in radio_instance["rotation_deg"])
+                if radio_instance is not None
+                else (0.0, 0.0, 0.0)
+            )
             radio_object_name = f"radio_{sector_id}_{sector['radio_asset_id']}"
+            radio_properties = {
+                "sector_id": sector_id,
+                "install_height_m": radio_location[2],
+                "requested_azimuth_deg": azimuth_deg,
+                "requested_hba_m": z,
+            }
+            if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+                radio_properties.update(
+                    _component_execution_properties(
+                        scene,
+                        "remote_radio",
+                        sector_id,
+                        expected_handler="radio_enclosure",
+                        operation_ids=["assembly:radio-to-mount"],
+                    )
+                )
             if radio_strategy == "imported_glb_exact":
+                radio_boundary = trusted_assembly.exact_asset_boundary(
+                    scene,
+                    role_id="remote_radio",
+                    asset_id=sector["radio_asset_id"],
+                    project_root=Path.cwd().resolve(),
+                )
                 radio_mode = _try_import_glb_asset(
                     bpy=bpy,
                     asset_id=sector["radio_asset_id"],
-                    asset_file=sector.get("radio_asset_file"),
+                    asset_file=radio_boundary["asset_file"],
                     asset_source=sector.get("radio_asset_source"),
-                    asset_metadata=sector.get("radio_asset_metadata"),
-                    fallback_allowed=sector.get("radio_import_fallback_allowed", True),
+                    asset_metadata={
+                        **(sector.get("radio_asset_metadata") or {}),
+                        "verified_file_sha256": radio_boundary["verified_file_sha256"],
+                    },
+                    fallback_allowed=False,
                     object_role="radio",
                     object_name=radio_object_name,
                     location=radio_location,
-                    rotation=(0.0, 0.0, 0.0),
+                    rotation=radio_rotation,
                     rotation_mode="XYZ",
-                    dimensions=sector.get("radio_dimensions_m"),
+                    dimensions=radio_boundary.get("dimensions_m")
+                    or sector.get("radio_dimensions_m"),
                     asset_imports=asset_imports,
                     warnings=asset_warnings,
-                    semantic_properties={
-                        "sector_id": sector_id,
-                        "install_height_m": radio_location[2],
-                        "requested_azimuth_deg": azimuth_deg,
-                        "requested_hba_m": z,
-                    },
-                    sector_pose=(
-                        azimuth_deg,
-                        0.0,
-                        str((sector.get("radio_asset_metadata") or {}).get("front_axis") or "+Y"),
-                    ),
+                    semantic_properties=radio_properties,
+                    exact_boundary=radio_boundary,
                 )
                 if not _is_imported_mode(radio_mode) and sector.get(
                     "radio_import_fallback_allowed", True
@@ -734,6 +927,17 @@ def _create_sectors(
                     azimuth_deg,
                     z,
                 )
+                if radio_instance is not None:
+                    _apply_resolved_instance_transform(radio_root, radio_instance)
+                if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+                    _stamp_component_execution(
+                        radio_root,
+                        scene,
+                        "remote_radio",
+                        sector_id,
+                        expected_handler="radio_enclosure",
+                        operation_ids=["assembly:radio-to-mount"],
+                    )
                 procedural_objects.append(f"radio:{sector_id}")
                 _record_asset_generation(
                     asset_imports,
@@ -746,7 +950,7 @@ def _create_sectors(
                     object_name=radio_object_name,
                     dimensions=sector.get("radio_dimensions_m"),
                     location=radio_location,
-                    rotation=(0.0, 0.0, 0.0),
+                    rotation=radio_rotation,
                     generation_strategy=radio_strategy,
                     generated_object_names=_semantic_tree_names(radio_root),
                 )
@@ -773,7 +977,29 @@ def _create_sectors(
                     0.5,
                 ),
             ]
-            cable = _create_cable(bpy, sector_id, route_points)
+            cable_instance = _assembly_operation_instance(
+                scene,
+                "radio-to-base-route",
+                sector_id,
+            )
+            if cable_instance is not None:
+                route_points = [
+                    tuple(float(value) for value in point)
+                    for point in cable_instance["route_points_m"]
+                ]
+            cable_plan = _assembly_component(scene, "sector_cable_route")
+            cable_diameter = float(
+                ((cable_plan or {}).get("parameter_values") or {}).get(
+                    "cable_diameter_m",
+                    0.05,
+                )
+            )
+            cable = _create_cable(
+                bpy,
+                sector_id,
+                route_points,
+                diameter_m=cable_diameter,
+            )
             _set_semantic_properties(
                 cable,
                 role="cable",
@@ -792,8 +1018,16 @@ def _create_sectors(
                     **_classification_properties("parametric_generated"),
                 },
             )
+            if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+                _stamp_component_execution(
+                    cable,
+                    scene,
+                    "sector_cable_route",
+                    sector_id,
+                    expected_handler="cable_route",
+                    operation_ids=["assembly:radio-to-base-route"],
+                )
             procedural_objects.append(f"cable:{sector_id}")
-            cable_plan = _assembly_component(scene, "sector_cable_route")
             if cable_plan:
                 _record_asset_generation(
                     asset_imports,
@@ -807,7 +1041,9 @@ def _create_sectors(
                     dimensions=None,
                     location=route_points[0],
                     rotation=(0.0, 0.0, 0.0),
-                    generation_strategy="procedural_fallback",
+                    generation_strategy=str(
+                        cable_plan.get("generation_strategy") or "internal_project_generated"
+                    ),
                     generated_object_names=[cable.name],
                 )
 
@@ -941,17 +1177,32 @@ def _build_generated_radio(
 
 
 def _antenna_geometry_family(scene: dict, sector: dict) -> str:
-    asset_id = str(sector.get("antenna_asset_id") or "").lower()
-    if scene.get("network_type") == "MW" or "microwave" in asset_id or "dish" in asset_id:
-        return "microwave_dish"
-    return "panel"
+    metadata = sector.get("antenna_asset_metadata") or {}
+    builder = trusted_assembly.resolve_component_builder(
+        scene,
+        role_id="sector_antenna",
+        runtime_builder_profile_id=metadata.get("builder_profile_id"),
+        project_root=Path.cwd().resolve(),
+    )
+    if builder.get("worker_handler") != "sector_equipment":
+        raise RuntimeError("ASSEMBLY_ANTENNA_BUILDER_HANDLER_INVALID")
+    family = builder.get("geometry_family")
+    if family not in {"panel", "microwave_dish"}:
+        raise RuntimeError(f"ASSEMBLY_ANTENNA_GEOMETRY_FAMILY_UNSUPPORTED:{family}")
+    return str(family)
 
 
-def _create_cable(bpy, sector_id: str, route_points: list[tuple[float, float, float]]) -> object:
+def _create_cable(
+    bpy,
+    sector_id: str,
+    route_points: list[tuple[float, float, float]],
+    *,
+    diameter_m: float = 0.05,
+) -> object:
     curve = bpy.data.curves.new(f"cable_{sector_id}", "CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 8
-    curve.bevel_depth = 0.025
+    curve.bevel_depth = max(0.0025, float(diameter_m) / 2.0)
     spline = curve.splines.new("POLY")
     spline.points.add(len(route_points) - 1)
     for point, coordinate in zip(spline.points, route_points, strict=True):
@@ -968,6 +1219,147 @@ def _assembly_component(scene: dict, role_id: str) -> dict | None:
         (item for item in plan.get("components", []) if item.get("role_id") == role_id),
         None,
     )
+
+
+def _assembly_operation_instance(
+    scene: dict,
+    connection_id: str,
+    instance_id: str,
+) -> dict | None:
+    plan = scene.get("assembly_plan") or {}
+    if plan.get("schema_version") != "1.1.0":
+        return None
+    return trusted_assembly.operation_instance(
+        scene,
+        connection_id=connection_id,
+        instance_id=instance_id,
+    )
+
+
+def _component_execution_properties(
+    scene: dict,
+    role_id: str,
+    instance_id: str,
+    *,
+    expected_handler: str,
+    operation_ids: list[str] | None = None,
+) -> dict:
+    component = trusted_assembly.component_boundary(scene, role_id)
+    builder = component.get("builder_profile") or {}
+    snapshot = component.get("manifest_snapshot") or {}
+    if builder.get("worker_handler") != expected_handler:
+        raise RuntimeError(
+            f"ASSEMBLY_BUILDER_HANDLER_DISPATCH_MISMATCH:{role_id}:{expected_handler}"
+        )
+    return {
+        "assembly_role_id": role_id,
+        "assembly_instance_id": instance_id,
+        "assembly_operation_ids": ",".join(sorted(operation_ids or [])),
+        "builder_profile_id": component["builder_profile_id"],
+        "worker_handler": expected_handler,
+        "manifest_snapshot_sha256": snapshot["snapshot_sha256"],
+        "source_manifest_sha256": snapshot["source_manifest_sha256"],
+        "selected_asset_id": component["selected_asset_id"],
+    }
+
+
+def _stamp_component_execution(
+    root,
+    scene: dict,
+    role_id: str,
+    instance_id: str,
+    *,
+    expected_handler: str,
+    operation_ids: list[str] | None = None,
+) -> None:
+    semantic_root = str(root.get("semantic_root") or root.name)
+    role = str(root.get("role") or role_id)
+    _set_semantic_tree(
+        root,
+        role=role,
+        semantic_root=semantic_root,
+        sector_id=instance_id if instance_id != "global" else None,
+        properties=_component_execution_properties(
+            scene,
+            role_id,
+            instance_id,
+            expected_handler=expected_handler,
+            operation_ids=operation_ids,
+        ),
+    )
+
+
+def _apply_resolved_instance_transform(root, instance: dict) -> None:
+    from mathutils import Vector  # type: ignore[import-not-found]
+
+    root.location = tuple(float(value) for value in instance["translation_m"])
+    root.rotation_mode = "XYZ"
+    root.rotation_euler = tuple(math.radians(float(value)) for value in instance["rotation_deg"])
+    root.scale = tuple(float(value) for value in instance.get("scale") or [1.0, 1.0, 1.0])
+    # Segment builders store their requested endpoints for hard geometric QA.
+    # Once their semantic root receives the compiled placement, keep those QA
+    # targets in the same world frame as the evaluated geometry.
+    rotation = root.rotation_euler.to_matrix()
+    translation = Vector(root.location)
+    scale = Vector(root.scale)
+
+    def resolved_point(values) -> tuple[float, float, float]:
+        local = Vector(tuple(values))
+        scaled = Vector((local.x * scale.x, local.y * scale.y, local.z * scale.z))
+        return tuple(rotation @ scaled + translation)
+
+    for obj in root.children_recursive:
+        if "segment_start_m" not in obj or "segment_end_m" not in obj:
+            continue
+        obj["segment_start_m"] = resolved_point(obj["segment_start_m"])
+        obj["segment_end_m"] = resolved_point(obj["segment_end_m"])
+
+
+def _create_remaining_assembly_routes(
+    bpy,
+    scene: dict,
+    procedural_objects: list[str],
+    asset_imports: list[dict],
+    asset_warnings: list[str],
+) -> None:
+    del asset_imports, asset_warnings
+    plan = scene.get("assembly_plan") or {}
+    if plan.get("schema_version") != "1.1.0":
+        return
+    for operation in plan.get("operations", []):
+        if operation.get("operation_type") != "route_connection":
+            continue
+        if operation.get("connection_id") == "radio-to-base-route":
+            # Executed by the selected cable-route handler in _create_sectors.
+            continue
+        operation_id = str(operation["operation_id"])
+        for instance in operation.get("instances", []):
+            route_points = [tuple(point) for point in instance.get("route_points_m", [])]
+            if len(route_points) < 2:
+                raise RuntimeError(f"ASSEMBLY_ROUTE_POINTS_MISSING:{operation['connection_id']}")
+            instance_id = str(instance["instance_id"])
+            name = f"connection_{operation['connection_id']}_{instance_id}"
+            connection = _create_cable(
+                bpy,
+                name,
+                route_points,
+                diameter_m=0.018,
+            )
+            _set_semantic_properties(
+                connection,
+                role="connection",
+                semantic_root=name,
+                sector_id=instance_id if instance_id != "global" else None,
+                properties={
+                    "assembly_operation_ids": operation_id,
+                    "assembly_connection_id": operation["connection_id"],
+                    "connection_kind": operation["kind"],
+                    **_classification_properties("parametric_generated"),
+                },
+            )
+            procedural_objects.append(
+                f"assembly_connection:{operation['connection_id']}:{instance_id}"
+            )
 
 
 def _create_beam(
@@ -1081,22 +1473,40 @@ def _create_power_cabinet(
     import_attempted = False
     if accessory and strategy == "imported_glb_exact":
         import_attempted = True
+        cabinet_boundary = trusted_assembly.exact_asset_boundary(
+            scene,
+            role_id="ground_equipment",
+            asset_id=accessory["asset_id"],
+            project_root=Path.cwd().resolve(),
+        )
         mode = _try_import_glb_asset(
             bpy=bpy,
             asset_id=accessory["asset_id"],
-            asset_file=accessory.get("asset_file"),
+            asset_file=cabinet_boundary["asset_file"],
             asset_source=accessory.get("asset_source"),
-            asset_metadata=accessory.get("asset_metadata"),
-            fallback_allowed=accessory.get("import_fallback_allowed", True),
+            asset_metadata={
+                **(accessory.get("asset_metadata") or {}),
+                "verified_file_sha256": cabinet_boundary["verified_file_sha256"],
+            },
+            fallback_allowed=False,
             object_role="cabinet",
             object_name=cabinet_object_name,
             location=cabinet_location,
             rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
-            dimensions=accessory.get("dimensions_m"),
+            dimensions=cabinet_boundary.get("dimensions_m") or accessory.get("dimensions_m"),
             placement_scale=tuple(accessory.get("scale") or [1.0, 1.0, 1.0]),
             asset_imports=asset_imports,
             warnings=asset_warnings,
-            semantic_properties={"ground_datum_z": 0.0},
+            semantic_properties={
+                "ground_datum_z": 0.0,
+                **_component_execution_properties(
+                    scene,
+                    "ground_equipment",
+                    "global",
+                    expected_handler="ground_cabinet",
+                ),
+            },
+            exact_boundary=cabinet_boundary,
         )
         if _is_imported_mode(mode) or not accessory.get("import_fallback_allowed", True):
             return
@@ -1132,6 +1542,14 @@ def _create_power_cabinet(
             **_classification_properties(actual_strategy, actual_source),
         },
     )
+    if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+        _stamp_component_execution(
+            cabinet,
+            scene,
+            "ground_equipment",
+            "global",
+            expected_handler="ground_cabinet",
+        )
     if accessory and import_attempted:
         _mark_fallback_generated(
             asset_imports,
@@ -1190,22 +1608,54 @@ def _create_gps_antenna(
     import_attempted = False
     if accessory and strategy in {"imported_glb_exact", "internal_project_generated"}:
         import_attempted = True
+        gps_boundary = (
+            trusted_assembly.exact_asset_boundary(
+                scene,
+                role_id="timing_antenna",
+                asset_id=accessory["asset_id"],
+                project_root=Path.cwd().resolve(),
+            )
+            if strategy == "imported_glb_exact"
+            else None
+        )
         mode = _try_import_glb_asset(
             bpy=bpy,
             asset_id=accessory["asset_id"],
-            asset_file=accessory.get("asset_file"),
+            asset_file=(gps_boundary or {}).get("asset_file") or accessory.get("asset_file"),
             asset_source=accessory.get("asset_source"),
-            asset_metadata=accessory.get("asset_metadata"),
-            fallback_allowed=accessory.get("import_fallback_allowed", True),
+            asset_metadata={
+                **(accessory.get("asset_metadata") or {}),
+                **(
+                    {"verified_file_sha256": gps_boundary["verified_file_sha256"]}
+                    if gps_boundary
+                    else {}
+                ),
+            },
+            fallback_allowed=False
+            if gps_boundary
+            else accessory.get("import_fallback_allowed", True),
             object_role="gps",
             object_name=gps_object_name,
             location=gps_location,
             rotation=_rotation_deg_to_rad(accessory.get("rotation_deg") or [0.0, 0.0, 0.0]),
-            dimensions=accessory.get("dimensions_m"),
+            dimensions=(gps_boundary or {}).get("dimensions_m") or accessory.get("dimensions_m"),
             placement_scale=tuple(accessory.get("scale") or [1.0, 1.0, 1.0]),
             asset_imports=asset_imports,
             warnings=asset_warnings,
-            semantic_properties={"install_height_m": z},
+            semantic_properties={
+                "install_height_m": z,
+                **(
+                    _component_execution_properties(
+                        scene,
+                        "timing_antenna",
+                        "global",
+                        expected_handler="gps_radome",
+                    )
+                    if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0"
+                    else {}
+                ),
+            },
+            exact_boundary=gps_boundary,
         )
         if _is_imported_mode(mode) or not accessory.get("import_fallback_allowed", True):
             return
@@ -1232,6 +1682,14 @@ def _create_gps_antenna(
             **_classification_properties(actual_strategy, actual_source),
         },
     )
+    if (scene.get("assembly_plan") or {}).get("schema_version") == "1.1.0":
+        _stamp_component_execution(
+            gps,
+            scene,
+            "timing_antenna",
+            "global",
+            expected_handler="gps_radome",
+        )
     if accessory and import_attempted:
         _mark_fallback_generated(
             asset_imports,
@@ -1470,11 +1928,36 @@ def _try_import_glb_asset(
     warnings: list[str],
     semantic_properties: dict | None = None,
     sector_pose: tuple[float, float, str] | None = None,
+    exact_boundary: dict | None = None,
 ) -> str:
     path = _resolve_asset_path(asset_file)
+    record_asset_file = asset_file
+    if exact_boundary is not None:
+        if fallback_allowed:
+            raise RuntimeError(f"EXACT_IMPORT_FALLBACK_NOT_FAIL_CLOSED:{asset_id}")
+        public_asset_file = exact_boundary.get("asset_file")
+        resolved_asset_path = exact_boundary.get("resolved_asset_path")
+        if (
+            not isinstance(public_asset_file, str)
+            or not public_asset_file
+            or Path(public_asset_file).is_absolute()
+        ):
+            raise RuntimeError(f"EXACT_IMPORT_ASSET_PATH_INVALID:{asset_id}")
+        if asset_file != public_asset_file:
+            raise RuntimeError(f"EXACT_IMPORT_PUBLIC_ASSET_FILE_MISMATCH:{asset_id}")
+        if not isinstance(resolved_asset_path, str) or not Path(resolved_asset_path).is_absolute():
+            raise RuntimeError(f"EXACT_IMPORT_RESOLVED_PATH_MISMATCH:{asset_id}")
+        public_resolved_path = _resolve_asset_path(public_asset_file)
+        internal_resolved_path = Path(resolved_asset_path).resolve()
+        if public_resolved_path is None or public_resolved_path.resolve() != internal_resolved_path:
+            raise RuntimeError(f"EXACT_IMPORT_RESOLVED_PATH_MISMATCH:{asset_id}")
+        path = internal_resolved_path
+        record_asset_file = public_asset_file
+        if tuple(float(value) for value in placement_scale) != (1.0, 1.0, 1.0):
+            raise RuntimeError(f"EXACT_IMPORT_SCALE_NOT_AUTHORIZED:{asset_id}")
     record = _base_asset_import_record(
         asset_id=asset_id,
-        asset_file=asset_file,
+        asset_file=record_asset_file,
         asset_source=asset_source,
         asset_metadata=asset_metadata,
         object_role=object_role,
@@ -1486,6 +1969,8 @@ def _try_import_glb_asset(
         rotation=rotation,
     )
     if path is None or not path.exists():
+        if exact_boundary is not None:
+            raise RuntimeError(f"EXACT_IMPORT_ASSET_FILE_MISSING:{asset_id}")
         return _record_asset_import_fallback(
             record,
             asset_imports,
@@ -1494,8 +1979,16 @@ def _try_import_glb_asset(
             fallback_allowed=fallback_allowed,
         )
 
-    expected_sha256 = str((asset_metadata or {}).get("verified_file_sha256") or "")
+    expected_sha256 = str(
+        (exact_boundary or {}).get("verified_file_sha256")
+        or (asset_metadata or {}).get("verified_file_sha256")
+        or ""
+    )
+    if exact_boundary is not None and not expected_sha256:
+        raise RuntimeError(f"EXACT_IMPORT_PINNED_HASH_MISSING:{asset_id}")
     if expected_sha256 and _sha256_file(path) != expected_sha256:
+        if exact_boundary is not None:
+            raise RuntimeError(f"EXACT_IMPORT_ASSET_HASH_MISMATCH:{asset_id}")
         return _record_asset_import_fallback(
             record,
             asset_imports,
@@ -1509,6 +2002,10 @@ def _try_import_glb_asset(
         bpy.ops.import_scene.gltf(filepath=str(path))
     except Exception as exc:
         _remove_partial_import_objects(bpy, before_object_ids)
+        if exact_boundary is not None:
+            raise RuntimeError(
+                f"EXACT_IMPORT_BLENDER_IMPORT_FAILED:{asset_id}:{type(exc).__name__}"
+            ) from exc
         return _record_asset_import_fallback(
             record,
             asset_imports,
@@ -1519,6 +2016,8 @@ def _try_import_glb_asset(
 
     imported = [obj for obj in bpy.data.objects if id(obj) not in before_object_ids]
     if not imported:
+        if exact_boundary is not None:
+            raise RuntimeError(f"EXACT_IMPORT_EMPTY:{asset_id}")
         return _record_asset_import_fallback(
             record,
             asset_imports,
@@ -1560,9 +2059,21 @@ def _try_import_glb_asset(
             float(dimensions.get("depth") or source_size.y),
             float(dimensions.get("height") or source_size.z),
         )
-        scale_factors = tuple(
-            target_size[index] / max(float(source_size[index]), 1e-6) for index in range(3)
-        )
+        if exact_boundary is not None:
+            for index, axis in enumerate(("width", "depth", "height")):
+                actual = float(source_size[index])
+                expected = float(target_size[index])
+                tolerance = max(0.01, expected * 0.05)
+                if abs(actual - expected) > tolerance:
+                    _remove_partial_import_objects(bpy, before_object_ids)
+                    raise RuntimeError(
+                        "EXACT_IMPORT_DIMENSIONS_MISMATCH:"
+                        f"{asset_id}:{axis}:{actual:.6f}:{expected:.6f}"
+                    )
+        else:
+            scale_factors = tuple(
+                target_size[index] / max(float(source_size[index]), 1e-6) for index in range(3)
+            )
         dimensions_checked = True
     scale_factors = tuple(
         float(scale_factors[index]) * float(placement_scale[index]) for index in range(3)
@@ -1590,6 +2101,10 @@ def _try_import_glb_asset(
     bpy.context.view_layer.update()
 
     non_uniform_scale = max(scale_factors) - min(scale_factors) > 0.01
+    if exact_boundary is not None and any(
+        abs(float(value) - 1.0) > 1e-9 for value in scale_factors
+    ):
+        raise RuntimeError(f"EXACT_IMPORT_SCALE_NOT_AUTHORIZED:{asset_id}")
     import_mode = "stretched_imported_glb" if non_uniform_scale else "imported_glb"
     geometry_source = "stretched_imported_glb" if non_uniform_scale else "imported_glb_exact"
     _set_semantic_tree(
@@ -2290,8 +2805,11 @@ def _write_metadata(
     bounding_box_m: dict | None = None,
     segment_connectivity: dict | None = None,
     blender_runtime: dict | None = None,
+    assembly_validation: dict | None = None,
+    component_proof: dict | None = None,
 ) -> None:
     asset_imports = asset_imports or _fallback_asset_import_records(scene)
+    public_asset_imports = _public_asset_import_records(asset_imports)
     all_warnings = _unique_strings(
         [
             *warnings,
@@ -2308,7 +2826,7 @@ def _write_metadata(
         "generation_mode": generation_mode,
         "assets_used": _assets_used(scene),
         "procedural_objects_created": procedural_objects,
-        "asset_imports": asset_imports,
+        "asset_imports": public_asset_imports,
         "asset_import_summary": _asset_import_summary(asset_imports),
         "sector_count": len(scene["sectors"]),
         "network_type": scene["network_type"],
@@ -2322,6 +2840,8 @@ def _write_metadata(
         "visual_elements": scene.get("visual_elements", {}),
         "accessory_assets": scene.get("accessory_assets", []),
         "assembly_plan": scene.get("assembly_plan"),
+        "assembly_validation": assembly_validation,
+        "component_proof": component_proof,
         "preview_camera": camera_metadata,
         "segment_connectivity": segment_connectivity
         or {
@@ -2341,6 +2861,21 @@ def _write_metadata(
         json.dumps(payload, indent=2),
         encoding="utf-8",
     )
+
+
+def _public_asset_import_records(asset_imports: list[dict]) -> list[dict]:
+    """Strip worker-local paths before asset evidence is persisted or exposed."""
+
+    public_records: list[dict] = []
+    for record in asset_imports:
+        public_record = dict(record)
+        public_record.pop("resolved_path", None)
+        asset_file = public_record.get("asset_file")
+        if isinstance(asset_file, str) and Path(asset_file).is_absolute():
+            asset_id = str(public_record.get("asset_id") or "unknown")
+            raise RuntimeError(f"PUBLIC_ASSET_FILE_ABSOLUTE_PATH:{asset_id}")
+        public_records.append(public_record)
+    return public_records
 
 
 def _blender_runtime_metadata(bpy) -> dict:

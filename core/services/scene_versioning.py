@@ -16,6 +16,10 @@ from core.contracts.versioning import SceneVersion
 from core.performance import scene_spec_hash
 
 _CERTIFIED_ARTIFACTS = {"glb", "preview", "metadata", "build_lock"}
+_CERTIFIED_ARTIFACTS_M0 = {
+    *_CERTIFIED_ARTIFACTS,
+    "component_proofs",
+}
 _CRITICAL_REPORT_FILES = (
     ("qa_report", "qa_report.json"),
     ("geometry_validation", "geometry_validation.json"),
@@ -61,6 +65,10 @@ _REQUIRED_COMPLETION_CHECKS_V1_1 = {
     "design_blueprint_present",
     "blueprint_requirement_coverage_passed",
     "blueprint_scene_coverage_passed",
+}
+_REQUIRED_COMPLETION_CHECKS_V1_2 = {
+    *_REQUIRED_COMPLETION_CHECKS_V1_1,
+    "component_proof_verified",
 }
 
 
@@ -232,7 +240,7 @@ class SceneVersioningService:
         )
         build_lock_schema = _build_lock_schema(artifact_dir)
         report_proof = None
-        if build_lock_schema == "1.1.0":
+        if build_lock_schema in {"1.1.0", "1.2.0"}:
             report_proof = _write_critical_report_proof(artifact_dir)
         status_path = artifact_dir / "status.json"
         manifest = {
@@ -398,11 +406,11 @@ def verify_persisted_version(
         raise ValueError("ACTIVE_VERSION_COMPLETION_MODE_INVALID")
     if certificate.blockers:
         raise ValueError("ACTIVE_VERSION_COMPLETION_BLOCKERS_PRESENT")
-    required_checks = (
-        _REQUIRED_COMPLETION_CHECKS_V1_1
-        if certificate.schema_version == "1.1.0"
-        else _REQUIRED_COMPLETION_CHECKS_V1
-    )
+    required_checks = {
+        "1.0.0": _REQUIRED_COMPLETION_CHECKS_V1,
+        "1.1.0": _REQUIRED_COMPLETION_CHECKS_V1_1,
+        "1.2.0": _REQUIRED_COMPLETION_CHECKS_V1_2,
+    }[certificate.schema_version]
     if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
         raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
 
@@ -416,13 +424,19 @@ def verify_persisted_version(
         SceneSpec,
         "ACTIVE_VERSION_SCENE_SPEC_INVALID",
     )
+    component_proof_required = bool(
+        scene.geometry_programs
+        or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
+    )
+    if component_proof_required and certificate.schema_version != "1.2.0":
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
     blueprint = (
         _read_model(
             artifact_dir / "design_blueprint.json",
             DesignBlueprint,
             "ACTIVE_VERSION_DESIGN_BLUEPRINT_INVALID",
         )
-        if certificate.schema_version == "1.1.0"
+        if certificate.schema_version in {"1.1.0", "1.2.0"}
         else None
     )
     if certificate.requirements_sha256 != _persisted_json_hash(
@@ -463,10 +477,15 @@ def verify_persisted_version(
                 "sha256": item.sha256,
             }
         )
-    if logical_names != _CERTIFIED_ARTIFACTS:
+    expected_artifacts = (
+        _CERTIFIED_ARTIFACTS_M0 if certificate.schema_version == "1.2.0" else _CERTIFIED_ARTIFACTS
+    )
+    if logical_names != expected_artifacts:
         raise ValueError("ACTIVE_VERSION_CERTIFIED_ARTIFACT_SET_INCOMPLETE")
     build_lock_schema = _verify_build_lock(artifact_dir, scene=scene)
-    if require_report_proof and build_lock_schema == "1.1.0":
+    if component_proof_required and build_lock_schema != "1.2.0":
+        raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_DOWNGRADE")
+    if require_report_proof and build_lock_schema in {"1.1.0", "1.2.0"}:
         _verify_critical_report_proof(artifact_dir)
     _verify_terminal_status(artifact_dir / "status.json", workflow_id=workflow_id)
     return sorted(evidence, key=lambda item: item["logical_name"])
@@ -505,13 +524,23 @@ def _persisted_json_hash(path: Path, *, exclude: set[str] | None = None) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _canonical_json_hash(payload: object) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _build_lock_schema(artifact_dir: Path) -> str:
     try:
         payload = json.loads((artifact_dir / "build.lock.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_INVALID") from exc
     schema_version = payload.get("schema_version")
-    if schema_version not in {"1.0.0", "1.1.0"}:
+    if schema_version not in {"1.0.0", "1.1.0", "1.2.0"}:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_UNSUPPORTED")
     return schema_version
 
@@ -599,10 +628,12 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     worker_hash = payload.get("worker_script_sha256")
     if not isinstance(worker_hash, str) or len(worker_hash) != 64:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_WORKER_IDENTITY_INVALID")
-    if schema_version == "1.1.0":
+    if schema_version in {"1.1.0", "1.2.0"}:
         bundle = payload.get("worker_bundle")
         if not _valid_worker_bundle(bundle):
             raise ValueError("ACTIVE_VERSION_BUILD_LOCK_WORKER_BUNDLE_INVALID")
+    if schema_version == "1.2.0" and not _valid_trusted_inputs(payload, scene):
+        raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TRUSTED_INPUTS_INVALID")
     if payload.get("command_profile") != {
         "background": True,
         "factory_startup": True,
@@ -621,7 +652,10 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_ARTIFACTS_INVALID")
-    for name in ("design.glb", "preview.png", "scene_metadata.json"):
+    artifact_names = ["design.glb", "preview.png", "scene_metadata.json"]
+    if (artifact_dir / "component_proofs.json").is_file():
+        artifact_names.append("component_proofs.json")
+    for name in artifact_names:
         item = artifacts.get(name)
         path = artifact_dir / name
         if (
@@ -632,6 +666,92 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
         ):
             raise ValueError(f"ACTIVE_VERSION_BUILD_LOCK_ARTIFACT_MISMATCH:{name}")
     return schema_version
+
+
+def _valid_trusted_inputs(payload: dict, scene: SceneSpec) -> bool:
+    trusted = payload.get("trusted_inputs")
+    digest = payload.get("trusted_inputs_sha256")
+    if (
+        not isinstance(trusted, dict)
+        or not isinstance(digest, str)
+        or digest != _canonical_json_hash(trusted)
+    ):
+        return False
+    plan = scene.assembly_plan
+    components = plan.components if plan is not None and plan.schema_version == "1.1.0" else []
+    manifests = [
+        {
+            "role_id": component.role_id,
+            "asset_id": component.manifest_snapshot.asset_id,
+            "file": f"assets/manifests/{component.manifest_snapshot.manifest_file_name}",
+            "source_sha256": component.manifest_snapshot.source_manifest_sha256,
+            "snapshot_sha256": component.manifest_snapshot.snapshot_sha256,
+            "generation_mode": component.manifest_snapshot.generation_mode,
+        }
+        for component in components
+        if component.manifest_snapshot is not None
+    ]
+    builders = [
+        {
+            "role_id": component.role_id,
+            "profile_id": component.builder_profile.profile_id,
+            "profile_sha256": component.builder_profile.profile_sha256,
+            "worker_handler": component.builder_profile.worker_handler,
+        }
+        for component in components
+        if component.builder_profile is not None
+    ]
+    exact_assets = [
+        {
+            "role_id": component.role_id,
+            "asset_id": component.manifest_snapshot.asset_id,
+            "file": component.manifest_snapshot.asset_file,
+            "sha256": component.manifest_snapshot.verified_file_sha256,
+            "units": component.manifest_snapshot.units,
+        }
+        for component in components
+        if component.manifest_snapshot is not None
+        and component.manifest_snapshot.generation_mode == "imported_glb_exact"
+    ]
+    operations = [
+        {
+            "operation_id": operation.operation_id,
+            "operation_sha256": operation.operation_sha256,
+        }
+        for operation in (plan.operations if plan is not None else [])
+    ]
+    programs = [
+        {
+            "program_id": program.program_id,
+            "program_sha256": _canonical_json_hash(program.model_dump(mode="json")),
+        }
+        for program in scene.geometry_programs
+    ]
+    expected = {
+        "assembly_plan_schema_version": plan.schema_version if plan is not None else None,
+        "manifest_catalog_sha256": plan.manifest_catalog_sha256 if plan is not None else None,
+        "manifests": sorted(manifests, key=lambda item: item["role_id"]),
+        "builder_profiles": sorted(builders, key=lambda item: item["role_id"]),
+        "exact_assets": sorted(exact_assets, key=lambda item: item["role_id"]),
+        "assembly_operations": sorted(
+            operations,
+            key=lambda item: item["operation_id"],
+        ),
+        "geometry_programs": sorted(programs, key=lambda item: item["program_id"]),
+    }
+    if plan is not None and plan.schema_version == "1.1.0":
+        builder_catalog = trusted.get("builder_catalog")
+        if (
+            not isinstance(builder_catalog, dict)
+            or builder_catalog.get("file") != "assets/capabilities/builder_profiles.json"
+            or not isinstance(builder_catalog.get("sha256"), str)
+            or len(builder_catalog["sha256"]) != 64
+        ):
+            return False
+    else:
+        builder_catalog = None
+    expected["builder_catalog"] = builder_catalog
+    return trusted == expected
 
 
 def _valid_worker_bundle(bundle: object) -> bool:

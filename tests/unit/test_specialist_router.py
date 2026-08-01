@@ -49,9 +49,7 @@ def test_router_enforces_gate_then_parallel_fanout_with_stable_order() -> None:
 
 
 def test_router_rejects_wrong_domain_and_dependency_cycles() -> None:
-    wrong_domain = SpecialistRouter(
-        [SpecialistRegistration("rf", lambda _: Result("structure"))]
-    )
+    wrong_domain = SpecialistRouter([SpecialistRegistration("rf", lambda _: Result("structure"))])
     with pytest.raises(SpecialistRoutingError, match="returned domain"):
         wrong_domain.route(["rf"], "context")
 

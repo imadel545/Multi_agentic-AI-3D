@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,6 +21,7 @@ class _Selection(BaseModel):
 
     role_id: str = Field(min_length=1, max_length=96)
     asset_id: str = Field(min_length=1, max_length=120)
+    generation_strategy: Literal["imported_glb_exact", "internal_project_generated"]
     reason: str = Field(min_length=1, max_length=200)
 
 
@@ -80,19 +81,35 @@ class GroqAssetSelectionClient:
             decision = _Decision.model_validate(_response_content(response.json()))
             selections = {item.role_id: item.asset_id for item in decision.selections}
             allowed = {
-                slot["role_id"]: set(slot["candidate_asset_ids"])
+                slot["role_id"]: {
+                    (candidate["asset_id"], strategy)
+                    for candidate in slot["candidates"]
+                    for strategy in candidate["allowed_generation_strategies"]
+                }
                 for slot in slots
             }
             if (
                 len(selections) != len(slots)
                 or set(selections) != set(allowed)
-                or any(asset_id not in allowed[role] for role, asset_id in selections.items())
+                or any(
+                    (item.asset_id, item.generation_strategy) not in allowed[item.role_id]
+                    for item in decision.selections
+                )
             ):
-                raise ValueError("model must select exactly one asset for every role")
+                raise ValueError(
+                    "model must select exactly one allowed asset and strategy for every role"
+                )
             return selections, {
                 "provider": "groq",
                 "model_name": self.model,
                 "latency_ms": _elapsed_ms(started),
+                "selection_reasons": {item.asset_id: item.reason for item in decision.selections},
+                "selection_reasons_by_role": {
+                    item.role_id: item.reason for item in decision.selections
+                },
+                "generation_strategies": {
+                    item.role_id: item.generation_strategy for item in decision.selections
+                },
             }
         except (
             httpx.HTTPError,
@@ -124,33 +141,54 @@ class GroqAssetSelectionClient:
                         "properties": {
                             "role_id": {"type": "string"},
                             "asset_id": {"type": "string"},
+                            "generation_strategy": {
+                                "type": "string",
+                                "enum": ["imported_glb_exact", "internal_project_generated"],
+                            },
                             "reason": {"type": "string"},
                         },
-                        "required": ["role_id", "asset_id", "reason"],
+                        "required": [
+                            "role_id",
+                            "asset_id",
+                            "generation_strategy",
+                            "reason",
+                        ],
                     },
                 }
             },
             "required": ["selections"],
         }
-        return self._policy.apply({
-            "model": self.model,
-            "temperature": 0,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "Choose exactly one candidate asset_id for each supplied role. "
-                        "You may only use supplied IDs. Do not create assets, transforms, "
-                        "connector names, parameters, or Blender code. Return strict JSON only."
-                    ),
+        return self._policy.apply(
+            {
+                "model": self.model,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Choose exactly one candidate asset_id and one of that candidate's "
+                            "allowed_generation_strategies for each supplied role. Compare the "
+                            "provided scores, dimensions, compatibility, permissions, and "
+                            "qualification limitations. You may only use supplied values. Do not "
+                            "create assets, transforms, connector names, parameters, strategies, "
+                            "or Blender code. Return strict JSON only."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({"slots": slots}, separators=(",", ":")),
+                    },
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "BoundedAssetSelection",
+                        "schema": schema,
+                        "strict": True,
+                    },
                 },
-                {"role": "user", "content": json.dumps({"slots": slots}, separators=(",", ":"))},
-            ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": "BoundedAssetSelection", "schema": schema, "strict": True},
-            },
-        })
+            }
+        )
 
 
 def _elapsed_ms(started: float) -> int:
@@ -160,9 +198,7 @@ def _elapsed_ms(started: float) -> int:
 def _response_content(body: dict[str, Any]) -> dict[str, Any]:
     content = body["choices"][0]["message"]["content"]
     if isinstance(content, list):
-        content = "".join(
-            part.get("text", "") for part in content if isinstance(part, dict)
-        )
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
     if not isinstance(content, str):
         raise TypeError("provider message content must be a JSON string")
     parsed = json.loads(content)

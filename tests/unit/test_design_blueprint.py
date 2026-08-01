@@ -70,6 +70,33 @@ def test_blueprint_scene_coverage_rejects_silent_asset_mutation() -> None:
     assert "scene.sectors.antenna_asset_ids" in report.critical_errors
 
 
+def test_blueprint_uses_manifest_backed_cable_without_a_duplicate_derived_intent() -> None:
+    requirements, assets, scene = _inputs()
+    registry = AssetRegistry(Path("assets/manifests"))
+    cable_asset = registry.get("CABLE_TRAY_001")
+
+    blueprint = BlueprintComposer().compose(
+        workflow_id=scene.scene_id,
+        requirements=requirements,
+        selected_assets=[*assets, cable_asset],
+        tower_validation=TowerEngineerAgent().validate(requirements, assets[0]),
+        rf_validation=RfEngineerAgent().validate(requirements),
+        planning_resolution=None,
+    )
+
+    cable_intents = [
+        intent for intent in blueprint.component_intents if intent.asset_type == "cable"
+    ]
+    assert requirements.include_cables is True
+    assert [intent.intent_id for intent in cable_intents] == ["component:cable:1"]
+    assert cable_intents[0].resolved_asset_id == cable_asset.asset_id
+    assert cable_intents[0].instance_strategy_id == "per_sector"
+    assert cable_intents[0].quantity == requirements.sector_count
+    assert len({intent.intent_id for intent in blueprint.component_intents}) == len(
+        blueprint.component_intents
+    )
+
+
 def test_blueprint_rejects_unknown_connection_reference() -> None:
     requirements, assets, scene = _inputs()
     blueprint = BlueprintComposer().compose(
@@ -156,30 +183,30 @@ def test_blueprint_routes_arbitrary_geometry_through_typed_specialist() -> None:
             "generator_model": "openai/gpt-oss-120b",
             "structured_output_mode": "strict_json_schema",
             "source_prompt_sha256": hashlib.sha256(request.description.encode()).hexdigest(),
-                "nodes": [
-                    {
-                        "kind": "primitive",
-                        "node_id": "stair_root",
-                        "primitive": "box",
-                        "size_m": {"x": 3.0, "y": 1.2, "z": 0.2},
-                        "semantic_role": "maintenance_stair",
-                    },
-                    {
-                        "kind": "primitive",
-                        "node_id": "stair_step",
-                        "primitive": "box",
-                        "size_m": {"x": 0.4, "y": 1.2, "z": 0.15},
-                    },
-                    {
-                        "kind": "curve",
-                        "node_id": "stair_guardrail",
-                        "points_m": [
-                            {"x": -1.5, "y": -0.6, "z": 0.2},
-                            {"x": 1.5, "y": -0.6, "z": 1.8},
-                        ],
-                        "bevel_depth_m": 0.03,
-                    },
-                ],
+            "nodes": [
+                {
+                    "kind": "primitive",
+                    "node_id": "stair_root",
+                    "primitive": "box",
+                    "size_m": {"x": 3.0, "y": 1.2, "z": 0.2},
+                    "semantic_role": "maintenance_stair",
+                },
+                {
+                    "kind": "primitive",
+                    "node_id": "stair_step",
+                    "primitive": "box",
+                    "size_m": {"x": 0.4, "y": 1.2, "z": 0.15},
+                },
+                {
+                    "kind": "curve",
+                    "node_id": "stair_guardrail",
+                    "points_m": [
+                        {"x": -1.5, "y": -0.6, "z": 0.2},
+                        {"x": 1.5, "y": -0.6, "z": 1.8},
+                    ],
+                    "bevel_depth_m": 0.03,
+                },
+            ],
         }
     )
     compiled_scene = scene.model_copy(update={"geometry_programs": [program]})

@@ -21,17 +21,25 @@
   "normalized_by": "Codex Agent",
   "pivot_policy": "base_center_mount",
   "front_axis": "+Y",
-  "import_fallback_allowed": true,
+  "import_fallback_allowed": false,
   "adaptation_profile_id": "accessory_transform_v1",
   "builder_profile_id": "gps_radome_v1",
   "capability_tags": ["timing", "gps"],
   "anchors": [
-    {"anchor_id": "mast_mount", "position_m": [0, 0, -0.11], "normal": [0, 0, -1], "roles": ["mechanical_mount"]}
+    {"anchor_id": "mast_mount", "position_m": [0, 0, -0.11], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["mechanical_mount"]}
   ],
   "connectors": [
     {"connector_id": "mast_mount", "kind": "mechanical", "gender": "source", "anchor_id": "mast_mount", "compatible_connector_kinds": ["mechanical"]}
   ],
   "allowed_parameters": [],
+  "transform_permissions": {
+    "translation_axes": ["x", "y", "z"],
+    "rotation_axes": ["z"],
+    "maximum_translation_m": 100,
+    "maximum_rotation_deg": 360,
+    "uniform_scale_allowed": false,
+    "non_uniform_scale_allowed": false
+  },
   "qualification": {
     "status": "qualified_for_generation",
     "allowed_generation_modes": ["imported_glb_exact"],

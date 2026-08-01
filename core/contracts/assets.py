@@ -1,3 +1,4 @@
+import math
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -56,15 +57,68 @@ class AssetAnchor(StrictModel):
     anchor_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$")
     position_m: tuple[float, float, float]
     normal: tuple[float, float, float]
+    up: tuple[float, float, float] = (0.0, 0.0, 1.0)
+    placement_policy: Literal["fixed", "sector_tower_surface", "ground_route"] = "fixed"
     roles: list[str] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_frame(self) -> "AssetAnchor":
+        normal_length = math.sqrt(sum(component * component for component in self.normal))
+        up_length = math.sqrt(sum(component * component for component in self.up))
+        if normal_length <= 1e-9:
+            raise ValueError("asset anchor normal must be non-zero")
+        if up_length <= 1e-9:
+            raise ValueError("asset anchor up vector must be non-zero")
+        cross = (
+            self.normal[1] * self.up[2] - self.normal[2] * self.up[1],
+            self.normal[2] * self.up[0] - self.normal[0] * self.up[2],
+            self.normal[0] * self.up[1] - self.normal[1] * self.up[0],
+        )
+        if math.sqrt(sum(component * component for component in cross)) <= 1e-9:
+            raise ValueError("asset anchor normal and up vectors must define a coherent frame")
+        if len(self.roles) != len(set(self.roles)):
+            raise ValueError("asset anchor roles must be unique")
+        return self
 
 
 class AssetConnector(StrictModel):
     connector_id: str = Field(min_length=1, max_length=96, pattern=r"^[a-z][a-z0-9._-]*$")
     kind: Literal["mechanical", "power", "fiber", "rf", "grounding", "routing"]
-    gender: Literal["source", "target", "bidirectional"] = "bidirectional"
+    gender: Literal["source", "target", "male", "female", "bidirectional"] = "bidirectional"
     anchor_id: str = Field(min_length=1, max_length=96)
-    compatible_connector_kinds: list[str] = Field(default_factory=list, max_length=12)
+    compatible_connector_kinds: list[
+        Literal["mechanical", "power", "fiber", "rf", "grounding", "routing"]
+    ] = Field(default_factory=list, max_length=12)
+    tolerance_m: float = Field(default=0.01, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_compatibility(self) -> "AssetConnector":
+        if len(self.compatible_connector_kinds) != len(set(self.compatible_connector_kinds)):
+            raise ValueError("compatible connector kinds must be unique")
+        if self.kind not in self.compatible_connector_kinds:
+            raise ValueError("connector compatibility must include its own kind")
+        return self
+
+
+class AssetTransformPermissions(StrictModel):
+    """Fail-closed transform allowlist for exact imported geometry."""
+
+    translation_axes: list[Literal["x", "y", "z"]] = Field(default_factory=list, max_length=3)
+    rotation_axes: list[Literal["x", "y", "z"]] = Field(default_factory=list, max_length=3)
+    maximum_translation_m: float = Field(default=0.0, ge=0.0, le=1000.0)
+    maximum_rotation_deg: float = Field(default=0.0, ge=0.0, le=3600.0)
+    uniform_scale_allowed: bool = False
+    non_uniform_scale_allowed: bool = False
+
+    @model_validator(mode="after")
+    def validate_permissions(self) -> "AssetTransformPermissions":
+        if len(self.translation_axes) != len(set(self.translation_axes)):
+            raise ValueError("translation axes must be unique")
+        if len(self.rotation_axes) != len(set(self.rotation_axes)):
+            raise ValueError("rotation axes must be unique")
+        if self.non_uniform_scale_allowed and not self.uniform_scale_allowed:
+            raise ValueError("non-uniform scale permission requires uniform scale permission")
+        return self
 
 
 class AllowedAssetParameter(StrictModel):
@@ -183,6 +237,7 @@ class AssetManifest(StrictModel):
     anchors: list[AssetAnchor] = Field(default_factory=list, max_length=48)
     connectors: list[AssetConnector] = Field(default_factory=list, max_length=64)
     allowed_parameters: list[AllowedAssetParameter] = Field(default_factory=list, max_length=48)
+    transform_permissions: AssetTransformPermissions | None = None
     qualification: AssetQualification = Field(default_factory=AssetQualification)
 
     @model_validator(mode="after")
@@ -196,9 +251,19 @@ class AssetManifest(StrictModel):
             raise ValueError("asset anchor IDs must be unique")
         if any(connector.anchor_id not in anchor_ids for connector in self.connectors):
             raise ValueError("asset connectors must reference a declared anchor")
+        connector_ids = [connector.connector_id for connector in self.connectors]
+        if len(connector_ids) != len(set(connector_ids)):
+            raise ValueError("asset connector IDs must be unique")
         parameter_ids = [parameter.parameter_id for parameter in self.allowed_parameters]
         if len(parameter_ids) != len(set(parameter_ids)):
             raise ValueError("allowed asset parameter IDs must be unique")
+        if self.is_generation_eligible and self.builder_profile_id is None:
+            raise ValueError("generation-eligible assets require a builder_profile_id")
+        if self.allows_generation_mode("imported_glb_exact"):
+            if self.transform_permissions is None:
+                raise ValueError("imported_glb_exact requires explicit transform permissions")
+            if self.import_fallback_allowed:
+                raise ValueError("imported_glb_exact must fail closed without procedural fallback")
         return self
 
     @property

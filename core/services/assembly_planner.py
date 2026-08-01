@@ -7,6 +7,7 @@ from core.contracts.assembly import AssemblyComponentSelection, AssemblyConnecti
 from core.contracts.assets import AssetManifest
 from core.contracts.requirements import RequirementSpec
 from core.services.asset_registry import AssetRegistry
+from core.services.builder_registry import BuilderRegistry
 
 
 class BoundedAssemblyDecisionClient(Protocol):
@@ -28,17 +29,21 @@ class AssetAssemblyPlanner:
     """
 
     def __init__(
-        self, registry: AssetRegistry, decision_client: BoundedAssemblyDecisionClient | None = None
+        self,
+        registry: AssetRegistry,
+        decision_client: BoundedAssemblyDecisionClient | None = None,
+        builder_registry: BuilderRegistry | None = None,
     ) -> None:
         self.registry = registry
         self.decision_client = decision_client
+        self.builder_registry = builder_registry or BuilderRegistry(
+            registry.manifests_dir.parent / "capabilities" / "builder_profiles.json"
+        )
 
     def plan(self, *, workflow_id: str, requirements: RequirementSpec) -> AssemblyPlanningResult:
         slots = self._required_slots(requirements)
         ranked: dict[str, list[tuple[AssetManifest, object]]] = {}
-        for role_id, asset_type, _required, _profile, _strategy in slots:
-            if asset_type == "cable":
-                continue
+        for role_id, asset_type, _required in slots:
             # Preserve registry policy overrides (including a controlled
             # "asset unavailable" outcome) before exposing the full ranking.
             if asset_type == "tower":
@@ -66,25 +71,7 @@ class AssetAssemblyPlanner:
         selected_ids, decision = self._bounded_decision(ranked)
         components: list[AssemblyComponentSelection] = []
         assets_by_role: dict[str, AssetManifest] = {}
-        for role_id, asset_type, required, default_profile, _default_strategy in slots:
-            if asset_type == "cable":
-                components.append(
-                    AssemblyComponentSelection(
-                        role_id=role_id,
-                        asset_type=asset_type,
-                        required=required,
-                        candidate_scores=[],
-                        selected_asset_id=None,
-                        builder_profile_id="cable_route_v1",
-                        generation_strategy="procedural_fallback",
-                        allowed_parameter_ids=["route_clearance_m", "cable_diameter_m"],
-                        selection_reason=(
-                            "Aucun chemin de câble qualifié dans l’échantillon ; "
-                            "route procédurale contrôlée."
-                        ),
-                    )
-                )
-                continue
+        for role_id, asset_type, required in slots:
             options = ranked[role_id]
             selected_id = selected_ids.get(role_id, options[0][0].asset_id)
             asset = next(
@@ -92,11 +79,31 @@ class AssetAssemblyPlanner:
                 options[0][0],
             )
             assets_by_role[role_id] = asset
-            strategy = (
-                "imported_glb_exact"
-                if asset.allows_generation_mode("imported_glb_exact")
-                else "internal_project_generated"
+            strategy = (decision.get("generation_strategies") or {}).get(role_id)
+            if strategy is None:
+                strategy = _deterministic_generation_strategy(asset)
+            if strategy not in _allowed_assembly_strategies(asset):
+                raise ValueError(
+                    f"ASSET_GENERATION_STRATEGY_NOT_ALLOWED:{asset.asset_id}:{strategy}"
+                )
+            manifest_generation_mode = (
+                "imported_glb_exact" if strategy == "imported_glb_exact" else "parametric_generated"
             )
+            if asset.builder_profile_id is None:
+                raise ValueError(f"ASSET_BUILDER_PROFILE_MISSING:{asset.asset_id}")
+            builder_profile = self.builder_registry.resolve(asset.builder_profile_id)
+            if asset.type not in builder_profile.asset_types:
+                raise ValueError(
+                    f"BUILDER_ASSET_TYPE_INCOMPATIBLE:{asset.builder_profile_id}:{asset.type}"
+                )
+            if manifest_generation_mode not in builder_profile.allowed_generation_modes:
+                raise ValueError(
+                    "BUILDER_GENERATION_MODE_INCOMPATIBLE:"
+                    f"{asset.builder_profile_id}:{manifest_generation_mode}"
+                )
+            manifest_parameters = {item.parameter_id for item in asset.allowed_parameters}
+            if not manifest_parameters.issubset(builder_profile.allowed_parameter_ids):
+                raise ValueError(f"BUILDER_PARAMETER_ALLOWLIST_MISMATCH:{asset.builder_profile_id}")
             components.append(
                 AssemblyComponentSelection(
                     role_id=role_id,
@@ -104,53 +111,49 @@ class AssetAssemblyPlanner:
                     required=required,
                     candidate_scores=[score for _candidate, score in options],
                     selected_asset_id=asset.asset_id,
-                    builder_profile_id=asset.builder_profile_id or default_profile,
+                    builder_profile_id=asset.builder_profile_id,
                     generation_strategy=strategy,
                     allowed_parameter_ids=[item.parameter_id for item in asset.allowed_parameters],
-                    selection_reason=_selection_reason(asset, options, decision),
+                    parameter_values=_parameter_values(asset, requirements),
+                    manifest_snapshot=self.registry.manifest_snapshot(
+                        asset.asset_id,
+                        generation_mode=manifest_generation_mode,
+                    ),
+                    builder_profile=builder_profile,
+                    requirement_links=_requirement_links(role_id),
+                    blueprint_links=[f"component:{asset.type}:1"],
+                    selection_reason=_selection_reason(role_id, asset, options, decision),
                 )
             )
         plan = AssemblyPlan(
+            schema_version="1.1.0",
             workflow_id=workflow_id,
             components=components,
             connections=_connections(components),
             selection_authority=decision["authority"],
+            selection_provider=decision.get("provider"),
+            selection_model=decision.get("model_name"),
             llm_fallback_used=decision["fallback_used"],
             llm_fallback_reason=decision.get("fallback_reason"),
+            compilation_status="declared",
+            manifest_catalog_sha256=self.registry.manifest_hash,
         )
         return AssemblyPlanningResult(plan=plan, assets_by_role=assets_by_role)
 
-    def _required_slots(
-        self, requirements: RequirementSpec
-    ) -> list[tuple[str, str, bool, str, str]]:
+    def _required_slots(self, requirements: RequirementSpec) -> list[tuple[str, str, bool]]:
         slots = [
-            (
-                "support_structure",
-                "tower",
-                True,
-                "tower_structure_v1",
-                "internal_project_generated",
-            ),
-            ("sector_antenna", "antenna", True, "sector_panel_v1", "internal_project_generated"),
-            ("antenna_mount", "bracket", True, "mount_bracket_v1", "internal_project_generated"),
-            (
-                "sector_cable_route",
-                "cable",
-                bool(requirements.include_cables),
-                "cable_route_v1",
-                "procedural_fallback",
-            ),
+            ("support_structure", "tower", True),
+            ("sector_antenna", "antenna", True),
+            ("antenna_mount", "bracket", True),
         ]
+        if requirements.include_cables:
+            slots.append(("sector_cable_route", "cable", True))
         if requirements.include_rru:
-            slots.append(
-                ("remote_radio", "radio", True, "rru_enclosure_v1", "internal_project_generated")
-            )
+            slots.append(("remote_radio", "radio", True))
         if requirements.include_power_cabinet:
-            slots.append(
-                ("ground_equipment", "cabinet", True, "ground_cabinet_v1", "imported_glb_exact")
-            )
+            slots.append(("ground_equipment", "cabinet", True))
         if requirements.include_gps_antenna:
-            slots.append(("timing_antenna", "gps", True, "gps_radome_v1", "imported_glb_exact"))
+            slots.append(("timing_antenna", "gps", True))
         return slots
 
     def _bounded_decision(
@@ -159,6 +162,8 @@ class AssetAssemblyPlanner:
         if self.decision_client is None:
             return {}, {
                 "authority": "deterministic_fallback",
+                "provider": "deterministic",
+                "model_name": None,
                 "fallback_used": True,
                 "fallback_reason": "llm_asset_selector_unavailable",
             }
@@ -166,6 +171,27 @@ class AssetAssemblyPlanner:
             {
                 "role_id": role_id,
                 "candidate_asset_ids": [asset.asset_id for asset, _score in options],
+                "candidates": [
+                    {
+                        "asset_id": asset.asset_id,
+                        "asset_type": asset.type,
+                        "score": score.model_dump(mode="json"),
+                        "dimensions_m": (
+                            asset.dimensions_m.model_dump(mode="json")
+                            if asset.dimensions_m is not None
+                            else None
+                        ),
+                        "compatible_networks": asset.compatible_networks,
+                        "compatible_tower_types": asset.compatible_tower_types,
+                        "allowed_generation_strategies": _allowed_assembly_strategies(asset),
+                        "allowed_parameter_ids": [
+                            parameter.parameter_id for parameter in asset.allowed_parameters
+                        ],
+                        "builder_profile_id": asset.builder_profile_id,
+                        "qualification_limitations": asset.qualification.limitations,
+                    }
+                    for asset, score in options
+                ],
             }
             for role_id, options in ranked.items()
         ]
@@ -182,8 +208,27 @@ class AssetAssemblyPlanner:
         if len(safe) != len(allowed):
             return {}, {
                 "authority": "deterministic_fallback",
+                "provider": diagnostics.get("provider", "deterministic"),
+                "model_name": diagnostics.get("model_name"),
                 "fallback_used": True,
-                "fallback_reason": "llm_asset_selector_output_rejected",
+                "fallback_reason": diagnostics.get("fallback_reason")
+                or "llm_asset_selector_output_rejected",
+            }
+        generation_strategies = diagnostics.get("generation_strategies") or {}
+        selected_assets = {
+            role_id: next(asset for asset, _score in ranked[role_id] if asset.asset_id == asset_id)
+            for role_id, asset_id in safe.items()
+        }
+        if set(generation_strategies) != set(allowed) or any(
+            generation_strategies[role_id] not in _allowed_assembly_strategies(asset)
+            for role_id, asset in selected_assets.items()
+        ):
+            return {}, {
+                "authority": "deterministic_fallback",
+                "provider": diagnostics.get("provider", "deterministic"),
+                "model_name": diagnostics.get("model_name"),
+                "fallback_used": True,
+                "fallback_reason": "llm_asset_strategy_output_rejected",
             }
         return safe, {
             "authority": "llm_bounded",
@@ -194,7 +239,10 @@ class AssetAssemblyPlanner:
 
 
 def _selection_reason(
-    asset: AssetManifest, options: list[tuple[AssetManifest, object]], decision: dict
+    role_id: str,
+    asset: AssetManifest,
+    options: list[tuple[AssetManifest, object]],
+    decision: dict,
 ) -> str:
     rank = next(
         index
@@ -204,7 +252,28 @@ def _selection_reason(
     source = (
         "Le LLM borné" if decision["authority"] == "llm_bounded" else "Le fallback déterministe"
     )
+    model_reason = (decision.get("selection_reasons_by_role") or {}).get(role_id)
+    if model_reason is None:
+        model_reason = (decision.get("selection_reasons") or {}).get(asset.asset_id)
+    if model_reason and decision["authority"] == "llm_bounded":
+        return f"{source} a retenu le candidat classé #{rank} ; motif structuré : {model_reason}"
     return f"{source} a retenu le candidat classé #{rank} ; compatibilité et permissions vérifiées."
+
+
+def _allowed_assembly_strategies(asset: AssetManifest) -> list[str]:
+    strategies = []
+    if asset.allows_generation_mode("imported_glb_exact"):
+        strategies.append("imported_glb_exact")
+    if asset.allows_generation_mode("parametric_generated"):
+        strategies.append("internal_project_generated")
+    if not strategies:
+        raise ValueError(f"ASSET_HAS_NO_EXECUTABLE_GENERATION_STRATEGY:{asset.asset_id}")
+    return strategies
+
+
+def _deterministic_generation_strategy(asset: AssetManifest) -> str:
+    strategies = _allowed_assembly_strategies(asset)
+    return "imported_glb_exact" if "imported_glb_exact" in strategies else strategies[0]
 
 
 def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyConnection]:
@@ -232,6 +301,17 @@ def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyC
     if "remote_radio" in roles:
         connections.append(
             AssemblyConnection(
+                connection_id="radio-to-mount",
+                kind="mechanical",
+                source_role_id="remote_radio",
+                source_connector_id="rear_mount",
+                target_role_id="antenna_mount",
+                target_connector_id="radio_rail",
+                required=True,
+            )
+        )
+        connections.append(
+            AssemblyConnection(
                 connection_id="antenna-to-radio-rf",
                 kind="rf",
                 source_role_id="sector_antenna",
@@ -254,3 +334,30 @@ def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyC
             )
         )
     return connections
+
+
+def _parameter_values(asset: AssetManifest, requirements: RequirementSpec) -> dict:
+    allowed = {item.parameter_id for item in asset.allowed_parameters}
+    values: dict[str, float | int | bool | str] = {}
+    if "height_m" in allowed:
+        values["height_m"] = float(requirements.tower_height_m)
+    if "base_width_m" in allowed and requirements.tower_characteristics.base_width_m is not None:
+        values["base_width_m"] = float(requirements.tower_characteristics.base_width_m)
+    if "vertical_offset_m" in allowed and asset.radio_geometry_profile is not None:
+        values["vertical_offset_m"] = float(asset.radio_geometry_profile.vertical_offset_m)
+    if "radial_inset_m" in allowed and asset.radio_geometry_profile is not None:
+        values["radial_inset_m"] = float(asset.radio_geometry_profile.radial_inset_m)
+    return values
+
+
+def _requirement_links(role_id: str) -> list[str]:
+    mapping = {
+        "support_structure": ["tower_type", "tower_height_m", "tower_characteristics"],
+        "sector_antenna": ["network_type", "sector_count", "azimuths_deg"],
+        "antenna_mount": ["tower_type", "antenna_install_height_m"],
+        "remote_radio": ["include_rru", "sector_count"],
+        "sector_cable_route": ["include_cables", "sector_count"],
+        "ground_equipment": ["include_power_cabinet"],
+        "timing_antenna": ["include_gps_antenna"],
+    }
+    return mapping.get(role_id, [role_id])

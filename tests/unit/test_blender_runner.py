@@ -10,6 +10,7 @@ import pytest
 from core.agents import ScenePlanner
 from core.qa.glb_geometry_validator import GLBGeometryValidator
 from core.qa.glb_inspector import GLBInspector
+from core.services.assembly_planner import AssetAssemblyPlanner
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, _command_failure_details
 from core.services.requirement_parser import parse_requirements_text
@@ -74,7 +75,9 @@ def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Pat
     }
 
 
-def test_blender_runner_reports_accessory_fallback_when_file_missing(tmp_path: Path) -> None:
+def test_blender_runner_reports_fail_closed_exact_accessory_when_file_missing(
+    tmp_path: Path,
+) -> None:
     base_scene = _accessory_scene()
     scene = base_scene.model_copy(
         update={
@@ -98,9 +101,10 @@ def test_blender_runner_reports_accessory_fallback_when_file_missing(tmp_path: P
     gps_record = next(
         record for record in metadata["asset_imports"] if record["asset_id"] == "GPS_ANTENNA_001"
     )
-    assert gps_record["import_mode"] == "procedural_fallback"
+    assert gps_record["import_mode"] == "missing_file"
     assert gps_record["asset_file_exists"] is False
     assert "ASSET_FILE_MISSING" in gps_record["warnings"]
+    assert "PROCEDURAL_FALLBACK_NOT_ALLOWED" in gps_record["warnings"]
     assert metadata["asset_import_summary"]["asset_count"] == 9
 
 
@@ -211,7 +215,7 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     reason="Blender executable is not available",
 )
 def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path: Path) -> None:
-    scene = _accessory_scene()
+    scene = _accessory_scene(trusted_assembly=True)
 
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
@@ -221,13 +225,19 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert metadata["visual_elements"]["include_gps_antenna"] is True
     assert metadata["visual_elements"]["include_power_cabinet"] is True
     assert metadata["mechanical_tilts_deg"] == [5, 5, 5]
-    assert metadata["asset_import_summary"]["asset_count"] == 9
+    assert metadata["asset_import_summary"]["asset_count"] == 15
     assert metadata["asset_import_summary"]["imported_glb_count"] == 1
     assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
     assert metadata["asset_import_summary"]["parametric_generated_count"] == 1
-    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 7
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 13
     records = {record["asset_id"]: record for record in metadata["asset_imports"]}
+    gps_component = next(
+        component
+        for component in scene.assembly_plan.components
+        if component.role_id == "timing_antenna"
+    )
     assert records["GPS_ANTENNA_001"]["import_mode"] == "imported_glb"
+    assert records["GPS_ANTENNA_001"]["asset_file"] == gps_component.manifest_snapshot.asset_file
     assert records["POWER_CABINET_001"]["import_mode"] == "internal_project_generated"
     assert records["TOWER_LATTICE_30M"]["import_mode"] == "parametric_generated"
     assert records["ANT_PANEL_5G_001"]["import_mode"] == "internal_project_generated"
@@ -237,6 +247,8 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert records["POWER_CABINET_001"]["generated_object_count"] >= 16
     assert records["POWER_CABINET_001"]["placement_location"][2] == 0.0
     assert records["GPS_ANTENNA_001"]["generation_success"] is False
+    assert all("resolved_path" not in record for record in metadata["asset_imports"])
+    assert str(Path.cwd().resolve()) not in json.dumps(metadata, ensure_ascii=False)
     assert "label:power_cabinet" in metadata["procedural_objects_created"]
     assert "label:gps_antenna" in metadata["procedural_objects_created"]
     glb_report = GLBInspector().inspect(
@@ -271,25 +283,7 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
             "include_power_cabinet": True,
         }
     )
-    tower = registry.select_tower(
-        requirements.tower_type,
-        requirements.network_type,
-        requirements.tower_height_m,
-    )
-    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
-    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
-    accessories = [
-        registry.select_asset("gps", requirements.network_type, requirements.tower_type),
-        registry.select_asset("cabinet", requirements.network_type, requirements.tower_type),
-    ]
-    scene = ScenePlanner().build_scene_spec(
-        "wf_qualified_asset_assembly",
-        requirements,
-        tower,
-        antenna,
-        radio,
-        accessory_assets=accessories,
-    )
+    scene = _trusted_assembly_scene("wf_qualified_asset_assembly", requirements, registry)
 
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
@@ -297,10 +291,15 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
     assert metadata["asset_import_summary"]["imported_glb_count"] == 4
     assert metadata["asset_import_summary"]["stretched_imported_glb_count"] == 0
-    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 4
+    assert metadata["asset_import_summary"]["internal_project_generated_count"] == 10
     qualified_imports = [
         record for record in metadata["asset_imports"] if record["import_mode"] == "imported_glb"
     ]
+    exact_asset_files = {
+        component.selected_asset_id: component.manifest_snapshot.asset_file
+        for component in scene.assembly_plan.components
+        if component.generation_strategy == "imported_glb_exact"
+    }
     assert {record["asset_id"] for record in qualified_imports} == {
         "ANT_PANEL_4G_001",
         "GPS_ANTENNA_001",
@@ -310,10 +309,14 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
         for record in qualified_imports
     )
     assert all(record["asset_metadata"]["verified_file_sha256"] for record in qualified_imports)
+    assert all(
+        record["asset_file"] == exact_asset_files[record["asset_id"]]
+        for record in qualified_imports
+    )
+    assert all("resolved_path" not in record for record in metadata["asset_imports"])
+    assert str(Path.cwd().resolve()) not in json.dumps(metadata, ensure_ascii=False)
     cabinet_record = next(
-        record
-        for record in metadata["asset_imports"]
-        if record["asset_id"] == "POWER_CABINET_001"
+        record for record in metadata["asset_imports"] if record["asset_id"] == "POWER_CABINET_001"
     )
     assert cabinet_record["import_mode"] == "internal_project_generated"
     assert cabinet_record["generation_success"] is True
@@ -338,36 +341,18 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
     reason="Blender executable is not available",
 )
-def test_blender_runner_creates_real_geometry_after_import_failure(tmp_path: Path) -> None:
-    base_scene = _accessory_scene()
-    scene = base_scene.model_copy(
-        update={
-            "accessory_assets": [
-                accessory.model_copy(update={"asset_file": "assets/missing/gps_missing.glb"})
-                if accessory.asset_type == "gps"
-                else accessory
-                for accessory in base_scene.accessory_assets
-            ]
-        }
-    )
+def test_blender_runner_rejects_exact_import_without_trusted_assembly_snapshot(
+    tmp_path: Path,
+) -> None:
+    scene = _accessory_scene()
 
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
-    assert result.status == "generated"
-    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
-    gps_record = next(
-        record for record in metadata["asset_imports"] if record["asset_id"] == "GPS_ANTENNA_001"
-    )
-    assert gps_record["asset_import_success"] is False
-    assert gps_record["generation_success"] is True
-    assert gps_record["effective_geometry_source"] == "procedural_fallback"
-    assert gps_record["generated_object_names"]
-    glb_payload = _read_glb_json(Path(result.artifacts["glb"]))
-    assert any(
-        node.get("extras", {}).get("role") == "gps"
-        and node.get("extras", {}).get("semantic_root") == node.get("name")
-        for node in glb_payload.get("nodes", [])
-    )
+    assert result.status == "fallback"
+    assert result.mode == "fallback_blender_error"
+    assert "EXACT_IMPORT_MANIFEST_SNAPSHOT_REQUIRED" in (result.error or "")
+    assert not Path(result.artifacts["glb"]).exists()
+    assert not Path(result.artifacts["build_lock"]).exists()
 
 
 @pytest.mark.parametrize(
@@ -437,15 +422,7 @@ def test_blender_runner_imports_qualified_microwave_dishes_not_panels(tmp_path: 
         "Créer un lien MW sur pylône treillis 30m avec 2 secteurs à 22m. "
         "Azimuts : 80°, 260°. Antennes paraboliques, sans RRU et sans câbles."
     )
-    tower = registry.select_tower(
-        requirements.tower_type,
-        requirements.network_type,
-        requirements.tower_height_m,
-    )
-    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
-    scene = ScenePlanner().build_scene_spec(
-        "wf_real_microwave_dish", requirements, tower, antenna, None
-    )
+    scene = _trusted_assembly_scene("wf_real_microwave_dish", requirements, registry)
 
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
@@ -492,14 +469,11 @@ def test_blender_runner_honors_operational_scene_switches_and_build_lock(
                 *base.sectors[1:],
             ],
             "visual_elements": base.visual_elements.model_copy(
-                update={"include_height_markers": False}
+                update={"include_height_markers": False, "include_gps_antenna": False}
             ),
             "preview": base.preview.model_copy(update={"camera": "front"}),
             "accessory_assets": [
-                accessory.model_copy(update={"scale": [1.5, 1.0, 1.0]})
-                if accessory.asset_type == "gps"
-                else accessory
-                for accessory in base.accessory_assets
+                accessory for accessory in base.accessory_assets if accessory.asset_type != "gps"
             ],
         }
     )
@@ -516,18 +490,17 @@ def test_blender_runner_honors_operational_scene_switches_and_build_lock(
     assert metadata["preview_camera"]["requested_camera"] == "front"
     assert metadata["preview_camera"]["framing"] == "geometry_bounds_front"
     assert metadata["blender_runtime"]["background"] is True
-    gps_record = next(
-        record for record in metadata["asset_imports"] if record["asset_id"] == "GPS_ANTENNA_001"
-    )
-    assert gps_record["scale_factors"][0] == pytest.approx(1.5)
+    assert not any(record["object_role"] == "gps" for record in metadata["asset_imports"])
     build_lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
-    assert build_lock["schema_version"] == "1.1.0"
+    assert build_lock["schema_version"] == "1.2.0"
     assert build_lock["scene_id"] == scene.scene_id
     assert "generate_scene.py" in build_lock["worker_bundle"]["files"]
     assert "parametric_builder.py" in build_lock["worker_bundle"]["files"]
     assert build_lock["blender_runtime"]["background"] is True
     assert build_lock["blender_runtime"]["version"]
     assert build_lock["command_profile"]["factory_startup"] is True
+    assert build_lock["trusted_inputs_sha256"]
+    assert "geometry_programs" in build_lock["trusted_inputs"]
 
     glb_payload = _read_glb_json(Path(result.artifacts["glb"]))
     semantic_roles = {node.get("extras", {}).get("role") for node in glb_payload.get("nodes", [])}
@@ -596,6 +569,115 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
     assert build_lock["command_profile"]["factory_startup"] is True
     assert build_lock["artifacts"]["design.glb"]["size_bytes"] == 64
     assert not any(path.exists() for path in attempt_directories)
+
+
+def test_blender_runner_retries_build_lock_preparation_failure_then_falls_back(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene = _accessory_scene()
+    runner = BlenderRunner(project_root=Path.cwd())
+    attempts = 0
+    attempt_directories: list[Path] = []
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        attempt_dir = Path(command[-1])
+        attempt_directories.append(attempt_dir)
+        (attempt_dir / "design.glb").write_bytes(b"x" * 64)
+        (attempt_dir / "preview.png").write_bytes(b"x" * 64)
+        (attempt_dir / "scene_metadata.json").write_text(
+            json.dumps(
+                {
+                    "scene_id": scene.scene_id,
+                    "generation_mode": "real_blender",
+                    "blender_runtime": {
+                        "version": "test",
+                        "background": True,
+                        "factory_startup": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    def fail_build_lock(**_kwargs) -> None:
+        raise ValueError("ASSET_MANIFEST_SOURCE_HASH_MISMATCH")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(runner, "_run_blender_command", fake_run)
+    monkeypatch.setattr("core.services.blender_runner._validate_staged_artifacts", lambda *_: None)
+    monkeypatch.setattr("core.services.blender_runner._write_build_lock", fail_build_lock)
+    monkeypatch.setattr("core.services.blender_runner.time.sleep", lambda *_: None)
+
+    result = runner.generate(scene, tmp_path)
+
+    assert attempts == 3
+    assert result.status == "fallback"
+    assert result.mode == "fallback_blender_error"
+    assert result.error is not None
+    assert result.error.count("BLENDER_BUILD_LOCK_PREPARATION_ERROR") == 3
+    assert "ValueError:ASSET_MANIFEST_SOURCE_HASH_MISMATCH" in result.error
+    assert not Path(result.artifacts["build_lock"]).exists()
+    assert all(not path.exists() for path in attempt_directories)
+
+
+def test_blender_runner_never_binds_output_to_concurrently_mutated_public_scene(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene = _accessory_scene()
+    runner = BlenderRunner(project_root=Path.cwd())
+    attempts = 0
+    consumed_tower_heights: list[float] = []
+
+    def fake_run(command: list[str]) -> subprocess.CompletedProcess[str]:
+        nonlocal attempts
+        attempts += 1
+        scene_input_path = Path(command[-2])
+        assert scene_input_path.parent.name == ".scene_input"
+        consumed_scene = json.loads(scene_input_path.read_text(encoding="utf-8"))
+        consumed_tower_heights.append(consumed_scene["tower"]["height_m"])
+        public_scene_path = tmp_path / "scene_spec.json"
+        public_scene = json.loads(public_scene_path.read_text(encoding="utf-8"))
+        public_scene["tower"]["height_m"] += attempts
+        public_scene_path.write_text(json.dumps(public_scene), encoding="utf-8")
+        attempt_dir = Path(command[-1])
+        (attempt_dir / "design.glb").write_bytes(b"scene-a-glb" * 8)
+        (attempt_dir / "preview.png").write_bytes(b"scene-a-preview" * 8)
+        (attempt_dir / "scene_metadata.json").write_text(
+            json.dumps(
+                {
+                    "scene_id": scene.scene_id,
+                    "generation_mode": "real_blender",
+                    "blender_runtime": {
+                        "version": "test",
+                        "background": True,
+                        "factory_startup": True,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(runner, "_run_blender_command", fake_run)
+    monkeypatch.setattr("core.services.blender_runner._validate_staged_artifacts", lambda *_: None)
+    monkeypatch.setattr("core.services.blender_runner.time.sleep", lambda *_: None)
+
+    result = runner.generate(scene, tmp_path)
+
+    assert attempts == 3
+    assert consumed_tower_heights == [scene.tower.height_m] * 3
+    assert result.status == "fallback"
+    assert result.mode == "fallback_blender_error"
+    assert result.error is not None
+    assert result.error.count("BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH") == 3
+    assert not Path(result.artifacts["glb"]).exists()
+    assert not Path(result.artifacts["build_lock"]).exists()
 
 
 def test_blender_runner_never_reuses_failed_attempt_artifacts(tmp_path: Path, monkeypatch) -> None:
@@ -696,7 +778,7 @@ def test_blender_runner_executes_immutable_worker_snapshot(
     assert lock["worker_bundle"]["files"]["parametric_builder.py"] != after_hash
 
 
-def _accessory_scene():
+def _accessory_scene(*, trusted_assembly: bool = False):
     registry = AssetRegistry(Path("assets/manifests"))
     requirements = parse_requirements_text(
         "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
@@ -708,6 +790,8 @@ def _accessory_scene():
             "include_power_cabinet": True,
         }
     )
+    if trusted_assembly:
+        return _trusted_assembly_scene("wf_accessory_scene", requirements, registry)
     tower = registry.select_tower(
         requirements.tower_type,
         requirements.network_type,
@@ -724,6 +808,26 @@ def _accessory_scene():
         antenna,
         radio,
         accessory_assets=[gps, cabinet],
+    )
+
+
+def _trusted_assembly_scene(workflow_id, requirements, registry: AssetRegistry):
+    planning = AssetAssemblyPlanner(registry).plan(
+        workflow_id=workflow_id,
+        requirements=requirements,
+    )
+    assets = planning.assets_by_role
+    accessories = [
+        assets[role_id] for role_id in ("ground_equipment", "timing_antenna") if role_id in assets
+    ]
+    return ScenePlanner().build_scene_spec(
+        workflow_id,
+        requirements,
+        assets["support_structure"],
+        assets["sector_antenna"],
+        assets.get("remote_radio"),
+        accessory_assets=accessories,
+        assembly_plan=planning.plan,
     )
 
 

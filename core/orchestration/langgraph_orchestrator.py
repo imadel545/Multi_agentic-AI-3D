@@ -53,6 +53,7 @@ from core.rag.planning import (
 )
 from core.repair.scene_repair import repair_scene_spec
 from core.rules import RuleEngine
+from core.services.assembly_compiler import resolve_scene_assembly
 from core.services.assembly_planner import AssetAssemblyPlanner, BoundedAssemblyDecisionClient
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
@@ -665,6 +666,10 @@ class DesignOrchestrator:
             scene = _scene_with_revision_dependencies(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
             scene = _scene_with_asset_metadata(scene, selected_assets)
+            scene = scene.model_copy(deep=True)
+            resolved_assembly = resolve_scene_assembly(scene)
+            if resolved_assembly is not None:
+                scene = scene.model_copy(update={"assembly_plan": resolved_assembly})
             requirements = _requirements_from_scene(
                 scene, tower, antenna, radio, state["detail_level"]
             )
@@ -1362,9 +1367,7 @@ class DesignOrchestrator:
                 )
                 programs.append(program)
                 if sum(len(item.nodes) for item in programs) > 1024:
-                    raise ValueError(
-                        "aggregate geometry-program node budget exceeds 1024 nodes"
-                    )
+                    raise ValueError("aggregate geometry-program node budget exceeds 1024 nodes")
         except Exception as exc:
             logger.exception("Typed geometry-program planning failed")
             message = (
@@ -2343,6 +2346,7 @@ def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
         verified_file_sha256=asset.qualification.verified_file_sha256,
         qualification_method=asset.qualification.qualification_method,
         qualification_limitations=list(asset.qualification.limitations),
+        builder_profile_id=asset.builder_profile_id,
     )
 
 

@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import Field
 
 from core.contracts.common import StrictModel
+from core.contracts.llm_provenance import LLMDecisionProvenance
 from core.contracts.scene import SceneSpec
 
 
@@ -19,4 +20,5 @@ class SceneVersion(StrictModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     qa_score: float | None = None
     generation_mode: str | None = None
+    llm_decision_provenance: LLMDecisionProvenance | None = None
     active: bool = False

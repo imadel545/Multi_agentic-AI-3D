@@ -25,16 +25,30 @@ class CreateDesignRequest(BaseModel):
             raise ValueError(
                 "confirmed_requirements and confirmed_requirements_hash must be provided together"
             )
-        if (
-            self.confirmed_requirements is not None
-            and self.confirmed_requirements.requires_confirmation
-        ):
-            fields = ", ".join(self.confirmed_requirements.confirmation_fields)
+        confirmed = self.confirmed_requirements
+        if confirmed is not None and self.options.detail_level != confirmed.detail_level:
+            raise ValueError("options.detail_level must match confirmed_requirements.detail_level")
+        if confirmed is not None and _has_unresolved_confirmation_state(confirmed):
+            fields = ", ".join(confirmed.confirmation_fields)
             raise ValueError(
                 "confirmed_requirements contains unresolved input conflicts"
                 + (f": {fields}" if fields else "")
             )
         return self
+
+
+def _has_unresolved_confirmation_state(requirements: RequirementSpec) -> bool:
+    return any(
+        (
+            requirements.requires_confirmation,
+            bool(requirements.confirmation_fields),
+            any(not conflict.resolved for conflict in requirements.conflicts),
+            any(
+                evidence.conflict or evidence.requires_confirmation
+                for evidence in requirements.field_evidence.values()
+            ),
+        )
+    )
 
 
 class CreateDesignResponse(BaseModel):
@@ -86,6 +100,7 @@ class WorkflowStatus(BaseModel):
     llm_available: bool | None = None
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
+    llm_decision_provenance: dict[str, Any] | None = None
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
     rag_reranker_provider: str | None = None
@@ -156,6 +171,7 @@ class MemoryVectorReindexResponse(BaseModel):
     embedding_provider: str
     embedding_dimensions: int = Field(gt=0)
     source_counts: dict[str, int]
+    skipped_source_counts: dict[str, int]
     candidate_counts: dict[str, int]
     compacted_points: int = Field(ge=0)
     source_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -179,6 +195,7 @@ class EditDesignResponse(BaseModel):
     validation_report: dict | None = None
     artifacts: dict[str, str] | None = None
     generation_mode: str | None = None
+    llm_decision_provenance: dict[str, Any] | None = None
     qa_score: float | None = None
     extraction_provider: str | None = None
     llm_provider: str | None = None
@@ -216,6 +233,7 @@ class VersionInfo(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     qa_score: float | None = None
     generation_mode: str | None = None
+    llm_decision_provenance: dict[str, Any] | None = None
 
 
 class PublicVersionInfo(BaseModel):
@@ -229,6 +247,7 @@ class PublicVersionInfo(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     qa_score: float | None = None
     generation_mode: str | None = None
+    llm_decision_provenance: dict[str, Any] | None = None
 
 
 class RollbackVersionResponse(BaseModel):
@@ -538,8 +557,7 @@ class GeometryProgramSummary(BaseModel):
         if self.total_node_count != sum(program.node_count for program in self.programs):
             raise ValueError("total_node_count does not match programs")
         if self.repaired_program_count != sum(
-            program.structured_output_mode == "json_object_repaired"
-            for program in self.programs
+            program.structured_output_mode == "json_object_repaired" for program in self.programs
         ):
             raise ValueError("repaired_program_count does not match programs")
         return self
@@ -564,6 +582,7 @@ class ViewerBundle(BaseModel):
     preview_url: str | None = None
     report_url: str | None = None
     metadata_url: str | None = None
+    component_proofs_url: str | None = None
     requirements_spec_url: str | None = None
     extraction_report_url: str | None = None
     scene_spec_url: str | None = None
@@ -582,6 +601,8 @@ class ViewerBundle(BaseModel):
     llm_available: bool | None = None
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
+    llm_decision_provenance: dict[str, Any] | None = None
+    llm_decision_provenance_url: str | None = None
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
     rag_reranker_provider: str | None = None

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from apps.api.telecom_studio_api.workflow import WorkflowService
-from apps.blender_worker.generate_scene import _try_import_glb_asset
+from apps.blender_worker.generate_scene import _try_import_glb_asset, _write_metadata
 from core.contracts.parametric import BoundingBoxM
 from core.contracts.scene import (
     SceneAssetPlacement,
@@ -15,6 +15,7 @@ from core.contracts.scene import (
     VisualElements,
 )
 from core.contracts.tower import TowerCharacteristics
+from core.qa.generation_qa import _asset_import_warnings
 from core.qa.glb_inspector import GLBInspector
 from core.qa.mesh_qa import (
     MeshQA,
@@ -64,6 +65,39 @@ def _minimal_scene() -> SceneSpec:
             include_labels=False,
         ),
     )
+
+
+def test_asset_import_warnings_are_deduplicated_per_asset() -> None:
+    warnings = _asset_import_warnings(
+        [
+            {
+                "asset_id": "ANT_PANEL_4G_001",
+                "import_mode": "imported_glb",
+                "warnings": ["INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE"],
+            },
+            {
+                "asset_id": "ANT_PANEL_4G_001",
+                "import_mode": "imported_glb",
+                "warnings": ["INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE"],
+            },
+            {
+                "asset_id": "GPS_ANTENNA_001",
+                "import_mode": "imported_glb",
+                "warnings": ["INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE"],
+            },
+        ]
+    )
+
+    assert [(warning.code, warning.message) for warning in warnings] == [
+        (
+            "ASSET_IMPORT_INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE",
+            "ANT_PANEL_4G_001: INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE",
+        ),
+        (
+            "ASSET_IMPORT_INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE",
+            "GPS_ANTENNA_001: INTERNAL_CLEANED_ASSET_NOT_VENDOR_GRADE",
+        ),
+    ]
 
 
 def _write_malformed_transform_glb(path: Path) -> None:
@@ -183,6 +217,51 @@ def test_failed_blender_import_removes_every_partially_created_object(tmp_path: 
     assert mode == "procedural_fallback"
     assert objects == [existing]
     assert asset_imports[0]["imported_object_count"] == 0
+
+
+def test_public_worker_metadata_strips_private_paths_for_every_exact_asset_family(
+    tmp_path: Path,
+) -> None:
+    families = (
+        ("tower", "assets/towers/tower.glb"),
+        ("antenna", "assets/antennas/antenna.glb"),
+        ("radio", "assets/radios/radio.glb"),
+        ("cabinet", "assets/ground/cabinet.glb"),
+        ("gps", "assets/accessories/gps.glb"),
+    )
+    asset_imports = [
+        {
+            "asset_id": f"EXACT_{role.upper()}",
+            "asset_file": asset_file,
+            "object_role": role,
+            "resolved_path": str(tmp_path / asset_file),
+            "import_mode": "imported_glb",
+            "asset_import_success": True,
+            "generation_success": False,
+            "asset_file_exists": True,
+            "warnings": [],
+        }
+        for role, asset_file in families
+    ]
+
+    _write_metadata(
+        _minimal_scene().model_dump(mode="json"),
+        tmp_path,
+        "real_blender",
+        [],
+        [],
+        {"camera": "test"},
+        asset_imports,
+    )
+
+    metadata_text = (tmp_path / "scene_metadata.json").read_text(encoding="utf-8")
+    metadata = json.loads(metadata_text)
+    assert {record["object_role"] for record in metadata["asset_imports"]} == {
+        role for role, _ in families
+    }
+    assert all("resolved_path" not in record for record in metadata["asset_imports"])
+    assert all(not Path(record["asset_file"]).is_absolute() for record in metadata["asset_imports"])
+    assert str(tmp_path) not in metadata_text
 
 
 def test_same_sector_contact_rejects_thin_full_containment() -> None:

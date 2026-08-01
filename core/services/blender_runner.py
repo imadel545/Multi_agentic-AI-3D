@@ -43,10 +43,12 @@ class BlenderRunner:
         started = time.perf_counter()
         output_dir.mkdir(parents=True, exist_ok=True)
         scene_spec_path = output_dir / "scene_spec.json"
+        scene_spec_content = json.dumps(scene.model_dump(), indent=2, ensure_ascii=False)
         _atomic_write_text(
             scene_spec_path,
-            json.dumps(scene.model_dump(), indent=2, ensure_ascii=False),
+            scene_spec_content,
         )
+        scene_spec_sha256 = _sha256(scene_spec_path)
         blender_path = self._resolve_blender_binary()
         if blender_path is None:
             self._write_fallback_artifacts(output_dir, scene, mode="fallback_no_blender")
@@ -70,6 +72,26 @@ class BlenderRunner:
                 staging_dir,
                 entry_script_name=self.worker_script.name,
             )
+            try:
+                scene_input_dir = staging_dir / ".scene_input"
+                scene_input_dir.mkdir(parents=True, exist_ok=False)
+                attempt_scene_spec_path = scene_input_dir / "scene_spec.json"
+                _atomic_write_text(attempt_scene_spec_path, scene_spec_content)
+                snapshot_hash = _sha256(attempt_scene_spec_path)
+            except OSError as exc:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                attempt_errors.append(
+                    f"attempt_{attempt}: {_scene_snapshot_preparation_error(exc)}"
+                )
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
+            if snapshot_hash != scene_spec_sha256:
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                attempt_errors.append(f"attempt_{attempt}: BLENDER_SCENE_SPEC_SNAPSHOT_MISMATCH")
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
             worker_script_sha256 = worker_bundle_snapshot["files"].get(self.worker_script.name)
             if worker_script_sha256 is None:
                 shutil.rmtree(staging_dir, ignore_errors=True)
@@ -84,7 +106,7 @@ class BlenderRunner:
                 "--python",
                 str(snapshot_script),
                 "--",
-                str(scene_spec_path),
+                str(attempt_scene_spec_path),
                 str(staging_dir),
             ]
             try:
@@ -123,29 +145,57 @@ class BlenderRunner:
                     time.sleep(attempt)
                 continue
 
-            _write_build_lock(
-                staging_dir=staging_dir,
-                scene_spec_path=scene_spec_path,
-                worker_script_sha256=worker_script_sha256,
-                worker_bundle_snapshot=worker_bundle_snapshot,
-                blender_path=blender_path,
-                build_id=build_id,
-                attempt_id=attempt_id,
-                attempt_number=attempt,
-            )
-            lock_error = _validate_build_lock(
-                staging_dir,
-                scene_spec_path,
-                worker_script_sha256,
-                worker_bundle_snapshot,
-            )
+            try:
+                _write_build_lock(
+                    staging_dir=staging_dir,
+                    scene_spec_path=attempt_scene_spec_path,
+                    project_root=self.project_root,
+                    worker_script_sha256=worker_script_sha256,
+                    worker_bundle_snapshot=worker_bundle_snapshot,
+                    blender_path=blender_path,
+                    build_id=build_id,
+                    attempt_id=attempt_id,
+                    attempt_number=attempt,
+                )
+                lock_error = _validate_build_lock(
+                    staging_dir,
+                    attempt_scene_spec_path,
+                    worker_script_sha256,
+                    worker_bundle_snapshot,
+                    self.project_root,
+                )
+            except (OSError, TypeError, ValueError) as exc:
+                # The lock binds mutable catalog inputs after Blender exits. A
+                # concurrent catalog change is an invalid candidate, not an API
+                # exception: discard it and use the existing bounded retry path.
+                lock_error = _build_lock_preparation_error(exc)
             if lock_error:
                 attempt_errors.append(f"attempt_{attempt}: {lock_error}")
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 if attempt < 3:
                     time.sleep(attempt)
                 continue
+            try:
+                public_scene_hash = _sha256(scene_spec_path)
+            except OSError:
+                public_scene_hash = None
+            if public_scene_hash != scene_spec_sha256:
+                attempt_errors.append(f"attempt_{attempt}: BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH")
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
             _promote_staged_artifacts(staging_dir, output_dir)
+            try:
+                public_scene_hash = _sha256(scene_spec_path)
+            except OSError:
+                public_scene_hash = None
+            if public_scene_hash != scene_spec_sha256:
+                attempt_errors.append(f"attempt_{attempt}: BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH")
+                _clear_generated_artifacts(output_dir)
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
             return self._result(
                 started,
                 output_dir,
@@ -226,6 +276,7 @@ class BlenderRunner:
                 "glb": str(output_dir / "design.glb"),
                 "preview": str(output_dir / "preview.png"),
                 "metadata": str(output_dir / "scene_metadata.json"),
+                "component_proofs": str(output_dir / "component_proofs.json"),
                 "build_lock": str(output_dir / "build.lock.json"),
             },
             error=error,
@@ -551,6 +602,18 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
         return "BLENDER_METADATA_SCENE_ID_MISMATCH"
     if metadata.get("generation_mode") != "real_blender":
         return "BLENDER_METADATA_MODE_INVALID"
+    proof_required = bool(
+        scene.geometry_programs
+        or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
+    )
+    proof_error = _validate_component_proof_artifact(
+        output_dir,
+        scene,
+        metadata,
+        required=proof_required,
+    )
+    if proof_error:
+        return proof_error
     glb_report = GLBInspector().inspect(glb_path, scene, metadata_path)
     if not glb_report.structural_qa_passed:
         return "BLENDER_GLB_INVALID:" + ",".join(glb_report.critical_errors)
@@ -563,7 +626,13 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
 def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
     # The lock is the commit marker: publish it last, after every payload file
     # has been atomically projected into the candidate output directory.
-    names = ("design.glb", "preview.png", "scene_metadata.json", "design.blend")
+    names = (
+        "design.glb",
+        "preview.png",
+        "scene_metadata.json",
+        "component_proofs.json",
+        "design.blend",
+    )
     for name in names:
         source = staging_dir / name
         if source.exists():
@@ -577,6 +646,7 @@ def _clear_generated_artifacts(output_dir: Path) -> None:
         "design.glb",
         "preview.png",
         "scene_metadata.json",
+        "component_proofs.json",
         "design.blend",
         "build.lock.json",
     ):
@@ -589,6 +659,7 @@ def _write_build_lock(
     *,
     staging_dir: Path,
     scene_spec_path: Path,
+    project_root: Path,
     worker_script_sha256: str,
     worker_bundle_snapshot: dict,
     blender_path: Path,
@@ -598,15 +669,20 @@ def _write_build_lock(
 ) -> None:
     metadata_path = staging_dir / "scene_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    scene_payload = json.loads(scene_spec_path.read_text(encoding="utf-8"))
+    trusted_inputs = _trusted_input_evidence(scene_payload, project_root)
+    artifact_names = ["design.glb", "preview.png", "scene_metadata.json"]
+    if (staging_dir / "component_proofs.json").is_file():
+        artifact_names.append("component_proofs.json")
     artifact_hashes = {
         name: {
             "sha256": _sha256(staging_dir / name),
             "size_bytes": (staging_dir / name).stat().st_size,
         }
-        for name in ("design.glb", "preview.png", "scene_metadata.json")
+        for name in artifact_names
     }
     payload = {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "build_id": build_id,
         "attempt_id": attempt_id,
         "attempt_number": attempt_number,
@@ -622,6 +698,8 @@ def _write_build_lock(
             "factory_startup": True,
             "python_exit_code": 97,
         },
+        "trusted_inputs": trusted_inputs,
+        "trusted_inputs_sha256": _canonical_json_sha256(trusted_inputs),
         "artifacts": artifact_hashes,
     }
     _atomic_write_text(
@@ -635,6 +713,7 @@ def _validate_build_lock(
     scene_spec_path: Path,
     worker_script_sha256: str,
     worker_bundle_snapshot: dict,
+    project_root: Path,
 ) -> str | None:
     lock_path = output_dir / "build.lock.json"
     try:
@@ -645,6 +724,8 @@ def _validate_build_lock(
         scene_payload = json.loads(scene_spec_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return "BLENDER_BUILD_LOCK_SCENE_INVALID"
+    if payload.get("schema_version") != "1.2.0":
+        return "BLENDER_BUILD_LOCK_SCHEMA_INVALID"
     if payload.get("scene_id") != scene_payload.get("scene_id"):
         return "BLENDER_BUILD_LOCK_SCENE_ID_MISMATCH"
     if not isinstance(payload.get("build_id"), str) or not isinstance(
@@ -657,6 +738,14 @@ def _validate_build_lock(
         return "BLENDER_BUILD_LOCK_WORKER_MISMATCH"
     if payload.get("worker_bundle") != worker_bundle_snapshot:
         return "BLENDER_BUILD_LOCK_WORKER_BUNDLE_MISMATCH"
+    try:
+        trusted_inputs = _trusted_input_evidence(scene_payload, project_root)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return "BLENDER_BUILD_LOCK_TRUSTED_INPUTS_UNREADABLE"
+    if payload.get("trusted_inputs") != trusted_inputs or payload.get(
+        "trusted_inputs_sha256"
+    ) != _canonical_json_sha256(trusted_inputs):
+        return "BLENDER_BUILD_LOCK_TRUSTED_INPUTS_MISMATCH"
     command_profile = payload.get("command_profile")
     if command_profile != {
         "background": True,
@@ -676,7 +765,10 @@ def _validate_build_lock(
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, dict):
         return "BLENDER_BUILD_LOCK_ARTIFACTS_INVALID"
-    for name in ("design.glb", "preview.png", "scene_metadata.json"):
+    required_names = ["design.glb", "preview.png", "scene_metadata.json"]
+    if (output_dir / "component_proofs.json").is_file():
+        required_names.append("component_proofs.json")
+    for name in required_names:
         evidence = artifacts.get(name)
         path = output_dir / name
         if (
@@ -686,6 +778,235 @@ def _validate_build_lock(
             or evidence.get("sha256") != _sha256(path)
         ):
             return f"BLENDER_BUILD_LOCK_ARTIFACT_MISMATCH:{name}"
+    return None
+
+
+def _build_lock_preparation_error(exc: OSError | TypeError | ValueError) -> str:
+    """Expose a useful failure class without leaking filesystem details."""
+
+    reason = str(exc).strip()
+    if (
+        not reason
+        or len(reason) > 160
+        or reason.upper() != reason
+        or not all(character.isalnum() or character in "_:-" for character in reason)
+    ):
+        reason = "DETAILS_REDACTED"
+    return f"BLENDER_BUILD_LOCK_PREPARATION_ERROR:{type(exc).__name__}:{reason}"
+
+
+def _scene_snapshot_preparation_error(exc: OSError) -> str:
+    return f"BLENDER_SCENE_SPEC_SNAPSHOT_ERROR:{type(exc).__name__}:DETAILS_REDACTED"
+
+
+def _trusted_input_evidence(scene_payload: dict, project_root: Path) -> dict:
+    plan = scene_payload.get("assembly_plan") or {}
+    components = (plan.get("components") or []) if plan.get("schema_version") == "1.1.0" else []
+    manifests: list[dict] = []
+    builders: list[dict] = []
+    exact_assets: list[dict] = []
+    assets_root = (project_root / "assets").resolve()
+    manifests_root = (assets_root / "manifests").resolve()
+    if plan.get("schema_version") == "1.1.0":
+        actual_catalog_hash = _manifest_catalog_sha256(manifests_root)
+        if plan.get("manifest_catalog_sha256") != actual_catalog_hash:
+            raise ValueError("ASSET_MANIFEST_CATALOG_HASH_MISMATCH")
+        builder_catalog_path = assets_root / "capabilities" / "builder_profiles.json"
+        if not builder_catalog_path.is_file():
+            raise ValueError("BUILDER_PROFILE_CATALOG_INVALID")
+        builder_catalog = {
+            "file": "assets/capabilities/builder_profiles.json",
+            "sha256": _sha256(builder_catalog_path),
+        }
+    else:
+        builder_catalog = None
+    for component in components:
+        if not isinstance(component, dict):
+            raise ValueError("ASSEMBLY_COMPONENT_INVALID")
+        role_id = str(component.get("role_id") or "")
+        snapshot = component.get("manifest_snapshot")
+        builder = component.get("builder_profile")
+        if not role_id or not isinstance(snapshot, dict) or not isinstance(builder, dict):
+            raise ValueError("ASSEMBLY_TRUSTED_INPUT_SNAPSHOT_MISSING")
+        snapshot_hash = snapshot.get("snapshot_sha256")
+        if snapshot_hash != _canonical_json_sha256(
+            {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
+        ):
+            raise ValueError("ASSET_MANIFEST_SNAPSHOT_HASH_MISMATCH")
+        profile_hash = builder.get("profile_sha256")
+        if profile_hash != _canonical_json_sha256(
+            {key: value for key, value in builder.items() if key != "profile_sha256"}
+        ):
+            raise ValueError("BUILDER_PROFILE_SNAPSHOT_HASH_MISMATCH")
+        manifest_file_name = snapshot.get("manifest_file_name")
+        if (
+            not isinstance(manifest_file_name, str)
+            or Path(manifest_file_name).name != manifest_file_name
+        ):
+            raise ValueError("ASSET_MANIFEST_PATH_INVALID")
+        manifest_path = (manifests_root / manifest_file_name).resolve()
+        if manifest_path.parent != manifests_root or not manifest_path.is_file():
+            raise ValueError("ASSET_MANIFEST_PATH_OUTSIDE_CATALOG")
+        actual_manifest_hash = _sha256(manifest_path)
+        if actual_manifest_hash != snapshot.get("source_manifest_sha256"):
+            raise ValueError("ASSET_MANIFEST_SOURCE_HASH_MISMATCH")
+        manifests.append(
+            {
+                "role_id": role_id,
+                "asset_id": snapshot.get("asset_id"),
+                "file": f"assets/manifests/{manifest_file_name}",
+                "source_sha256": actual_manifest_hash,
+                "snapshot_sha256": snapshot_hash,
+                "generation_mode": snapshot.get("generation_mode"),
+            }
+        )
+        builders.append(
+            {
+                "role_id": role_id,
+                "profile_id": builder.get("profile_id"),
+                "profile_sha256": profile_hash,
+                "worker_handler": builder.get("worker_handler"),
+            }
+        )
+        if snapshot.get("generation_mode") != "imported_glb_exact":
+            continue
+        asset_file = snapshot.get("asset_file")
+        if not isinstance(asset_file, str):
+            raise ValueError("EXACT_IMPORT_ASSET_PATH_INVALID")
+        relative_asset_path = Path(asset_file)
+        if relative_asset_path.is_absolute() or ".." in relative_asset_path.parts:
+            raise ValueError("EXACT_IMPORT_ASSET_PATH_INVALID")
+        asset_path = (project_root / relative_asset_path).resolve()
+        try:
+            asset_path.relative_to(assets_root)
+        except ValueError as exc:
+            raise ValueError("EXACT_IMPORT_ASSET_PATH_OUTSIDE_CATALOG") from exc
+        if not asset_path.is_file():
+            raise ValueError("EXACT_IMPORT_ASSET_FILE_MISSING")
+        actual_asset_hash = _sha256(asset_path)
+        if actual_asset_hash != snapshot.get("verified_file_sha256"):
+            raise ValueError("EXACT_IMPORT_ASSET_HASH_MISMATCH")
+        exact_assets.append(
+            {
+                "role_id": role_id,
+                "asset_id": snapshot.get("asset_id"),
+                "file": relative_asset_path.as_posix(),
+                "sha256": actual_asset_hash,
+                "units": snapshot.get("units"),
+            }
+        )
+    operations = [
+        {
+            "operation_id": operation.get("operation_id"),
+            "operation_sha256": operation.get("operation_sha256"),
+        }
+        for operation in plan.get("operations", [])
+        if isinstance(operation, dict)
+    ]
+    geometry_programs = [
+        {
+            "program_id": program.get("program_id"),
+            "program_sha256": _canonical_json_sha256(program),
+        }
+        for program in scene_payload.get("geometry_programs", [])
+        if isinstance(program, dict)
+    ]
+    return {
+        "assembly_plan_schema_version": plan.get("schema_version"),
+        "manifest_catalog_sha256": plan.get("manifest_catalog_sha256"),
+        "builder_catalog": builder_catalog,
+        "manifests": sorted(manifests, key=lambda item: item["role_id"]),
+        "builder_profiles": sorted(builders, key=lambda item: item["role_id"]),
+        "exact_assets": sorted(exact_assets, key=lambda item: item["role_id"]),
+        "assembly_operations": sorted(operations, key=lambda item: str(item["operation_id"])),
+        "geometry_programs": sorted(
+            geometry_programs,
+            key=lambda item: str(item["program_id"]),
+        ),
+    }
+
+
+def _manifest_catalog_sha256(manifests_root: Path) -> str:
+    entries = [
+        {
+            "filename": path.name,
+            "content": json.loads(path.read_text(encoding="utf-8")),
+        }
+        for path in sorted(manifests_root.glob("*.json"))
+    ]
+    return hashlib.sha256(
+        json.dumps(entries, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _canonical_json_sha256(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
+def _validate_component_proof_artifact(
+    output_dir: Path,
+    scene: SceneSpec,
+    metadata: dict,
+    *,
+    required: bool,
+) -> str | None:
+    proof_path = output_dir / "component_proofs.json"
+    proof_metadata = metadata.get("component_proof")
+    if not required and not proof_path.exists() and proof_metadata is None:
+        return None
+    if not proof_path.is_file() or not isinstance(proof_metadata, dict):
+        return "BLENDER_COMPONENT_PROOF_MISSING"
+    try:
+        payload = json.loads(proof_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "BLENDER_COMPONENT_PROOF_INVALID"
+    expected_report_hash = payload.get("report_sha256")
+    unsigned = {key: value for key, value in payload.items() if key != "report_sha256"}
+    actual_report_hash = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    if (
+        payload.get("schema_version") != "1.0.0"
+        or payload.get("scene_id") != scene.scene_id
+        or expected_report_hash != actual_report_hash
+        or proof_metadata.get("report_sha256") != expected_report_hash
+        or proof_metadata.get("sha256") != _sha256(proof_path)
+        or proof_metadata.get("passed") is not True
+    ):
+        return "BLENDER_COMPONENT_PROOF_HASH_OR_IDENTITY_MISMATCH"
+    components = payload.get("components")
+    programs = payload.get("geometry_programs")
+    if not isinstance(components, list) or not isinstance(programs, list):
+        return "BLENDER_COMPONENT_PROOF_SET_INVALID"
+    expected_roles = (
+        {component.role_id for component in scene.assembly_plan.components}
+        if scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
+        else set()
+    )
+    if {item.get("role_id") for item in components} != expected_roles:
+        return "BLENDER_COMPONENT_PROOF_ROLE_SET_MISMATCH"
+    if {item.get("geometry_program", {}).get("program_id") for item in programs} != {
+        program.program_id for program in scene.geometry_programs
+    }:
+        return "BLENDER_GEOMETRY_PROGRAM_PROOF_SET_MISMATCH"
+    proof_strategies = {"reuse", "adapt", "compose", "procedural_generate"}
+    if any(item.get("strategy") not in proof_strategies for item in [*components, *programs]):
+        return "BLENDER_COMPONENT_PROOF_STRATEGY_INVALID"
+    if any(item.get("qa", {}).get("passed") is not True for item in [*components, *programs]):
+        return "BLENDER_COMPONENT_PROOF_QA_FAILED"
+    if payload.get("operation_execution", {}).get("passed") is not True:
+        return "BLENDER_ASSEMBLY_OPERATION_EXECUTION_PROOF_FAILED"
     return None
 
 

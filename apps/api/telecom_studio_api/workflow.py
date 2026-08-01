@@ -15,12 +15,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.llm_provenance import (
+    LLMDecisionCandidate,
+    LLMDecisionLinks,
+    LLMDecisionProvenance,
+)
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
 from core.contracts.validation import ValidationReport
 from core.orchestration import DesignOrchestrator, OrchestratorResult
-from core.performance import requirements_hash
+from core.performance import requirements_confirmation_hash
 from core.rag.planning import SUPPORTED_PLANNING_HINT_FIELDS
 from core.services.asset_registry import AssetRegistry
 from core.services.cleanup_service import CleanupService
@@ -994,7 +999,11 @@ class WorkflowService:
                 extraction.requirements.model_dump() if extraction.requirements else None
             ),
             "requirements_hash": (
-                requirements_hash(extraction.requirements)
+                requirements_confirmation_hash(
+                    extraction.requirements,
+                    requirements_text=requirements_text,
+                    detail_level=detail_level,
+                )
                 if extraction.requirements is not None
                 else None
             ),
@@ -1192,6 +1201,17 @@ class WorkflowService:
             activate=False,
         )
         version_output_dir = self.versioning.version_artifacts_dir(workflow_id, version.version_id)
+        llm_decision_provenance = (
+            _edit_llm_decision_provenance(
+                workflow_id=workflow_id,
+                version_id=version.version_id,
+                parent_version_id=active_version.version_id,
+                edit_prompt=edit_prompt,
+                adaptation_decision=adaptation_decision,
+            )
+            if adaptation_decision is not None
+            else None
+        )
         self._emit_workflow_event(
             workflow_id,
             "version_created",
@@ -1205,7 +1225,7 @@ class WorkflowService:
             workflow_id=workflow_id,
             scene=patched_scene,
             output_dir=version_output_dir,
-            detail_level="high",
+            detail_level=patched_scene.detail_level,
             revision_id=version.version_id,
         )
         self._enforce_completion_proof(result)
@@ -1221,6 +1241,11 @@ class WorkflowService:
                 version_output_dir / "adaptation_capabilities.json",
                 adaptation_decision.capabilities.model_dump(mode="json"),
             )
+        if llm_decision_provenance is not None:
+            self._write_json(
+                version_output_dir / "llm_decision_provenance.json",
+                llm_decision_provenance.model_dump(mode="json"),
+            )
         self._write_status(
             workflow_id,
             result.status,
@@ -1228,6 +1253,7 @@ class WorkflowService:
             result,
             version_id=version.version_id,
             active_version_id=self.versioning.active_version_id(workflow_id),
+            llm_decision_provenance=llm_decision_provenance,
         )
         self._make_archive(version_output_dir)
         self._write_status(
@@ -1237,6 +1263,7 @@ class WorkflowService:
             result,
             version_id=version.version_id,
             active_version_id=self.versioning.active_version_id(workflow_id),
+            llm_decision_provenance=llm_decision_provenance,
         )
         version_status = self._read_json(version_output_dir / "status.json")
         self.versioning.update_version(
@@ -1248,6 +1275,7 @@ class WorkflowService:
             artifacts=version_status.get("artifacts", {}),
             qa_score=result.qa_report.score if result.qa_report else None,
             generation_mode=result.generation.mode if result.generation else None,
+            llm_decision_provenance=llm_decision_provenance,
             active=False,
         )
 
@@ -1305,6 +1333,7 @@ class WorkflowService:
                 llm_provider=patch.edit_llm_provider,
                 llm_fallback_used=patch.edit_llm_fallback_used,
                 llm_fallback_reason=patch.edit_llm_fallback_reason,
+                llm_decision_provenance=llm_decision_provenance,
                 errors=result.report.errors,
                 warnings=[*validation_report.warnings, *result.report.warnings],
             )
@@ -1316,6 +1345,7 @@ class WorkflowService:
             result,
             version_id=version.version_id,
             active_version_id=version.version_id,
+            llm_decision_provenance=llm_decision_provenance,
         )
         self.versioning.commit_active_version(workflow_id, version.version_id)
         self._run_after_canonical_commit(
@@ -1356,6 +1386,7 @@ class WorkflowService:
             llm_provider=patch.edit_llm_provider,
             llm_fallback_used=patch.edit_llm_fallback_used,
             llm_fallback_reason=patch.edit_llm_fallback_reason,
+            llm_decision_provenance=llm_decision_provenance,
             warnings=[*validation_report.warnings, *result.report.warnings],
         )
 
@@ -1437,6 +1468,11 @@ class WorkflowService:
             "llm_available": llm["llm_available"],
             "llm_fallback_used": result.llm_fallback_used,
             "llm_fallback_reason": llm["llm_fallback_reason"],
+            "llm_decision_provenance": (
+                result.llm_decision_provenance.model_dump(mode="json")
+                if result.llm_decision_provenance
+                else None
+            ),
             "errors": [e.model_dump() for e in result.errors],
             "warnings": [w.model_dump() for w in result.warnings],
             "viewer_bundle_url": f"/designs/{result.workflow_id}/viewer-bundle",
@@ -1465,6 +1501,11 @@ class WorkflowService:
                 "artifacts": v.artifacts,
                 "qa_score": v.qa_score,
                 "generation_mode": v.generation_mode,
+                "llm_decision_provenance": (
+                    v.llm_decision_provenance.model_dump(mode="json")
+                    if v.llm_decision_provenance
+                    else None
+                ),
             }
             for v in versions
         ]
@@ -1488,6 +1529,11 @@ class WorkflowService:
                 ),
                 "qa_score": v.qa_score,
                 "generation_mode": v.generation_mode,
+                "llm_decision_provenance": (
+                    v.llm_decision_provenance.model_dump(mode="json")
+                    if v.llm_decision_provenance
+                    else None
+                ),
             }
             for v in versions
         ]
@@ -1717,6 +1763,7 @@ class WorkflowService:
         result: OrchestratorResult,
         version_id: str | None = None,
         active_version_id: str | None = None,
+        llm_decision_provenance: LLMDecisionProvenance | None = None,
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
@@ -1726,13 +1773,20 @@ class WorkflowService:
         metrics = dict(result.metrics)
         metrics.setdefault("started_at", created_at)
         llm_available = llm_available_from_workflow_service(self)
-        llm_reason = llm_fallback_reason(
-            provider=result.llm_provider,
-            fallback_used=result.llm_fallback_used,
-            use_llm=metrics.get("use_llm"),
-            error=result.llm_error,
-            llm_available=llm_available,
-        )
+        effective_llm_provider = result.llm_provider
+        effective_llm_fallback_used = result.llm_fallback_used
+        if llm_decision_provenance is not None:
+            effective_llm_provider = _provenance_provider_label(llm_decision_provenance)
+            effective_llm_fallback_used = llm_decision_provenance.fallback_used
+            llm_reason = llm_decision_provenance.fallback_reason
+        else:
+            llm_reason = llm_fallback_reason(
+                provider=result.llm_provider,
+                fallback_used=result.llm_fallback_used,
+                use_llm=metrics.get("use_llm"),
+                error=result.llm_error,
+                llm_available=llm_available,
+            )
         artifacts = {
             "requirements_spec": str(output_dir / "requirements_spec.json"),
             "extraction_report": str(output_dir / "extraction_report.json"),
@@ -1759,6 +1813,7 @@ class WorkflowService:
             "glb": str(output_dir / "design.glb"),
             "preview": str(output_dir / "preview.png"),
             "metadata": str(output_dir / "scene_metadata.json"),
+            "component_proofs": str(output_dir / "component_proofs.json"),
             "build_lock": str(output_dir / "build.lock.json"),
             "download": str(output_dir / "artifacts.zip"),
             "trace": str(output_dir / "workflow_trace.json"),
@@ -1766,6 +1821,7 @@ class WorkflowService:
             "scene_diff": str(output_dir / "scene_diff.json"),
             "adaptation_plan": str(output_dir / "adaptation_plan.json"),
             "adaptation_capabilities": str(output_dir / "adaptation_capabilities.json"),
+            "llm_decision_provenance": str(output_dir / "llm_decision_provenance.json"),
         }
         payload = {
             "workflow_id": workflow_id,
@@ -1775,12 +1831,15 @@ class WorkflowService:
             "active_version_id": active_version_id,
             "artifacts": artifacts,
             "extraction_provider": extraction_provider_label(
-                result.llm_provider, result.llm_fallback_used, llm_reason
+                effective_llm_provider, effective_llm_fallback_used, llm_reason
             ),
-            "llm_provider": result.llm_provider,
+            "llm_provider": effective_llm_provider,
             "llm_available": llm_available,
-            "llm_fallback_used": result.llm_fallback_used,
+            "llm_fallback_used": effective_llm_fallback_used,
             "llm_fallback_reason": llm_reason,
+            "llm_decision_provenance": (
+                llm_decision_provenance.model_dump(mode="json") if llm_decision_provenance else None
+            ),
             "rag_context_count": len(result.rag_context),
             "rag_planning_summary": _rag_planning_summary(result),
             "rag_reranker_provider": rag_runtime["rag_reranker_provider"],
@@ -2566,8 +2625,31 @@ def _public_asset_imports(asset_imports: object) -> list[dict] | None:
         public.pop("resolved_path", None)
         public.pop("local_path", None)
         public.pop("filesystem_path", None)
+        if "asset_file" in public:
+            public["asset_file"] = _public_asset_file(public["asset_file"])
         public_imports.append(public)
     return public_imports
+
+
+def _public_asset_file(asset_file: object) -> str | None:
+    if not isinstance(asset_file, str) or not asset_file.strip():
+        return None
+
+    normalized = asset_file.strip().replace("\\", "/")
+    if normalized.startswith("~") or "://" in normalized:
+        return None
+    parts = [part for part in normalized.split("/") if part not in {"", "."}]
+    if ".." in parts:
+        return None
+
+    asset_roots = [index for index, part in enumerate(parts) if part == "assets"]
+    if asset_roots:
+        return "/".join(parts[asset_roots[-1] :])
+
+    windows_absolute = len(normalized) >= 3 and normalized[1] == ":" and normalized[2] == "/"
+    if normalized.startswith("/") or windows_absolute:
+        return None
+    return "/".join(parts)
 
 
 def _public_artifact_urls(
@@ -2957,6 +3039,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "glb": "design.glb",
     "preview": "preview.png",
     "metadata": "scene_metadata.json",
+    "component_proofs": "component_proofs.json",
     "build_lock": "build.lock.json",
     "download": "artifacts.zip",
     "trace": "workflow_trace.json",
@@ -2964,4 +3047,76 @@ _ALLOWED_ARTIFACT_FILES = {
     "scene_diff": "scene_diff.json",
     "adaptation_plan": "adaptation_plan.json",
     "adaptation_capabilities": "adaptation_capabilities.json",
+    "llm_decision_provenance": "llm_decision_provenance.json",
 }
+
+
+def _edit_llm_decision_provenance(
+    *,
+    workflow_id: str,
+    version_id: str,
+    parent_version_id: str,
+    edit_prompt: str,
+    adaptation_decision,
+) -> LLMDecisionProvenance:
+    provider_label = adaptation_decision.planner_provider
+    provider, model = _split_provider_label(provider_label)
+    tools = list(
+        dict.fromkeys(operation.execution_tool for operation in adaptation_decision.plan.operations)
+    )
+    is_geometry_revision = "geometry_program_rebuild" in tools
+    version_query = f"version_id={version_id}"
+    return LLMDecisionProvenance(
+        workflow_id=workflow_id,
+        version_id=version_id,
+        parent_version_id=parent_version_id,
+        provider=provider,
+        model=model,
+        capability_called=(
+            "geometry_program_revision" if is_geometry_revision else "scene_adaptation"
+        ),
+        structured_decision=adaptation_decision.plan.model_dump(mode="json"),
+        candidates_considered=[
+            LLMDecisionCandidate(
+                capability_id=candidate.capability_id,
+                asset_id=candidate.asset_id,
+                profile_id=candidate.profile_id,
+                path=candidate.path,
+                execution_tool=candidate.execution_tool,
+                value_type=candidate.value_type,
+                minimum=candidate.minimum,
+                maximum=candidate.maximum,
+                allowed_values=candidate.allowed_values,
+            )
+            for candidate in adaptation_decision.capabilities.capabilities
+        ],
+        strategy_selected=tools,
+        rationale=[operation.rationale for operation in adaptation_decision.plan.operations],
+        fallback_used=adaptation_decision.planner_fallback_used,
+        fallback_reason=adaptation_decision.planner_fallback_reason,
+        timestamp=_utc_now_iso(),
+        decision_contract_version=(
+            "geometry_program_revision@1.0.0"
+            if is_geometry_revision
+            else "telecom_asset_adaptation_plan@1.0.0"
+        ),
+        source_prompt_sha256=hashlib.sha256(edit_prompt.encode("utf-8")).hexdigest(),
+        capability_catalog_hash=adaptation_decision.capabilities.catalog_hash,
+        links=LLMDecisionLinks(
+            blueprint_url=(f"/designs/{workflow_id}/artifacts/design_blueprint?{version_query}"),
+            scene_spec_url=f"/designs/{workflow_id}/artifacts/scene_spec?{version_query}",
+            version_url=f"/designs/{workflow_id}/versions",
+        ),
+    )
+
+
+def _split_provider_label(provider_label: str) -> tuple[str, str | None]:
+    if provider_label.startswith("groq:"):
+        return "groq", provider_label.removeprefix("groq:")
+    return provider_label, None
+
+
+def _provenance_provider_label(provenance: LLMDecisionProvenance) -> str:
+    if provenance.model:
+        return f"{provenance.provider}:{provenance.model}"
+    return provenance.provider

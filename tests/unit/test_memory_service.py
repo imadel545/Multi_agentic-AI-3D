@@ -1,11 +1,13 @@
 import json
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from qdrant_client.models import Distance, VectorParams
 
+from apps.api.telecom_studio_api.runtime_contract import memory_status
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.memory import MemoryIndexResult
 from core.contracts.requirements import RequirementSpec
@@ -168,13 +170,68 @@ def test_memory_init_invalidates_legacy_fallback_reusable_rows(tmp_path: Path) -
     assert reloaded.recall(requirements).similar_workflows == []
 
 
+def test_memory_outbox_schema_migrates_without_deleting_legacy_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-memory.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE workflow_memory (
+                workflow_id TEXT PRIMARY KEY,
+                network_type TEXT NOT NULL,
+                tower_type TEXT NOT NULL,
+                sector_count INTEGER NOT NULL,
+                generation_mode TEXT NOT NULL,
+                qa_score REAL NOT NULL,
+                warnings_json TEXT NOT NULL,
+                scene_spec_path TEXT NOT NULL,
+                validation_report_path TEXT NOT NULL DEFAULT '',
+                reusable_pattern INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workflow_memory VALUES (
+                'wf_legacy_preserved', '5G', 'lattice_tower', 3, 'real_blender',
+                1.0, '[]', 'scene.json', 'validation.json', 1, 1
+            )
+            """
+        )
+
+    service = MemoryService(db_path, auto_reconcile=False)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM workflow_memory").fetchone()[0] == 1
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(memory_vector_outbox)").fetchall()
+        }
+        assert conn.execute("SELECT COUNT(*) FROM memory_vector_outbox").fetchone()[0] == 0
+    assert {
+        "operation_key",
+        "status",
+        "retry_count",
+        "last_error",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimensions",
+        "collection_target",
+        "source_fingerprint",
+    }.issubset(columns)
+    assert service.vector_outbox_status()["status"] == "not_configured"
+
+
 def test_memory_does_not_store_large_artifacts(tmp_path: Path) -> None:
     rag_service = RagService(
         project_root=Path.cwd(),
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
     )
-    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
     requirements, scene, report, generation = _memory_inputs("wf_no_large_outputs")
     generation = _real_generation().model_copy(
         update={
@@ -195,6 +252,7 @@ def test_memory_does_not_store_large_artifacts(tmp_path: Path) -> None:
         scene_spec_path=tmp_path / "scene_spec.json",
         validation_report_path=tmp_path / "validation_report.json",
     )
+    reconciliation = service.reconcile_vector_outbox()
 
     with sqlite3.connect(tmp_path / "telecom_memory.db") as conn:
         sqlite_dump = "\n".join(conn.iterdump())
@@ -211,6 +269,7 @@ def test_memory_does_not_store_large_artifacts(tmp_path: Path) -> None:
         assert forbidden not in sqlite_dump
         assert forbidden not in indexed_dump
     assert str(tmp_path) not in indexed_dump
+    assert reconciliation["status"] == "succeeded"
     assert service.last_index_result.status == "indexed"
     assert service.last_index_result.indexed_collections["design_memory"] == 1
 
@@ -221,7 +280,11 @@ def test_failed_workflow_is_diagnostic_only_and_issues_are_deduplicated(tmp_path
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
     )
-    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
     requirements, scene, report, generation = _memory_inputs("wf_failed_memory")
     duplicate = ValidationIssue(
         code="BLENDER_FALLBACK_USED",
@@ -245,12 +308,14 @@ def test_failed_workflow_is_diagnostic_only_and_issues_are_deduplicated(tmp_path
         scene_spec_path=tmp_path / "scene_spec.json",
         validation_report_path=tmp_path / "validation_report.json",
     )
+    reconciliation = service.reconcile_vector_outbox()
 
     assert summary is not None
     assert summary.reusable_pattern is False
     assert len(summary.warnings) == 1
     assert service.stats()["design_memory_count"] == 0
     assert service.stats()["error_memory_count"] == 1
+    assert reconciliation["status"] == "succeeded"
     assert service.last_index_result.indexed_collections["design_memory"] == 0
     assert service.last_index_result.indexed_collections["error_memory"] == 1
 
@@ -267,7 +332,11 @@ def test_vector_memory_reindex_compacts_sqlite_and_preserves_legacy_collections(
         collection_name="design_memory",
         vectors_config=VectorParams(size=384, distance=Distance.COSINE),
     )
-    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
     for workflow_id in ("wf_pattern_first", "wf_pattern_second"):
         requirements, scene, report, _ = _memory_inputs(workflow_id)
         service.write_workflow_summary(
@@ -293,6 +362,11 @@ def test_vector_memory_reindex_compacts_sqlite_and_preserves_legacy_collections(
         "error_memory": 0,
         "document_pack_memory": 0,
     }
+    assert first["skipped_source_counts"] == {
+        "design_memory": 0,
+        "error_memory": 0,
+        "document_pack_memory": 0,
+    }
     assert first["compacted_points"] == 1
     assert rag_service.client.collection_exists("design_memory")
     compatibility = service.index_health()["vector_compatibility"]
@@ -313,6 +387,66 @@ def test_vector_memory_reindex_compacts_sqlite_and_preserves_legacy_collections(
     rag_service.close()
 
 
+def test_vector_memory_skips_invalid_legacy_scene_without_stopping_projection(
+    tmp_path: Path,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    db_path = tmp_path / "telecom_memory.db"
+    service = MemoryService(db_path, rag_service=rag_service, auto_reconcile=False)
+    requirements, scene, report, _ = _memory_inputs("wf_valid_memory")
+    service.write_workflow_summary(
+        workflow_id="wf_valid_memory",
+        requirements=requirements,
+        scene=scene,
+        report=report.model_copy(update={"warnings": []}),
+        generation=_real_generation(),
+        scene_spec_path=tmp_path / "valid_scene.json",
+        validation_report_path=tmp_path / "valid_validation.json",
+    )
+    invalid_scene = scene.model_dump(mode="json")
+    invalid_scene["network_type"] = "unsupported_legacy_network"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO design_memory (
+                workflow_id, scene_id, network_type, tower_type, scene_spec_json,
+                validation_report_json, qa_score, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "wf_invalid_legacy",
+                "scene_invalid_legacy",
+                "unsupported_legacy_network",
+                "lattice_tower",
+                json.dumps(invalid_scene),
+                "{}",
+                1.0,
+                int(time.time()),
+            ),
+        )
+
+    projection = service.reindex_vector_memory()
+
+    assert projection["status"] == "indexed"
+    assert projection["source_counts"]["design_memory"] == 2
+    assert projection["skipped_source_counts"]["design_memory"] == 1
+    assert projection["candidate_counts"]["design_memory"] == 1
+    assert projection["compacted_points"] == 0
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM design_memory WHERE workflow_id = 'wf_invalid_legacy'"
+            ).fetchone()[0]
+            == 1
+        )
+    service.close()
+    rag_service.close()
+
+
 def test_purge_workflow_removes_sqlite_memory_and_invalidates_vector_projection(
     tmp_path: Path,
 ) -> None:
@@ -321,7 +455,11 @@ def test_purge_workflow_removes_sqlite_memory_and_invalidates_vector_projection(
         qdrant_path=tmp_path / "qdrant",
         embedding_provider_name="deterministic",
     )
-    service = MemoryService(tmp_path / "telecom_memory.db", rag_service=rag_service)
+    service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        auto_reconcile=False,
+    )
     requirements = None
     for workflow_id in ("wf_delete", "wf_keep"):
         requirements, scene, report, _ = _memory_inputs(workflow_id)
@@ -344,16 +482,18 @@ def test_purge_workflow_removes_sqlite_memory_and_invalidates_vector_projection(
     assert report["status"] == "purged"
     assert report["deleted"]["workflow_memory"] == 1
     assert report["deleted"]["design_memory"] == 1
-    assert report["vector_projection"]["status"] == "invalidated"
+    assert report["vector_projection"]["status"] == "pending"
     assert service.stats()["workflow_memory_count"] == 1
     assert service.stats()["design_memory_count"] == 1
-    assert not rag_service.client.collection_exists(active_collection)
-    assert not (tmp_path / "qdrant" / "qdrant_runtime_memory_state.json").exists()
+    assert rag_service.client.collection_exists(active_collection)
     assert requirements is not None
     assert [row["workflow_id"] for row in service.recall(requirements).similar_workflows] == [
         "wf_keep"
     ]
 
+    recovered = service.reconcile_vector_outbox()
+    assert recovered["status"] == "succeeded"
+    assert not rag_service.client.collection_exists(active_collection)
     rebuilt = service.reindex_vector_memory()
     assert rebuilt["status"] == "indexed"
     results = rag_service.search(
@@ -361,6 +501,206 @@ def test_purge_workflow_removes_sqlite_memory_and_invalidates_vector_projection(
         collection="design_memory",
     )
     assert results[0].payload["occurrence_count"] == 1
+    rag_service.close()
+
+
+def test_vector_outbox_recovers_qdrant_failure_without_duplicates(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    original_reindex = rag_service.reindex_runtime_documents
+    attempt_entered = threading.Event()
+    release_failed_attempt = threading.Event()
+    qdrant_available = threading.Event()
+
+    def switchable_reindex(*args, **kwargs):
+        attempt_entered.set()
+        if not qdrant_available.is_set():
+            release_failed_attempt.wait(timeout=5)
+            raise ConnectionError("injected qdrant outage " + ("x" * 800))
+        return original_reindex(*args, **kwargs)
+
+    monkeypatch.setattr(rag_service, "reindex_runtime_documents", switchable_reindex)
+    db_path = tmp_path / "telecom_memory.db"
+    service = MemoryService(
+        db_path,
+        rag_service=rag_service,
+        reconcile_retry_initial_s=0.2,
+        reconcile_retry_max_s=0.2,
+    )
+    requirements, scene, report, _ = _memory_inputs("wf_outbox_recovery")
+
+    service.write_workflow_summary(
+        workflow_id="wf_outbox_recovery",
+        requirements=requirements,
+        scene=scene,
+        report=report.model_copy(update={"warnings": []}),
+        generation=_real_generation(),
+        scene_spec_path=tmp_path / "scene.json",
+        validation_report_path=tmp_path / "validation.json",
+    )
+
+    assert attempt_entered.wait(timeout=5)
+    assert service.vector_outbox_status()["status"] == "attempt"
+    partial_status = memory_status(service)
+    assert partial_status["memory_status"] == "degraded:vector_projection_pending"
+    assert partial_status["memory_vector_status"] == "attempt"
+    with sqlite3.connect(db_path) as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM workflow_memory WHERE workflow_id = ?",
+                ("wf_outbox_recovery",),
+            ).fetchone()[0]
+            == 1
+        )
+    release_failed_attempt.set()
+    assert _wait_until(lambda: service.vector_outbox_status()["status"] == "failed")
+    failed = service.vector_outbox_status()
+    assert failed["degraded"] is True
+    assert failed["retry_count"] == 1
+    assert failed["last_error_code"] == "ConnectionError"
+    assert failed["embedding_provider"] == "hashing-1024"
+    assert failed["embedding_model"] == "hashing-1024"
+    assert failed["embedding_dimensions"] == 1024
+    assert failed["collection"] == "design_memory,error_memory,document_pack_memory"
+    assert len(failed["source_fingerprint"]) == 64
+    failed_status = memory_status(service)
+    assert failed_status["memory_status"] == "degraded:vector_index"
+    assert failed_status["memory_vector_status"] == "failed"
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT status, retry_count, last_error, embedding_input_profile
+            FROM memory_vector_outbox
+            WHERE operation_key = 'runtime_memory_projection'
+            """
+        ).fetchone()
+    assert row[0] == "failed"
+    assert row[1] == 1
+    assert 0 < len(row[2]) <= 512
+    assert row[3] == "symmetric_v1"
+
+    qdrant_available.set()
+    assert _wait_until(lambda: service.vector_outbox_status()["status"] == "succeeded")
+    succeeded = service.vector_outbox_status()
+    assert succeeded["degraded"] is False
+    assert succeeded["retry_count"] == 2
+    assert succeeded["last_error_code"] is None
+    compatibility = service.index_health()["vector_compatibility"]
+    assert compatibility["status"] == "compatible"
+    recovered_status = memory_status(service)
+    assert recovered_status["memory_status"] == "available"
+    assert recovered_status["memory_vector_status"] == "compatible"
+    active_collection = compatibility["collections"]["design_memory"]["active_collection"]
+    assert rag_service.client.get_collection(active_collection).points_count == 1
+
+    idempotent_rebuild = service.reindex_vector_memory()
+    replacement_collection = service.index_health()["vector_compatibility"]["collections"][
+        "design_memory"
+    ]["active_collection"]
+    assert idempotent_rebuild["candidate_counts"]["design_memory"] == 1
+    assert rag_service.client.get_collection(replacement_collection).points_count == 1
+    results = rag_service.search(
+        "pylône treillis 5G trois secteurs",
+        collection="design_memory",
+    )
+    assert len(results) == 1
+    assert results[0].payload["occurrence_count"] == 1
+    service.close()
+    rag_service.close()
+
+
+def test_vector_outbox_startup_requeues_and_automatically_recovers_interrupted_attempt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    original_reindex = rag_service.reindex_runtime_documents
+    recovered_attempt_entered = threading.Event()
+    release_recovered_attempt = threading.Event()
+
+    def controlled_reindex(*args, **kwargs):
+        recovered_attempt_entered.set()
+        assert release_recovered_attempt.wait(timeout=5)
+        return original_reindex(*args, **kwargs)
+
+    monkeypatch.setattr(rag_service, "reindex_runtime_documents", controlled_reindex)
+    db_path = tmp_path / "telecom_memory.db"
+    service = MemoryService(db_path, rag_service=rag_service, auto_reconcile=False)
+    requirements, scene, report, _ = _memory_inputs("wf_interrupted_projection")
+    service.write_workflow_summary(
+        workflow_id="wf_interrupted_projection",
+        requirements=requirements,
+        scene=scene,
+        report=report.model_copy(update={"warnings": []}),
+        generation=_real_generation(),
+        scene_spec_path=tmp_path / "scene.json",
+        validation_report_path=tmp_path / "validation.json",
+    )
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE memory_vector_outbox SET status = 'attempt' WHERE operation_key = ?",
+            ("runtime_memory_projection",),
+        )
+    service.close()
+
+    recovered = MemoryService(
+        db_path,
+        rag_service=rag_service,
+        reconcile_retry_initial_s=0.05,
+        reconcile_retry_max_s=0.05,
+    )
+
+    assert recovered_attempt_entered.wait(timeout=5)
+    attempt = recovered.vector_outbox_status()
+    assert attempt["status"] == "attempt"
+    assert attempt["retry_count"] == 1
+    release_recovered_attempt.set()
+    assert _wait_until(lambda: recovered.vector_outbox_status()["status"] == "succeeded")
+    assert recovered.index_health()["vector_compatibility"]["status"] == "compatible"
+    recovered.close()
+    rag_service.close()
+
+
+def test_memory_service_start_reenables_reconciliation_after_close(tmp_path: Path) -> None:
+    rag_service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider_name="deterministic",
+    )
+    service = MemoryService(
+        tmp_path / "telecom_memory.db",
+        rag_service=rag_service,
+        reconcile_retry_initial_s=0.05,
+        reconcile_retry_max_s=0.05,
+    )
+    service.close()
+    requirements, scene, report, _ = _memory_inputs("wf_lifecycle_restart")
+
+    service.write_workflow_summary(
+        workflow_id="wf_lifecycle_restart",
+        requirements=requirements,
+        scene=scene,
+        report=report.model_copy(update={"warnings": []}),
+        generation=_real_generation(),
+        scene_spec_path=tmp_path / "scene.json",
+        validation_report_path=tmp_path / "validation.json",
+    )
+
+    assert service.vector_outbox_status()["status"] == "pending"
+    service.start()
+    assert _wait_until(lambda: service.vector_outbox_status()["status"] == "succeeded")
+    assert service.index_health()["vector_compatibility"]["status"] == "compatible"
+    service.close()
     rag_service.close()
 
 
@@ -418,3 +758,12 @@ def _real_generation() -> _GenerationResult:
         duration_ms=1,
         artifacts={},
     )
+
+
+def _wait_until(predicate, *, timeout_s: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return bool(predicate())
