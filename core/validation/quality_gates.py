@@ -95,6 +95,10 @@ def evaluate_post_blender_gate(
         and generation.status == "generated"
         and generation.mode == "real_blender"
     )
+    generic_geometry = bool(
+        glb_inspection
+        and "geometry_programs_present" in glb_inspection.checks
+    )
     checks = {
         "generation_mode_explicit": bool(generation and generation.mode),
         "real_blender_generation": allow_fallback or real_blender,
@@ -116,8 +120,6 @@ def evaluate_post_blender_gate(
             if warning.severity == "error"
         ],
         "glb_structure_valid": glb_inspection is not None and glb_inspection.structural_qa_passed,
-        "expected_objects_present": glb_inspection is not None
-        and glb_inspection.checks.get("expected_objects_present", False),
         "minimum_node_count_valid": glb_inspection is not None
         and glb_inspection.checks.get("minimum_node_count_valid", False),
         "real_blender_glb_parse_required": generation is not None
@@ -137,6 +139,26 @@ def evaluate_post_blender_gate(
         and preview_inspection is not None
         and (generation.mode != "real_blender" or preview_inspection.visual_quality_valid),
     }
+    if generic_geometry:
+        checks.update(
+            {
+                "expected_geometry_programs_present": bool(
+                    glb_inspection
+                    and glb_inspection.checks.get("geometry_programs_present", False)
+                ),
+                "geometry_program_mesh_coverage": bool(
+                    glb_inspection
+                    and glb_inspection.checks.get(
+                        "geometry_program_mesh_coverage", False
+                    )
+                ),
+            }
+        )
+    else:
+        checks["expected_objects_present"] = bool(
+            glb_inspection
+            and glb_inspection.checks.get("expected_objects_present", False)
+        )
     critical_errors = [name for name, passed in checks.items() if not passed]
     warnings = [warning.code for warning in qa_report.warnings] if qa_report else []
     if glb_inspection:

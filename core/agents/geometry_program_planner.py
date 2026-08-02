@@ -51,13 +51,14 @@ class GeometryProgramPlanner:
         ] = "user_requirement",
         placement_context: str | None = None,
         maximum_dimensions_m: GeometryProgramVector3 | None = None,
+        schema_version: Literal["1.0.0", "2.0.0"] = "2.0.0",
     ) -> GeometryProgram:
         normalized_prompt = prompt.strip()
         if not normalized_prompt:
             raise ValueError("geometry-program prompt must not be empty")
         normalized_role = _program_identifier(semantic_role)
         normalized_request_id = _program_identifier(request_id or normalized_role)
-        program_id = f"{normalized_request_id}.llm_v1"
+        program_id = f"{normalized_request_id}.llm_v{schema_version.split('.', 1)[0]}"
         if quantity < 1 or quantity > 32:
             raise ValueError("geometry-program quantity must be in [1, 32]")
         prompt_hash = hashlib.sha256(normalized_prompt.encode("utf-8")).hexdigest()
@@ -94,7 +95,10 @@ class GeometryProgramPlanner:
                 "content": (
                     "You are the geometry-program specialist of a verified 3D design system. "
                     "Write a declarative meter-based geometry program, not Python and not prose. "
-                    "Use only the schema primitives, curves, instances, materials and transforms. "
+                    "Use only operations present in the supplied GeometryProgram schema. "
+                    "For V2 prefer profiles, extrusion, sweep, arrays, exact booleans, bounded "
+                    "modifiers, terrain, anchors, connectors and semantic groups when they improve "
+                    "functional construction. "
                     "Create coherent multi-part technical geometry with stable semantic roles. "
                     "Do not reference files, URLs, Blender operators, scripts or "
                     "undeclared assets. "
@@ -108,6 +112,7 @@ class GeometryProgramPlanner:
                 "role": "user",
                 "content": (
                     f"Required program_id: {program_id}\n"
+                    f"Required schema_version: {schema_version}\n"
                     f"Required semantic_role: {normalized_role}\n"
                     f"Required requested_quantity: {quantity}\n"
                     "Required maximum_dimensions_m: "
@@ -161,7 +166,7 @@ class GeometryProgramPlanner:
                                 "The strict decoder rejected the first attempt. Return one JSON "
                                 "object matching the requested GeometryProgram shape. Optional "
                                 "fields may be omitted; local validation remains fail-closed.\n\n"
-                                + _json_object_contract()
+                                + _json_object_contract(schema_version)
                             ),
                         },
                     ],
@@ -170,6 +175,7 @@ class GeometryProgramPlanner:
                 policy=self.policy,
             )
         pinned = {
+            "schema_version": schema_version,
             "program_id": program_id,
             "semantic_role": normalized_role,
             "requested_quantity": quantity,
@@ -205,6 +211,7 @@ class GeometryProgramPlanner:
                     quantity=quantity,
                     prompt_hash=prompt_hash,
                     maximum_dimensions_m=maximum_dimensions_payload,
+                    schema_version=schema_version,
                 )
                 candidate.update(
                     {
@@ -224,6 +231,7 @@ class GeometryProgramPlanner:
         quantity: int,
         prompt_hash: str,
         maximum_dimensions_m: dict[str, float] | None,
+        schema_version: Literal["1.0.0", "2.0.0"],
     ) -> dict[str, Any]:
         error_payload = validation_error.errors(
             include_url=False,
@@ -242,7 +250,8 @@ class GeometryProgramPlanner:
                             "Do not redesign it. Preserve valid geometry intent and correct every "
                             "reported schema error. Every vector must be an object with the "
                             "numeric keys x, y and z; every color must be an object with the "
-                            "numeric keys r, g, b and a. " + _json_object_contract()
+                            "numeric keys r, g, b and a. "
+                            + _json_object_contract(schema_version)
                         ),
                     },
                     {
@@ -251,7 +260,7 @@ class GeometryProgramPlanner:
                             f"Pinned program_id: {program_id}\n"
                             f"Pinned semantic_role: {semantic_role}\n"
                             f"Pinned requested_quantity: {quantity}\n"
-                            "Pinned schema_version: 1.0.0\n"
+                            f"Pinned schema_version: {schema_version}\n"
                             "Pinned authorship: llm_generated\n"
                             "Pinned generator_provider: groq\n"
                             f"Pinned generator_model: {self.groq.model}\n"
@@ -280,8 +289,25 @@ def _program_identifier(value: str) -> str:
     return normalized[:80]
 
 
-def _json_object_contract() -> str:
-    return """
+def _json_object_contract(schema_version: str = "2.0.0") -> str:
+    v2_contract = """
+- V2 profile node: kind="profile", points_m are XY objects and closed declares a reusable
+  transform-free profile.
+- V2 mesh operations: extrude(profile_node_id, depth_m),
+  revolve(profile_node_id, angle_deg, segments), sweep(profile_node_id, path_points_m),
+  array(source_node_id, count, offset_m), boolean(left_node_id, right_node_id,
+  operation=union/difference/intersection, solver=exact), modifier(source_node_id,
+  modifier=bevel/solidify/mirror), and terrain(width_m, depth_m, columns, rows, heights_m).
+- V2 may declare anchors, connectors, semantic_groups and construction_node_ids. References
+  must resolve and the dependency graph must be acyclic. Use construction_node_ids for profiles,
+  cutters and intermediate sources that must not appear as final visible geometry.
+"""
+    version_contract = (
+        v2_contract
+        if schema_version == "2.0.0"
+        else "- V1 permits only primitive, curve and instance nodes."
+    )
+    return f"""
 GeometryProgram compact contract:
 - top-level keys: schema_version, program_id, semantic_role, units, authorship,
   requested_quantity, generator_provider, generator_model, structured_output_mode,
@@ -310,6 +336,7 @@ GeometryProgram compact contract:
   instances for repeated equal components.
 - assumptions and limitations are arrays of short JSON strings only, never objects.
 - deterministic_adjustments is backend-owned and must be an empty array.
+{version_contract}
 
 Example node list:
 [

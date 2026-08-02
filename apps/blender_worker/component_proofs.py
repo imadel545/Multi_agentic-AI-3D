@@ -226,6 +226,11 @@ def plan_operations(scene: dict) -> list[dict]:
 
 def _geometry_program_proof(bpy, program: dict) -> dict:
     program_id = str(program["program_id"])
+    geometry_program_profile = (
+        "typed_geometry_program_v2"
+        if str(program.get("schema_version")) == "2.0.0"
+        else "typed_geometry_program_v1"
+    )
     root = next(
         (
             obj
@@ -260,11 +265,12 @@ def _geometry_program_proof(bpy, program: dict) -> dict:
         "role_id": str(program["semantic_role"]),
         "origin": "geometry_program",
         "strategy": "procedural_generate",
-        "generation_strategy": "typed_geometry_program_v1",
+        "generation_strategy": geometry_program_profile,
         "asset_id": None,
         "manifest": None,
         "geometry_program": {
             "program_id": program_id,
+            "schema_version": str(program.get("schema_version")),
             "program_sha256": program_sha256,
             "authorship": program["authorship"],
             "generator_provider": program["generator_provider"],
@@ -274,7 +280,7 @@ def _geometry_program_proof(bpy, program: dict) -> dict:
             "node_ids": node_ids,
         },
         "builder": {
-            "profile_id": "typed_geometry_program_v1",
+            "profile_id": geometry_program_profile,
             "profile_sha256": program_sha256,
             "worker_handler": "geometry_program_compiler",
         },

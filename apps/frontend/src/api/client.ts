@@ -1,9 +1,11 @@
 import {
   AdaptationCapabilityCatalogSchema,
+  AssemblyPlanEvidenceSchema,
   AssetInventorySchema,
   AssetLibrarySearchSchema,
   AssetLibrarySummarySchema,
   CreateDesignResponseSchema,
+  ComponentProofsSchema,
   CurrentOperationSchema,
   DocumentPackCapabilitiesSchema,
   DocumentExtractionSchema,
@@ -19,6 +21,7 @@ import {
   HealthSchema,
   LLMDecisionProvenanceSchema,
   ParseRequirementsResponseSchema,
+  RequirementSpecSchema,
   RollbackVersionResponseSchema,
   SceneAdaptationCapabilitiesSchema,
   StudioSummarySchema,
@@ -30,10 +33,12 @@ import {
   WorkflowStatusSchema,
   parseContract,
   type AdaptationCapabilityCatalog,
+  type AssemblyPlanEvidence,
   type AssetInventory,
   type AssetLibrarySearch,
   type AssetLibrarySummary,
   type CreateDesignResponse,
+  type ComponentProofs,
   type CurrentOperation,
   type DocumentPackCapabilities,
   type DocumentPackReview,
@@ -336,6 +341,31 @@ export class TelecomStudioApi {
       ViewerBundleSchema,
       await this.getJson(`/designs/${workflowId}/viewer-bundle`)
     );
+  }
+
+  async componentProofs(relativeUrl: string | null | undefined): Promise<ComponentProofs | null> {
+    const payload = await this.artifactJson(relativeUrl);
+    return payload === null
+      ? null
+      : parseContract("ComponentProofs", ComponentProofsSchema, payload);
+  }
+
+  async assemblyPlan(
+    relativeUrl: string | null | undefined
+  ): Promise<AssemblyPlanEvidence | null> {
+    const payload = await this.artifactJson(relativeUrl);
+    return payload === null
+      ? null
+      : parseContract("AssemblyPlanEvidence", AssemblyPlanEvidenceSchema, payload);
+  }
+
+  async requirementsSpec(
+    relativeUrl: string | null | undefined
+  ): Promise<RequirementSpec | null> {
+    const payload = await this.artifactJson(relativeUrl);
+    return payload === null
+      ? null
+      : parseContract("RequirementSpec", RequirementSpecSchema, payload);
   }
 
   async timelineSummary(workflowId: string): Promise<TimelineSummary> {

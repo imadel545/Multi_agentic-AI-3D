@@ -15,6 +15,50 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}) {
 }
 
 describe("TelecomStudioApi", () => {
+  it("loads and validates composition evidence from backend artifact URLs", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        schema_version: "1.0",
+        workflow_id: "wf_1",
+        components: [{
+          component_id: "tower_component",
+          role_id: "tower",
+          origin: "catalog",
+          strategy: "reuse",
+          generation_strategy: "reuse",
+          asset_id: "TOWER_REAL_1",
+          quantity: 1,
+          instances: [{
+            instance_id: "tower_1",
+            object_role: "tower",
+            semantic_root: "tower_REAL_1",
+            geometry_source: "asset_glb"
+          }]
+        }],
+        geometry_programs: []
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        schema_version: "1.0",
+        workflow_id: "wf_1",
+        selection_authority: "bounded_llm",
+        selection_provider: "groq",
+        selection_model: "openai/gpt-oss-120b",
+        components: [],
+        connections: [],
+        operations: []
+      }));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const proofs = await client.componentProofs("/designs/wf_1/artifacts/component_proofs.json");
+    const plan = await client.assemblyPlan("/designs/wf_1/artifacts/assembly_plan.json");
+
+    expect(proofs?.components[0]?.instances[0]?.semantic_root).toBe("tower_REAL_1");
+    expect(plan?.selection_authority).toBe("bounded_llm");
+    expect(fetcher).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/designs/wf_1/artifacts/component_proofs.json"
+    );
+  });
   it("rejects inconsistent geometry-program aggregate counts", () => {
     expect(() =>
       parseContract("ViewerBundle", ViewerBundleSchema, {

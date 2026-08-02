@@ -46,6 +46,10 @@ from apps.api.telecom_studio_api.workflow import (
     WorkflowService,
     WorkflowStorageError,
 )
+from core.agents.cognitive_domain_router import (
+    ConservativeDesignDomainRouter,
+    GroqDesignDomainRouter,
+)
 from core.agents.geometry_program_planner import GeometryProgramPlanner
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
@@ -72,6 +76,8 @@ from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound,
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 from core.services.checkpoint_saver import SqliteCheckpointSaver
+from core.services.cognitive_runtime import build_cognitive_design_planner
+from core.services.cognitive_scene_compiler import CognitiveSceneCompiler
 
 WorkflowId = Annotated[str, ApiPath(pattern=WORKFLOW_ID_PATTERN)]
 VersionId = Annotated[str, ApiPath(pattern=VERSION_ID_PATTERN)]
@@ -213,6 +219,16 @@ geometry_program_planner = (
     if geometry_program_client is not None
     else None
 )
+design_domain_router = (
+    GroqDesignDomainRouter(groq_client)
+    if groq_client is not None
+    else ConservativeDesignDomainRouter()
+)
+cognitive_design_planner = (
+    build_cognitive_design_planner(groq_client)
+    if groq_client is not None and geometry_program_planner is not None
+    else None
+)
 document_pack_service = DocumentPackService(
     settings.temp_outputs_dir,
     groq_client=groq_client,
@@ -249,6 +265,9 @@ orchestrator = DesignOrchestrator(
     planning_decision_client=planning_decision_client,
     asset_selection_client=asset_selection_client,
     geometry_program_planner=geometry_program_planner,
+    design_domain_router=design_domain_router,
+    cognitive_design_planner=cognitive_design_planner,
+    cognitive_scene_compiler=CognitiveSceneCompiler(),
     allow_blender_fallback=settings.allow_blender_fallback,
 )
 scene_edit_agent = SceneEditAgent(

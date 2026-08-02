@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import (
@@ -169,13 +169,24 @@ class ExportSpec(StrictModel):
 
 
 class SceneSpec(StrictModel):
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "2.0.0"] = "1.0.0"
     scene_id: str = Field(min_length=1)
     units: Literal["meters"] = "meters"
-    network_type: NetworkType
+    design_domain: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=80,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    )
+    design_intent_id: str | None = Field(default=None, min_length=1, max_length=120)
+    component_graph_id: str | None = Field(default=None, min_length=1, max_length=120)
+    asset_decision_plan_id: str | None = Field(default=None, min_length=1, max_length=120)
+    specialist_route_id: str | None = Field(default=None, min_length=1, max_length=120)
+    cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    network_type: NetworkType | None = None
     detail_level: DetailLevel = "high"
-    tower: SceneAssetPlacement
-    sectors: list[SectorSpec] = Field(min_length=1)
+    tower: SceneAssetPlacement | None = None
+    sectors: list[SectorSpec] = Field(default_factory=list)
     visual_elements: VisualElements = Field(default_factory=VisualElements)
     accessory_assets: list[SceneAccessoryPlacement] = Field(default_factory=list)
     assembly_plan: AssemblyPlan | None = None
@@ -185,6 +196,27 @@ class SceneSpec(StrictModel):
 
     @model_validator(mode="after")
     def validate_scene_geometry(self) -> "SceneSpec":
+        if self.schema_version == "1.0.0":
+            if self.design_domain is not None:
+                raise ValueError("SceneSpec 1.0 does not accept a generic design domain")
+            if self.network_type is None or self.tower is None or not self.sectors:
+                raise ValueError("SceneSpec 1.0 requires telecom network, tower and sectors")
+        else:
+            if self.design_domain is None:
+                raise ValueError("SceneSpec 2.0 requires a design domain")
+            cognitive_links = (
+                self.design_intent_id,
+                self.component_graph_id,
+                self.asset_decision_plan_id,
+                self.specialist_route_id,
+                self.cognitive_plan_sha256,
+            )
+            if any(value is None for value in cognitive_links):
+                raise ValueError("SceneSpec 2.0 requires complete cognitive planning links")
+            if not self.geometry_programs and self.assembly_plan is None:
+                raise ValueError(
+                    "SceneSpec 2.0 requires governed geometry or a trusted assembly plan"
+                )
         sector_ids = [sector.sector_id for sector in self.sectors]
         if len(sector_ids) != len(set(sector_ids)):
             raise ValueError("sector_id values must be unique")
@@ -194,16 +226,36 @@ class SceneSpec(StrictModel):
         program_ids = [program.program_id for program in self.geometry_programs]
         if len(program_ids) != len(set(program_ids)):
             raise ValueError("geometry program IDs must be unique")
-        if self.tower.position != [0.0, 0.0, 0.0]:
-            raise ValueError("tower.position is not operational and must remain [0, 0, 0]")
-        if self.tower.rotation_deg != [0.0, 0.0, 0.0]:
-            raise ValueError("tower.rotation_deg is not operational and must remain [0, 0, 0]")
-        if self.tower.scale != [1.0, 1.0, 1.0]:
-            raise ValueError("tower.scale is not operational and must remain [1, 1, 1]")
+        if self.tower is not None:
+            if self.tower.position != [0.0, 0.0, 0.0]:
+                raise ValueError("tower.position is not operational and must remain [0, 0, 0]")
+            if self.tower.rotation_deg != [0.0, 0.0, 0.0]:
+                raise ValueError("tower.rotation_deg is not operational and must remain [0, 0, 0]")
+            if self.tower.scale != [1.0, 1.0, 1.0]:
+                raise ValueError("tower.scale is not operational and must remain [1, 1, 1]")
         for sector in self.sectors:
+            if self.tower is None:
+                raise ValueError("sector geometry requires a tower placement")
             if sector.install_height_m > self.tower.height_m:
                 raise ValueError(
                     f"{sector.sector_id} install_height_m exceeds tower height "
                     f"({sector.install_height_m} > {self.tower.height_m})"
                 )
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_scene(self, handler):
+        """Keep the legacy SceneSpec 1.0 byte shape stable for certificate hashes."""
+
+        payload = handler(self)
+        if self.schema_version == "1.0.0":
+            for field_name in (
+                "design_domain",
+                "design_intent_id",
+                "component_graph_id",
+                "asset_decision_plan_id",
+                "specialist_route_id",
+                "cognitive_plan_sha256",
+            ):
+                payload.pop(field_name, None)
+        return payload

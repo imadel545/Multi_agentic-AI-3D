@@ -129,3 +129,18 @@ active SceneSpec + prompt
   are not accompanied by a committed resolution lock. The optional Qdrant
   Docker image remains on legacy server `v1.9.2` pending a stepwise storage
   migration.
+
+## Generic cognitive extension V1
+
+La route générique est une extension du monolithe local-first existant:
+`CognitiveDesignPlanner` produit un plan borné, `CognitiveSupervisor` ferme le
+DAG des spécialistes, `CapabilityRegistry` autorise les opérations, puis
+`CognitiveSceneCompiler` produit le même `SceneSpec` consommé par le même
+`BlenderRunner`, les mêmes gates, le même certificat et le même versioning.
+Le LLM ne possède ni filesystem, ni `bpy`, ni exécution de code; les programmes
+géométriques sont des contrats JSON validés et compilés déterministiquement.
+
+Cette extension reste partielle: la route d'assets génériques est procédurale,
+la résolution spatiale arbitraire n'est pas un solveur de contraintes complet,
+et la disponibilité/validité JSON du provider Groq reste une dépendance externe
+non maîtrisée.

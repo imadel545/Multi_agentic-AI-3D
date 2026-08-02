@@ -14,6 +14,13 @@ from pydantic import BaseModel
 
 from core.contracts.scene import SceneSpec
 
+_ADDITIONAL_PREVIEW_FILES = (
+    "preview_front.png",
+    "preview_side.png",
+    "preview_top.png",
+    "preview_closeup.png",
+)
+
 
 class GenerationResult(BaseModel):
     status: str
@@ -275,6 +282,10 @@ class BlenderRunner:
             artifacts={
                 "glb": str(output_dir / "design.glb"),
                 "preview": str(output_dir / "preview.png"),
+                "preview_front": str(output_dir / "preview_front.png"),
+                "preview_side": str(output_dir / "preview_side.png"),
+                "preview_top": str(output_dir / "preview_top.png"),
+                "preview_closeup": str(output_dir / "preview_closeup.png"),
                 "metadata": str(output_dir / "scene_metadata.json"),
                 "component_proofs": str(output_dir / "component_proofs.json"),
                 "build_lock": str(output_dir / "build.lock.json"),
@@ -301,6 +312,12 @@ class BlenderRunner:
                 {
                     "scene_id": scene.scene_id,
                     "schema_version": scene.schema_version,
+                    "design_domain": scene.design_domain or "telecom",
+                    "design_intent_id": scene.design_intent_id,
+                    "component_graph_id": scene.component_graph_id,
+                    "asset_decision_plan_id": scene.asset_decision_plan_id,
+                    "specialist_route_id": scene.specialist_route_id,
+                    "cognitive_plan_sha256": scene.cognitive_plan_sha256,
                     "generation_mode": mode,
                     "assets_used": _assets_used(scene),
                     "procedural_objects_created": _procedural_objects(scene),
@@ -308,8 +325,10 @@ class BlenderRunner:
                     "asset_import_summary": _asset_import_summary(asset_imports),
                     "sector_count": len(scene.sectors),
                     "network_type": scene.network_type,
-                    "tower_height_m": scene.tower.height_m,
-                    "tower_characteristics": scene.tower.characteristics.model_dump(),
+                    "tower_height_m": scene.tower.height_m if scene.tower else None,
+                    "tower_characteristics": (
+                        scene.tower.characteristics.model_dump() if scene.tower else {}
+                    ),
                     "azimuths_deg": [sector.azimuth_deg for sector in scene.sectors],
                     "antenna_heights_m": [sector.install_height_m for sector in scene.sectors],
                     "mechanical_tilts_deg": [
@@ -333,17 +352,22 @@ class BlenderRunner:
 
 
 def _assets_used(scene: SceneSpec) -> list[str]:
-    assets = [scene.tower.asset_id]
+    assets = [scene.tower.asset_id] if scene.tower is not None else []
     for sector in scene.sectors:
         assets.append(sector.antenna_asset_id)
         if sector.radio_asset_id:
             assets.append(sector.radio_asset_id)
     for accessory in scene.accessory_assets:
         assets.append(accessory.asset_id)
+    assets.extend(
+        f"GEOMETRY_PROGRAM_{program.program_id.upper()}" for program in scene.geometry_programs
+    )
     return sorted(set(assets))
 
 
 def _procedural_objects(scene: SceneSpec) -> list[str]:
+    if scene.tower is None:
+        return [f"geometry_program:{program.program_id}" for program in scene.geometry_programs]
     objects = ["tower"]
     if scene.tower.characteristics.foundation_type == "concrete_pad":
         objects.append("foundation_concrete_pad")
@@ -383,25 +407,27 @@ def _procedural_objects(scene: SceneSpec) -> list[str]:
 
 
 def _fallback_asset_imports(scene: SceneSpec, project_root: Path) -> list[dict]:
-    records = [
-        _fallback_asset_import_record(
-            project_root=project_root,
-            asset_id=scene.tower.asset_id,
-            asset_file=scene.tower.asset_file,
-            asset_source=scene.tower.asset_source,
-            asset_metadata=scene.tower.asset_metadata.model_dump(),
-            object_role="tower",
-            object_name=f"tower_{scene.tower.asset_id}",
-            fallback_allowed=scene.tower.import_fallback_allowed,
-            dimensions=scene.tower.dimensions_m.model_dump()
-            if scene.tower.dimensions_m
-            else {
-                "height": scene.tower.height_m,
-                "width": scene.tower.characteristics.base_width_m,
-                "depth": scene.tower.characteristics.base_width_m,
-            },
+    records = []
+    if scene.tower is not None:
+        records.append(
+            _fallback_asset_import_record(
+                project_root=project_root,
+                asset_id=scene.tower.asset_id,
+                asset_file=scene.tower.asset_file,
+                asset_source=scene.tower.asset_source,
+                asset_metadata=scene.tower.asset_metadata.model_dump(),
+                object_role="tower",
+                object_name=f"tower_{scene.tower.asset_id}",
+                fallback_allowed=scene.tower.import_fallback_allowed,
+                dimensions=scene.tower.dimensions_m.model_dump()
+                if scene.tower.dimensions_m
+                else {
+                    "height": scene.tower.height_m,
+                    "width": scene.tower.characteristics.base_width_m,
+                    "depth": scene.tower.characteristics.base_width_m,
+                },
+            )
         )
-    ]
     for sector in scene.sectors:
         records.append(
             _fallback_asset_import_record(
@@ -546,7 +572,7 @@ def _unique_strings(values: list[str]) -> list[str]:
 
 
 def _preview_camera_metadata(scene: SceneSpec) -> dict:
-    tower_height = scene.tower.height_m
+    tower_height = scene.tower.height_m if scene.tower is not None else 10.0
     return {
         "camera": "not_rendered",
         "camera_type": "not_rendered",
@@ -620,6 +646,52 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
     preview_report = PreviewInspector().inspect(preview_path, scene)
     if not preview_report.preview_qa_passed:
         return "BLENDER_PREVIEW_INVALID:" + ",".join(preview_report.critical_errors)
+    preview_views = metadata.get("preview_camera", {}).get("preview_views")
+    if preview_views is not None:
+        preview_error = _validate_additional_preview_artifacts(
+            output_dir,
+            scene,
+            preview_views,
+        )
+        if preview_error:
+            return preview_error
+    return None
+
+
+def _validate_additional_preview_artifacts(
+    output_dir: Path,
+    scene: SceneSpec,
+    preview_views: object,
+) -> str | None:
+    # Imported lazily to avoid the qa package's GenerationResult dependency cycle.
+    from core.qa.preview_inspector import PreviewInspector
+
+    if not isinstance(preview_views, list):
+        return "BLENDER_PREVIEW_VIEWS_METADATA_INVALID"
+    expected_names = {"preview.png", *_ADDITIONAL_PREVIEW_FILES}
+    records_by_name: dict[str, dict] = {}
+    for record in preview_views:
+        if not isinstance(record, dict):
+            return "BLENDER_PREVIEW_VIEWS_METADATA_INVALID"
+        file_name = record.get("file_name")
+        if not isinstance(file_name, str) or file_name not in expected_names:
+            return "BLENDER_PREVIEW_VIEWS_METADATA_INVALID"
+        if file_name in records_by_name:
+            return "BLENDER_PREVIEW_VIEWS_METADATA_DUPLICATE"
+        records_by_name[file_name] = record
+    if set(records_by_name) != expected_names:
+        return "BLENDER_PREVIEW_VIEWS_INCOMPLETE"
+    for file_name in sorted(expected_names):
+        path = output_dir / file_name
+        report = PreviewInspector().inspect(path, scene)
+        # The primary preview remains the certified visual-framing gate. The
+        # supplementary inspection views must be real PNGs at the declared
+        # resolution, without falsely claiming semantic visual certification.
+        if not report.file_exists or report.format != "png" or not report.minimum_resolution_valid:
+            return f"BLENDER_PREVIEW_VIEW_INVALID:{file_name}"
+        record = records_by_name[file_name]
+        if record.get("sha256") != _sha256(path) or record.get("size_bytes") != path.stat().st_size:
+            return f"BLENDER_PREVIEW_VIEW_EVIDENCE_MISMATCH:{file_name}"
     return None
 
 
@@ -629,6 +701,7 @@ def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
     names = (
         "design.glb",
         "preview.png",
+        *_ADDITIONAL_PREVIEW_FILES,
         "scene_metadata.json",
         "component_proofs.json",
         "design.blend",
@@ -645,6 +718,7 @@ def _clear_generated_artifacts(output_dir: Path) -> None:
     for name in (
         "design.glb",
         "preview.png",
+        *_ADDITIONAL_PREVIEW_FILES,
         "scene_metadata.json",
         "component_proofs.json",
         "design.blend",
@@ -672,6 +746,9 @@ def _write_build_lock(
     scene_payload = json.loads(scene_spec_path.read_text(encoding="utf-8"))
     trusted_inputs = _trusted_input_evidence(scene_payload, project_root)
     artifact_names = ["design.glb", "preview.png", "scene_metadata.json"]
+    artifact_names.extend(
+        name for name in _ADDITIONAL_PREVIEW_FILES if (staging_dir / name).is_file()
+    )
     if (staging_dir / "component_proofs.json").is_file():
         artifact_names.append("component_proofs.json")
     artifact_hashes = {
@@ -766,10 +843,24 @@ def _validate_build_lock(
     if not isinstance(artifacts, dict):
         return "BLENDER_BUILD_LOCK_ARTIFACTS_INVALID"
     required_names = ["design.glb", "preview.png", "scene_metadata.json"]
+    required_names.extend(
+        name for name in _ADDITIONAL_PREVIEW_FILES if (output_dir / name).is_file()
+    )
     if (output_dir / "component_proofs.json").is_file():
         required_names.append("component_proofs.json")
     for name in required_names:
         evidence = artifacts.get(name)
+        path = output_dir / name
+        if (
+            not isinstance(evidence, dict)
+            or not path.is_file()
+            or evidence.get("size_bytes") != path.stat().st_size
+            or evidence.get("sha256") != _sha256(path)
+        ):
+            return f"BLENDER_BUILD_LOCK_ARTIFACT_MISMATCH:{name}"
+    for name, evidence in artifacts.items():
+        if not isinstance(name, str) or Path(name).name != name:
+            return "BLENDER_BUILD_LOCK_ARTIFACT_NAME_INVALID"
         path = output_dir / name
         if (
             not isinstance(evidence, dict)

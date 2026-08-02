@@ -339,7 +339,7 @@ Le frontend doit rendre:
 Le frontend M0 ne doit conserver aucun succès obsolète après une erreur ou un
 changement de version. Les ressources GLB/WebGL, assets, QA, RAG, provenance,
 documents et versions ont des états de chargement/erreur/retry indépendants. La
-suite courante compte 139 tests Vitest et passe le typecheck/build; le smoke
+suite courante compte 145 tests Vitest et passe le typecheck/build; le smoke
 navigateur connecté reste une gate distincte et non encore confirmée.
 
 `/designs/{id}/edit` expose, en cas de succès:
@@ -470,3 +470,19 @@ Les events portent `event_id`, `workflow_id`, `timestamp`, `event_source` et
 Un `node_failed` doit aussi apparaître dans `/user-issues` comme issue humaine. Si le workflow
 termine malgré l'échec du nœud, la sévérité est `warning`; si le workflow échoue, elle est
 `error`.
+
+## Generic cognitive evidence V1
+
+Le Product API peut publier dans le viewer bundle, lorsqu'ils existent:
+
+- le plan cognitif et son domaine détecté;
+- les décisions de stratégie et leur provenance provider/modèle;
+- le résumé des `GeometryProgram` et observations de capacités;
+- l'arbre sémantique de scène et les identifiants de nœuds GLB sélectionnables;
+- les URLs publiques de `preview`, `preview_front`, `preview_side`,
+  `preview_top` et `preview_closeup`.
+
+Le frontend ne construit jamais une URL depuis un chemin filesystem et ne
+présente aucune preuve absente comme vide ou réussie. Une erreur d'une ressource
+secondaire reste dans son drawer; elle ne masque ni ne contredit un viewer
+bundle principal déjà certifié et chargé.

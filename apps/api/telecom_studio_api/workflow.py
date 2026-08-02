@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.llm_provenance import (
     LLMDecisionCandidate,
     LLMDecisionLinks,
@@ -632,6 +633,7 @@ class WorkflowService:
         output_dir: Path,
         detail_level: str,
         revision_id: str,
+        cognitive_plan: CognitiveDesignPlan | None = None,
     ) -> OrchestratorResult:
         self._mark_workflow_active(workflow_id)
         try:
@@ -641,6 +643,7 @@ class WorkflowService:
                 output_dir=output_dir,
                 detail_level=detail_level,
                 revision_id=revision_id,
+                cognitive_plan=cognitive_plan,
                 runtime_event_sink=self._event_sink_for(workflow_id),
             )
         finally:
@@ -1190,6 +1193,32 @@ class WorkflowService:
                 errors=validation_report.errors,
             )
 
+        cognitive_plan: CognitiveDesignPlan | None = None
+        if patched_scene.schema_version == "2.0.0":
+            try:
+                cognitive_plan = _load_cognitive_plan_for_revision(
+                    workflow_id=workflow_id,
+                    outputs_dir=self.outputs_dir,
+                    artifact_dir=active_version.artifact_dir,
+                )
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                return SceneEditResult(
+                    workflow_id=workflow_id,
+                    edit_id=edit_id,
+                    status="failed",
+                    original_scene=original_scene,
+                    patched_scene=patched_scene,
+                    patch=patch,
+                    validation_report=validation_report,
+                    errors=[
+                        {
+                            "code": "COGNITIVE_REVISION_PLAN_INVALID",
+                            "message": str(exc),
+                            "severity": "error",
+                        }
+                    ],
+                )
+
         diff_summary = self.diff_engine.diff_scenes(original_scene, patched_scene)
         version = self.versioning.save_version(
             workflow_id,
@@ -1227,6 +1256,7 @@ class WorkflowService:
             output_dir=version_output_dir,
             detail_level=patched_scene.detail_level,
             revision_id=version.version_id,
+            cognitive_plan=cognitive_plan,
         )
         self._enforce_completion_proof(result)
         self._write_result_files(version_output_dir, edit_prompt, result)
@@ -1796,6 +1826,8 @@ class WorkflowService:
             "quality_gates": str(output_dir / "quality_gates.json"),
             "requirement_coverage": str(output_dir / "requirement_coverage.json"),
             "design_blueprint": str(output_dir / "design_blueprint.json"),
+            "cognitive_plan": str(output_dir / "cognitive_plan.json"),
+            "capability_observations": str(output_dir / "capability_observations.json"),
             "blueprint_requirement_coverage": str(
                 output_dir / "blueprint_requirement_coverage.json"
             ),
@@ -1812,6 +1844,10 @@ class WorkflowService:
             "technical_report": str(output_dir / "technical_report.md"),
             "glb": str(output_dir / "design.glb"),
             "preview": str(output_dir / "preview.png"),
+            "preview_front": str(output_dir / "preview_front.png"),
+            "preview_side": str(output_dir / "preview_side.png"),
+            "preview_top": str(output_dir / "preview_top.png"),
+            "preview_closeup": str(output_dir / "preview_closeup.png"),
             "metadata": str(output_dir / "scene_metadata.json"),
             "component_proofs": str(output_dir / "component_proofs.json"),
             "build_lock": str(output_dir / "build.lock.json"),
@@ -1893,6 +1929,8 @@ class WorkflowService:
             "completion_certificate_status": result.completion_certificate.status
             if result.completion_certificate
             else None,
+            "design_domain": result.scene.design_domain if result.scene else None,
+            "cognitive_plan_sha256": result.scene.cognitive_plan_sha256 if result.scene else None,
             "download_url": f"/designs/{workflow_id}/download",
             "trace_path": str(output_dir / "workflow_trace.json"),
             "runtime_capabilities": runtime_capabilities(),
@@ -2023,6 +2061,20 @@ class WorkflowService:
                 output_dir / "design_blueprint.json",
                 result.design_blueprint.model_dump(mode="json"),
             )
+        if result.cognitive_plan:
+            self._write_json(
+                output_dir / "cognitive_plan.json",
+                result.cognitive_plan.model_dump(mode="json"),
+            )
+        if result.capability_observations:
+            self._write_json(
+                output_dir / "capability_observations.json",
+                {
+                    "observations": [
+                        item.model_dump(mode="json") for item in result.capability_observations
+                    ]
+                },
+            )
         if result.blueprint_requirement_coverage:
             self._write_json(
                 output_dir / "blueprint_requirement_coverage.json",
@@ -2076,6 +2128,7 @@ class WorkflowService:
             design_blueprint=getattr(result, "design_blueprint", None),
             scene=result.scene,
             generation=result.generation,
+            cognitive_plan=result.cognitive_plan,
         ):
             raise RuntimeError(
                 "COMPLETION_CERTIFICATE_INVALID: terminal artifacts or hashes are not proven"
@@ -2123,9 +2176,12 @@ class WorkflowService:
                     requirements_text,
                     "",
                     "## Scene",
+                    f"- Domain: {scene.design_domain if scene else 'not_planned'}",
                     f"- Network: {scene.network_type if scene else 'not_planned'}",
-                    f"- Tower asset: {scene.tower.asset_id if scene else 'not_planned'}",
-                    f"- Tower height: {scene.tower.height_m if scene else 'not_planned'} m",
+                    "- Tower asset: "
+                    f"{scene.tower.asset_id if scene and scene.tower else 'not_applicable'}",
+                    "- Tower height: "
+                    f"{scene.tower.height_m if scene and scene.tower else 'not_applicable'} m",
                     f"- Tower characteristics: {_tower_characteristics_text(result)}",
                     f"- Sectors: {len(scene.sectors) if scene else 0}",
                     "",
@@ -3015,6 +3071,26 @@ def _adaptation_node_message(node: str, patch) -> str:
     return "L’adaptation du design progresse."
 
 
+def _load_cognitive_plan_for_revision(
+    *,
+    workflow_id: str,
+    outputs_dir: Path,
+    artifact_dir: str | None,
+) -> CognitiveDesignPlan:
+    if not artifact_dir:
+        raise ValueError("COGNITIVE_REVISION_ARTIFACT_DIR_MISSING")
+    workflow_dir = (outputs_dir / workflow_id).resolve()
+    resolved_artifact_dir = Path(artifact_dir).resolve()
+    try:
+        resolved_artifact_dir.relative_to(workflow_dir)
+    except ValueError as exc:
+        raise ValueError("COGNITIVE_REVISION_ARTIFACT_DIR_OUTSIDE_WORKFLOW") from exc
+    path = resolved_artifact_dir / "cognitive_plan.json"
+    if not path.is_file():
+        raise ValueError("COGNITIVE_REVISION_PLAN_ARTIFACT_MISSING")
+    return CognitiveDesignPlan.model_validate_json(path.read_text(encoding="utf-8"))
+
+
 _ALLOWED_ARTIFACT_FILES = {
     "requirements_spec": "requirements_spec.json",
     "extraction_report": "extraction_report.json",
@@ -3024,6 +3100,8 @@ _ALLOWED_ARTIFACT_FILES = {
     "quality_gates": "quality_gates.json",
     "requirement_coverage": "requirement_coverage.json",
     "design_blueprint": "design_blueprint.json",
+    "cognitive_plan": "cognitive_plan.json",
+    "capability_observations": "capability_observations.json",
     "blueprint_requirement_coverage": "blueprint_requirement_coverage.json",
     "blueprint_scene_coverage": "blueprint_scene_coverage.json",
     "completion_certificate": "completion_certificate.json",
@@ -3038,6 +3116,10 @@ _ALLOWED_ARTIFACT_FILES = {
     "technical_report": "technical_report.md",
     "glb": "design.glb",
     "preview": "preview.png",
+    "preview_front": "preview_front.png",
+    "preview_side": "preview_side.png",
+    "preview_top": "preview_top.png",
+    "preview_closeup": "preview_closeup.png",
     "metadata": "scene_metadata.json",
     "component_proofs": "component_proofs.json",
     "build_lock": "build.lock.json",

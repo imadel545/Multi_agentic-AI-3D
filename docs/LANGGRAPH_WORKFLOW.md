@@ -153,3 +153,20 @@ memory_writeback
 - Décider queue/job manager seulement si le runtime local-thread devient bloquant.
 - Ajouter clés d'idempotence et journal compensatoire pour les mutations
   multi-store (suppression, pack documentaire, soumission de révision).
+
+## Generic cognitive route V1
+
+La route générique conserve l'orchestrateur existant et ajoute les phases
+gouvernées suivantes avant Blender:
+
+1. décomposition LLM séparée de l'intention, des composants et relations;
+2. fermeture déterministe des dépendances spécialistes;
+3. recherche de candidats par composant et décision LLM bornée aux stratégies;
+4. génération des `GeometryProgram` V2 manquants;
+5. compilation déterministe en `SceneSpec` V2;
+6. Blender réel, QA générique, certificat cognitif et versioning existant.
+
+Les réparations JSON du plan sont bornées et revalidées. Une sortie encore
+invalide bloque le workflow; elle n'est ni remplacée par une décision cachée ni
+annoncée comme succès provider. La révision générique recharge le plan cognitif
+persisté et réexécute capacités, Blender, QA et certification.

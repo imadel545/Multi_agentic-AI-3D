@@ -561,15 +561,15 @@ connected browser smoke is recorded on this exact tree.
   GPS still have one qualified candidate each; the cabinet is technical generic,
   not vendor-specific. Additional real candidates
   require independent qualification, not copied manifests.
-- Preview generation is scene-level. Per-asset preview images and a close-up
-  visual QA gate remain future work.
+- Preview generation est scene-level et publie désormais cinq vues Blender.
+  Les previews par asset et la QA visuelle sémantique du close-up restent à faire.
 - Connector roles prove composition contracts and route intent; they are not an
   electrical, RF, load, clearance or vendor-installation certification.
 
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 139 passing
+frontend now has a verified chat-first/3D-first product baseline and 145 passing
 component/contract tests. It is not yet the final M0 product gate because the
 current-tree connected smoke and all relevant degraded/retry paths have not
 been replayed in one recorded acceptance session.
@@ -582,3 +582,33 @@ broker/cancellation.
 Backend proof remains `tests/e2e/test_telecom_generation_proof.py` plus targeted
 Product API, RAG, LangGraph, Blender, and QA tests. Frontend acceptance requires
 the checks and smoke described in `apps/frontend/FRONTEND_KERNEL_README.md`.
+
+## GENERIC COGNITIVE 3D CORE V1 — livraison 2026-08-02
+
+Statut autoritaire: `IMPLEMENTED_PARTIAL`.
+
+- Le runtime générique étend l'orchestrateur et le `SceneSpec` existants; il ne
+  crée ni second moteur de génération, ni second store. Un superviseur borné
+  décompose la demande en intention, composants et relations, route les
+  spécialistes déclarés, puis compile un `SceneSpec` V2.
+- Le registre de capacités gouverne schémas d'entrée/sortie, permissions,
+  budgets et observations d'exécution. GPT-OSS ne produit jamais de Python
+  Blender: il choisit des stratégies autorisées et peut écrire un
+  `GeometryProgram` déclaratif validé.
+- `GeometryProgram` V2 supporte profils, extrusion, révolution, sweep, arrays,
+  booléens exacts, modificateurs bornés, terrain, hiérarchie, ancres,
+  connecteurs et groupes. Le worker Blender compile ces opérations de manière
+  déterministe et enregistre les programmes réellement exécutés.
+- La route générique produit GLB, cinq previews Blender, QA géométrique
+  générique, provenance et certificat cognitif local. La révision d'un
+  `SceneSpec` V2 repasse par validation de plan/capacités, Blender, QA,
+  certification et versioning existant.
+- Le frontend reconstruit une conversation persistée, expose la scène, les
+  stratégies, la provenance, les composants sélectionnables dans le viewer et
+  la galerie des previews réelles. Il ne présente plus une erreur globale de
+  synchronisation lorsque le bundle certifié principal est déjà disponible.
+
+Ce statut n'est pas `IMPLEMENTED`: le parcours complet GPT-OSS réel reste
+instable sur les sorties JSON Groq, les trois scénarios génériques réels ne sont
+pas tous passés, et la sélection/réutilisation d'assets génériques hors domaine
+télécom reste `procedural_only`. Aucune convergence globale n'est déclarée.

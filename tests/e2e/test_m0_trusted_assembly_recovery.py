@@ -126,7 +126,7 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert cable_asset.is_generation_eligible
         assert cable_component["manifest_snapshot"]["asset_id"] == cable_asset.asset_id
         assert _BOUNDED_SELECTION_REASON in cable_component["selection_reason"]
-        assert scene["geometry_programs"][0]["program_id"] == "maintenance_stair.llm_v1"
+        assert scene["geometry_programs"][0]["program_id"] == "maintenance_stair.llm_v2"
         assert scene["geometry_programs"][0]["generator_provider"] == "groq"
         assert scene["geometry_programs"][0]["generator_model"] == "openai/gpt-oss-120b"
         assert scene["geometry_programs"][0]["structured_output_mode"] == "strict_json_schema"
@@ -155,7 +155,7 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         program_proof = proofs["geometry_programs"][0]
         assert program_proof["origin"] == "geometry_program"
         assert program_proof["strategy"] == "procedural_generate"
-        assert program_proof["generation_strategy"] == "typed_geometry_program_v1"
+        assert program_proof["generation_strategy"] == "typed_geometry_program_v2"
         assert program_proof["geometry_program"]["generator_provider"] == "groq"
         assert program_proof["qa"]["passed"] is True
 

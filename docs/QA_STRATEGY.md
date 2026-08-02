@@ -158,6 +158,21 @@ limitations and never advertises checks it cannot perform.
   requirement/Groq tests after the live-input parser fix, the isolated
   real-Blender E2E (`1 passed`), and the real HTTP 4G generation/edit/version
   scenario with QA 1.0 and an issued certificate.
-- The frontend has 139 passing Vitest tests plus green typecheck/build. The
-  connected browser smoke on the exact final tree remains the sole M0 release
-  gate; no global convergence is claimed.
+- The frontend has 145 passing Vitest tests plus green typecheck/build and a
+  connected smoke on the current tree. The real generic multi-project user
+  scenario remains open; no global convergence is claimed.
+
+## Generic cognitive QA V1
+
+- La QA générique utilise les `geometry_program_ids` réellement enregistrés par
+  le worker pour prouver la couverture mesh de chaque composant, au lieu des
+  rôles télécom historiques.
+- Le certificat cognitif schema 1.3 lie plan, `SceneSpec` V2, observations de
+  capacités, GLB, previews, QA et build lock. Il reste un certificat local
+  d'intégrité, pas une approbation d'ingénierie.
+- Cinq previews Blender sont publiées et hashées. La vue principale garde la
+  gate pixel/framing; les quatre vues supplémentaires prouvent actuellement
+  présence et provenance, pas qualité sémantique.
+- Il manque une critique visuelle multimodale bornée, un solveur de relations
+  spatiales et une boucle unique de réparation/régénération avant que les trois
+  scénarios génériques puissent devenir une gate produit.

@@ -24,7 +24,7 @@ from core.contracts.validation import ValidationReport
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import GenerationResult
 from core.services.requirement_parser import parse_requirements_text
-from core.services.scene_versioning import SceneVersioningService
+from core.services.scene_versioning import SceneVersioningService, _verify_build_lock
 from core.validation.completion_certificate import (
     build_completion_certificate,
     verify_completion_certificate,
@@ -195,6 +195,28 @@ def test_m0_build_lock_trusted_input_tampering_invalidates_active_version(
         match="ACTIVE_VERSION_BUILD_LOCK_TRUSTED_INPUTS_INVALID",
     ):
         bundle.service.verified_active_status_path(bundle.workflow_id)
+
+
+def test_build_lock_binds_supplementary_preview_bytes(tmp_path: Path) -> None:
+    bundle = _create_certified_bundle(tmp_path, certificate_schema="1.2.0")
+    preview_path = bundle.artifact_dir / "preview_front.png"
+    preview_path.write_bytes(b"real-supplementary-preview-evidence")
+    build_lock_path = bundle.artifact_dir / "build.lock.json"
+    payload = json.loads(build_lock_path.read_text(encoding="utf-8"))
+    payload["artifacts"][preview_path.name] = {
+        "size_bytes": preview_path.stat().st_size,
+        "sha256": _sha256(preview_path),
+    }
+    _write_json(build_lock_path, payload)
+
+    assert _verify_build_lock(bundle.artifact_dir, scene=bundle.scene) == "1.2.0"
+
+    preview_path.write_bytes(b"tampered-supplementary-preview")
+    with pytest.raises(
+        ValueError,
+        match="ACTIVE_VERSION_BUILD_LOCK_ARTIFACT_MISMATCH:preview_front.png",
+    ):
+        _verify_build_lock(bundle.artifact_dir, scene=bundle.scene)
 
 
 @pytest.mark.parametrize("downgrade", ["certificate", "build_lock"])

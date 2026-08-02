@@ -14,8 +14,10 @@ import {
   QaPanel,
   RagEvidencePanel,
   RuntimeCapabilitiesPanel,
+  SceneCompositionPanel,
   SummaryPanel,
   VersionSummary,
+  conversationHistoryEntries,
   displayIssueCount,
   humanRagLimitation,
   humanRequirementWarning,
@@ -144,6 +146,30 @@ const parsedRequirements = {
 afterEach(() => cleanup());
 
 describe("studio kernel components", () => {
+  it("restores a truthful structured conversation context and backend version edits", () => {
+    const entries = conversationHistoryEntries({
+      activeRequirements: parsedRequirements.requirements,
+      currentPrompt: "",
+      versions: [{
+        version_id: "v2",
+        parent_version_id: "v1",
+        created_at: "2026-08-02T10:00:00Z",
+        active: true,
+        artifacts: {},
+        qa_score: 1,
+        generation_mode: "real_blender",
+        llm_decision_provenance: null,
+        edit_description: "Ajouter un cabinet au sol",
+        diff_summary: null,
+        status: "completed"
+      }]
+    });
+
+    expect(entries.map((entry) => entry.message)).toEqual([
+      "5G · pylône treillis · 30 m · 3 secteur(s)",
+      "Ajouter un cabinet au sol"
+    ]);
+  });
   it("keeps component geometry fidelity visible independently from QA proof", () => {
     render(
       <BackendStatusBar
@@ -1202,6 +1228,91 @@ describe("studio kernel components", () => {
     expect(
       screen.getByRole("link", { name: /Preuves des composants assemblés/ })
     ).toHaveAttribute("href", "/designs/wf_1/artifacts/component_proofs.json");
+  });
+
+  it("renders every real image artifact as a preview without inventing unavailable views", () => {
+    render(
+      <ArtifactsPanel
+        bundle={{
+          ...bundle,
+          viewer_artifacts: [
+            { name: "preview_front.png", url: "/front.png", content_type: "image/png", available: true },
+            { name: "preview_top.png", url: "/top.png", content_type: "image/png", available: true },
+            { name: "preview_missing.png", url: "/missing.png", content_type: "image/png", available: false }
+          ]
+        }}
+        toAbsoluteUrl={(url) => url ? `http://127.0.0.1:8000${url}` : null}
+      />
+    );
+
+    expect(screen.getByLabelText("Aperçus du design").querySelectorAll("img")).toHaveLength(2);
+    expect(screen.getByRole("img", { name: "Vue de face" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Vue de dessus" })).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /missing/i })).not.toBeInTheDocument();
+  });
+
+  it("exposes the real assembly strategy and synchronizes a proof instance selection", () => {
+    const onSelect = vi.fn();
+    render(
+      <SceneCompositionPanel
+        assemblyPlan={{
+          schema_version: "1.0",
+          workflow_id: "wf_1",
+          selection_authority: "bounded_llm",
+          selection_provider: "groq",
+          selection_model: "openai/gpt-oss-120b",
+          components: [{
+            role_id: "antenna",
+            asset_type: "antenna",
+            required: true,
+            candidate_scores: [],
+            selected_asset_id: "ANT_REAL_1",
+            generation_strategy: "reuse",
+            selection_reason: "Meilleur candidat compatible avec les connecteurs requis."
+          }],
+          connections: [{}],
+          operations: []
+        }}
+        componentProofs={{
+          schema_version: "1.0",
+          workflow_id: "wf_1",
+          components: [{
+            component_id: "antenna_component",
+            role_id: "antenna",
+            origin: "catalog",
+            strategy: "reuse",
+            generation_strategy: "reuse",
+            asset_id: "ANT_REAL_1",
+            quantity: 1,
+            instances: [{
+              instance_id: "antenna_1",
+              object_role: "antenna",
+              semantic_root: "antenna_S1_REAL_1",
+              geometry_source: "asset_glb",
+              qa: null
+            }],
+            qa: null
+          }],
+          geometry_programs: [{
+            component_id: "shelter_component",
+            role_id: "technical_shelter",
+            origin: "geometry_program",
+            strategy: "procedural_generate",
+            generation_strategy: "procedural_generate",
+            quantity: 1,
+            geometry_program: {},
+            qa: null
+          }]
+        }}
+        onSelect={onSelect}
+      />
+    );
+
+    expect(screen.getByText("Réutilisé")).toBeInTheDocument();
+    expect(screen.getByText("Généré")).toBeInTheDocument();
+    expect(screen.getByText(/Meilleur candidat compatible/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("treeitem", { name: /antenna/i }));
+    expect(onSelect).toHaveBeenCalledWith("antenna_S1_REAL_1");
   });
 
   it("does not render unsupported actions as buttons", () => {

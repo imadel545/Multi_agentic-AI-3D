@@ -857,6 +857,14 @@ class MeshQA:
                 limitations=["Mesh-level QA could not parse the GLB accessors."],
             )
 
+        if scene.schema_version == "2.0.0":
+            return _validate_generic_program_mesh(
+                scene=scene,
+                payload=payload,
+                integrity=integrity,
+                bounding_box=bounding_box,
+            )
+
         if geometry_source_incomplete:
             warnings.append("MESH_GEOMETRY_SOURCE_INCOMPLETE")
         if generation_strategy_incomplete:
@@ -1030,6 +1038,117 @@ class MeshQA:
             mesh_qa_passed=mesh_qa_passed,
             limitations=limitations,
         )
+
+
+def _validate_generic_program_mesh(
+    *,
+    scene: SceneSpec,
+    payload: dict[str, Any],
+    integrity,
+    bounding_box: BoundingBoxM,
+) -> MeshQAReport:
+    nodes = payload.get("nodes", [])
+    if not isinstance(nodes, list):
+        nodes = []
+    expected_program_ids = {program.program_id for program in scene.geometry_programs}
+    program_mesh_counts = {program_id: 0 for program_id in expected_program_ids}
+    anchor_counts = {program_id: 0 for program_id in expected_program_ids}
+    connector_counts = {program_id: 0 for program_id in expected_program_ids}
+    for node in nodes:
+        if not isinstance(node, dict) or not isinstance(node.get("extras"), dict):
+            continue
+        extras = node["extras"]
+        program_id = str(extras.get("geometry_program_id") or "")
+        if program_id not in expected_program_ids:
+            continue
+        if node.get("mesh") in integrity.valid_mesh_indices:
+            program_mesh_counts[program_id] += 1
+        if extras.get("geometry_program_anchor") is True:
+            anchor_counts[program_id] += 1
+        raw_connectors = extras.get("geometry_program_connectors")
+        if isinstance(raw_connectors, str):
+            try:
+                parsed_connectors = json.loads(raw_connectors)
+            except json.JSONDecodeError:
+                parsed_connectors = []
+            if isinstance(parsed_connectors, list):
+                connector_counts[program_id] += len(parsed_connectors)
+
+    program_mesh_coverage = all(count > 0 for count in program_mesh_counts.values())
+    anchors_covered = all(
+        anchor_counts[program.program_id] >= len(program.anchors)
+        for program in scene.geometry_programs
+    )
+    connectors_covered = all(
+        connector_counts[program.program_id] >= len(program.connectors)
+        for program in scene.geometry_programs
+    )
+    pbr_declared = all(program.materials for program in scene.geometry_programs)
+    non_primitive_detail = all(
+        scene.detail_level != "high"
+        or any(node.kind not in {"primitive", "instance"} for node in program.nodes)
+        for program in scene.geometry_programs
+    )
+    dimensions_positive = (
+        bounding_box.width > 0 and bounding_box.depth > 0 and bounding_box.height > 0
+    )
+    scale_bounded = max(
+        bounding_box.width,
+        bounding_box.depth,
+        bounding_box.height,
+    ) <= 2000
+    checks = [
+        MeshCheckResult(name="glb_parse_ok", passed=True),
+        MeshCheckResult(
+            name="geometry_program_mesh_coverage",
+            passed=program_mesh_coverage,
+            detail=f"mesh_counts={program_mesh_counts}",
+        ),
+        MeshCheckResult(
+            name="geometry_program_anchor_coverage",
+            passed=anchors_covered,
+            detail=f"anchor_counts={anchor_counts}",
+        ),
+        MeshCheckResult(
+            name="geometry_program_connector_coverage",
+            passed=connectors_covered,
+            detail=f"connector_counts={connector_counts}",
+        ),
+        MeshCheckResult(name="pbr_materials_declared", passed=pbr_declared),
+        MeshCheckResult(
+            name="high_fidelity_not_primitives_only",
+            passed=non_primitive_detail,
+        ),
+        MeshCheckResult(name="scene_dimensions_positive", passed=dimensions_positive),
+        MeshCheckResult(name="scene_scale_bounded", passed=scale_bounded),
+    ]
+    required = {
+        "geometry_program_mesh_coverage",
+        "geometry_program_anchor_coverage",
+        "geometry_program_connector_coverage",
+        "pbr_materials_declared",
+        "high_fidelity_not_primitives_only",
+        "scene_dimensions_positive",
+        "scene_scale_bounded",
+    }
+    failed = [check.name for check in checks if check.name in required and not check.passed]
+    return MeshQAReport(
+        level="mesh_level_basic",
+        geometry_source="internal_project_generated",
+        generation_strategy="internal_project_generated",
+        glb_parse_ok=True,
+        bounding_box_m=bounding_box,
+        checks=checks,
+        warnings=[],
+        critical_errors=[f"GENERIC_{name.upper()}" for name in failed],
+        mesh_qa_passed=not failed,
+        limitations=[
+            "Generic mesh QA verifies real GLB buffers, governed program coverage, anchors, "
+            "connectors, declared PBR materials, bounded scale and non-trivial high-detail "
+            "construction. It does not certify manifold topology, triangle-level collision, "
+            "structural capacity, accessibility, horticulture or fabrication fitness."
+        ],
+    )
 
 
 def _expected_semantic_counts(scene: SceneSpec) -> dict[str, int]:

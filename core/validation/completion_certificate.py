@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.blueprint_composer import design_blueprint_hash
+from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.completion import (
     CertifiedArtifact,
     CompletionCertificate,
@@ -19,6 +20,7 @@ from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
 from core.performance import requirements_hash, scene_spec_hash
 from core.services.blender_runner import GenerationResult
+from core.services.cognitive_scene_compiler import cognitive_plan_hash
 
 _BASE_CERTIFIED_ARTIFACTS = ("glb", "preview", "metadata", "build_lock")
 _M0_CERTIFIED_ARTIFACTS = (
@@ -46,7 +48,22 @@ def build_completion_certificate(
     preview_inspection: PreviewInspectionReport | None,
     pre_blender_gate: QualityGateReport | None,
     post_blender_gate: QualityGateReport | None,
+    cognitive_plan: CognitiveDesignPlan | None = None,
 ) -> CompletionCertificate:
+    if cognitive_plan is not None:
+        return _build_cognitive_completion_certificate(
+            workflow_id=workflow_id,
+            cognitive_plan=cognitive_plan,
+            scene=scene,
+            requirement_coverage=requirement_coverage,
+            generation=generation,
+            qa_report=qa_report,
+            glb_inspection=glb_inspection,
+            geometry_validation=geometry_validation,
+            preview_inspection=preview_inspection,
+            pre_blender_gate=pre_blender_gate,
+            post_blender_gate=post_blender_gate,
+        )
     component_proof_required = bool(
         scene
         and (
@@ -131,7 +148,15 @@ def verify_completion_certificate(
     design_blueprint: DesignBlueprint | None,
     scene: SceneSpec | None,
     generation: GenerationResult | None,
+    cognitive_plan: CognitiveDesignPlan | None = None,
 ) -> bool:
+    if certificate is not None and certificate.schema_version == "1.3.0":
+        return _verify_cognitive_completion_certificate(
+            certificate,
+            cognitive_plan=cognitive_plan,
+            scene=scene,
+            generation=generation,
+        )
     if (
         certificate is None
         or certificate.status != "issued"
@@ -155,6 +180,125 @@ def verify_completion_certificate(
     if set(expected) != set(certified_artifact_names):
         return False
     for logical_name in certified_artifact_names:
+        path_value = generation.artifacts.get(logical_name)
+        if not path_value:
+            return False
+        path = Path(path_value)
+        artifact = expected[logical_name]
+        if (
+            not path.is_file()
+            or path.name != artifact.file_name
+            or path.stat().st_size != artifact.size_bytes
+            or _sha256(path) != artifact.sha256
+        ):
+            return False
+    return True
+
+
+def _build_cognitive_completion_certificate(
+    *,
+    workflow_id: str,
+    cognitive_plan: CognitiveDesignPlan,
+    scene: SceneSpec | None,
+    requirement_coverage: RequirementCoverageReport | None,
+    generation: GenerationResult | None,
+    qa_report: ValidationReport | None,
+    glb_inspection: GlbInspectionReport | None,
+    geometry_validation: GeometryValidationReport | None,
+    preview_inspection: PreviewInspectionReport | None,
+    pre_blender_gate: QualityGateReport | None,
+    post_blender_gate: QualityGateReport | None,
+) -> CompletionCertificate:
+    artifacts = _artifact_evidence(generation, _M0_CERTIFIED_ARTIFACTS)
+    plan_sha256 = cognitive_plan_hash(cognitive_plan)
+    mesh_qa = geometry_validation.mesh_qa if geometry_validation else None
+    checks = {
+        "cognitive_plan_present": True,
+        "cognitive_plan_linked": bool(
+            scene
+            and scene.schema_version == "2.0.0"
+            and scene.cognitive_plan_sha256 == plan_sha256
+            and scene.design_intent_id == cognitive_plan.design_intent.intent_id
+            and scene.component_graph_id == cognitive_plan.component_graph.graph_id
+            and scene.asset_decision_plan_id == cognitive_plan.asset_decision_plan.plan_id
+            and scene.specialist_route_id == cognitive_plan.specialist_route.route_id
+        ),
+        "scene_spec_present": scene is not None,
+        "requirement_coverage_passed": bool(requirement_coverage and requirement_coverage.passed),
+        "pre_blender_gate_passed": bool(pre_blender_gate and pre_blender_gate.passed),
+        "real_blender_generation": bool(
+            generation and generation.status == "generated" and generation.mode == "real_blender"
+        ),
+        "required_artifacts_regular_files": len(artifacts) == len(_M0_CERTIFIED_ARTIFACTS),
+        "artifact_hashes_recorded": len(artifacts) == len(_M0_CERTIFIED_ARTIFACTS)
+        and all(item.size_bytes > 0 and bool(item.sha256) for item in artifacts),
+        "qa_report_passed": bool(qa_report and qa_report.status == "passed"),
+        "glb_binary_integrity_passed": bool(
+            glb_inspection
+            and glb_inspection.structural_qa_passed
+            and glb_inspection.binary_chunk_count > 0
+            and glb_inspection.valid_primitive_count == glb_inspection.primitive_count
+            and glb_inspection.primitive_count > 0
+        ),
+        "geometry_program_mesh_coverage_complete": bool(
+            glb_inspection
+            and glb_inspection.checks.get("geometry_program_mesh_coverage") is True
+        ),
+        "geometry_validation_passed": bool(
+            geometry_validation and geometry_validation.status == "passed"
+        ),
+        "mesh_qa_passed": bool(mesh_qa and mesh_qa.mesh_qa_passed),
+        "preview_qa_passed": bool(preview_inspection and preview_inspection.preview_qa_passed),
+        "post_blender_gate_passed": bool(post_blender_gate and post_blender_gate.passed),
+        "no_critical_fallback": bool(
+            generation and generation.mode == "real_blender" and generation.status == "generated"
+        ),
+        "component_proof_verified": bool(scene and _component_proof_verified(generation, scene)),
+    }
+    blockers = [name for name, passed in checks.items() if not passed]
+    return CompletionCertificate(
+        schema_version="1.3.0",
+        workflow_id=workflow_id,
+        status="issued" if not blockers else "rejected",
+        evaluated_at=datetime.now(UTC),
+        requirements_sha256=plan_sha256,
+        cognitive_plan_sha256=plan_sha256,
+        scene_spec_sha256=scene_spec_hash(scene) if scene else "0" * 64,
+        generation_mode=generation.mode if generation else None,
+        artifacts=artifacts,
+        checks=checks,
+        blockers=blockers,
+    )
+
+
+def _verify_cognitive_completion_certificate(
+    certificate: CompletionCertificate,
+    *,
+    cognitive_plan: CognitiveDesignPlan | None,
+    scene: SceneSpec | None,
+    generation: GenerationResult | None,
+) -> bool:
+    if (
+        certificate.status != "issued"
+        or not certificate.checks
+        or not all(certificate.checks.values())
+        or cognitive_plan is None
+        or scene is None
+        or generation is None
+    ):
+        return False
+    plan_sha256 = cognitive_plan_hash(cognitive_plan)
+    if (
+        certificate.requirements_sha256 != plan_sha256
+        or certificate.cognitive_plan_sha256 != plan_sha256
+        or certificate.scene_spec_sha256 != scene_spec_hash(scene)
+        or scene.cognitive_plan_sha256 != plan_sha256
+    ):
+        return False
+    expected = {artifact.logical_name: artifact for artifact in certificate.artifacts}
+    if set(expected) != set(_M0_CERTIFIED_ARTIFACTS):
+        return False
+    for logical_name in _M0_CERTIFIED_ARTIFACTS:
         path_value = generation.artifacts.get(logical_name)
         if not path_value:
             return False

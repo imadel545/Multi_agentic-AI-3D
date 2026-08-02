@@ -46,8 +46,8 @@ def test_scene_rejects_unimplemented_gltf_export() -> None:
 
 def test_scene_rejects_unknown_schema_and_non_finite_geometry() -> None:
     payload = _scene_payload()
-    payload["schema_version"] = "2.0.0"
-    with pytest.raises(ValidationError, match="1.0.0"):
+    payload["schema_version"] = "3.0.0"
+    with pytest.raises(ValidationError, match="1.0.0|2.0.0"):
         SceneSpec.model_validate(payload)
 
     payload = _scene_payload()

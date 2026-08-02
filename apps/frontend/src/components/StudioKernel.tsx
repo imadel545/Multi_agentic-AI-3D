@@ -20,9 +20,11 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   AdaptationCapabilityCatalog,
+  AssemblyPlanEvidence,
   AssetLibrarySearch,
   AssetLibrarySummary,
   AssetInventory,
+  ComponentProofs,
   CurrentOperation,
   DocumentPackCapabilities,
   DocumentPackField,
@@ -32,6 +34,7 @@ import type {
   LLMDecisionProvenance,
   ParseRequirementsResponse,
   PublicVersionInfo,
+  RequirementSpec,
   SceneAdaptationCapabilities,
   StudioSummary,
   TimelineSummary,
@@ -133,6 +136,7 @@ export function BackendStatusBar({
 }
 
 export function ChatCommandPanel({
+  activeRequirements,
   analysis,
   analysisBusy,
   analysisError,
@@ -148,6 +152,7 @@ export function ChatCommandPanel({
   revisionPrompt,
   revisionBusy,
   editMessage,
+  versions,
   documentCapabilities = null,
   documentCapabilitiesError,
   documentCapabilitiesLoading,
@@ -169,6 +174,7 @@ export function ChatCommandPanel({
   onRevisionSubmit,
   onRetryBootstrap
 }: {
+  activeRequirements?: RequirementSpec | null;
   analysis: ParseRequirementsResponse | null;
   analysisBusy: boolean;
   analysisError: string | null;
@@ -184,6 +190,7 @@ export function ChatCommandPanel({
   revisionPrompt: string;
   revisionBusy: boolean;
   editMessage: string | null;
+  versions?: PublicVersionInfo[];
   documentCapabilities: DocumentPackCapabilities | null;
   documentCapabilitiesError?: string | null;
   documentCapabilitiesLoading?: boolean;
@@ -259,6 +266,12 @@ export function ChatCommandPanel({
           <p>{assistantMessage}</p>
         </div>
       </div>
+
+      <ConversationHistory
+        activeRequirements={activeRequirements ?? null}
+        currentPrompt={prompt}
+        versions={versions ?? []}
+      />
 
       {bootstrapError ? (
         <ResourceRecovery
@@ -363,6 +376,78 @@ export function ChatCommandPanel({
         </p>
       ) : null}
     </section>
+  );
+}
+
+type ConversationEntry = {
+  id: string;
+  label: string;
+  message: string;
+  role: "user" | "assistant" | "system";
+};
+
+export function conversationHistoryEntries({
+  activeRequirements,
+  currentPrompt,
+  versions
+}: {
+  activeRequirements: RequirementSpec | null;
+  currentPrompt: string;
+  versions: PublicVersionInfo[];
+}): ConversationEntry[] {
+  const entries: ConversationEntry[] = [];
+  const prompt = currentPrompt.trim();
+  if (prompt) {
+    entries.push({ id: "current-prompt", label: "Vous", message: prompt, role: "user" });
+  } else if (activeRequirements) {
+    entries.push({
+      id: "restored-requirements",
+      label: "Contexte actif restauré",
+      message: `${activeRequirements.network_type} · ${humanTowerType(activeRequirements.tower_type)} · ${activeRequirements.tower_height_m} m · ${activeRequirements.sector_count} secteur(s)`,
+      role: "system"
+    });
+  }
+  versions
+    .filter((version) => Boolean(version.edit_description?.trim()))
+    .slice(-3)
+    .forEach((version) => {
+      entries.push({
+        id: version.version_id,
+        label: version.active ? "Modification active" : "Version enregistrée",
+        message: version.edit_description!.trim(),
+        role: "assistant"
+      });
+    });
+  return entries;
+}
+
+function ConversationHistory({
+  activeRequirements,
+  currentPrompt,
+  versions
+}: {
+  activeRequirements: RequirementSpec | null;
+  currentPrompt: string;
+  versions: PublicVersionInfo[];
+}) {
+  const entries = conversationHistoryEntries({
+    activeRequirements,
+    currentPrompt,
+    versions
+  });
+  if (!entries.length) return null;
+  return (
+    <details className="conversation-history">
+      <summary>Contexte de la conversation <small>{entries.length}</small></summary>
+      <div className="conversation-history-list">
+        {entries.map((entry) => (
+          <article className={`conversation-entry ${entry.role}`} key={entry.id}>
+            <strong>{entry.label}</strong>
+            <p>{entry.message}</p>
+          </article>
+        ))}
+      </div>
+    </details>
   );
 }
 
@@ -1081,6 +1166,7 @@ export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflow
 type DrawerId =
   | "summary"
   | "agents"
+  | "scene"
   | "quality"
   | "artifacts"
   | "library"
@@ -1089,6 +1175,7 @@ type DrawerId =
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
 export function InspectorDock({
+  assemblyPlan = null,
   adaptationCapabilities = null,
   adaptationCapabilitiesError = null,
   adaptationLoading = false,
@@ -1106,6 +1193,9 @@ export function InspectorDock({
   canRollback,
   documentCapabilities,
   events,
+  componentProofs = null,
+  cognitiveEvidenceError = null,
+  cognitiveEvidenceLoading = false,
   issues,
   ragEvidence = null,
   ragEvidenceError = null,
@@ -1128,12 +1218,16 @@ export function InspectorDock({
   onRetryLlmProvenance,
   onRetryQaEvidence,
   onRetryRagEvidence,
+  onRetryCognitiveEvidence,
   onRetryViewerBundle,
   onSearchAssetLibrary,
+  onSelectSceneComponent,
   rollbackBusyVersionId,
   versionMessage,
   versions
+  , selectedSemanticRoot = null
 }: {
+  assemblyPlan?: AssemblyPlanEvidence | null;
   adaptationCapabilities?: SceneAdaptationCapabilities | null;
   adaptationCapabilitiesError?: string | null;
   adaptationLoading?: boolean;
@@ -1151,6 +1245,9 @@ export function InspectorDock({
   canRollback: boolean;
   documentCapabilities?: DocumentPackCapabilities | null;
   events: NormalizedWorkflowEvent[];
+  componentProofs?: ComponentProofs | null;
+  cognitiveEvidenceError?: string | null;
+  cognitiveEvidenceLoading?: boolean;
   issues: UserIssues | null;
   ragEvidence?: unknown | null;
   ragEvidenceError?: string | null;
@@ -1173,11 +1270,14 @@ export function InspectorDock({
   onRetryLlmProvenance?: () => void;
   onRetryQaEvidence?: () => void;
   onRetryRagEvidence?: () => void;
+  onRetryCognitiveEvidence?: () => void;
   onRetryViewerBundle?: () => void;
   onSearchAssetLibrary?: (query: string) => void | Promise<void>;
+  onSelectSceneComponent?: (semanticRoot: string | null) => void;
   rollbackBusyVersionId: string | null;
   versionMessage: string | null;
   versions: PublicVersionInfo[];
+  selectedSemanticRoot?: string | null;
 }) {
   const [activeDrawer, setActiveDrawer] = useState<DrawerId | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1187,6 +1287,14 @@ export function InspectorDock({
   const drawers: DrawerDefinition[] = [];
   if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Aperçu", icon: <CheckCircle2 size={16} /> });
   if (events.length || timeline) drawers.push({ id: "agents", label: "Activité", icon: <Sparkles size={16} /> });
+  if (assemblyPlan || componentProofs || cognitiveEvidenceError || cognitiveEvidenceLoading) {
+    drawers.push({
+      id: "scene",
+      label: "Scène",
+      badge: componentProofs ? String(sceneInstanceCount(componentProofs)) : undefined,
+      icon: <Layers3 size={16} />
+    });
+  }
   if (bundle || issueCount || viewerBundleError || qaEvidenceError || qaEvidenceLoading) {
     drawers.push({
       id: "quality",
@@ -1196,7 +1304,7 @@ export function InspectorDock({
     });
   }
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
-  if (assetLibrarySummary?.catalog_available || assetInventory || assetLibrarySummaryError || assetInventoryError || assetLibraryLoading) drawers.push({ id: "library", label: "Composants", icon: <Boxes size={16} /> });
+  if (assetLibrarySummary?.catalog_available || assetInventory || assetLibrarySummaryError || assetInventoryError || assetLibraryLoading) drawers.push({ id: "library", label: "Bibliothèque", icon: <Boxes size={16} /> });
   if (bundle || summary || adaptationCapabilitiesError || adaptationCatalogError || llmProvenanceError || llmProvenanceLoading) drawers.push({ id: "system", label: "Système", icon: <Cpu size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
@@ -1284,6 +1392,17 @@ export function InspectorDock({
             </>
           ) : null}
           {activeDrawer === "agents" ? <AgentTimeline events={events} timeline={timeline} /> : null}
+          {activeDrawer === "scene" ? (
+            <SceneCompositionPanel
+              assemblyPlan={assemblyPlan}
+              componentProofs={componentProofs}
+              error={cognitiveEvidenceError}
+              loading={cognitiveEvidenceLoading}
+              onRetry={onRetryCognitiveEvidence}
+              onSelect={onSelectSceneComponent}
+              selectedSemanticRoot={selectedSemanticRoot}
+            />
+          ) : null}
           {activeDrawer === "quality" ? (
             <>
               <QaPanel
@@ -1354,6 +1473,130 @@ export function InspectorDock({
         </div>
       ) : null}
     </aside>
+  );
+}
+
+export function sceneInstanceCount(proofs: ComponentProofs): number {
+  return proofs.components.reduce((count, component) => count + component.instances.length, 0) +
+    proofs.geometry_programs.reduce((count, program) => count + program.quantity, 0);
+}
+
+function strategyLabel(strategy: string): string {
+  const labels: Record<string, string> = {
+    reuse: "Réutilisé",
+    adapt: "Adapté",
+    compose: "Composé",
+    procedural_generate: "Généré"
+  };
+  return labels[strategy] ?? strategy;
+}
+
+export function SceneCompositionPanel({
+  assemblyPlan,
+  componentProofs,
+  error = null,
+  loading = false,
+  onRetry,
+  onSelect,
+  selectedSemanticRoot = null
+}: {
+  assemblyPlan: AssemblyPlanEvidence | null;
+  componentProofs: ComponentProofs | null;
+  error?: string | null;
+  loading?: boolean;
+  onRetry?: () => void;
+  onSelect?: (semanticRoot: string | null) => void;
+  selectedSemanticRoot?: string | null;
+}) {
+  const strategyCounts = new Map<string, number>();
+  componentProofs?.components.forEach((component) => {
+    strategyCounts.set(component.strategy, (strategyCounts.get(component.strategy) ?? 0) + component.quantity);
+  });
+  componentProofs?.geometry_programs.forEach((program) => {
+    strategyCounts.set(program.strategy, (strategyCounts.get(program.strategy) ?? 0) + program.quantity);
+  });
+  const planByRole = new Map(
+    (assemblyPlan?.components ?? []).map((component) => [component.role_id, component])
+  );
+  return (
+    <section className="drawer-section" aria-label="Composition de la scène">
+      <PanelTitle icon={<Layers3 size={17} />} title="Composition vérifiable" />
+      {loading ? (
+        <p className="resource-loading" aria-live="polite" role="status">
+          <Loader2 className="spin" size={15} aria-hidden="true" /> Synchronisation du plan et des composants…
+        </p>
+      ) : null}
+      {error ? (
+        <ResourceRecovery
+          busy={loading}
+          label="Le plan de composition n’a pas pu être entièrement resynchronisé."
+          message={error}
+          onRetry={onRetry}
+        />
+      ) : null}
+      {assemblyPlan ? (
+        <div className="scene-plan-summary">
+          <strong>Décision de sélection tracée</strong>
+          <small>
+            {assemblyPlan.selection_provider}
+            {assemblyPlan.selection_model ? ` · ${assemblyPlan.selection_model}` : ""}
+            {` · ${assemblyPlan.connections.length} connexion(s)`}
+          </small>
+        </div>
+      ) : null}
+      {strategyCounts.size ? (
+        <div className="strategy-chips" aria-label="Stratégies de construction">
+          {Array.from(strategyCounts.entries()).map(([strategy, count]) => (
+            <span data-strategy={strategy} key={strategy}>{strategyLabel(strategy)} <strong>{count}</strong></span>
+          ))}
+        </div>
+      ) : null}
+      {componentProofs ? (
+        <div className="scene-tree" role="tree" aria-label="Arbre réel de la scène">
+          {componentProofs.components.map((component) => {
+            const plan = planByRole.get(component.role_id);
+            return (
+              <div className="scene-tree-group" key={component.component_id} role="group">
+                <div className="scene-tree-heading">
+                  <div>
+                    <strong>{humanSemanticRole(component.role_id)}</strong>
+                    <small>{strategyLabel(component.strategy)} · {component.asset_id ?? component.origin}</small>
+                  </div>
+                  <span>{component.quantity}</span>
+                </div>
+                {plan?.selection_reason ? <p>{plan.selection_reason}</p> : null}
+                {component.instances.map((instance) => (
+                  <button
+                    aria-current={selectedSemanticRoot === instance.semantic_root ? "true" : undefined}
+                    className={`scene-tree-item${selectedSemanticRoot === instance.semantic_root ? " selected" : ""}`}
+                    key={instance.instance_id}
+                    onClick={() => onSelect?.(instance.semantic_root)}
+                    role="treeitem"
+                    type="button"
+                  >
+                    <span>{humanSemanticRole(instance.object_role)}</span>
+                    <small>{instance.instance_id}</small>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+          {componentProofs.geometry_programs.map((program) => (
+            <div className="scene-tree-group generated" key={program.component_id} role="group">
+              <div className="scene-tree-heading">
+                <div>
+                  <strong>{humanSemanticRole(program.role_id)}</strong>
+                  <small>{strategyLabel(program.strategy)} · programme géométrique validé</small>
+                </div>
+                <span>{program.quantity}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : !loading && !error ? (
+        <p className="muted">Aucune preuve de composition n’est publiée pour ce design.</p>
+      ) : null}
+    </section>
   );
 }
 
@@ -1560,10 +1803,22 @@ export function ArtifactsPanel({
   bundle: ViewerBundle | null;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 }) {
+  const previews = availablePreviewArtifacts(bundle, toAbsoluteUrl);
   return (
     <section className="drawer-section" aria-label="Livrables">
       <PanelTitle icon={<FileArchive size={17} />} title="Livrables vérifiables" />
       {bundle ? (
+        <>
+        {previews.length ? (
+          <div className="artifact-preview-grid" aria-label="Aperçus du design">
+            {previews.map((preview) => (
+              <a href={preview.url} key={preview.name} rel="noreferrer" target="_blank">
+                <img alt={artifactLabel(preview.name)} loading="lazy" src={preview.url} />
+                <span>{artifactLabel(preview.name)}</span>
+              </a>
+            ))}
+          </div>
+        ) : null}
         <div className="artifact-list">
           {bundle.viewer_artifacts.map((artifact) => {
             const url = artifact.available ? toAbsoluteUrl(artifact.url) : null;
@@ -1595,11 +1850,26 @@ export function ArtifactsPanel({
             );
           })}
         </div>
+        </>
       ) : (
         <p className="muted">Aucun artefact tant qu’un workflow n’est pas terminé.</p>
       )}
     </section>
   );
+}
+
+export function availablePreviewArtifacts(
+  bundle: ViewerBundle | null,
+  toAbsoluteUrl: (url: string | null | undefined) => string | null
+): Array<{ name: string; url: string }> {
+  if (!bundle) return [];
+  return bundle.viewer_artifacts.flatMap((artifact) => {
+    if (!artifact.available || !artifact.content_type.toLowerCase().startsWith("image/")) {
+      return [];
+    }
+    const url = toAbsoluteUrl(artifact.url);
+    return url ? [{ name: artifact.name, url }] : [];
+  });
 }
 
 export function AssetLibraryPanel({
@@ -3023,7 +3293,11 @@ function humanTimelineMessage(message: string): string {
 function artifactLabel(name: string): string {
   const labels: Record<string, string> = {
     "design.glb": "Modèle 3D GLB",
-    "preview.png": "Aperçu de contrôle",
+    "preview.png": "Vue d’ensemble",
+    "preview_front.png": "Vue de face",
+    "preview_side.png": "Vue latérale",
+    "preview_top.png": "Vue de dessus",
+    "preview_closeup.png": "Gros plan principal",
     "scene_metadata.json": "Métadonnées de la scène",
     "requirements_spec.json": "Exigences consolidées",
     "extraction_report.json": "Rapport de compréhension",

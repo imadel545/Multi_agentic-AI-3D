@@ -17,6 +17,7 @@ import {
 import { normalizeWorkflowEvent, openWorkflowEventStream } from "./api/sse";
 import type {
   AdaptationCapabilityCatalog,
+  AssemblyPlanEvidence,
   DocumentPackCapabilities,
   DocumentPackReview,
   DocumentPackSummary,
@@ -26,7 +27,9 @@ import type {
   AssetLibrarySearch,
   AssetLibrarySummary,
   ParseRequirementsResponse,
+  ComponentProofs,
   PublicVersionInfo,
+  RequirementSpec,
   SceneAdaptationCapabilities,
   ViewerBundle,
   EditDesignResponse,
@@ -80,6 +83,10 @@ export default function App({ apiClient = api }: AppProps) {
     useState<SceneAdaptationCapabilities | null>(null);
   const [qaEvidence, setQaEvidence] = useState<unknown | null>(null);
   const [llmProvenance, setLlmProvenance] = useState<LLMDecisionProvenance | null>(null);
+  const [componentProofs, setComponentProofs] = useState<ComponentProofs | null>(null);
+  const [assemblyPlan, setAssemblyPlan] = useState<AssemblyPlanEvidence | null>(null);
+  const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
+  const [selectedSemanticRoot, setSelectedSemanticRoot] = useState<string | null>(null);
   const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
@@ -265,14 +272,26 @@ export default function App({ apiClient = api }: AppProps) {
 
   useEffect(() => {
     const bundle = state.viewerBundle;
-    for (const resource of ["adaptation_scene", "qa_evidence", "llm_provenance", "rag_evidence"]) {
+    for (const resource of [
+      "adaptation_scene",
+      "assembly_plan",
+      "component_proofs",
+      "qa_evidence",
+      "llm_provenance",
+      "rag_evidence",
+      "requirements_context"
+    ]) {
       resourceRequestRef.current[resource] =
         (resourceRequestRef.current[resource] ?? 0) + 1;
     }
     setAdaptationCapabilities(null);
+    setAssemblyPlan(null);
+    setComponentProofs(null);
     setQaEvidence(null);
     setLlmProvenance(null);
     setRagEvidence(null);
+    setActiveRequirements(null);
+    setSelectedSemanticRoot(null);
     if (!bundle) {
       return;
     }
@@ -283,6 +302,39 @@ export default function App({ apiClient = api }: AppProps) {
       "resource",
       () => setAdaptationCapabilities(null)
     ).catch(() => undefined);
+    if (bundle.assembly_plan_url) {
+      void loadSurfaceResource(
+        "assembly_plan",
+        () => apiClient.assemblyPlan(bundle.assembly_plan_url),
+        setAssemblyPlan,
+        "resource",
+        () => setAssemblyPlan(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "assembly_plan" });
+    }
+    if (bundle.component_proofs_url) {
+      void loadSurfaceResource(
+        "component_proofs",
+        () => apiClient.componentProofs(bundle.component_proofs_url),
+        setComponentProofs,
+        "resource",
+        () => setComponentProofs(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "component_proofs" });
+    }
+    if (bundle.requirements_spec_url) {
+      void loadSurfaceResource(
+        "requirements_context",
+        () => apiClient.requirementsSpec(bundle.requirements_spec_url),
+        setActiveRequirements,
+        "resource",
+        () => setActiveRequirements(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "requirements_context" });
+    }
     if (bundle.qa_report_url) {
       void loadSurfaceResource(
         "qa_evidence",
@@ -1129,6 +1181,45 @@ export default function App({ apiClient = api }: AppProps) {
       () => setRagEvidence(null)
     );
   }, [apiClient, loadSurfaceResource, state.viewerBundle?.rag_evidence_url]);
+  const retryCognitiveEvidence = useCallback(async () => {
+    const bundle = state.viewerBundle;
+    if (!bundle) return;
+    const requests: Promise<unknown>[] = [];
+    if (bundle.assembly_plan_url) {
+      requests.push(
+        loadSurfaceResource(
+          "assembly_plan",
+          () => apiClient.assemblyPlan(bundle.assembly_plan_url),
+          setAssemblyPlan,
+          "resource",
+          () => setAssemblyPlan(null)
+        )
+      );
+    }
+    if (bundle.component_proofs_url) {
+      requests.push(
+        loadSurfaceResource(
+          "component_proofs",
+          () => apiClient.componentProofs(bundle.component_proofs_url),
+          setComponentProofs,
+          "resource",
+          () => setComponentProofs(null)
+        )
+      );
+    }
+    if (bundle.requirements_spec_url) {
+      requests.push(
+        loadSurfaceResource(
+          "requirements_context",
+          () => apiClient.requirementsSpec(bundle.requirements_spec_url),
+          setActiveRequirements,
+          "resource",
+          () => setActiveRequirements(null)
+        )
+      );
+    }
+    await Promise.allSettled(requests);
+  }, [apiClient, loadSurfaceResource, state.viewerBundle]);
 
   const canEditCurrentDesign =
     state.viewerBundle?.status === "completed" &&
@@ -1162,14 +1253,16 @@ export default function App({ apiClient = api }: AppProps) {
     state.phase === "submitting" ||
     state.phase === "streaming" ||
     state.phase === "running";
-  const bootstrapError = Array.from(
-    new Set([
-      state.resourceErrors.studio_summary,
-      state.resourceErrors.design_list,
-      state.resourceErrors.workflow_status,
-      state.resourceErrors.terminal_bundle
-    ].filter((message): message is string => Boolean(message)))
-  ).join(" · ") || null;
+  const bootstrapError = state.viewerBundle
+    ? null
+    : Array.from(
+        new Set([
+          state.resourceErrors.studio_summary,
+          !state.workflowId ? state.resourceErrors.design_list : null,
+          state.resourceErrors.workflow_status,
+          state.resourceErrors.terminal_bundle
+        ].filter((message): message is string => Boolean(message)))
+      ).join(" · ") || null;
   const bootstrapLoading = ["studio_summary", "design_list", "workflow_status", "terminal_bundle"].some(
     (resource) => state.resourceLoads[resource]?.status === "loading"
   );
@@ -1195,6 +1288,7 @@ export default function App({ apiClient = api }: AppProps) {
       <main className="studio-layout">
         <aside className="left-rail">
           <ChatCommandPanel
+            activeRequirements={activeRequirements}
             analysis={analysisIsCurrent ? requirementsAnalysis : null}
             analysisBusy={analysisBusy}
             analysisError={analysisError}
@@ -1230,6 +1324,7 @@ export default function App({ apiClient = api }: AppProps) {
             submissionPending={state.pendingSubmission}
             revisionBusy={revisionBusy}
             revisionPrompt={revisionPrompt}
+            versions={versions}
           />
           {workflowActive || operationNotice ? (
             <CurrentOperationStrip
@@ -1247,6 +1342,7 @@ export default function App({ apiClient = api }: AppProps) {
               loadError={viewerSurfaceError}
               loading={viewerSurfaceLoading}
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
+              selectedSemanticRoot={selectedSemanticRoot}
               toAbsoluteUrl={toArtifactUrl}
             />
           </Suspense>
@@ -1285,8 +1381,20 @@ export default function App({ apiClient = api }: AppProps) {
             assetLibrarySummary={assetLibrarySummary}
             assetLibrarySummaryError={state.resourceErrors.asset_library ?? null}
             bundle={state.viewerBundle}
+            assemblyPlan={assemblyPlan}
             canRollback={canRollbackVersions}
             events={state.events}
+            componentProofs={componentProofs}
+            cognitiveEvidenceError={[
+              state.resourceErrors.assembly_plan,
+              state.resourceErrors.component_proofs,
+              state.resourceErrors.requirements_context
+            ].filter(Boolean).join(" ") || null}
+            cognitiveEvidenceLoading={
+              state.resourceLoads.assembly_plan?.status === "loading" ||
+              state.resourceLoads.component_proofs?.status === "loading" ||
+              state.resourceLoads.requirements_context?.status === "loading"
+            }
             documentCapabilities={documentCapabilities}
             issues={state.userIssues}
             ragEvidence={ragEvidence}
@@ -1304,15 +1412,18 @@ export default function App({ apiClient = api }: AppProps) {
             timeline={state.timeline}
             toAbsoluteUrl={toArtifactUrl}
             onRollbackVersion={rollbackVersion}
+            onSelectSceneComponent={setSelectedSemanticRoot}
             onRetryAdaptation={() => void retryAdaptationSurfaces()}
             onRetryAssets={() => void retryAssetSurfaces()}
             onRetryAssetSearch={() => void retryAssetSearch()}
             onRetryLlmProvenance={() => void retryLlmProvenance().catch(() => undefined)}
             onRetryQaEvidence={() => void retryQaEvidence().catch(() => undefined)}
             onRetryRagEvidence={() => void retryRagEvidence().catch(() => undefined)}
+            onRetryCognitiveEvidence={() => void retryCognitiveEvidence()}
             onRetryViewerBundle={() => void reloadViewerBundle().catch(() => undefined)}
             onSearchAssetLibrary={searchAssetLibrary}
             rollbackBusyVersionId={rollbackBusyVersionId}
+            selectedSemanticRoot={selectedSemanticRoot}
             versionMessage={versionMessage}
             versions={versions}
           />

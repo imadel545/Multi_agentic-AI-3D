@@ -237,7 +237,7 @@ class SceneEditAgent:
         )
         if capability is None:
             raise RuntimeError("geometry-program capability was not resolved")
-        request_id = current.program_id.removesuffix(".llm_v1")
+        request_id = re.sub(r"\.llm_v[12]$", "", current.program_id)
         source_description_available = (
             current.source_description is not None
             and current.source_description_origin != "legacy_unavailable"
@@ -262,11 +262,13 @@ class SceneEditAgent:
             ),
             placement_context=current.placement_context,
             maximum_dimensions_m=current.maximum_dimensions_m,
+            schema_version=current.schema_version,
             design_context={
                 "operation": "revision",
                 "current_geometry_program": current.model_dump(mode="json"),
                 "scene_network_type": scene.network_type,
-                "scene_tower_height_m": scene.tower.height_m,
+                "scene_tower_height_m": scene.tower.height_m if scene.tower is not None else None,
+                "design_domain": scene.design_domain,
                 "site_coordinate_frame": "meters, Z-up, tower center at origin",
             },
         )

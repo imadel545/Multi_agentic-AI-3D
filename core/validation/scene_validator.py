@@ -56,6 +56,35 @@ def _has_accessory(scene: SceneSpec, asset_type: str) -> bool:
 
 
 def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> ValidationReport:
+    if scene.schema_version == "2.0.0":
+        checks = {
+            "scene_schema_v2": True,
+            "design_domain_present": bool(scene.design_domain),
+            "design_intent_linked": bool(scene.design_intent_id),
+            "component_graph_linked": bool(scene.component_graph_id),
+            "asset_decision_plan_linked": bool(scene.asset_decision_plan_id),
+            "specialist_route_linked": bool(scene.specialist_route_id),
+            "cognitive_plan_hash_present": bool(scene.cognitive_plan_sha256),
+            "geometry_programs_present": bool(scene.geometry_programs),
+            "units_meters": scene.units == "meters",
+        }
+        errors = [
+            ValidationIssue(
+                code=code.upper(),
+                message=f"SceneSpec V2 check failed: {code}",
+                severity="error",
+            )
+            for code, passed in checks.items()
+            if not passed
+        ]
+        return ValidationReport(
+            design_id=scene.scene_id,
+            status="passed" if not errors else "failed",
+            score=sum(checks.values()) / len(checks),
+            checks=checks,
+            warnings=[],
+            errors=errors,
+        )
     assets_by_id = {asset.asset_id: asset for asset in assets}
     checks = {
         "tower_asset_valid": scene.tower.asset_id in assets_by_id

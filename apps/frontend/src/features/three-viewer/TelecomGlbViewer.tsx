@@ -2,8 +2,8 @@ import { Grid, Html, OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { AlertTriangle, Box, Image as ImageIcon, Layers3, Loader2, RotateCcw } from "lucide-react";
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { ACESFilmicToneMapping, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
-import type { Camera, PerspectiveCamera, Scene, WebGLRenderer } from "three";
+import { ACESFilmicToneMapping, BoxHelper, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
+import type { Camera, Object3D, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { ViewerBundle } from "../../api/schemas";
 import {
@@ -26,6 +26,7 @@ type TelecomGlbViewerProps = {
   loading?: boolean;
   onReloadBundle?: () => void | Promise<void>;
   probeWebGL?: () => boolean;
+  selectedSemanticRoot?: string | null;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 };
 
@@ -44,6 +45,7 @@ export function TelecomGlbViewer({
   loading = false,
   onReloadBundle,
   probeWebGL = hasUsableWebGL,
+  selectedSemanticRoot = null,
   toAbsoluteUrl
 }: TelecomGlbViewerProps) {
   const source = resolveViewerSource(bundle, toAbsoluteUrl);
@@ -121,6 +123,11 @@ export function TelecomGlbViewer({
         <ViewerError busy={loading} message={source.message} previewUrl={source.previewUrl} onRetry={retryViewer} />
       ) : (
         <div className="canvas-frame">
+          {selectedSemanticRoot ? (
+            <div className="viewer-selection" aria-live="polite">
+              <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {humanizeSemanticRoot(selectedSemanticRoot)}
+            </div>
+          ) : null}
           {loading ? (
             <div className="viewer-refresh-alert loading" aria-live="polite" role="status">
               <Loader2 className="spin" size={16} aria-hidden="true" />
@@ -186,6 +193,7 @@ export function TelecomGlbViewer({
                     controlsRef={controlsRef}
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
+                    selectedSemanticRoot={selectedSemanticRoot}
                     url={source.url}
                   />
                 </Suspense>
@@ -251,32 +259,76 @@ function ModelScene({
   url,
   controlsRef,
   onHealth,
-  onLoaded
+  onLoaded,
+  selectedSemanticRoot
 }: {
   url: string;
   controlsRef: MutableRefObject<OrbitControlsImpl | null>;
   onHealth: (health: ViewerHealth) => void;
   onLoaded: (summary: ModelObjectSummary) => void;
+  selectedSemanticRoot: string | null;
 }) {
   const gltf = useGLTF(url);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
   const { camera, size } = useThree();
   const fitted = useRef(false);
+  const selectedObject = useMemo(
+    () => findSemanticObject(scene, selectedSemanticRoot),
+    [scene, selectedSemanticRoot]
+  );
+  const selectionHelper = useMemo(
+    () => selectedObject ? new BoxHelper(selectedObject, new Color("#70e1d2")) : null,
+    [selectedObject]
+  );
+  useEffect(() => () => selectionHelper?.dispose(), [selectionHelper]);
   useEffect(() => {
     prepareViewerScene(scene);
     onLoaded(summarizeObjects(scene));
     fitted.current = false;
     onHealth("model_loaded");
   }, [onHealth, onLoaded, scene, size.height, size.width]);
+  useEffect(() => {
+    fitted.current = false;
+  }, [selectedSemanticRoot]);
   useFrame(() => {
     if (fitted.current || !controlsRef.current) {
       return;
     }
     fitted.current = true;
-    const fit = fitCameraToObject(camera as PerspectiveCamera, scene, controlsRef.current);
+    const fit = fitCameraToObject(
+      camera as PerspectiveCamera,
+      selectedObject ?? scene,
+      controlsRef.current
+    );
+    selectionHelper?.update();
     onHealth(fit ? "camera_fitted" : "glb_error");
   });
-  return <primitive object={scene} />;
+  return (
+    <>
+      <primitive object={scene} />
+      {selectionHelper ? <primitive object={selectionHelper} /> : null}
+    </>
+  );
+}
+
+export function findSemanticObject(scene: Object3D, semanticRoot: string | null): Object3D | null {
+  if (!semanticRoot) return null;
+  let prefixMatch: Object3D | null = null;
+  let exactMatch: Object3D | null = null;
+  scene.traverse((object) => {
+    const declaredRoot = object.userData.semantic_root ?? object.userData.semanticRoot;
+    if (!exactMatch && (object.name === semanticRoot || declaredRoot === semanticRoot)) {
+      exactMatch = object;
+    }
+    if (!prefixMatch && object.name.startsWith(`${semanticRoot}_`)) {
+      prefixMatch = object;
+    }
+  });
+  return exactMatch ?? prefixMatch;
+}
+
+function humanizeSemanticRoot(value: string): string {
+  return value.replaceAll("_", " ");
 }
 
 function ViewerEmpty({ message }: { message: string }) {

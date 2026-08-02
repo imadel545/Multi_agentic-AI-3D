@@ -238,6 +238,10 @@ class ProductService:
 
         viewer_artifacts.append(_artifact("design.glb", "model/gltf-binary", "glb"))
         viewer_artifacts.append(_artifact("preview.png", "image/png", "preview"))
+        viewer_artifacts.append(_artifact("preview_front.png", "image/png", "preview_front"))
+        viewer_artifacts.append(_artifact("preview_side.png", "image/png", "preview_side"))
+        viewer_artifacts.append(_artifact("preview_top.png", "image/png", "preview_top"))
+        viewer_artifacts.append(_artifact("preview_closeup.png", "image/png", "preview_closeup"))
         viewer_artifacts.append(_artifact("scene_metadata.json", "application/json", "metadata"))
         viewer_artifacts.append(
             _artifact("component_proofs.json", "application/json", "component_proofs")
@@ -259,6 +263,16 @@ class ProductService:
         viewer_artifacts.append(_artifact("rag_evidence.json", "application/json", "rag_evidence"))
         viewer_artifacts.append(
             _artifact("planning_decision.json", "application/json", "planning_decision")
+        )
+        viewer_artifacts.append(
+            _artifact("cognitive_plan.json", "application/json", "cognitive_plan")
+        )
+        viewer_artifacts.append(
+            _artifact(
+                "capability_observations.json",
+                "application/json",
+                "capability_observations",
+            )
         )
         viewer_artifacts.append(
             _artifact("geometry_validation.json", "application/json", "geometry_validation")
@@ -297,6 +311,10 @@ class ProductService:
         geometry_validation = _artifact_by_name(viewer_artifacts, "geometry_validation.json")
         requirement_coverage = _artifact_by_name(viewer_artifacts, "requirement_coverage.json")
         completion_certificate = _artifact_by_name(viewer_artifacts, "completion_certificate.json")
+        cognitive_plan = _artifact_by_name(viewer_artifacts, "cognitive_plan.json")
+        capability_observations = _artifact_by_name(
+            viewer_artifacts, "capability_observations.json"
+        )
         report = _artifact_by_name(viewer_artifacts, "technical_report.md")
         llm_decision_provenance = _artifact_by_name(
             viewer_artifacts, "llm_decision_provenance.json"
@@ -340,6 +358,10 @@ class ProductService:
             "requirement_coverage_passed": status.get("requirement_coverage_passed"),
             "requirement_coverage_ratio": status.get("requirement_coverage_ratio"),
             "completion_certificate_status": status.get("completion_certificate_status"),
+            "design_domain": status.get("design_domain"),
+            "cognitive_plan_sha256": status.get("cognitive_plan_sha256"),
+            "cognitive_plan_url": _available_artifact_url(cognitive_plan),
+            "capability_observations_url": _available_artifact_url(capability_observations),
             "extraction_provider": llm["extraction_provider"],
             "llm_provider": status.get("llm_provider"),
             "llm_available": llm["llm_available"],

@@ -287,7 +287,7 @@ def _subject_stats(
     framing_valid = (
         pixel_ratio >= MIN_SUBJECT_PIXEL_RATIO
         and bbox_width_ratio >= minimum_width_ratio
-        and bbox_height_ratio >= MIN_SUBJECT_BBOX_HEIGHT_RATIO
+        and bbox_height_ratio >= _minimum_subject_height_ratio(scene)
         and bbox_height_ratio <= MAX_SUBJECT_BBOX_HEIGHT_RATIO
         and contrast_mean >= MIN_SUBJECT_CONTRAST_MEAN
         and MIN_SUBJECT_CENTER_X_RATIO <= center_x_ratio <= MAX_SUBJECT_CENTER_X_RATIO
@@ -312,6 +312,16 @@ def _minimum_subject_width_ratio(scene: SceneSpec) -> float:
     if sector_count == 2:
         return 0.13
     return 0.09
+
+
+def _minimum_subject_height_ratio(scene: SceneSpec) -> float:
+    # Environment and general-object scenes can be intentionally wide. The
+    # generic gate still requires visible subject pixels, contrast, centering,
+    # margins and at least 45% vertical occupancy instead of applying the tall
+    # telecom-tower threshold to every domain.
+    if scene.schema_version == "2.0.0":
+        return 0.45
+    return MIN_SUBJECT_BBOX_HEIGHT_RATIO
 
 
 def _png_color_info(data: bytes) -> tuple[int, int, int, int]:

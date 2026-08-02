@@ -134,6 +134,13 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert result.blender_available is True
     assert Path(result.artifacts["glb"]).stat().st_size > 1000
     assert Path(result.artifacts["preview"]).stat().st_size > 1000
+    for artifact_name in (
+        "preview_front",
+        "preview_side",
+        "preview_top",
+        "preview_closeup",
+    ):
+        assert Path(result.artifacts[artifact_name]).stat().st_size > 1000
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
     assert metadata["generation_mode"] == "real_blender"
     assert metadata["tower_characteristics"]["structure"] == "lattice"
@@ -141,6 +148,23 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert metadata["preview_camera"]["camera_type"] == "ORTHO"
     assert metadata["preview_camera"]["framing"] == "geometry_bounds_three_quarter"
     assert metadata["preview_camera"]["render_backdrop"] == "preview_only_light_plane"
+    preview_views = metadata["preview_camera"]["preview_views"]
+    assert [view["view_id"] for view in preview_views] == [
+        "primary",
+        "front",
+        "side",
+        "top",
+        "closeup",
+    ]
+    assert {view["file_name"] for view in preview_views} == {
+        "preview.png",
+        "preview_front.png",
+        "preview_side.png",
+        "preview_top.png",
+        "preview_closeup.png",
+    }
+    assert all(len(view["sha256"]) == 64 for view in preview_views)
+    assert all(view["size_bytes"] > 1000 for view in preview_views)
     assert metadata["segment_connectivity"]["passed"] is True
     assert metadata["segment_connectivity"]["evaluated_segment_count"] > 0
     assert metadata["segment_connectivity"]["failed_segment_count"] == 0
@@ -536,6 +560,13 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
         output_dir = Path(command[-1])
         (output_dir / "design.glb").write_bytes(b"x" * 64)
         (output_dir / "preview.png").write_bytes(b"x" * 64)
+        for name in (
+            "preview_front.png",
+            "preview_side.png",
+            "preview_top.png",
+            "preview_closeup.png",
+        ):
+            (output_dir / name).write_bytes(name.encode("utf-8") * 4)
         (output_dir / "scene_metadata.json").write_text(
             json.dumps(
                 {
@@ -568,6 +599,16 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
     assert build_lock["attempt_number"] == 2
     assert build_lock["command_profile"]["factory_startup"] is True
     assert build_lock["artifacts"]["design.glb"]["size_bytes"] == 64
+    assert set(build_lock["artifacts"]) >= {
+        "preview_front.png",
+        "preview_side.png",
+        "preview_top.png",
+        "preview_closeup.png",
+    }
+    assert all(
+        Path(result.artifacts[name]).is_file()
+        for name in ("preview_front", "preview_side", "preview_top", "preview_closeup")
+    )
     assert not any(path.exists() for path in attempt_directories)
 
 

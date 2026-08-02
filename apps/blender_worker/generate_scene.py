@@ -46,16 +46,17 @@ def main() -> int:
     _reset_scene(bpy)
     _configure_scene(bpy, scene)
     _create_ground_plane(bpy, scene)
-    _create_tower(bpy, scene, procedural_objects, asset_imports, asset_warnings)
-    if scene["visual_elements"].get("include_height_markers", False):
-        _create_height_marker(bpy, scene, procedural_objects)
-    _create_sectors(bpy, scene, procedural_objects, asset_imports, asset_warnings)
-    if scene["visual_elements"].get("include_power_cabinet", False):
-        _create_power_cabinet(bpy, scene, procedural_objects, asset_imports, asset_warnings)
-    if scene["visual_elements"].get("include_gps_antenna", False):
-        _create_gps_antenna(bpy, scene, procedural_objects, asset_imports, asset_warnings)
-    if scene["visual_elements"].get("include_labels", False):
-        _create_labels(bpy, scene, procedural_objects)
+    if scene.get("tower") is not None:
+        _create_tower(bpy, scene, procedural_objects, asset_imports, asset_warnings)
+        if scene["visual_elements"].get("include_height_markers", False):
+            _create_height_marker(bpy, scene, procedural_objects)
+        _create_sectors(bpy, scene, procedural_objects, asset_imports, asset_warnings)
+        if scene["visual_elements"].get("include_power_cabinet", False):
+            _create_power_cabinet(bpy, scene, procedural_objects, asset_imports, asset_warnings)
+        if scene["visual_elements"].get("include_gps_antenna", False):
+            _create_gps_antenna(bpy, scene, procedural_objects, asset_imports, asset_warnings)
+        if scene["visual_elements"].get("include_labels", False):
+            _create_labels(bpy, scene, procedural_objects)
     _create_geometry_programs(
         bpy,
         scene,
@@ -99,13 +100,14 @@ def main() -> int:
         }
 
     glb_path = output_dir / "design.glb"
-    preview_path = output_dir / "preview.png"
     bpy.ops.export_scene.gltf(filepath=str(glb_path), export_format="GLB", export_extras=True)
     bounding_box_m = _compute_scene_bounding_box(bpy)
-    _create_preview_backdrop(bpy, scene)
     camera_metadata["render_backdrop"] = "preview_only_light_plane"
-    bpy.context.scene.render.filepath = str(preview_path)
-    bpy.ops.render.render(write_still=True)
+    camera_metadata["preview_views"] = _render_preview_views(
+        bpy,
+        scene,
+        output_dir,
+    )
     _write_metadata(
         scene,
         output_dir,
@@ -135,6 +137,11 @@ def _create_geometry_programs(
         return
     records = geometry_program_compiler.compile_geometry_programs(bpy, programs)
     for program, record in zip(programs, records, strict=True):
+        geometry_program_profile = (
+            "typed_geometry_program_v2"
+            if str(program.get("schema_version")) == "2.0.0"
+            else "typed_geometry_program_v1"
+        )
         program_payload = json.dumps(
             program,
             sort_keys=True,
@@ -154,7 +161,8 @@ def _create_geometry_programs(
                 "geometry_fidelity": "technical_generic",
                 "qualification_status": "validated_geometry_program",
                 "allowed_generation_modes": ["internal_project_generated"],
-                "qualification_method": "typed_geometry_program_v1",
+                "qualification_method": geometry_program_profile,
+                "geometry_program_schema_version": record["schema_version"],
                 "qualification_limitations": record["limitations"],
                 "program_sha256": program_sha256,
                 "program_authorship": record["authorship"],
@@ -236,8 +244,20 @@ def _configure_scene(bpy, scene: dict) -> None:
 
 
 def _create_ground_plane(bpy, scene: dict) -> None:
-    height = float(scene["tower"]["height_m"])
-    size = max(14.0, height * 0.6)
+    has_terrain = any(
+        node.get("kind") == "terrain"
+        for program in scene.get("geometry_programs", [])
+        for node in program.get("nodes", [])
+    )
+    if has_terrain:
+        return
+    tower = scene.get("tower")
+    # A generic cognitive scene must contain only planned/programmed geometry.
+    # Adding an undeclared floor would be a hardcoded design component and would
+    # also pollute framing QA. Telecom V1 retains its established technical pad.
+    if tower is None:
+        return
+    size = max(14.0, float(tower["height_m"]) * 0.6)
     bpy.ops.mesh.primitive_plane_add(size=size, location=(0, 0, -0.02))
     ground = bpy.context.object
     ground.name = "technical_ground_plane"
@@ -2376,8 +2396,13 @@ def _create_height_marker(bpy, scene: dict, procedural_objects: list[str]) -> No
 def _create_camera_and_light(bpy, scene: dict) -> dict:
     from mathutils import Vector  # type: ignore[import-not-found]
 
-    tower_height = float(scene["tower"]["height_m"])
-    base_width = float(scene["tower"].get("characteristics", {}).get("base_width_m") or 4.0)
+    tower = scene.get("tower")
+    tower_height = float(tower["height_m"]) if tower is not None else 0.0
+    base_width = (
+        float(tower.get("characteristics", {}).get("base_width_m") or 4.0)
+        if tower is not None
+        else 4.0
+    )
     subject_corners = _subject_world_corners(bpy)
     subject_bounds = _bounds_from_vectors(subject_corners)
     if subject_bounds:
@@ -2385,37 +2410,39 @@ def _create_camera_and_light(bpy, scene: dict) -> dict:
         target_vector = (minimum + maximum) * 0.5
         subject_size = maximum - minimum
     else:
-        target_vector = Vector((0.0, 0.0, tower_height * 0.5))
-        subject_size = Vector((base_width, base_width, tower_height))
-    distance = max(34.0, subject_size.length * 1.45)
+        fallback_height = max(tower_height, 4.0)
+        target_vector = Vector((0.0, 0.0, fallback_height * 0.5))
+        subject_size = Vector((base_width, base_width, fallback_height))
+    reference_height = max(float(subject_size.z), tower_height, 4.0)
+    distance = max(12.0, subject_size.length * 1.45)
     camera_mode = str(scene.get("preview", {}).get("camera") or "isometric")
     view_direction = Vector(_camera_view_direction(camera_mode)).normalized()
     camera_location_vector = target_vector + (view_direction * distance)
     target = tuple(float(value) for value in target_vector)
     camera_location = tuple(float(value) for value in camera_location_vector)
 
-    bpy.ops.object.light_add(type="SUN", location=(8, -6, tower_height + 12))
+    bpy.ops.object.light_add(type="SUN", location=(8, -6, reference_height + 12))
     sun = bpy.context.object
     sun.name = "sun_key"
     sun.data.energy = 3.0
     sun.rotation_euler = (math.radians(28), math.radians(-18), math.radians(-32))
     bpy.ops.object.light_add(
         type="AREA",
-        location=(-distance * 0.35, -distance * 0.45, tower_height * 0.82),
+        location=(-distance * 0.35, -distance * 0.45, reference_height * 0.82),
     )
     fill = bpy.context.object
     fill.name = "area_fill"
     fill.data.energy = 1550
-    fill.data.size = max(7, tower_height * 0.42)
+    fill.data.size = max(5, reference_height * 0.42)
     _point_object_at(fill, target)
     bpy.ops.object.light_add(
         type="AREA",
-        location=(distance * 0.58, distance * 0.32, tower_height * 0.7),
+        location=(distance * 0.58, distance * 0.32, reference_height * 0.7),
     )
     rim = bpy.context.object
     rim.name = "area_rim"
     rim.data.energy = 1750
-    rim.data.size = max(5, tower_height * 0.3)
+    rim.data.size = max(4, reference_height * 0.3)
     _point_object_at(rim, target)
 
     bpy.ops.object.camera_add(
@@ -2455,8 +2482,149 @@ def _camera_view_direction(camera_mode: str) -> tuple[float, float, float]:
     return {
         "isometric": (0.62, -1.0, 0.28),
         "front": (0.0, -1.0, 0.04),
+        "side": (1.0, 0.0, 0.04),
         "top": (0.0, 0.0, 1.0),
     }[camera_mode]
+
+
+def _render_preview_views(bpy, scene: dict, output_dir: Path) -> list[dict]:
+    """Render the governed preview set without changing exported scene geometry.
+
+    The primary view preserves ``SceneSpec.preview.camera`` and its historical
+    filename. The other views are deterministic inspection aids. They are not
+    presented as independent semantic or engineering QA.
+    """
+
+    camera = bpy.context.scene.camera
+    subject_corners = _subject_world_corners(bpy)
+    closeup_corners, closeup_focus = _closeup_subject_world_corners(bpy, subject_corners)
+    requested_camera = str(scene.get("preview", {}).get("camera") or "isometric")
+    views = (
+        ("primary", "preview.png", requested_camera, subject_corners, "complete_scene"),
+        ("front", "preview_front.png", "front", subject_corners, "complete_scene"),
+        ("side", "preview_side.png", "side", subject_corners, "complete_scene"),
+        ("top", "preview_top.png", "top", subject_corners, "complete_scene"),
+        ("closeup", "preview_closeup.png", "isometric", closeup_corners, closeup_focus),
+    )
+    rendered: list[dict] = []
+    for view_id, file_name, camera_mode, view_corners, focus in views:
+        _remove_preview_backdrops(bpy)
+        framing = _position_preview_camera(
+            bpy,
+            camera,
+            view_corners,
+            scene,
+            camera_mode=camera_mode,
+        )
+        if view_id == "closeup" and focus == "complete_scene":
+            # Generic scenes may not expose telecom role names. Preserve the
+            # deterministic scene centre and create an honest inspection crop
+            # instead of duplicating the primary overview under another name.
+            camera.data.ortho_scale *= 0.62
+        _create_preview_backdrop(bpy, scene)
+        preview_path = output_dir / file_name
+        bpy.context.scene.render.filepath = str(preview_path)
+        annotation_states = _set_preview_annotations_hidden(bpy, hidden=view_id == "closeup")
+        try:
+            bpy.ops.render.render(write_still=True)
+        finally:
+            _restore_preview_annotation_states(annotation_states)
+        rendered.append(
+            {
+                "view_id": view_id,
+                "file_name": file_name,
+                "camera_mode": camera_mode,
+                "focus": focus,
+                "inspection_only": view_id != "primary",
+                "camera_location": [round(float(value), 3) for value in camera.location],
+                "target": [round(float(value), 3) for value in framing["target"]],
+                "ortho_scale": round(float(camera.data.ortho_scale), 3),
+                "subject_bounds_m": framing["subject_bounds_m"],
+                "sha256": _sha256_file(preview_path),
+                "size_bytes": preview_path.stat().st_size,
+            }
+        )
+    return rendered
+
+
+def _position_preview_camera(
+    bpy,
+    camera,
+    subject_corners: list,
+    scene: dict,
+    *,
+    camera_mode: str,
+) -> dict:
+    from mathutils import Vector  # type: ignore[import-not-found]
+
+    subject_bounds = _bounds_from_vectors(subject_corners)
+    if subject_bounds:
+        minimum, maximum = subject_bounds
+        target = (minimum + maximum) * 0.5
+        subject_size = maximum - minimum
+    else:
+        tower = scene.get("tower")
+        fallback_height = float(tower["height_m"]) if tower is not None else 10.0
+        target = Vector((0.0, 0.0, fallback_height * 0.5))
+        subject_size = Vector((4.0, 4.0, fallback_height))
+    distance = max(12.0, subject_size.length * 1.45)
+    direction = Vector(_camera_view_direction(camera_mode)).normalized()
+    camera.location = target + (direction * distance)
+    _point_object_at(camera, tuple(float(value) for value in target))
+    return _fit_orthographic_camera(bpy, camera, subject_corners, scene)
+
+
+def _closeup_subject_world_corners(bpy, fallback_corners: list) -> tuple[list, str]:
+    """Prefer mounted/ground equipment for telecom and remain generic otherwise."""
+
+    from mathutils import Vector  # type: ignore[import-not-found]
+
+    preferred_roles = {
+        "antenna",
+        "radio",
+        "rru",
+        "gps",
+        "equipment",
+        "component",
+    }
+    corners = []
+    for obj in bpy.context.scene.objects:
+        if obj.type not in {"MESH", "CURVE", "FONT", "SURFACE"} or obj.hide_render:
+            continue
+        role = str(obj.get("role") or obj.get("component_role") or "").strip().lower()
+        if role not in preferred_roles:
+            continue
+        for corner in obj.bound_box:
+            corners.append(obj.matrix_world @ Vector(corner))
+    if corners:
+        return corners, "primary_equipment"
+    return fallback_corners, "complete_scene"
+
+
+def _remove_preview_backdrops(bpy) -> None:
+    for obj in list(bpy.context.scene.objects):
+        if obj.name.startswith("technical_preview_backdrop"):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def _set_preview_annotations_hidden(bpy, *, hidden: bool) -> list[tuple[object, bool]]:
+    if not hidden:
+        return []
+    states = []
+    annotation_roles = {"label", "beam", "azimuth_arrow", "height_marker"}
+    annotation_prefixes = ("label_", "sector_beam_", "azimuth_arrow_", "height_marker")
+    for obj in bpy.context.scene.objects:
+        role = str(obj.get("role") or "").strip().lower()
+        if role not in annotation_roles and not obj.name.startswith(annotation_prefixes):
+            continue
+        states.append((obj, bool(obj.hide_render)))
+        obj.hide_render = True
+    return states
+
+
+def _restore_preview_annotation_states(states: list[tuple[object, bool]]) -> None:
+    for obj, hide_render in states:
+        obj.hide_render = hide_render
 
 
 def _subject_world_corners(bpy) -> list:
@@ -2502,10 +2670,11 @@ def _fit_orthographic_camera(bpy, camera, subject_corners: list, scene: dict) ->
     width, height = scene["preview"]["resolution"]
     aspect_ratio = max(float(width) / max(float(height), 1.0), 0.1)
     if not subject_corners:
-        tower_height = float(scene["tower"]["height_m"])
-        camera.data.ortho_scale = max(tower_height * 1.28, 18.0)
+        tower = scene.get("tower")
+        reference_height = float(tower["height_m"]) if tower is not None else 10.0
+        camera.data.ortho_scale = max(reference_height * 1.28, 12.0)
         camera.data.clip_start = 0.1
-        camera.data.clip_end = max(tower_height * 6.0, 250.0)
+        camera.data.clip_end = max(reference_height * 6.0, 120.0)
         return {
             "target": list(camera.location),
             "subject_bounds_m": None,
@@ -2559,7 +2728,9 @@ def _create_preview_backdrop(bpy, scene: dict) -> None:
     width = float(camera.data.ortho_scale) * 1.3
     height = (width / aspect_ratio) * 1.3
     view_direction = camera.matrix_world.to_quaternion() @ Vector((0, 0, -1))
-    backdrop_distance = max(float(scene["tower"]["height_m"]) * 2.2, 70.0)
+    tower = scene.get("tower")
+    reference_height = float(tower["height_m"]) if tower is not None else width
+    backdrop_distance = max(reference_height * 2.2, 40.0)
     location = Vector(camera.location) + (view_direction * backdrop_distance)
     bpy.ops.mesh.primitive_plane_add(
         size=1,
@@ -2823,19 +2994,29 @@ def _write_metadata(
     payload = {
         "scene_id": scene["scene_id"],
         "schema_version": scene.get("schema_version"),
+        "design_domain": scene.get("design_domain") or "telecom",
+        "design_intent_id": scene.get("design_intent_id"),
+        "component_graph_id": scene.get("component_graph_id"),
+        "asset_decision_plan_id": scene.get("asset_decision_plan_id"),
+        "specialist_route_id": scene.get("specialist_route_id"),
+        "cognitive_plan_sha256": scene.get("cognitive_plan_sha256"),
         "generation_mode": generation_mode,
         "assets_used": _assets_used(scene),
+        "geometry_program_ids": [
+            str(program["program_id"])
+            for program in scene.get("geometry_programs", [])
+        ],
         "procedural_objects_created": procedural_objects,
         "asset_imports": public_asset_imports,
         "asset_import_summary": _asset_import_summary(asset_imports),
-        "sector_count": len(scene["sectors"]),
-        "network_type": scene["network_type"],
-        "tower_height_m": scene["tower"]["height_m"],
-        "tower_characteristics": scene["tower"].get("characteristics", {}),
-        "azimuths_deg": [sector["azimuth_deg"] for sector in scene["sectors"]],
-        "antenna_heights_m": [sector["install_height_m"] for sector in scene["sectors"]],
+        "sector_count": len(scene.get("sectors", [])),
+        "network_type": scene.get("network_type"),
+        "tower_height_m": (scene.get("tower") or {}).get("height_m"),
+        "tower_characteristics": (scene.get("tower") or {}).get("characteristics", {}),
+        "azimuths_deg": [sector["azimuth_deg"] for sector in scene.get("sectors", [])],
+        "antenna_heights_m": [sector["install_height_m"] for sector in scene.get("sectors", [])],
         "mechanical_tilts_deg": [
-            sector.get("mechanical_tilt_deg", 0.0) for sector in scene["sectors"]
+            sector.get("mechanical_tilt_deg", 0.0) for sector in scene.get("sectors", [])
         ],
         "visual_elements": scene.get("visual_elements", {}),
         "accessory_assets": scene.get("accessory_assets", []),
@@ -2892,35 +3073,43 @@ def _blender_runtime_metadata(bpy) -> dict:
 
 
 def _assets_used(scene: dict) -> list[str]:
-    assets = [scene["tower"]["asset_id"]]
-    for sector in scene["sectors"]:
+    assets = []
+    tower = scene.get("tower")
+    if tower is not None:
+        assets.append(tower["asset_id"])
+    for sector in scene.get("sectors", []):
         assets.append(sector["antenna_asset_id"])
         if sector.get("radio_asset_id"):
             assets.append(sector["radio_asset_id"])
     for accessory in scene.get("accessory_assets", []):
         assets.append(accessory["asset_id"])
+    for program in scene.get("geometry_programs", []):
+        assets.append(f"GEOMETRY_PROGRAM_{str(program['program_id']).upper()}")
     return sorted(set(assets))
 
 
 def _fallback_asset_import_records(scene: dict) -> list[dict]:
-    records = [
-        _fallback_asset_import_record(
-            asset_id=scene["tower"]["asset_id"],
-            asset_file=scene["tower"].get("asset_file"),
-            asset_source=scene["tower"].get("asset_source"),
-            asset_metadata=scene["tower"].get("asset_metadata"),
-            object_role="tower",
-            object_name=f"tower_{scene['tower']['asset_id']}",
-            fallback_allowed=scene["tower"].get("import_fallback_allowed", True),
-            dimensions=scene["tower"].get("dimensions_m")
-            or {
-                "height": scene["tower"].get("height_m"),
-                "width": scene["tower"].get("characteristics", {}).get("base_width_m"),
-                "depth": scene["tower"].get("characteristics", {}).get("base_width_m"),
-            },
+    records = []
+    tower = scene.get("tower")
+    if tower is not None:
+        records.append(
+            _fallback_asset_import_record(
+                asset_id=tower["asset_id"],
+                asset_file=tower.get("asset_file"),
+                asset_source=tower.get("asset_source"),
+                asset_metadata=tower.get("asset_metadata"),
+                object_role="tower",
+                object_name=f"tower_{tower['asset_id']}",
+                fallback_allowed=tower.get("import_fallback_allowed", True),
+                dimensions=tower.get("dimensions_m")
+                or {
+                    "height": tower.get("height_m"),
+                    "width": tower.get("characteristics", {}).get("base_width_m"),
+                    "depth": tower.get("characteristics", {}).get("base_width_m"),
+                },
+            )
         )
-    ]
-    for sector in scene["sectors"]:
+    for sector in scene.get("sectors", []):
         records.append(
             _fallback_asset_import_record(
                 asset_id=sector["antenna_asset_id"],
@@ -3063,7 +3252,8 @@ def _unique_strings(values: list[str]) -> list[str]:
 
 
 def _fallback_camera_metadata(scene: dict) -> dict:
-    tower_height = float(scene["tower"]["height_m"])
+    tower = scene.get("tower")
+    tower_height = float(tower["height_m"]) if tower is not None else 10.0
     return {
         "camera": "not_rendered",
         "camera_type": "not_rendered",

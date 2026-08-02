@@ -516,6 +516,12 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         names = {a["name"] for a in bundle["viewer_artifacts"]}
         assert "design.glb" in names
         assert "preview.png" in names
+        assert {
+            "preview_front.png",
+            "preview_side.png",
+            "preview_top.png",
+            "preview_closeup.png",
+        } <= names
         assert "scene_metadata.json" in names
         assert "component_proofs.json" in names
         assert "requirements_spec.json" in names
@@ -523,6 +529,19 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert "qa_report.json" in names
         assert "geometry_validation.json" in names
         assert "rag_evidence.json" in names
+        for preview_name in (
+            "preview_front.png",
+            "preview_side.png",
+            "preview_top.png",
+            "preview_closeup.png",
+        ):
+            artifact = next(
+                item for item in bundle["viewer_artifacts"] if item["name"] == preview_name
+            )
+            assert artifact["available"] is True
+            response = client.get(artifact["url"])
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("image/png")
         component_proofs_artifact = next(
             artifact
             for artifact in bundle["viewer_artifacts"]

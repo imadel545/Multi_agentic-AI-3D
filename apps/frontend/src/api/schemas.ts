@@ -502,6 +502,85 @@ export const ViewerBundleSchema = publicSchema(
   })
 );
 
+const ComponentProofInstanceSchema = publicSchema(
+  UnknownRecord.extend({
+    instance_id: z.string(),
+    object_role: z.string(),
+    semantic_root: z.string(),
+    geometry_source: z.string(),
+    qa: UnknownRecord.nullish()
+  })
+);
+
+const ComponentProofSchema = publicSchema(
+  UnknownRecord.extend({
+    component_id: z.string(),
+    role_id: z.string(),
+    origin: z.string(),
+    strategy: z.enum(["reuse", "adapt", "compose", "procedural_generate"]),
+    generation_strategy: z.string(),
+    asset_id: z.string().nullish(),
+    quantity: z.number().int().nonnegative(),
+    instances: z.array(ComponentProofInstanceSchema).default([]),
+    qa: UnknownRecord.nullish()
+  })
+);
+
+const GeometryProgramProofSchema = publicSchema(
+  UnknownRecord.extend({
+    component_id: z.string(),
+    role_id: z.string(),
+    origin: z.literal("geometry_program"),
+    strategy: z.literal("procedural_generate"),
+    generation_strategy: z.string(),
+    quantity: z.number().int().positive(),
+    geometry_program: UnknownRecord.nullish(),
+    qa: UnknownRecord.nullish()
+  })
+);
+
+export const ComponentProofsSchema = publicSchema(
+  UnknownRecord.extend({
+    schema_version: z.string(),
+    workflow_id: z.string(),
+    components: z.array(ComponentProofSchema).default([]),
+    geometry_programs: z.array(GeometryProgramProofSchema).default([])
+  })
+);
+
+const AssemblyCandidateScoreSchema = publicSchema(
+  UnknownRecord.extend({
+    asset_id: z.string(),
+    total_score: z.number(),
+    reasons: z.array(z.string()).default([])
+  })
+);
+
+const AssemblyPlanComponentSchema = publicSchema(
+  UnknownRecord.extend({
+    role_id: z.string(),
+    asset_type: z.string(),
+    required: z.boolean(),
+    candidate_scores: z.array(AssemblyCandidateScoreSchema).default([]),
+    selected_asset_id: z.string().nullish(),
+    generation_strategy: z.string(),
+    selection_reason: z.string().nullish()
+  })
+);
+
+export const AssemblyPlanEvidenceSchema = publicSchema(
+  UnknownRecord.extend({
+    schema_version: z.string(),
+    workflow_id: z.string(),
+    selection_authority: z.string(),
+    selection_provider: z.string(),
+    selection_model: z.string().nullish(),
+    components: z.array(AssemblyPlanComponentSchema).default([]),
+    connections: z.array(UnknownRecord).default([]),
+    operations: z.array(UnknownRecord).default([])
+  })
+);
+
 export const TimelineStepSchema = publicSchema(
   UnknownRecord.extend({
     step: z.string(),
@@ -928,6 +1007,10 @@ export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
 export type ViewerBundle = z.infer<typeof ViewerBundleSchema>;
+export type ComponentProofs = z.infer<typeof ComponentProofsSchema>;
+export type ComponentProof = z.infer<typeof ComponentProofSchema>;
+export type ComponentProofInstance = z.infer<typeof ComponentProofInstanceSchema>;
+export type AssemblyPlanEvidence = z.infer<typeof AssemblyPlanEvidenceSchema>;
 export type LLMDecisionProvenance = z.infer<typeof LLMDecisionProvenanceSchema>;
 export type GeometryFidelitySummary = z.infer<typeof GeometryFidelitySummarySchema>;
 export type TimelineSummary = z.infer<typeof TimelineSummarySchema>;

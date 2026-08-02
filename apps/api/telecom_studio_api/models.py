@@ -132,6 +132,8 @@ class WorkflowStatus(BaseModel):
     requirement_coverage_passed: bool | None = None
     requirement_coverage_ratio: float | None = None
     completion_certificate_status: Literal["issued", "rejected"] | None = None
+    design_domain: str | None = None
+    cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     download_url: str | None = None
     trace_path: str | None = None
     trace_url: str | None = None
@@ -595,6 +597,10 @@ class ViewerBundle(BaseModel):
     requirement_coverage_passed: bool | None = None
     requirement_coverage_ratio: float | None = None
     completion_certificate_status: Literal["issued", "rejected"] | None = None
+    design_domain: str | None = None
+    cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    cognitive_plan_url: str | None = None
+    capability_observations_url: str | None = None
     rag_evidence_url: str | None = None
     extraction_provider: str | None = None
     llm_provider: str | None = None

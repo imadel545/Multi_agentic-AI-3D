@@ -169,6 +169,29 @@ def _report(
     payload: dict[str, Any] | None = None,
     valid_mesh_indices: frozenset[int] = frozenset(),
 ) -> GlbInspectionReport:
+    if scene.schema_version == "2.0.0":
+        return _generic_program_report(
+            inspection_mode=inspection_mode,
+            file_exists=file_exists,
+            file_size_bytes=file_size_bytes,
+            format_valid=format_valid,
+            scene=scene,
+            object_names=object_names,
+            node_count=node_count,
+            mesh_count=mesh_count,
+            primitive_count=primitive_count,
+            valid_primitive_count=valid_primitive_count,
+            position_accessor_count=position_accessor_count,
+            buffer_count=buffer_count,
+            buffer_view_count=buffer_view_count,
+            binary_chunk_count=binary_chunk_count,
+            material_count=material_count,
+            metadata_exists=metadata_exists,
+            warnings=warnings,
+            critical_errors=critical_errors,
+            payload=payload,
+            valid_mesh_indices=valid_mesh_indices,
+        )
     semantic_payload = payload or {"nodes": [{"name": name} for name in object_names]}
     semantic_index = _build_semantic_index(semantic_payload, scene)
     semantic_counts = _semantic_object_counts(semantic_index)
@@ -286,6 +309,126 @@ def _report(
         warnings=report_warnings,
         critical_errors=errors,
         structural_qa_passed=structural_qa_passed,
+    )
+
+
+def _generic_program_report(
+    *,
+    inspection_mode: str,
+    file_exists: bool,
+    file_size_bytes: int,
+    format_valid: bool,
+    scene: SceneSpec,
+    object_names: list[str],
+    node_count: int,
+    mesh_count: int,
+    primitive_count: int,
+    valid_primitive_count: int,
+    position_accessor_count: int,
+    buffer_count: int,
+    buffer_view_count: int,
+    binary_chunk_count: int,
+    material_count: int,
+    metadata_exists: bool,
+    warnings: list[str],
+    critical_errors: list[str],
+    payload: dict[str, Any] | None,
+    valid_mesh_indices: frozenset[int],
+) -> GlbInspectionReport:
+    nodes = (payload or {}).get("nodes", [])
+    if not isinstance(nodes, list):
+        nodes = []
+    expected_program_ids = {program.program_id for program in scene.geometry_programs}
+    found_program_ids = {
+        str(extras["geometry_program_id"])
+        for node in nodes
+        if isinstance(node, dict)
+        and isinstance((extras := node.get("extras")), dict)
+        and extras.get("geometry_program_id")
+    }
+    program_mesh_ids = {
+        str(extras["geometry_program_id"])
+        for node in nodes
+        if isinstance(node, dict)
+        and isinstance((extras := node.get("extras")), dict)
+        and extras.get("geometry_program_id")
+        and node.get("mesh") in valid_mesh_indices
+    }
+    programs_present = bool(expected_program_ids) and expected_program_ids.issubset(
+        found_program_ids
+    )
+    program_mesh_coverage = expected_program_ids.issubset(program_mesh_ids)
+    materials_required = any(program.materials for program in scene.geometry_programs)
+    checks = {
+        "has_metadata": metadata_exists,
+        "geometry_programs_present": programs_present,
+        "geometry_program_mesh_coverage": program_mesh_coverage,
+        "minimum_node_count_valid": node_count >= len(expected_program_ids),
+        "mesh_primitives_present": primitive_count > 0,
+        "all_mesh_primitives_have_binary_data": valid_primitive_count == primitive_count > 0,
+        "position_accessors_nonempty": position_accessor_count > 0,
+        "buffers_present": buffer_count > 0,
+        "buffer_views_present": buffer_view_count > 0,
+        "binary_payload_present": binary_chunk_count > 0,
+        "declared_pbr_materials_present": not materials_required or material_count > 0,
+    }
+    errors = list(critical_errors)
+    error_by_check = {
+        "geometry_programs_present": "GENERIC_GEOMETRY_PROGRAM_MISSING",
+        "geometry_program_mesh_coverage": "GENERIC_GEOMETRY_PROGRAM_WITHOUT_MESH",
+        "minimum_node_count_valid": "MINIMUM_GLB_NODE_COUNT_NOT_MET",
+        "mesh_primitives_present": "GLB_MESH_PRIMITIVES_MISSING",
+        "all_mesh_primitives_have_binary_data": "GLB_MESH_BINARY_DATA_INCOMPLETE",
+        "position_accessors_nonempty": "GLB_POSITION_ACCESSORS_EMPTY",
+        "buffers_present": "GLB_BUFFERS_MISSING",
+        "buffer_views_present": "GLB_BUFFER_VIEWS_MISSING",
+        "binary_payload_present": "GLB_BINARY_PAYLOAD_MISSING",
+        "declared_pbr_materials_present": "GENERIC_PBR_MATERIAL_MISSING",
+    }
+    if not format_valid:
+        errors.append("GLB_FORMAT_INVALID")
+    if not metadata_exists:
+        errors.append("GLB_METADATA_MISSING")
+    errors.extend(code for check, code in error_by_check.items() if not checks[check])
+    errors = list(dict.fromkeys(errors))
+    coverage_ratio = (
+        len(expected_program_ids & program_mesh_ids) / len(expected_program_ids)
+        if expected_program_ids
+        else 0.0
+    )
+    return GlbInspectionReport(
+        inspection_mode=inspection_mode,  # type: ignore[arg-type]
+        file_exists=file_exists,
+        file_size_bytes=file_size_bytes,
+        format_valid=format_valid,
+        node_count=node_count,
+        mesh_count=mesh_count,
+        primitive_count=primitive_count,
+        valid_primitive_count=valid_primitive_count,
+        position_accessor_count=position_accessor_count,
+        buffer_count=buffer_count,
+        buffer_view_count=buffer_view_count,
+        binary_chunk_count=binary_chunk_count,
+        material_count=material_count,
+        object_names=object_names,
+        semantic_inspection_mode="semantic_extras",
+        semantic_root_count=len(found_program_ids),
+        semantic_extras_root_count=len(found_program_ids),
+        semantic_extras_coverage_ratio=(
+            len(expected_program_ids & found_program_ids) / len(expected_program_ids)
+            if expected_program_ids
+            else 0.0
+        ),
+        semantic_mesh_coverage_ratio=coverage_ratio,
+        semantic_object_counts={"geometry_program": len(found_program_ids)},
+        semantic_sector_ids={},
+        expected_object_prefixes_found={
+            program_id: program_id in found_program_ids for program_id in expected_program_ids
+        },
+        checks=checks,
+        warnings=warnings,
+        critical_errors=errors,
+        structural_qa_passed=not errors,
     )
 
 

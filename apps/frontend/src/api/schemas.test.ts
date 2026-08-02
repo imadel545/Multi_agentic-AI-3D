@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AssemblyPlanEvidenceSchema,
   ContractValidationError,
   AssetLibrarySearchSchema,
+  ComponentProofsSchema,
   DocumentPackFieldSchema,
   DocumentPackQASchema,
   ParseRequirementsResponseSchema,
@@ -51,6 +53,61 @@ const viewerBundlePayload = {
 };
 
 describe("frontend contract schemas", () => {
+  it("validates real component proofs and bounded assembly decisions", () => {
+    const proofs = parseContract("ComponentProofs", ComponentProofsSchema, {
+      schema_version: "1.0",
+      workflow_id: "wf_1",
+      components: [{
+        component_id: "antenna_component",
+        role_id: "antenna",
+        origin: "catalog",
+        strategy: "adapt",
+        generation_strategy: "asset_adaptation",
+        asset_id: "ANT_REAL_1",
+        quantity: 1,
+        instances: [{
+          instance_id: "antenna_1",
+          object_role: "antenna",
+          semantic_root: "antenna_S1_REAL_1",
+          geometry_source: "asset_glb"
+        }]
+      }],
+      geometry_programs: []
+    });
+    const plan = parseContract("AssemblyPlan", AssemblyPlanEvidenceSchema, {
+      schema_version: "1.0",
+      workflow_id: "wf_1",
+      selection_authority: "bounded_llm",
+      selection_provider: "groq",
+      selection_model: "openai/gpt-oss-120b",
+      components: [{
+        role_id: "antenna",
+        asset_type: "antenna",
+        required: true,
+        candidate_scores: [{ asset_id: "ANT_REAL_1", total_score: 0.95, reasons: ["compatible"] }],
+        selected_asset_id: "ANT_REAL_1",
+        generation_strategy: "asset_adaptation",
+        selection_reason: "Candidate compatible le mieux classé."
+      }]
+    });
+
+    expect(proofs.components[0]?.instances[0]?.semantic_root).toBe("antenna_S1_REAL_1");
+    expect(plan.components[0]?.candidate_scores[0]?.total_score).toBe(0.95);
+    expect(() => ComponentProofsSchema.parse({
+      schema_version: "1.0",
+      workflow_id: "wf_bad",
+      components: [{
+        component_id: "bad",
+        role_id: "bad",
+        origin: "catalog",
+        strategy: "free_code",
+        generation_strategy: "free_code",
+        asset_id: null,
+        quantity: 1,
+        instances: []
+      }]
+    })).toThrow();
+  });
   it("validates quarantined library search results and preview links", () => {
     const parsed = parseContract("AssetLibrarySearch", AssetLibrarySearchSchema, {
       query: "pylone 30m",

@@ -6,7 +6,7 @@ frontend.
 ## Visible during frontend build
 
 - `apps/frontend` has a visually verified historical real-backend product
-  baseline and 139 passing M0 Vitest tests plus green typecheck/build. The
+  baseline and 145 passing M0 Vitest tests plus green typecheck/build. The
   current-tree connected smoke is still missing; document-pack generation,
   edit, rollback and relevant degraded/retry paths still need one recorded
   end-to-end acceptance pass.
@@ -259,9 +259,9 @@ frontend.
   `technical_generic` profiles with explicit LOD, but they still do not prove a
   vendor model, exact RF ports, thermal performance, maintenance clearance or
   fabrication fitness.
-- The overview preview still lacks a certified sector-equipment close-up. Its
-  camera bounds now ignore technical annotations, but role-specific pixel
-  visibility/contrast remains future work.
+- Five scene-level Blender views now include a close-up. Only the primary view
+  has the current framing gate; role-specific close-up visibility/contrast and
+  per-asset previews remain future work.
 - The curated manifest catalog is intentionally small: all 13 manifests are
   generation-eligible, with 3 GLBs qualified for exact import, 10
   component/tower profiles qualified for controlled parametric generation and
@@ -302,3 +302,29 @@ frontend.
 - A journaled, idempotent multi-store delete. Today SQLite memory is purged
   before checkpoints and workflow files; a later failure aborts deletion but
   does not restore already-purged memory rows.
+
+## Generic Cognitive 3D Core V1 — limites bloquantes de livraison
+
+- Le chemin GPT-OSS `openai/gpt-oss-120b` a produit au moins une décomposition
+  de composants génériques plausible, mais le scénario complet reste instable:
+  Groq retourne encore des HTTP 400 de validation JSON ou des objets incomplets
+  malgré les appels découpés, retries et réparations bornées. Aucun fallback
+  déterministe ne doit être présenté comme une décision LLM réussie.
+- Les scénarios réels obligatoires escalier, jardin aménagé et objet simple
+  n'ont pas tous été générés, révisés et certifiés de bout en bout avec le
+  provider réel. Les tests d'intégration utilisent un client LLM contrôlé et
+  Blender réel; ils prouvent le déterministe, pas la fiabilité externe.
+- L'Asset Intelligence générique n'est pas encore opérationnelle. Hors domaine
+  télécom, le retriever annonce honnêtement `procedural_only`; il ne recherche,
+  score, adapte ni assemble encore des assets génériques qualifiés de la
+  bibliothèque CAD.
+- Le compilateur génère chaque composant déclaré, mais il n'existe pas encore de
+  solveur générique de placement/relations qui prouve la cohérence spatiale d'un
+  assemblage arbitraire à partir d'ancres et connecteurs.
+- La QA générique ne contient ni critique visuelle multimodale ni boucle bornée
+  critique-réparation-régénération. Les previews front/side/top/closeup sont
+  vérifiées pour intégrité/provenance; seule la preview principale alimente la
+  gate de cadrage actuelle.
+- Le frontend expose les preuves cognitives réelles disponibles, mais le
+  scénario utilisateur créant, sélectionnant et modifiant trois projets
+  génériques réels n'est pas encore une acceptance validée.

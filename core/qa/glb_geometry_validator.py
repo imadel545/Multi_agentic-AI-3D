@@ -24,6 +24,8 @@ class GLBGeometryValidator:
     ) -> GeometryValidationReport:
         metadata = _load_metadata(metadata_path)
         mesh_qa = MeshQA().validate(glb_path, scene) if glb_path and glb_path.exists() else None
+        if scene.schema_version == "2.0.0":
+            return _validate_generic_geometry(scene, glb_inspection, metadata, mesh_qa)
         object_names = glb_inspection.object_names
         counts = glb_inspection.semantic_object_counts or _object_counts(object_names, scene)
         expected_antennas = len(scene.sectors)
@@ -124,6 +126,52 @@ class GLBGeometryValidator:
             mesh_qa=mesh_qa,
             mesh_qa_level=mesh_qa.level if mesh_qa else "not_available",
         )
+
+
+def _validate_generic_geometry(
+    scene: SceneSpec,
+    glb_inspection: GlbInspectionReport,
+    metadata: dict,
+    mesh_qa,
+) -> GeometryValidationReport:
+    expected_program_assets = {
+        f"GEOMETRY_PROGRAM_{program.program_id.upper()}" for program in scene.geometry_programs
+    }
+    metadata_assets = {str(item) for item in metadata.get("assets_used", [])}
+    proof = metadata.get("component_proof")
+    checks = {
+        "glb_structural_qa_passed": glb_inspection.structural_qa_passed,
+        "mesh_qa_passed": mesh_qa is not None and mesh_qa.mesh_qa_passed,
+        "design_domain_matches": metadata.get("design_domain") == scene.design_domain,
+        "cognitive_plan_hash_matches": (
+            metadata.get("cognitive_plan_sha256") == scene.cognitive_plan_sha256
+        ),
+        "geometry_program_assets_recorded": expected_program_assets.issubset(metadata_assets),
+        "component_proof_recorded": isinstance(proof, dict) and proof.get("passed") is True,
+    }
+    critical_errors = [name for name, passed in checks.items() if not passed]
+    warnings = list(glb_inspection.warnings)
+    if mesh_qa is not None:
+        warnings.extend(mesh_qa.warnings)
+    return GeometryValidationReport(
+        status="passed" if not critical_errors else "failed",
+        geometry_source=(mesh_qa.geometry_source if mesh_qa else "unknown"),
+        generation_strategy=(mesh_qa.generation_strategy if mesh_qa else "unknown"),
+        checks=checks,
+        object_counts={
+            "geometry_program": len(scene.geometry_programs),
+            "glb_node": glb_inspection.node_count,
+            "glb_mesh": glb_inspection.mesh_count,
+        },
+        missing_objects=[],
+        warnings=list(dict.fromkeys(warnings)),
+        critical_errors=critical_errors,
+        height_tolerance_m=HEIGHT_TOLERANCE_M,
+        azimuth_tolerance_deg=AZIMUTH_TOLERANCE_DEG,
+        bounding_box_m=mesh_qa.bounding_box_m if mesh_qa else None,
+        mesh_qa=mesh_qa,
+        mesh_qa_level=mesh_qa.level if mesh_qa else "not_available",
+    )
 
 
 def _object_counts(object_names: list[str], scene: SceneSpec) -> dict[str, int]:

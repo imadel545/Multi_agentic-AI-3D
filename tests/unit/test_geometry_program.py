@@ -13,7 +13,14 @@ from core.agents.geometry_program_planner import (
     _normalize_disclosures,
 )
 from core.agents.scene_planner import ScenePlanner
-from core.contracts.geometry_program import GeometryProgram, GeometryProgramVector3
+from core.contracts.geometry_program import (
+    GeometryProgram,
+    GeometryProgramVector3,
+    geometry_program_dimensions,
+)
+from core.contracts.scene import SceneSpec
+from core.qa.glb_geometry_validator import GLBGeometryValidator
+from core.qa.glb_inspector import GLBInspector
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 from core.services.requirement_parser import parse_requirements_text
@@ -99,6 +106,73 @@ def test_deterministic_envelope_adapter_fits_only_otherwise_valid_programs() -> 
     assert "factor=" in program.deterministic_adjustments[0]
 
 
+def test_geometry_program_v2_validates_closed_generic_registry_and_envelope() -> None:
+    program = GeometryProgram.model_validate(_v2_program_payload())
+
+    assert program.schema_version == "2.0.0"
+    assert {node.kind for node in program.nodes} == {
+        "primitive",
+        "profile",
+        "extrude",
+        "revolve",
+        "sweep",
+        "array",
+        "boolean",
+        "modifier",
+        "terrain",
+        "instance",
+    }
+    assert len(program.anchors) == 2
+    assert len(program.connectors) == 2
+    assert len(program.semantic_groups) == 3
+    assert all(value > 0 for value in geometry_program_dimensions(program))
+
+
+def test_geometry_program_v2_features_fail_closed_in_v1_and_on_invalid_graphs() -> None:
+    v1_with_v2_node = _v2_program_payload()
+    v1_with_v2_node["schema_version"] = "1.0.0"
+    with pytest.raises(ValidationError, match="V2 capabilities require"):
+        GeometryProgram.model_validate(v1_with_v2_node)
+
+    unknown_kind = _v2_program_payload()
+    unknown_kind["nodes"][0]["kind"] = "arbitrary_blender_operator"
+    with pytest.raises(ValidationError):
+        GeometryProgram.model_validate(unknown_kind)
+
+    bad_connector = _v2_program_payload()
+    bad_connector["connectors"][0]["anchor_id"] = "missing_anchor"
+    with pytest.raises(ValidationError, match="unknown anchor"):
+        GeometryProgram.model_validate(bad_connector)
+
+    dependency_cycle = _v2_program_payload()
+    _v2_node(dependency_cycle, "steps")["parent_id"] = "mirrored_rail"
+    _v2_node(dependency_cycle, "handrail")["parent_id"] = "steps"
+    with pytest.raises(ValidationError, match="dependency graph contains a cycle"):
+        GeometryProgram.model_validate(dependency_cycle)
+
+
+def test_geometry_program_v2_rejects_unsafe_profiles_terrain_and_operator_parameters() -> None:
+    self_intersecting = _v2_program_payload()
+    _v2_node(self_intersecting, "rail_profile")["points_m"] = [
+        _xy(-0.1, -0.1),
+        _xy(0.1, 0.1),
+        _xy(-0.1, 0.1),
+        _xy(0.1, -0.1),
+    ]
+    with pytest.raises(ValidationError, match="non-zero area|self-intersect"):
+        GeometryProgram.model_validate(self_intersecting)
+
+    wrong_height_count = _v2_program_payload()
+    _v2_node(wrong_height_count, "terrain_surface")["heights_m"] = [0.0] * 8
+    with pytest.raises(ValidationError, match="columns times rows"):
+        GeometryProgram.model_validate(wrong_height_count)
+
+    arbitrary_modifier = _v2_program_payload()
+    _v2_node(arbitrary_modifier, "beveled_wall")["modifier"] = "python_callback"
+    with pytest.raises(ValidationError):
+        GeometryProgram.model_validate(arbitrary_modifier)
+
+
 def test_geometry_program_planner_uses_strict_schema_and_pins_provenance() -> None:
     class FakeGroq:
         model = "openai/gpt-oss-120b"
@@ -175,7 +249,8 @@ def test_geometry_program_planner_uses_strict_schema_and_pins_provenance() -> No
         maximum_dimensions_m=GeometryProgramVector3(x=4.0, y=4.0, z=3.0),
     )
 
-    assert program.program_id == "equipment_shelter.llm_v1"
+    assert program.program_id == "equipment_shelter.llm_v2"
+    assert program.schema_version == "2.0.0"
     assert program.semantic_role == "equipment_shelter"
     assert program.requested_quantity == 1
     assert program.generator_provider == "groq"
@@ -241,7 +316,7 @@ def test_blender_compiles_validated_geometry_program_without_executing_model_cod
 
     result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
 
-    assert result.status == "generated"
+    assert result.status == "generated", result.error
     assert result.mode == "real_blender"
     metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
     record = next(
@@ -265,6 +340,118 @@ def test_blender_compiles_validated_geometry_program_without_executing_model_cod
     assert nodes["program_site_shelter"]["geometry_program_requested_quantity"] == 1
     assert "site_shelter_body" in nodes
     assert "site_shelter_door_right" in nodes
+
+
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is not available",
+)
+def test_blender_compiles_geometry_program_v2_closed_registry(tmp_path: Path) -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
+        "Azimuts : 0°, 120°, 240°."
+    )
+    tower = registry.select_tower(
+        requirements.tower_type,
+        requirements.network_type,
+        requirements.tower_height_m,
+    )
+    antenna = registry.select_asset("antenna", requirements.network_type, requirements.tower_type)
+    radio = registry.select_asset("radio", requirements.network_type, requirements.tower_type)
+    program = GeometryProgram.model_validate(_v2_program_payload())
+    scene = (
+        ScenePlanner()
+        .build_scene_spec(
+            "wf_geometry_program_v2",
+            requirements,
+            tower,
+            antenna,
+            radio,
+        )
+        .model_copy(update={"geometry_programs": [program]})
+    )
+
+    result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
+
+    assert result.status == "generated"
+    assert result.mode == "real_blender"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    record = next(
+        item
+        for item in metadata["asset_imports"]
+        if item["asset_id"] == "GEOMETRY_PROGRAM_GENERIC_SITE_CORE"
+    )
+    assert record["generation_success"] is True
+    assert record["generated_object_count"] >= len(program.nodes) + len(program.anchors) + 1
+    assert record["asset_metadata"]["qualification_method"] == "typed_geometry_program_v2"
+    assert record["asset_metadata"]["geometry_program_schema_version"] == "2.0.0"
+    proofs = json.loads(Path(result.artifacts["component_proofs"]).read_text(encoding="utf-8"))
+    proof = next(
+        item
+        for item in proofs["geometry_programs"]
+        if item["component_id"] == "geometry_program:generic_site_core"
+    )
+    assert proof["generation_strategy"] == "typed_geometry_program_v2"
+    assert proof["qa"]["passed"] is True
+    glb = _read_glb_json(Path(result.artifacts["glb"]))
+    nodes = {node.get("name"): node.get("extras", {}) for node in glb["nodes"]}
+    root = nodes["program_generic_site_core"]
+    assert root["geometry_program_schema_version"] == "2.0.0"
+    assert root["geometry_program_registry"] == "generic_cognitive_3d_core_v1"
+    assert root["geometry_program_anchor_count"] == 2
+    steps = nodes["generic_site_core_steps"]
+    assert steps["role"] == "technical_staircase"
+    assert "stair_system" in steps["geometry_program_semantic_groups"]
+
+
+@pytest.mark.skipif(
+    shutil.which("blender") is None
+    and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
+    reason="Blender executable is not available",
+)
+def test_blender_compiles_generic_scene_spec_without_telecom_placeholders(
+    tmp_path: Path,
+) -> None:
+    program = GeometryProgram.model_validate(_v2_program_payload())
+    scene = SceneSpec(
+        schema_version="2.0.0",
+        scene_id="wf_generic_scene_v2",
+        design_domain="generic",
+        design_intent_id="wf_generic_scene_v2:intent:v1",
+        component_graph_id="wf_generic_scene_v2:components:v1",
+        asset_decision_plan_id="wf_generic_scene_v2:asset-decisions:v1",
+        specialist_route_id="wf_generic_scene_v2:intent:v1:specialists:v1",
+        cognitive_plan_sha256="b" * 64,
+        geometry_programs=[program],
+    )
+
+    result = BlenderRunner(project_root=Path.cwd()).generate(scene, tmp_path)
+
+    assert result.status == "generated", result.error
+    assert result.mode == "real_blender"
+    metadata = json.loads(Path(result.artifacts["metadata"]).read_text(encoding="utf-8"))
+    assert metadata["design_domain"] == "generic"
+    assert metadata["network_type"] is None
+    assert metadata["tower_height_m"] is None
+    assert metadata["sector_count"] == 0
+    assert metadata["cognitive_plan_sha256"] == "b" * 64
+    assert Path(result.artifacts["glb"]).stat().st_size > 0
+    assert Path(result.artifacts["preview"]).stat().st_size > 0
+    inspection = GLBInspector().inspect(
+        Path(result.artifacts["glb"]),
+        scene,
+        Path(result.artifacts["metadata"]),
+    )
+    validation = GLBGeometryValidator().validate(
+        scene,
+        inspection,
+        Path(result.artifacts["metadata"]),
+        Path(result.artifacts["glb"]),
+    )
+    assert inspection.structural_qa_passed is True
+    assert validation.status == "passed", validation.critical_errors
 
 
 def _program_payload() -> dict:
@@ -346,8 +533,254 @@ def _program_payload() -> dict:
     }
 
 
+def _v2_program_payload() -> dict:
+    payload = {
+        "schema_version": "2.0.0",
+        "program_id": "generic_site_core",
+        "semantic_role": "technical_staircase",
+        "requested_quantity": 1,
+        "units": "meters",
+        "authorship": "deterministic_generated",
+        "generator_provider": "test_provider",
+        "generator_model": "bounded_geometry_contract",
+        "structured_output_mode": "strict_json_schema",
+        "source_prompt_sha256": hashlib.sha256(b"generic stairs garden telecom").hexdigest(),
+        "materials": [
+            {
+                "material_id": "steel",
+                "base_color_rgba": _rgba(0.3, 0.34, 0.38, 1.0),
+                "metallic": 0.65,
+                "roughness": 0.32,
+            },
+            {
+                "material_id": "ground",
+                "base_color_rgba": _rgba(0.18, 0.32, 0.12, 1.0),
+                "metallic": 0.0,
+                "roughness": 0.9,
+            },
+        ],
+        "nodes": [
+            {
+                "kind": "primitive",
+                "node_id": "step_seed",
+                "primitive": "box",
+                "size_m": _xyz(0.45, 1.2, 0.18),
+                "material_id": "steel",
+            },
+            {
+                "kind": "array",
+                "node_id": "steps",
+                "source_node_id": "step_seed",
+                "count": 6,
+                "offset_m": _xyz(0.42, 0.0, 0.2),
+                "material_id": "steel",
+                "semantic_role": "technical_staircase",
+                "transform": {"translation_m": _xyz(0.0, 0.0, 0.1)},
+            },
+            {
+                "kind": "profile",
+                "node_id": "rail_profile",
+                "points_m": [
+                    _xy(-0.025, -0.025),
+                    _xy(0.025, -0.025),
+                    _xy(0.025, 0.025),
+                    _xy(-0.025, 0.025),
+                ],
+                "closed": True,
+            },
+            {
+                "kind": "sweep",
+                "node_id": "handrail",
+                "profile_node_id": "rail_profile",
+                "path_points_m": [
+                    _xyz(0.0, -0.7, 0.9),
+                    _xyz(1.1, -0.7, 1.4),
+                    _xyz(2.2, -0.7, 1.9),
+                ],
+                "material_id": "steel",
+            },
+            {
+                "kind": "instance",
+                "node_id": "rail_copy",
+                "source_node_id": "handrail",
+                "parent_id": "steps",
+                "transform": {"translation_m": _xyz(0.0, 1.4, 0.0)},
+            },
+            {
+                "kind": "modifier",
+                "node_id": "mirrored_rail",
+                "source_node_id": "handrail",
+                "modifier": "mirror",
+                "mirror_axes": ["y"],
+                "material_id": "steel",
+            },
+            {
+                "kind": "profile",
+                "node_id": "landing_profile",
+                "points_m": [
+                    _xy(-0.8, -0.8),
+                    _xy(0.8, -0.8),
+                    _xy(0.8, 0.8),
+                    _xy(-0.8, 0.8),
+                ],
+                "closed": True,
+            },
+            {
+                "kind": "extrude",
+                "node_id": "landing",
+                "profile_node_id": "landing_profile",
+                "depth_m": 0.16,
+                "material_id": "steel",
+                "transform": {"translation_m": _xyz(2.5, 0.0, 1.2)},
+            },
+            {
+                "kind": "profile",
+                "node_id": "planter_profile",
+                "points_m": [
+                    _xy(0.35, 0.0),
+                    _xy(0.48, 0.0),
+                    _xy(0.48, 0.6),
+                    _xy(0.35, 0.6),
+                ],
+                "closed": True,
+            },
+            {
+                "kind": "revolve",
+                "node_id": "planter",
+                "profile_node_id": "planter_profile",
+                "angle_deg": 360.0,
+                "segments": 24,
+                "material_id": "steel",
+                "transform": {"translation_m": _xyz(4.0, 2.0, 0.0)},
+            },
+            {
+                "kind": "terrain",
+                "node_id": "terrain_surface",
+                "width_m": 8.0,
+                "depth_m": 6.0,
+                "columns": 3,
+                "rows": 3,
+                "heights_m": [0.0, 0.04, 0.0, 0.03, 0.08, 0.02, 0.0, 0.02, 0.0],
+                "material_id": "ground",
+            },
+            {
+                "kind": "modifier",
+                "node_id": "terrain_solid",
+                "source_node_id": "terrain_surface",
+                "modifier": "solidify",
+                "thickness_m": -0.12,
+                "material_id": "ground",
+            },
+            {
+                "kind": "primitive",
+                "node_id": "wall_source",
+                "primitive": "box",
+                "size_m": _xyz(2.8, 0.3, 2.2),
+                "material_id": "steel",
+            },
+            {
+                "kind": "primitive",
+                "node_id": "door_cutter",
+                "primitive": "box",
+                "size_m": _xyz(0.9, 0.5, 1.8),
+            },
+            {
+                "kind": "boolean",
+                "node_id": "wall_opening",
+                "left_node_id": "wall_source",
+                "right_node_id": "door_cutter",
+                "operation": "difference",
+                "solver": "exact",
+                "material_id": "steel",
+            },
+            {
+                "kind": "modifier",
+                "node_id": "beveled_wall",
+                "source_node_id": "wall_opening",
+                "modifier": "bevel",
+                "width_m": 0.03,
+                "segments": 2,
+                "material_id": "steel",
+                "transform": {"translation_m": _xyz(5.0, -2.0, 1.1)},
+            },
+        ],
+        "anchors": [
+            {
+                "anchor_id": "stair_base",
+                "node_id": "steps",
+                "position_m": _xyz(0.0, 0.0, 0.0),
+                "normal": _xyz(-1.0, 0.0, 0.0),
+                "up": _xyz(0.0, 0.0, 1.0),
+            },
+            {
+                "anchor_id": "stair_top",
+                "node_id": "landing",
+                "position_m": _xyz(0.0, 0.0, 0.08),
+                "normal": _xyz(1.0, 0.0, 0.0),
+                "up": _xyz(0.0, 0.0, 1.0),
+            },
+        ],
+        "connectors": [
+            {
+                "connector_id": "base_mount",
+                "anchor_id": "stair_base",
+                "kind": "mechanical",
+                "gender": "source",
+                "compatible_kinds": ["mechanical"],
+                "tolerance_m": 0.02,
+            },
+            {
+                "connector_id": "top_mount",
+                "anchor_id": "stair_top",
+                "kind": "mechanical",
+                "gender": "target",
+                "compatible_kinds": ["mechanical"],
+                "tolerance_m": 0.02,
+            },
+        ],
+        "semantic_groups": [
+            {
+                "group_id": "stair_system",
+                "semantic_role": "access_system",
+                "node_ids": ["steps", "handrail", "rail_copy", "mirrored_rail", "landing"],
+            },
+            {
+                "group_id": "garden_system",
+                "semantic_role": "landscape",
+                "node_ids": ["planter", "terrain_solid"],
+            },
+            {
+                "group_id": "telecom_enclosure",
+                "semantic_role": "equipment_boundary",
+                "node_ids": ["beveled_wall"],
+            },
+        ],
+        "construction_node_ids": [
+            "step_seed",
+            "rail_profile",
+            "landing_profile",
+            "planter_profile",
+            "terrain_surface",
+            "wall_source",
+            "door_cutter",
+            "wall_opening",
+        ],
+        "assumptions": ["Generic technical access and landscape geometry."],
+        "limitations": ["No structural, accessibility or civil-engineering certification."],
+    }
+    return payload
+
+
+def _v2_node(payload: dict, node_id: str) -> dict:
+    return next(node for node in payload["nodes"] if node["node_id"] == node_id)
+
+
 def _xyz(x: float, y: float, z: float) -> dict[str, float]:
     return {"x": x, "y": y, "z": z}
+
+
+def _xy(x: float, y: float) -> dict[str, float]:
+    return {"x": x, "y": y}
 
 
 def _rgba(r: float, g: float, b: float, a: float) -> dict[str, float]:

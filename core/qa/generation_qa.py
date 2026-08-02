@@ -22,6 +22,18 @@ class GenerationQA:
         preview_path = Path(generation.artifacts.get("preview", ""))
         metadata_path = Path(generation.artifacts.get("metadata", ""))
         metadata = _load_metadata(metadata_path)
+        if scene.schema_version == "2.0.0":
+            return _validate_generic_generation(
+                scene=scene,
+                generation=generation,
+                glb_inspection=glb_inspection,
+                preview_inspection=preview_inspection,
+                geometry_validation=geometry_validation,
+                glb_path=glb_path,
+                preview_path=preview_path,
+                metadata_path=metadata_path,
+                metadata=metadata,
+            )
         asset_imports = metadata.get("asset_imports", [])
         expected_asset_placements = (
             1
@@ -142,6 +154,95 @@ class GenerationQA:
             geometry_validation=geometry_validation.model_dump(),
             preview_inspection=preview_inspection.model_dump(),
         )
+
+
+def _validate_generic_generation(
+    *,
+    scene: SceneSpec,
+    generation: GenerationResult,
+    glb_inspection: GlbInspectionReport,
+    preview_inspection: PreviewInspectionReport,
+    geometry_validation: GeometryValidationReport,
+    glb_path: Path,
+    preview_path: Path,
+    metadata_path: Path,
+    metadata: dict,
+) -> ValidationReport:
+    program_ids = {item.program_id for item in scene.geometry_programs}
+    metadata_program_ids = set(metadata.get("geometry_program_ids") or [])
+    if not metadata_program_ids:
+        metadata_program_ids = {
+            item
+            for item in metadata.get("assets_used", [])
+            if isinstance(item, str) and item in program_ids
+        }
+    checks = {
+        "glb_exists": glb_path.is_file() and glb_path.stat().st_size > 32,
+        "preview_exists": preview_path.is_file() and preview_path.stat().st_size > 32,
+        "metadata_exists": metadata_path.is_file(),
+        "metadata_scene_id_valid": metadata.get("scene_id") == scene.scene_id,
+        "metadata_generation_mode_valid": metadata.get("generation_mode") == generation.mode,
+        "metadata_design_domain_valid": metadata.get("design_domain") == scene.design_domain,
+        "metadata_cognitive_plan_valid": metadata.get("cognitive_plan_sha256")
+        == scene.cognitive_plan_sha256,
+        "metadata_geometry_programs_valid": metadata_program_ids == program_ids,
+        "metadata_preview_camera_valid": isinstance(metadata.get("preview_camera"), dict)
+        and bool(metadata["preview_camera"].get("camera")),
+        "generation_real_blender": generation.status == "generated"
+        and generation.mode == "real_blender",
+        "glb_structure_valid": glb_inspection.structural_qa_passed,
+        "geometry_program_mesh_coverage": glb_inspection.checks.get(
+            "geometry_program_mesh_coverage", False
+        ),
+        "preview_visual_quality_valid": preview_inspection.preview_qa_passed,
+        "geometry_validation_valid": geometry_validation.status == "passed",
+    }
+    errors = [
+        ValidationIssue(
+            code=code.upper(),
+            message=f"Generic generation QA failed: {code}",
+            severity="error",
+        )
+        for code, passed in checks.items()
+        if not passed
+    ]
+    warnings = [
+        *[
+            ValidationIssue(
+                code=f"GLB_INSPECTION_{warning}",
+                message=f"GLB inspection warning: {warning}",
+                severity="warning",
+            )
+            for warning in glb_inspection.warnings
+        ],
+        *[
+            ValidationIssue(
+                code=f"PREVIEW_INSPECTION_{warning}",
+                message=f"Preview inspection warning: {warning}",
+                severity="warning",
+            )
+            for warning in preview_inspection.warnings
+        ],
+        *[
+            ValidationIssue(
+                code=f"GEOMETRY_VALIDATION_{warning}",
+                message=f"Geometry validation warning: {warning}",
+                severity="warning",
+            )
+            for warning in geometry_validation.warnings
+        ],
+    ]
+    return ValidationReport(
+        design_id=scene.scene_id,
+        status="passed" if not errors else "failed",
+        score=sum(checks.values()) / len(checks),
+        checks=checks,
+        warnings=warnings,
+        errors=errors,
+        glb_inspection=glb_inspection.model_dump(),
+        geometry_validation=geometry_validation.model_dump(),
+        preview_inspection=preview_inspection.model_dump(),
+    )
 
 
 def _load_metadata(path: Path) -> dict:

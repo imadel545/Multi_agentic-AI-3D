@@ -8,12 +8,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.agents.blueprint_composer import design_blueprint_hash
+from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.completion import CompletionCertificate
 from core.contracts.design_blueprint import DesignBlueprint
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.versioning import SceneVersion
 from core.performance import scene_spec_hash
+from core.services.cognitive_scene_compiler import cognitive_plan_hash
 
 _CERTIFIED_ARTIFACTS = {"glb", "preview", "metadata", "build_lock"}
 _CERTIFIED_ARTIFACTS_M0 = {
@@ -28,6 +30,8 @@ _CRITICAL_REPORT_FILES = (
     ("design_blueprint", "design_blueprint.json"),
     ("blueprint_requirement_coverage", "blueprint_requirement_coverage.json"),
     ("blueprint_scene_coverage", "blueprint_scene_coverage.json"),
+    ("cognitive_plan", "cognitive_plan.json"),
+    ("capability_observations", "capability_observations.json"),
     ("quality_gates", "quality_gates.json"),
 )
 _REQUIRED_CRITICAL_REPORTS_V1 = {
@@ -40,6 +44,13 @@ _REQUIRED_CRITICAL_REPORTS_V1_1 = {
     "design_blueprint",
     "blueprint_requirement_coverage",
     "blueprint_scene_coverage",
+}
+_REQUIRED_CRITICAL_REPORTS_V1_3 = {
+    *_REQUIRED_CRITICAL_REPORTS_V1,
+    "requirement_coverage",
+    "cognitive_plan",
+    "capability_observations",
+    "quality_gates",
 }
 _REPORT_PROOF_FILE = "critical_reports.proof.json"
 _REPORT_PROOF_PROFILE = "critical-reports-v1"
@@ -68,6 +79,25 @@ _REQUIRED_COMPLETION_CHECKS_V1_1 = {
 }
 _REQUIRED_COMPLETION_CHECKS_V1_2 = {
     *_REQUIRED_COMPLETION_CHECKS_V1_1,
+    "component_proof_verified",
+}
+_REQUIRED_COMPLETION_CHECKS_V1_3 = {
+    "cognitive_plan_present",
+    "cognitive_plan_linked",
+    "scene_spec_present",
+    "requirement_coverage_passed",
+    "pre_blender_gate_passed",
+    "real_blender_generation",
+    "required_artifacts_regular_files",
+    "artifact_hashes_recorded",
+    "qa_report_passed",
+    "glb_binary_integrity_passed",
+    "semantic_mesh_coverage_complete",
+    "geometry_validation_passed",
+    "mesh_qa_passed",
+    "preview_qa_passed",
+    "post_blender_gate_passed",
+    "no_critical_fallback",
     "component_proof_verified",
 }
 
@@ -410,15 +440,11 @@ def verify_persisted_version(
         "1.0.0": _REQUIRED_COMPLETION_CHECKS_V1,
         "1.1.0": _REQUIRED_COMPLETION_CHECKS_V1_1,
         "1.2.0": _REQUIRED_COMPLETION_CHECKS_V1_2,
+        "1.3.0": _REQUIRED_COMPLETION_CHECKS_V1_3,
     }[certificate.schema_version]
     if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
         raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
 
-    _read_model(
-        artifact_dir / "requirements_spec.json",
-        RequirementSpec,
-        "ACTIVE_VERSION_REQUIREMENTS_INVALID",
-    )
     scene = _read_model(
         artifact_dir / "scene_spec.json",
         SceneSpec,
@@ -429,7 +455,28 @@ def verify_persisted_version(
         or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
     )
     if component_proof_required and certificate.schema_version != "1.2.0":
-        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+        if certificate.schema_version != "1.3.0":
+            raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+    cognitive_plan = None
+    if certificate.schema_version == "1.3.0":
+        cognitive_plan = _read_model(
+            artifact_dir / "cognitive_plan.json",
+            CognitiveDesignPlan,
+            "ACTIVE_VERSION_COGNITIVE_PLAN_INVALID",
+        )
+        plan_hash = cognitive_plan_hash(cognitive_plan)
+        if (
+            certificate.cognitive_plan_sha256 != plan_hash
+            or certificate.requirements_sha256 != plan_hash
+            or scene.cognitive_plan_sha256 != plan_hash
+        ):
+            raise ValueError("ACTIVE_VERSION_COGNITIVE_PLAN_HASH_MISMATCH")
+    else:
+        _read_model(
+            artifact_dir / "requirements_spec.json",
+            RequirementSpec,
+            "ACTIVE_VERSION_REQUIREMENTS_INVALID",
+        )
     blueprint = (
         _read_model(
             artifact_dir / "design_blueprint.json",
@@ -439,11 +486,12 @@ def verify_persisted_version(
         if certificate.schema_version in {"1.1.0", "1.2.0"}
         else None
     )
-    if certificate.requirements_sha256 != _persisted_json_hash(
-        artifact_dir / "requirements_spec.json",
-        exclude={"warnings", "repair_events"},
-    ):
-        raise ValueError("ACTIVE_VERSION_REQUIREMENTS_HASH_MISMATCH")
+    if certificate.schema_version != "1.3.0":
+        if certificate.requirements_sha256 != _persisted_json_hash(
+            artifact_dir / "requirements_spec.json",
+            exclude={"warnings", "repair_events"},
+        ):
+            raise ValueError("ACTIVE_VERSION_REQUIREMENTS_HASH_MISMATCH")
     if certificate.scene_spec_sha256 != _persisted_json_hash(artifact_dir / "scene_spec.json"):
         raise ValueError("ACTIVE_VERSION_SCENE_SPEC_HASH_MISMATCH")
     if blueprint is not None and (
@@ -478,7 +526,9 @@ def verify_persisted_version(
             }
         )
     expected_artifacts = (
-        _CERTIFIED_ARTIFACTS_M0 if certificate.schema_version == "1.2.0" else _CERTIFIED_ARTIFACTS
+        _CERTIFIED_ARTIFACTS_M0
+        if certificate.schema_version in {"1.2.0", "1.3.0"}
+        else _CERTIFIED_ARTIFACTS
     )
     if logical_names != expected_artifacts:
         raise ValueError("ACTIVE_VERSION_CERTIFIED_ARTIFACT_SET_INCOMPLETE")
@@ -565,11 +615,22 @@ def _critical_report_evidence(artifact_dir: Path) -> list[dict]:
 def _write_critical_report_proof(artifact_dir: Path) -> dict:
     evidence = _critical_report_evidence(artifact_dir)
     logical_names = {item["logical_name"] for item in evidence}
-    missing = sorted(_REQUIRED_CRITICAL_REPORTS_V1_1 - logical_names)
+    try:
+        certificate = CompletionCertificate.model_validate_json(
+            (artifact_dir / "completion_certificate.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValidationError) as exc:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_INVALID") from exc
+    required_reports = (
+        _REQUIRED_CRITICAL_REPORTS_V1_3
+        if certificate.schema_version == "1.3.0"
+        else _REQUIRED_CRITICAL_REPORTS_V1_1
+    )
+    missing = sorted(required_reports - logical_names)
     if missing:
         raise ValueError("ACTIVE_VERSION_CRITICAL_REPORTS_MISSING:" + ",".join(missing))
     payload = {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0" if certificate.schema_version == "1.3.0" else "1.1.0",
         "evidence_profile": _REPORT_PROOF_PROFILE,
         "artifacts": evidence,
     }
@@ -588,7 +649,7 @@ def _verify_critical_report_proof(artifact_dir: Path) -> dict:
         raise ValueError("ACTIVE_VERSION_CRITICAL_REPORT_PROOF_INVALID") from exc
     if (
         not isinstance(payload, dict)
-        or payload.get("schema_version") not in {"1.0.0", "1.1.0"}
+        or payload.get("schema_version") not in {"1.0.0", "1.1.0", "1.2.0"}
         or payload.get("evidence_profile") != _REPORT_PROOF_PROFILE
         or not isinstance(payload.get("artifacts"), list)
     ):
@@ -599,11 +660,11 @@ def _verify_critical_report_proof(artifact_dir: Path) -> dict:
     logical_names = {
         item.get("logical_name") for item in payload["artifacts"] if isinstance(item, dict)
     }
-    required_reports = (
-        _REQUIRED_CRITICAL_REPORTS_V1_1
-        if payload.get("schema_version") == "1.1.0"
-        else _REQUIRED_CRITICAL_REPORTS_V1
-    )
+    required_reports = {
+        "1.0.0": _REQUIRED_CRITICAL_REPORTS_V1,
+        "1.1.0": _REQUIRED_CRITICAL_REPORTS_V1_1,
+        "1.2.0": _REQUIRED_CRITICAL_REPORTS_V1_3,
+    }[payload["schema_version"]]
     if not required_reports.issubset(logical_names):
         raise ValueError("ACTIVE_VERSION_CRITICAL_REPORT_SET_INCOMPLETE")
     return payload
@@ -657,6 +718,21 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
         artifact_names.append("component_proofs.json")
     for name in artifact_names:
         item = artifacts.get(name)
+        path = artifact_dir / name
+        if (
+            not isinstance(item, dict)
+            or not path.is_file()
+            or item.get("size_bytes") != path.stat().st_size
+            or item.get("sha256") != _sha256(path)
+        ):
+            raise ValueError(f"ACTIVE_VERSION_BUILD_LOCK_ARTIFACT_MISMATCH:{name}")
+    # Supplementary previews and future governed worker artifacts are bound by
+    # the certified build lock even when they are not completion-certificate
+    # primitives themselves. Serving a recorded artifact must therefore fail
+    # closed after any byte-level mutation.
+    for name, item in artifacts.items():
+        if not isinstance(name, str) or Path(name).name != name:
+            raise ValueError("ACTIVE_VERSION_BUILD_LOCK_ARTIFACT_NAME_INVALID")
         path = artifact_dir / name
         if (
             not isinstance(item, dict)

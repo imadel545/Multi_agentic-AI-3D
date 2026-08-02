@@ -5,7 +5,7 @@ import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -15,12 +15,23 @@ from pydantic import ValidationError
 
 from core.agents import GeometryProgramPlanner, ScenePlanner
 from core.agents.blueprint_composer import BlueprintComposer
+from core.agents.cognitive_design_planner import CognitiveDesignPlanner
+from core.agents.cognitive_domain_router import (
+    ConservativeDesignDomainRouter,
+    DesignDomainRouteClient,
+)
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
 from core.agents.tower_engineer import TowerEngineerAgent
 from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
-from core.contracts.completion import CompletionCertificate, RequirementCoverageReport
+from core.contracts.capabilities import CapabilityObservation
+from core.contracts.cognitive_design import CognitiveDesignPlan, DesignRouteDecision
+from core.contracts.completion import (
+    CompletionCertificate,
+    RequirementCoverageCheck,
+    RequirementCoverageReport,
+)
 from core.contracts.design_blueprint import BlueprintCoverageReport, DesignBlueprint
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.geometry_validation import GeometryValidationReport
@@ -57,6 +68,7 @@ from core.services.assembly_compiler import resolve_scene_assembly
 from core.services.assembly_planner import AssetAssemblyPlanner, BoundedAssemblyDecisionClient
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
+from core.services.cognitive_scene_compiler import CognitiveSceneCompiler, cognitive_plan_hash
 from core.validation import validate_scene_spec
 from core.validation.completion_certificate import build_completion_certificate
 from core.validation.design_blueprint import (
@@ -143,6 +155,9 @@ class WorkflowState(TypedDict, total=False):
     blueprint_scene_coverage: BlueprintCoverageReport
     geometry_programs: list[GeometryProgram]
     geometry_program_error: str
+    design_route: DesignRouteDecision
+    cognitive_plan: CognitiveDesignPlan
+    capability_observations: list[CapabilityObservation]
 
 
 @dataclass(frozen=True)
@@ -180,6 +195,8 @@ class OrchestratorResult:
     blueprint_scene_coverage: BlueprintCoverageReport | None
     metrics: dict[str, int | float | str | bool | None]
     route_history: list[dict]
+    cognitive_plan: CognitiveDesignPlan | None = None
+    capability_observations: list[CapabilityObservation] = field(default_factory=list)
 
 
 class DesignOrchestrator:
@@ -197,6 +214,9 @@ class DesignOrchestrator:
         runtime_event_sink: RuntimeEventSink | None = None,
         blueprint_composer: BlueprintComposer | None = None,
         geometry_program_planner: GeometryProgramPlanner | None = None,
+        design_domain_router: DesignDomainRouteClient | None = None,
+        cognitive_design_planner: CognitiveDesignPlanner | None = None,
+        cognitive_scene_compiler: CognitiveSceneCompiler | None = None,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -210,6 +230,9 @@ class DesignOrchestrator:
         self.assembly_planner = AssetAssemblyPlanner(registry, asset_selection_client)
         self.blueprint_composer = blueprint_composer or BlueprintComposer()
         self.geometry_program_planner = geometry_program_planner
+        self.design_domain_router = design_domain_router
+        self.cognitive_design_planner = cognitive_design_planner
+        self.cognitive_scene_compiler = cognitive_scene_compiler or CognitiveSceneCompiler()
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
         self.rf_engineer = RfEngineerAgent()
@@ -263,6 +286,9 @@ class DesignOrchestrator:
         config = {"configurable": {"thread_id": _initial_checkpoint_thread_id(workflow_id)}}
         initial_state = {
             "workflow_id": workflow_id,
+            "entry_mode": (
+                "natural_language" if self.design_domain_router is not None else "legacy_telecom"
+            ),
             "requirements_text": requirements_text,
             "detail_level": detail_level,
             "use_llm": use_llm,
@@ -330,6 +356,7 @@ class DesignOrchestrator:
         output_dir: Path,
         detail_level: str = "high",
         revision_id: str | None = None,
+        cognitive_plan: CognitiveDesignPlan | None = None,
         runtime_event_sink: RuntimeEventSink | None = None,
     ) -> OrchestratorResult:
         started = time.perf_counter()
@@ -345,6 +372,7 @@ class DesignOrchestrator:
             "use_llm": False,
             "output_dir": output_dir,
             "scene": scene,
+            "cognitive_plan": cognitive_plan,
             "revision_id": revision_id,
             "trace": [],
             "errors": [],
@@ -380,6 +408,33 @@ class DesignOrchestrator:
         graph = StateGraph(WorkflowState)
         terminal_node = "memory_writeback" if self.memory_service is not None else END
         graph.add_node("_entry_point", self._entry_point)
+        graph.add_node(
+            "infer_design_domain",
+            self._runtime_node("infer_design_domain", self._infer_design_domain),
+        )
+        graph.add_node(
+            "plan_cognitive_design",
+            self._runtime_node("plan_cognitive_design", self._plan_cognitive_design),
+        )
+        graph.add_node(
+            "plan_cognitive_geometry",
+            self._runtime_node("plan_cognitive_geometry", self._plan_cognitive_geometry),
+        )
+        graph.add_node(
+            "compile_cognitive_scene",
+            self._runtime_node("compile_cognitive_scene", self._compile_cognitive_scene),
+        )
+        graph.add_node(
+            "validate_cognitive_scene",
+            self._runtime_node("validate_cognitive_scene", self._validate_cognitive_scene),
+        )
+        graph.add_node(
+            "cognitive_planning_failure_handler",
+            self._runtime_node(
+                "cognitive_planning_failure_handler",
+                self._cognitive_planning_failure_handler,
+            ),
+        )
         graph.add_node(
             "_prepare_scene_revision",
             self._runtime_node("edit_prepare_revision", self._prepare_scene_revision),
@@ -480,11 +535,54 @@ class DesignOrchestrator:
             "_entry_point",
             _entry_route,
             {
-                "natural_language": "extract_requirements",
+                "natural_language": "infer_design_domain",
+                "legacy_telecom": "extract_requirements",
                 "validated_requirements": "retrieve_rag_context",
                 "scene_revision": "_prepare_scene_revision",
             },
         )
+        graph.add_conditional_edges(
+            "infer_design_domain",
+            _design_domain_route,
+            {
+                "telecom_v1": "extract_requirements",
+                "generic_cognitive_v1": "plan_cognitive_design",
+                "blocked": "cognitive_planning_failure_handler",
+            },
+        )
+        graph.add_conditional_edges(
+            "plan_cognitive_design",
+            _cognitive_plan_route,
+            {
+                "continue": "plan_cognitive_geometry",
+                "failed": "cognitive_planning_failure_handler",
+            },
+        )
+        graph.add_conditional_edges(
+            "plan_cognitive_geometry",
+            _cognitive_geometry_route,
+            {
+                "continue": "compile_cognitive_scene",
+                "failed": "cognitive_planning_failure_handler",
+            },
+        )
+        graph.add_conditional_edges(
+            "compile_cognitive_scene",
+            _cognitive_scene_route,
+            {
+                "continue": "validate_cognitive_scene",
+                "failed": "cognitive_planning_failure_handler",
+            },
+        )
+        graph.add_conditional_edges(
+            "validate_cognitive_scene",
+            _cognitive_validation_route,
+            {
+                "continue": "pre_blender_gate",
+                "failed": "cognitive_planning_failure_handler",
+            },
+        )
+        graph.add_edge("cognitive_planning_failure_handler", terminal_node)
         graph.add_conditional_edges(
             "extract_requirements",
             _extraction_route,
@@ -659,9 +757,427 @@ class DesignOrchestrator:
             }
         return {}
 
+    def _infer_design_domain(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        if self.design_domain_router is None:
+            decision = DesignRouteDecision(
+                route="telecom_v1",
+                inferred_domain="telecom",
+                rationale="The optional cognitive runtime is not configured; preserve telecom V1.",
+                provider="legacy_route",
+                model="none",
+            )
+        else:
+            try:
+                decision = self.design_domain_router.route(state["requirements_text"])
+            except Exception as exc:
+                decision = ConservativeDesignDomainRouter().route(state["requirements_text"])
+                decision = decision.model_copy(
+                    update={
+                        "fallback_reason": (
+                            f"LLM domain routing failed ({type(exc).__name__}); "
+                            f"{decision.fallback_reason}"
+                        )[:600]
+                    }
+                )
+        status = "failed" if decision.route == "blocked" else "passed"
+        report = None
+        if decision.route == "blocked":
+            report = _failed_report(
+                design_id=state["workflow_id"],
+                code="DESIGN_DOMAIN_ROUTING_BLOCKED",
+                message=decision.fallback_reason or decision.rationale,
+            )
+        return {
+            "design_route": decision,
+            "extraction_provider": f"{decision.provider}:{decision.model}",
+            "extraction_fallback_used": decision.fallback_used,
+            "extraction_error": decision.fallback_reason,
+            **({"report": report, "requirement_report": report} if report else {}),
+            "trace": _trace(
+                state,
+                "infer_design_domain",
+                f"{decision.route}:{decision.inferred_domain}",
+                started,
+                status=status,
+                warnings=["DOMAIN_ROUTING_FALLBACK"] if decision.fallback_used else [],
+                errors=["DESIGN_DOMAIN_ROUTING_BLOCKED"] if report else [],
+                actor_kind=(
+                    "llm_decision"
+                    if not decision.fallback_used
+                    else "deterministic_specialist"
+                ),
+                decision_authority="llm_bounded" if not decision.fallback_used else "deterministic",
+            ),
+        }
+
+    def _plan_cognitive_design(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        if self.cognitive_design_planner is None:
+            report = _failed_report(
+                state["workflow_id"],
+                "COGNITIVE_PLANNER_UNAVAILABLE",
+                "La planification cognitive générique n'est pas configurée.",
+            )
+            return {"report": report, "requirement_report": report}
+        try:
+            plan = self.cognitive_design_planner.plan(
+                workflow_id=state["workflow_id"],
+                request=state["requirements_text"],
+            )
+        except Exception as exc:
+            report = _failed_report(
+                state["workflow_id"],
+                "COGNITIVE_PLAN_INVALID",
+                f"Le plan 3D générique a été rejeté: {exc}",
+            )
+            return {
+                "report": report,
+                "requirement_report": report,
+                "trace": _trace(
+                    state,
+                    "plan_cognitive_design",
+                    "rejected",
+                    started,
+                    status="failed",
+                    errors=["COGNITIVE_PLAN_INVALID"],
+                    actor_kind="llm_decision",
+                    decision_authority="llm_bounded",
+                ),
+            }
+        report = ValidationReport(
+            design_id=state["workflow_id"],
+            status="passed",
+            score=1.0,
+            checks={
+                "design_intent_valid": True,
+                "component_graph_valid": True,
+                "asset_decisions_valid": True,
+                "specialist_route_valid": True,
+                "clarification_not_required": not plan.design_intent.clarification_required,
+            },
+            warnings=[],
+            errors=[],
+        )
+        if plan.design_intent.clarification_required:
+            report = _failed_report(
+                state["workflow_id"],
+                "COGNITIVE_CLARIFICATION_REQUIRED",
+                "Informations manquantes: " + ", ".join(plan.design_intent.missing_information),
+            )
+        return {
+            "cognitive_plan": plan,
+            "requirement_report": report,
+            "report": report,
+            "planning_decision": plan.asset_decision_plan.model_dump(mode="json"),
+            "trace": _trace(
+                state,
+                "plan_cognitive_design",
+                (
+                    f"domain={plan.design_intent.domain}; "
+                    f"components={len(plan.component_graph.components)}; "
+                    f"specialists={len(plan.specialist_route.steps)}"
+                ),
+                started,
+                status=report.status,
+                errors=[item.code for item in report.errors],
+                actor_kind="llm_decision",
+                decision_authority="llm_bounded",
+            ),
+        }
+
+    def _plan_cognitive_geometry(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        if self.geometry_program_planner is None:
+            report = _failed_report(
+                state["workflow_id"],
+                "GEOMETRY_PROGRAM_PLANNER_UNAVAILABLE",
+                "Le spécialiste de géométrie déclarative GPT-OSS n'est pas configuré.",
+            )
+            return {"report": report, "geometry_program_error": report.errors[0].message}
+        plan = state["cognitive_plan"]
+        components = {item.component_id: item for item in plan.component_graph.components}
+        programs: list[GeometryProgram] = []
+        try:
+            for decision in plan.asset_decision_plan.decisions:
+                if decision.strategy not in {"procedural_generate", "compose_and_generate"}:
+                    continue
+                component = components[decision.component_id]
+                description = (
+                    f"Create {component.quantity} component(s) for role "
+                    f"{component.semantic_role}: {component.description}"
+                )
+                programs.append(
+                    self.geometry_program_planner.plan(
+                        prompt=description,
+                        semantic_role=component.semantic_role,
+                        request_id=component.component_id,
+                        quantity=component.quantity,
+                        source_description=description,
+                        placement_context=_component_placement_context(
+                            plan, component.component_id
+                        ),
+                        maximum_dimensions_m=component.target_dimensions_m,
+                        design_context={
+                            "design_intent": plan.design_intent.model_dump(mode="json"),
+                            "component": component.model_dump(mode="json"),
+                            "relationships": [
+                                item.model_dump(mode="json")
+                                for item in plan.component_graph.relationships
+                                if component.component_id
+                                in {item.source_component_id, item.target_component_id}
+                            ],
+                            "asset_decision": decision.model_dump(mode="json"),
+                        },
+                        schema_version="2.0.0",
+                    )
+                )
+        except Exception as exc:
+            report = _failed_report(
+                state["workflow_id"],
+                "COGNITIVE_GEOMETRY_INVALID",
+                f"La géométrie déclarative a été rejetée: {exc}",
+            )
+            return {
+                "report": report,
+                "geometry_program_error": str(exc),
+                "trace": _trace(
+                    state,
+                    "plan_cognitive_geometry",
+                    "rejected",
+                    started,
+                    status="failed",
+                    errors=["COGNITIVE_GEOMETRY_INVALID"],
+                    actor_kind="llm_decision",
+                    decision_authority="llm_bounded",
+                ),
+            }
+        return {
+            "geometry_programs": programs,
+            "trace": _trace(
+                state,
+                "plan_cognitive_geometry",
+                f"programs={len(programs)};nodes={sum(len(item.nodes) for item in programs)}",
+                started,
+                actor_kind="llm_decision",
+                decision_authority="llm_bounded",
+            ),
+        }
+
+    def _compile_cognitive_scene(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        try:
+            compilation = self.cognitive_scene_compiler.compile_with_observations(
+                workflow_id=state["workflow_id"],
+                plan=state["cognitive_plan"],
+                geometry_programs=state.get("geometry_programs", []),
+                detail_level=state["detail_level"],
+            )
+        except Exception as exc:
+            report = _failed_report(
+                state["workflow_id"],
+                "COGNITIVE_SCENE_COMPILATION_FAILED",
+                f"La compilation SceneSpec V2 a été rejetée: {exc}",
+            )
+            return {
+                "report": report,
+                "trace": _trace(
+                    state,
+                    "compile_cognitive_scene",
+                    "rejected",
+                    started,
+                    status="failed",
+                    errors=["COGNITIVE_SCENE_COMPILATION_FAILED"],
+                ),
+            }
+        scene = compilation.scene
+        return {
+            "scene": scene,
+            "scene_spec_hash": scene_spec_hash(scene),
+            "capability_observations": list(compilation.capability_observations),
+            "selected_assets": [],
+            "trace": _trace(
+                state,
+                "compile_cognitive_scene",
+                f"capability_observations={len(compilation.capability_observations)}",
+                started,
+                actor_kind="deterministic_specialist",
+                decision_authority="deterministic",
+            ),
+        }
+
+    def _validate_cognitive_scene(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        scene_report = validate_scene_spec(state["scene"], [])
+        plan = state["cognitive_plan"]
+        scene = state["scene"]
+        checks = [
+            RequirementCoverageCheck(
+                path="design_intent_id",
+                expected=plan.design_intent.intent_id,
+                actual=scene.design_intent_id,
+                passed=scene.design_intent_id == plan.design_intent.intent_id,
+            ),
+            RequirementCoverageCheck(
+                path="component_graph_id",
+                expected=plan.component_graph.graph_id,
+                actual=scene.component_graph_id,
+                passed=scene.component_graph_id == plan.component_graph.graph_id,
+            ),
+            RequirementCoverageCheck(
+                path="cognitive_plan_sha256",
+                expected=cognitive_plan_hash(plan),
+                actual=scene.cognitive_plan_sha256,
+                passed=scene.cognitive_plan_sha256 == cognitive_plan_hash(plan),
+            ),
+        ]
+        coverage = RequirementCoverageReport(
+            workflow_id=state["workflow_id"],
+            passed=all(item.passed for item in checks),
+            coverage_ratio=sum(item.passed for item in checks) / len(checks),
+            checks=checks,
+            critical_errors=[item.path for item in checks if not item.passed],
+        )
+        report = _merge_reports(
+            state["workflow_id"],
+            [state["requirement_report"], scene_report],
+        )
+        if not coverage.passed:
+            report = _merge_reports(
+                state["workflow_id"],
+                [
+                    report,
+                    _failed_report(
+                        state["workflow_id"],
+                        "COGNITIVE_PLAN_NOT_COMPILED",
+                        "SceneSpec V2 ne préserve pas tous les liens du plan cognitif.",
+                    ),
+                ],
+            )
+        return {
+            "scene_report": scene_report,
+            "requirement_coverage": coverage,
+            "report": report,
+            "trace": _trace(
+                state,
+                "validate_cognitive_scene",
+                report.status,
+                started,
+                status=report.status,
+                errors=[item.code for item in report.errors],
+            ),
+        }
+
+    def _cognitive_planning_failure_handler(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        report = state.get("report") or _failed_report(
+            state["workflow_id"],
+            "COGNITIVE_WORKFLOW_BLOCKED",
+            "Le workflow cognitif a été bloqué avant Blender.",
+        )
+        return {
+            "report": report,
+            "trace": _trace(
+                state,
+                "cognitive_planning_failure_handler",
+                "blocked",
+                started,
+                status="failed",
+                errors=[item.code for item in report.errors],
+            ),
+        }
+
     def _prepare_scene_revision(self, state: WorkflowState) -> Command:
         started = time.perf_counter()
         scene = state["scene"]
+        if scene.schema_version == "2.0.0":
+            plan = state.get("cognitive_plan")
+            if plan is None:
+                report = _failed_report(
+                    design_id=state["workflow_id"],
+                    code="COGNITIVE_REVISION_PLAN_MISSING",
+                    message=(
+                        "La révision générique exige le plan cognitif certifié de la version "
+                        "active."
+                    ),
+                )
+                return Command(
+                    goto=END,
+                    update={
+                        "report": report,
+                        "requirement_report": report,
+                        "trace": _trace(
+                            state,
+                            "edit_prepare_revision",
+                            "cognitive_plan_missing",
+                            started,
+                            status="failed",
+                            errors=["COGNITIVE_REVISION_PLAN_MISSING"],
+                        ),
+                    },
+                )
+            try:
+                compilation = self.cognitive_scene_compiler.compile_with_observations(
+                    workflow_id=state["workflow_id"],
+                    plan=plan,
+                    geometry_programs=scene.geometry_programs,
+                    detail_level=scene.detail_level,
+                )
+                if compilation.scene.cognitive_plan_sha256 != scene.cognitive_plan_sha256:
+                    raise ValueError("COGNITIVE_REVISION_PLAN_HASH_MISMATCH")
+            except (KeyError, LookupError, ValueError) as exc:
+                report = _failed_report(
+                    design_id=state["workflow_id"],
+                    code="COGNITIVE_REVISION_INVALID",
+                    message=str(exc),
+                )
+                return Command(
+                    goto=END,
+                    update={
+                        "report": report,
+                        "requirement_report": report,
+                        "trace": _trace(
+                            state,
+                            "edit_prepare_revision",
+                            "cognitive_revision_rejected",
+                            started,
+                            status="failed",
+                            errors=["COGNITIVE_REVISION_INVALID"],
+                        ),
+                    },
+                )
+            report = ValidationReport(
+                design_id=state["workflow_id"],
+                status="passed",
+                score=1.0,
+                checks={
+                    "cognitive_plan_present": True,
+                    "cognitive_plan_hash_preserved": True,
+                    "geometry_programs_revalidated": True,
+                },
+                warnings=[],
+                errors=[],
+            )
+            return Command(
+                goto="validate_cognitive_scene",
+                update={
+                    "scene": scene,
+                    "scene_spec_hash": scene_spec_hash(scene),
+                    "requirement_report": report,
+                    "report": report,
+                    "planning_decision": plan.asset_decision_plan.model_dump(mode="json"),
+                    "capability_observations": list(compilation.capability_observations),
+                    "selected_assets": [],
+                    "trace": _trace(
+                        state,
+                        "edit_prepare_revision",
+                        "cognitive_revision_validated",
+                        started,
+                        actor_kind="deterministic_specialist",
+                        decision_authority="deterministic",
+                    ),
+                },
+            )
         try:
             scene = _scene_with_revision_dependencies(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
@@ -1509,17 +2025,40 @@ class DesignOrchestrator:
 
     def _pre_blender_gate(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
-        gate = evaluate_pre_blender_gate(
-            requirements=state.get("requirements"),
-            requirement_report=state.get("requirement_report"),
-            scene=state.get("scene"),
-            scene_report=state.get("scene_report"),
-            selected_assets=state.get("selected_assets", []),
-            all_assets=self.registry.list_assets(),
-            repair_attempts=state.get("repair_attempts", 0),
-            max_repair_attempts=state.get("max_repair_attempts", 2),
-            requirement_coverage=state.get("requirement_coverage"),
-        )
+        if state.get("cognitive_plan") is not None:
+            observations = state.get("capability_observations", [])
+            checks = {
+                "cognitive_plan_valid": state["requirement_report"].status == "passed",
+                "scene_spec_v2_valid": state["scene_report"].status == "passed",
+                "cognitive_coverage_passed": state["requirement_coverage"].passed,
+                "capabilities_executed": bool(observations),
+                "capabilities_completed": bool(observations)
+                and all(item.status == "completed" for item in observations),
+                "geometry_programs_present": bool(state["scene"].geometry_programs),
+            }
+            gate = QualityGateReport(
+                stage="pre_blender",
+                passed=all(checks.values()),
+                checks=checks,
+                details={
+                    "design_domain": state["scene"].design_domain,
+                    "capability_observation_count": len(observations),
+                },
+                critical_errors=[name for name, passed in checks.items() if not passed],
+                duration_ms=_duration_ms(started),
+            )
+        else:
+            gate = evaluate_pre_blender_gate(
+                requirements=state.get("requirements"),
+                requirement_report=state.get("requirement_report"),
+                scene=state.get("scene"),
+                scene_report=state.get("scene_report"),
+                selected_assets=state.get("selected_assets", []),
+                all_assets=self.registry.list_assets(),
+                repair_attempts=state.get("repair_attempts", 0),
+                max_repair_attempts=state.get("max_repair_attempts", 2),
+                requirement_coverage=state.get("requirement_coverage"),
+            )
         report = (
             state["report"]
             if gate.passed
@@ -1766,6 +2305,7 @@ class DesignOrchestrator:
             preview_inspection=state.get("preview_inspection"),
             pre_blender_gate=state.get("pre_blender_gate"),
             post_blender_gate=state.get("post_blender_gate"),
+            cognitive_plan=state.get("cognitive_plan"),
         )
         report = state["report"]
         if certificate.status == "rejected":
@@ -1986,6 +2526,41 @@ def _entry_route(state: WorkflowState) -> str:
     return state.get("entry_mode", "natural_language")
 
 
+def _design_domain_route(state: WorkflowState) -> str:
+    decision = state.get("design_route")
+    return decision.route if decision is not None else "blocked"
+
+
+def _cognitive_plan_route(state: WorkflowState) -> str:
+    report = state.get("requirement_report")
+    ready = state.get("cognitive_plan") is not None and report and report.status == "passed"
+    return "continue" if ready else "failed"
+
+
+def _cognitive_geometry_route(state: WorkflowState) -> str:
+    return "failed" if state.get("geometry_program_error") else "continue"
+
+
+def _cognitive_scene_route(state: WorkflowState) -> str:
+    return "continue" if state.get("scene") is not None else "failed"
+
+
+def _cognitive_validation_route(state: WorkflowState) -> str:
+    report = state.get("report")
+    return "continue" if report is not None and report.status == "passed" else "failed"
+
+
+def _component_placement_context(plan: CognitiveDesignPlan, component_id: str) -> str:
+    relationships = [
+        (
+            f"{item.kind}:{item.source_component_id}->{item.target_component_id}"
+        )
+        for item in plan.component_graph.relationships
+        if component_id in {item.source_component_id, item.target_component_id}
+    ]
+    return "; ".join(relationships)[:600] or "Place in the design coordinate frame."
+
+
 def _extraction_route(state: WorkflowState) -> str:
     requirement_report = state.get("requirement_report")
     if requirement_report is not None and requirement_report.status == "failed":
@@ -2081,7 +2656,7 @@ def _requirements_from_scene(
         include_gps_antenna=scene.visual_elements.include_gps_antenna,
         geometry_requests=[
             GeometryRequest(
-                request_id=program.program_id.removesuffix(".llm_v1"),
+                request_id=re.sub(r"\.llm_v[12]$", "", program.program_id),
                 semantic_role=program.semantic_role,
                 description=(
                     program.source_description
@@ -2840,6 +3415,8 @@ def _result_from_state(state: dict[str, Any]) -> OrchestratorResult:
         assembly_plan=state.get("assembly_plan"),
         blueprint_requirement_coverage=state.get("blueprint_requirement_coverage"),
         blueprint_scene_coverage=state.get("blueprint_scene_coverage"),
+        cognitive_plan=state.get("cognitive_plan"),
+        capability_observations=state.get("capability_observations", []),
     )
 
 

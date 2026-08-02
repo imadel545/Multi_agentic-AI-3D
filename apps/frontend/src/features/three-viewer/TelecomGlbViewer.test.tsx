@@ -1,13 +1,28 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Group, Object3D } from "three";
 import type { ViewerBundle } from "../../api/schemas";
 import {
   advanceRenderHealthProbe,
+  findSemanticObject,
   PreviewFallback,
   TelecomGlbViewer
 } from "./TelecomGlbViewer";
 
 describe("TelecomGlbViewer fallbacks", () => {
+  it("resolves a component from its real GLB semantic root before using a bounded name prefix", () => {
+    const scene = new Group();
+    const exact = new Object3D();
+    exact.name = "generated_mesh";
+    exact.userData.semantic_root = "antenna_S1_REAL_1";
+    const prefixed = new Object3D();
+    prefixed.name = "rru_S1_REAL_1_body";
+    scene.add(exact, prefixed);
+
+    expect(findSemanticObject(scene, "antenna_S1_REAL_1")).toBe(exact);
+    expect(findSemanticObject(scene, "rru_S1_REAL_1")).toBe(prefixed);
+    expect(findSemanticObject(scene, "unknown")).toBeNull();
+  });
   it("replaces a broken backend preview with an explicit product error", () => {
     const view = render(
       <PreviewFallback
