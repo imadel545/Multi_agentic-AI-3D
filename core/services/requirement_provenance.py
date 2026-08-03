@@ -39,8 +39,8 @@ NUMBER_WORDS = {
 }
 NUMBER_TOKEN = rf"(?:\d+|{'|'.join(sorted(NUMBER_WORDS, key=len, reverse=True))})"
 TOWER_TERMS = (
-    r"pyl[oô]ne|tower|tour|m[aâ]t|monopole|treillis|lattice|"
-    r"rooftop(?:\s+mast)?|small[- ]cell(?:\s+pole)?"
+    r"\b(?:pyl[oô]ne|tower|tour|m[aâ]t|monopole|treillis|lattice|"
+    r"rooftop(?:\s+mast)?|small[- ]cell(?:\s+pole)?)\b"
 )
 CORRECTION_CUES = (
     "correction",
@@ -487,6 +487,7 @@ def _is_relative_position_phrase(value: str) -> bool:
             r"\b(?:"
             r"(?:à|a|to\s+the)\s+(?:droite|gauche|right|left)"
             r"|(?:distance|écart|ecart|offset|décalage|decalage|rayon)"
+            r"|m\s*,?\s*(?:autour|around|près|pres|near|proche)\b"
             r"|m\s+(?:du|de\s+la|from\s+the)\s+(?:pyl[oô]ne|tower|tour|m[aâ]t|monopole)"
             r")\b",
             value,

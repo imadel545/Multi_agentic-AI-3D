@@ -322,14 +322,11 @@ class GeometryProgramAnchor(StrictModel):
         up_length = math.sqrt(sum(value * value for value in up))
         if normal_length <= 1e-9 or up_length <= 1e-9:
             raise ValueError("geometry anchor normal and up must be non-zero")
-        dot = sum(normal[index] * up[index] for index in range(3)) / (
-            normal_length * up_length
-        )
+        dot = sum(normal[index] * up[index] for index in range(3)) / (normal_length * up_length)
         if abs(dot) >= 1.0 - 1e-7:
             raise ValueError("geometry anchor normal and up must not be parallel")
         if any(
-            abs(value) > 1000
-            for value in (self.position_m.x, self.position_m.y, self.position_m.z)
+            abs(value) > 1000 for value in (self.position_m.x, self.position_m.y, self.position_m.z)
         ):
             raise ValueError("geometry anchor position exceeds the 1000 m local bound")
         return self
@@ -540,9 +537,7 @@ class GeometryProgram(StrictModel):
             raise ValueError("geometry-program construction node IDs must be unique")
         if not set(construction_ids).issubset(known_nodes):
             raise ValueError("geometry-program construction nodes reference unknown nodes")
-        profile_ids = {
-            node.node_id for node in self.nodes if isinstance(node, GeometryProfileNode)
-        }
+        profile_ids = {node.node_id for node in self.nodes if isinstance(node, GeometryProfileNode)}
         if not profile_ids.issubset(construction_ids):
             raise ValueError("geometry profile nodes must be construction-only")
 
@@ -654,34 +649,50 @@ def _node_resolves_to_mesh(
 
 
 def geometry_program_dimensions(program: GeometryProgram) -> tuple[float, float, float]:
+    minimum, maximum = geometry_program_bounds(program)
+    return tuple(maximum[axis] - minimum[axis] for axis in range(3))
+
+
+def geometry_program_bounds(
+    program: GeometryProgram,
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """Return the visible program envelope in its validated Z-up world frame."""
+
     nodes = {node.node_id: node for node in program.nodes}
     world_matrices: dict[str, tuple[tuple[float, ...], ...]] = {}
-
-    def world_matrix(node_id: str) -> tuple[tuple[float, ...], ...]:
-        cached = world_matrices.get(node_id)
-        if cached is not None:
-            return cached
-        node = nodes[node_id]
-        local = _transform_matrix(node.transform)
-        result = (
-            _matrix_multiply(world_matrix(node.parent_id), local)
-            if node.parent_id is not None
-            else local
-        )
-        world_matrices[node_id] = result
-        return result
 
     points: list[tuple[float, float, float]] = []
     for node in program.nodes:
         if node.node_id in program.construction_node_ids:
             continue
         local_corners = _geometry_corners(node, nodes, set())
-        matrix = world_matrix(node.node_id)
+        matrix = _node_world_matrix(node.node_id, nodes, world_matrices)
         points.extend(_transform_point(matrix, point) for point in local_corners)
-    return tuple(
-        max(point[axis] for point in points) - min(point[axis] for point in points)
-        for axis in range(3)
-    )
+    if not points:
+        raise ValueError("geometry-program has no visible geometry bounds")
+    return _point_bounds(points)
+
+
+def geometry_program_visible_root_bounds(
+    program: GeometryProgram,
+) -> dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]:
+    """Return bounds for each independently transformed visible root output."""
+
+    nodes = {node.node_id: node for node in program.nodes}
+    construction = set(program.construction_node_ids)
+    bounds: dict[
+        str,
+        tuple[tuple[float, float, float], tuple[float, float, float]],
+    ] = {}
+    for node in program.nodes:
+        if node.node_id in construction or node.parent_id is not None:
+            continue
+        local_corners = _geometry_corners(node, nodes, set())
+        matrix = _node_world_matrix(node.node_id, nodes, {})
+        bounds[node.node_id] = _point_bounds(
+            [_transform_point(matrix, point) for point in local_corners]
+        )
+    return bounds
 
 
 def _geometry_corners(
@@ -703,10 +714,19 @@ def _geometry_corners(
             for point in source
         ]
     if isinstance(node, GeometryBooleanNode):
-        return [
-            *_geometry_corners(nodes[node.left_node_id], nodes, next_visiting),
-            *_geometry_corners(nodes[node.right_node_id], nodes, next_visiting),
-        ]
+        left = _transformed_geometry_corners(nodes[node.left_node_id], nodes, next_visiting)
+        if node.operation == "difference":
+            return left
+        right = _transformed_geometry_corners(nodes[node.right_node_id], nodes, next_visiting)
+        if node.operation == "union":
+            return [*left, *right]
+        left_minimum, left_maximum = _point_bounds(left)
+        right_minimum, right_maximum = _point_bounds(right)
+        minimum = tuple(max(left_minimum[axis], right_minimum[axis]) for axis in range(3))
+        maximum = tuple(min(left_maximum[axis], right_maximum[axis]) for axis in range(3))
+        if any(minimum[axis] > maximum[axis] for axis in range(3)):
+            raise ValueError("geometry-program intersection operands do not overlap")
+        return _bounds_corners(minimum, maximum)
     if isinstance(node, GeometryModifierNode):
         source = _geometry_corners(nodes[node.source_node_id], nodes, next_visiting)
         minimum, maximum = _point_bounds(source)
@@ -777,17 +797,7 @@ def _geometry_corners(
     if isinstance(node, GeometrySweepNode):
         profile = nodes[node.profile_node_id]
         assert isinstance(profile, GeometryProfileNode)
-        radius = max(math.hypot(point.x, point.y) for point in profile.points_m)
-        return _bounds_corners(
-            tuple(
-                min(getattr(point, axis) for point in node.path_points_m) - radius
-                for axis in ("x", "y", "z")
-            ),
-            tuple(
-                max(getattr(point, axis) for point in node.path_points_m) + radius
-                for axis in ("x", "y", "z")
-            ),
-        )
+        return _sweep_vertices(node, profile)
     if isinstance(node, GeometryTerrainNode):
         return _bounds_corners(
             (-node.width_m / 2.0, -node.depth_m / 2.0, min(node.heights_m)),
@@ -806,6 +816,111 @@ def _geometry_corners(
         radius = max(node.radius_m, node.top_radius_m or 0.0)
         half = (radius, radius, node.height_m / 2)
     return _bounds_corners(tuple(-value for value in half), half)
+
+
+def _sweep_vertices(
+    node: GeometrySweepNode,
+    profile: GeometryProfileNode,
+) -> list[tuple[float, float, float]]:
+    """Mirror the deterministic Blender sweep frame exactly for envelope QA.
+
+    A radial approximation is incorrect for asymmetric profiles: it doubles a
+    one-sided vertical profile and can trigger an unnecessary global scale.
+    Keeping the contract and compiler on the same tangent/normal/binormal
+    construction prevents validated dimensions from diverging from the GLB.
+    """
+
+    path = [(point.x, point.y, point.z) for point in node.path_points_m]
+    vertices: list[tuple[float, float, float]] = []
+    for index, center in enumerate(path):
+        previous = path[index - 1] if index > 0 else (path[-1] if node.cyclic else center)
+        following = (
+            path[(index + 1) % len(path)] if index + 1 < len(path) or node.cyclic else center
+        )
+        tangent = _normalize_vector(_subtract_vectors(following, previous))
+        reference = (0.0, 0.0, 1.0)
+        if abs(_dot_vectors(tangent, reference)) > 0.95:
+            reference = (1.0, 0.0, 0.0)
+        normal = _normalize_vector(_cross_vectors(tangent, reference))
+        binormal = _normalize_vector(_cross_vectors(tangent, normal))
+        for point in profile.points_m:
+            vertices.append(
+                tuple(
+                    center[axis] + normal[axis] * point.x + binormal[axis] * point.y
+                    for axis in range(3)
+                )
+            )
+    return vertices
+
+
+def _subtract_vectors(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return tuple(left[axis] - right[axis] for axis in range(3))
+
+
+def _dot_vectors(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> float:
+    return sum(left[axis] * right[axis] for axis in range(3))
+
+
+def _cross_vectors(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
+
+
+def _normalize_vector(
+    value: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    length = math.sqrt(_dot_vectors(value, value))
+    if length <= 1e-12:
+        return (0.0, 0.0, 0.0)
+    return tuple(component / length for component in value)
+
+
+def _transformed_geometry_corners(
+    node: GeometryProgramNode,
+    nodes: dict[str, GeometryProgramNode],
+    visiting: set[str],
+) -> list[tuple[float, float, float]]:
+    """Return referenced Boolean operand geometry in program/world space.
+
+    Boolean inputs are spatial operands. Their complete parent/local transform
+    is therefore part of the operation and must be reflected by the bounded
+    envelope contract just as it is by the deterministic Blender compiler.
+    """
+
+    local_corners = _geometry_corners(node, nodes, visiting)
+    matrix = _node_world_matrix(node.node_id, nodes, {})
+    return [_transform_point(matrix, point) for point in local_corners]
+
+
+def _node_world_matrix(
+    node_id: str,
+    nodes: dict[str, GeometryProgramNode],
+    cache: dict[str, tuple[tuple[float, ...], ...]],
+) -> tuple[tuple[float, ...], ...]:
+    cached = cache.get(node_id)
+    if cached is not None:
+        return cached
+    node = nodes[node_id]
+    local = _transform_matrix(node.transform)
+    result = (
+        _matrix_multiply(_node_world_matrix(node.parent_id, nodes, cache), local)
+        if node.parent_id is not None
+        else local
+    )
+    cache[node_id] = result
+    return result
 
 
 def _point_bounds(
@@ -904,9 +1019,9 @@ def _segments_intersect(
         end: tuple[float, float],
         point: tuple[float, float],
     ) -> float:
-        return (end[0] - start[0]) * (point[1] - start[1]) - (
-            end[1] - start[1]
-        ) * (point[0] - start[0])
+        return (end[0] - start[0]) * (point[1] - start[1]) - (end[1] - start[1]) * (
+            point[0] - start[0]
+        )
 
     first_side = orientation(first_start, first_end, second_start)
     second_side = orientation(first_start, first_end, second_end)

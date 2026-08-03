@@ -77,7 +77,17 @@ describe("TelecomGlbViewer fallbacks", () => {
       available_actions: [],
       unsupported_actions: [],
       mesh_qa_passed: true,
-      qa_summary: {},
+      qa_summary: {
+        qa_status: "passed",
+        qa_executed: true,
+        blocked_before_qa: false,
+        checks_passed: ["glb_structure"],
+        checks_failed: [],
+        warnings: [],
+        errors: [],
+        upstream_errors: [],
+        limitations: []
+      },
       limitations: []
     } as ViewerBundle;
     render(

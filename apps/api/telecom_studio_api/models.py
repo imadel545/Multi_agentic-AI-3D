@@ -565,6 +565,33 @@ class GeometryProgramSummary(BaseModel):
         return self
 
 
+class ViewerQaSummary(BaseModel):
+    qa_status: Literal["not_started", "incomplete", "failed", "passed"]
+    qa_executed: bool
+    blocked_before_qa: bool
+    mesh_qa_level: str | None = None
+    mesh_qa_passed: bool | None = None
+    qa_score: float | None = None
+    checks_passed: list[str] = Field(default_factory=list)
+    checks_failed: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    upstream_errors: list[str] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)
+    geometry_source: str | None = None
+    generation_strategy: str | None = None
+    object_counts: dict[str, Any] | None = None
+    missing_objects: list[str] | None = None
+    glb_parse_structural: bool | None = None
+    preview_pixel_framing_qa: bool
+    preview_subject_framing_valid: bool | None = None
+    preview_subject_bbox_width_ratio: float | None = None
+    preview_subject_bbox_height_ratio: float | None = None
+    preview_subject_center_x_ratio: float | None = None
+    preview_subject_min_edge_margin_ratio: float | None = None
+    preview_subject_touches_frame: bool | None = None
+
+
 class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
@@ -616,7 +643,7 @@ class ViewerBundle(BaseModel):
     rag_reranker_status: str | None = None
     rag_reranker_degraded_reason: str | None = None
     memory_context_count: int | None = None
-    qa_summary: dict | None = None
+    qa_summary: ViewerQaSummary | None = None
     viewer_artifacts: list[ViewerArtifact]
     limitations: list[str] = Field(default_factory=list)
     runtime_capabilities: RuntimeCapabilities | None = None

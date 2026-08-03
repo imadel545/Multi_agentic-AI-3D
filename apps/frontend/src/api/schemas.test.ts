@@ -40,6 +40,18 @@ const viewerBundlePayload = {
     }
   },
   rag_context_count: 3,
+  qa_summary: {
+    qa_status: "passed",
+    qa_executed: true,
+    blocked_before_qa: false,
+    checks_passed: ["glb_structural"],
+    checks_failed: [],
+    warnings: [],
+    errors: [],
+    upstream_errors: [],
+    limitations: [],
+    preview_pixel_framing_qa: true
+  },
   viewer_artifacts: [
     {
       name: "design.glb",
@@ -147,6 +159,8 @@ describe("frontend contract schemas", () => {
       "antenna",
       "radio"
     ]);
+    expect(parsed.qa_summary?.qa_status).toBe("passed");
+    expect(parsed.qa_summary?.qa_executed).toBe(true);
   });
 
   it("rejects inconsistent geometry fidelity component counts", () => {

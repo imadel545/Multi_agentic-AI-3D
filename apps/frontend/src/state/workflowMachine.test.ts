@@ -59,7 +59,17 @@ const baseBundle: ViewerBundle = {
   rag_reranker_status: "available",
   rag_reranker_degraded_reason: null,
   memory_context_count: 0,
-  qa_summary: {},
+  qa_summary: {
+    qa_status: "passed",
+    qa_executed: true,
+    blocked_before_qa: false,
+    checks_passed: ["glb_structure"],
+    checks_failed: [],
+    warnings: [],
+    errors: [],
+    upstream_errors: [],
+    limitations: []
+  },
   viewer_artifacts: [],
   limitations: [],
   unsupported_actions: [],

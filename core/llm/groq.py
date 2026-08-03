@@ -1,11 +1,15 @@
 import json
+import re
+import unicodedata
 from typing import Any
 
 import httpx
 from pydantic import ValidationError
 
 from core.contracts.common import WarningItem
+from core.contracts.repair import RepairEvent
 from core.contracts.requirements import (
+    GeometryRequest,
     RequirementCandidateEvidence,
     RequirementFieldEvidence,
     RequirementSpec,
@@ -16,7 +20,7 @@ from core.llm.groq_policy import (
     GroqRequestPolicy,
     normalize_groq_base_url,
 )
-from core.services.requirement_parser import parse_requirements_text
+from core.services.requirement_parser import POWER_CABINET_TERMS, parse_requirements_text
 
 REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -239,6 +243,10 @@ class GroqStructuredClient:
                     "equipment shelter, solar canopy, fence, platform furniture or site "
                     "environment element. Use a stable lowercase request_id and semantic_role, "
                     "preserve the requested quantity, placement context and maximum dimensions. "
+                    "When a requested child is explicitly integrated in or contained by another "
+                    "generated component (for example a gate within a fence), emit one host "
+                    "geometry_request whose description contains the child requirements; do not "
+                    "emit a disconnected duplicate child request. "
                     "Do not duplicate standard components in geometry_requests. "
                     "Preserve the deterministic baseline values unless the user text "
                     "explicitly contradicts them. "
@@ -548,11 +556,137 @@ def _finalize_requirements(
             continue
         seen.add(identity)
         unique.append(warning)
+    normalized_requirements = _compose_nested_geometry_requests(
+        requirements.model_copy(update={"warnings": unique})
+    )
     return _merge_llm_provenance(
-        requirements.model_copy(update={"warnings": unique}),
+        normalized_requirements,
         baseline,
         llm_candidate,
     )
+
+
+_CONTAINMENT_SIGNALS = (
+    "inside",
+    "installed in",
+    "installed within",
+    "integrated in",
+    "integrated into",
+    "within",
+    "a l interieur",
+    "dans",
+    "integre dans",
+    "installe dans",
+)
+_SEMANTIC_STOP_WORDS = {"component", "equipment", "perimeter", "system"}
+
+
+def _compose_nested_geometry_requests(requirements: RequirementSpec) -> RequirementSpec:
+    """Compose explicit containment relations into one governed host program.
+
+    Separate GeometryPrograms do not yet have a cross-program constraint solver.
+    Keeping an explicitly integrated child as a disconnected request would place
+    it independently and misrepresent the user's assembly. This deterministic
+    reconciliation changes no dimensions or quantities; it preserves the child
+    brief inside the host description so GPT-OSS designs one coherent assembly.
+    """
+
+    requests = list(requirements.geometry_requests)
+    if len(requests) < 2:
+        return requirements
+    before = [request.model_dump(mode="json") for request in requests]
+    consumed: set[str] = set()
+    replacements: dict[str, GeometryRequest] = {}
+
+    for child in requests:
+        relation = _plain_text(" ".join(filter(None, (child.description, child.placement_context))))
+        if not any(signal in relation for signal in _CONTAINMENT_SIGNALS):
+            continue
+        hosts = []
+        for host in requests:
+            if host.request_id == child.request_id or host.request_id in consumed:
+                continue
+            tokens = _semantic_tokens(host.semantic_role)
+            if not tokens or not any(
+                re.search(rf"\b{re.escape(token)}\b", relation) for token in tokens
+            ):
+                continue
+            if not _nested_dimensions_fit(child, host) or child.quantity != host.quantity:
+                continue
+            hosts.append(host)
+        if len(hosts) != 1:
+            continue
+        original_host = hosts[0]
+        host = replacements.get(original_host.request_id, original_host)
+        nested_description = (
+            f" Includes integrated {child.semantic_role} (quantity {child.quantity}): "
+            f"{child.description}"
+        )
+        if child.placement_context:
+            nested_description += f" Placement relation: {child.placement_context}."
+        combined = host.description.rstrip(". ") + "." + nested_description
+        if len(combined) > 1200:
+            continue
+        replacements[host.request_id] = host.model_copy(update={"description": combined})
+        consumed.add(child.request_id)
+
+    if not consumed:
+        return requirements
+    composed = [
+        replacements.get(request.request_id, request)
+        for request in requests
+        if request.request_id not in consumed
+    ]
+    after = [request.model_dump(mode="json") for request in composed]
+    repair = RepairEvent(
+        attempt=1,
+        handler="compose_nested_geometry_requests",
+        reason=("Explicit containment relation requires one coherent generated host assembly."),
+        before={"geometry_requests": before},
+        after={"geometry_requests": after},
+        warning_code="NESTED_GEOMETRY_REQUEST_COMPOSED",
+        success=True,
+    )
+    return requirements.model_copy(
+        update={
+            "geometry_requests": composed,
+            "repair_events": [*requirements.repair_events, repair],
+        }
+    )
+
+
+def _nested_dimensions_fit(child: GeometryRequest, host: GeometryRequest) -> bool:
+    if child.maximum_dimensions_m is None or host.maximum_dimensions_m is None:
+        return True
+    return all(
+        child_value <= host_value + 1e-9
+        for child_value, host_value in zip(
+            (
+                child.maximum_dimensions_m.x,
+                child.maximum_dimensions_m.y,
+                child.maximum_dimensions_m.z,
+            ),
+            (
+                host.maximum_dimensions_m.x,
+                host.maximum_dimensions_m.y,
+                host.maximum_dimensions_m.z,
+            ),
+            strict=True,
+        )
+    )
+
+
+def _semantic_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in _plain_text(value).split()
+        if len(token) >= 4 and token not in _SEMANTIC_STOP_WORDS
+    }
+
+
+def _plain_text(value: str) -> str:
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", ascii_value.lower()).split())
 
 
 def _merge_llm_provenance(
@@ -698,18 +832,6 @@ _EXPLICIT_TEXT_TERMS_BY_FIELD = {
     "include_cables": ("cable", "câble"),
     "include_beams": ("faisceau", "beam"),
     "include_labels": ("label", "étiquette", "etiquette"),
-    "include_power_cabinet": (
-        "armoire énergie",
-        "armoire energie",
-        "armoire d'énergie",
-        "armoire d'energie",
-        "armoire d’énergie",
-        "armoire d’energie",
-        "boîte alimentation",
-        "boite alimentation",
-        "power cabinet",
-        "power box",
-        "cabinet",
-    ),
+    "include_power_cabinet": POWER_CABINET_TERMS,
     "include_gps_antenna": ("gps", "gnss"),
 }

@@ -121,8 +121,9 @@ export function BackendStatusBar({
                 : "topbar-proof warn"
             }
             data-geometry-fidelity={fidelityBadge.fidelity}
+            title={fidelityBadge.label}
           >
-            <Boxes size={14} aria-hidden="true" /> {fidelityBadge.label}
+            <Boxes size={14} aria-hidden="true" /> {compactFidelityLabel(fidelityBadge.fidelity)}
           </span>
         ) : null}
         {issueCount ? (
@@ -147,6 +148,7 @@ export function ChatCommandPanel({
   submissionPending,
   phase,
   error,
+  failureIssue = null,
   canEdit,
   correctionBusy,
   revisionPrompt,
@@ -185,6 +187,7 @@ export function ChatCommandPanel({
   submissionPending: boolean;
   phase: WorkflowPhase;
   error: string | null;
+  failureIssue?: UserIssue | null;
   canEdit: boolean;
   correctionBusy: boolean;
   revisionPrompt: string;
@@ -218,6 +221,7 @@ export function ChatCommandPanel({
     canEdit ? "revision" : "new"
   );
   const previousCanEdit = useRef(canEdit);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!canEdit && commandMode === "revision") {
@@ -230,6 +234,13 @@ export function ChatCommandPanel({
   }, [canEdit, commandMode]);
 
   const revisionMode = commandMode === "revision" && canEdit;
+  const composerValue = revisionMode ? revisionPrompt : prompt;
+  useEffect(() => {
+    const composer = composerRef.current;
+    if (!composer) return;
+    composer.style.height = "auto";
+    composer.style.height = `${Math.min(Math.max(composer.scrollHeight, 92), 210)}px`;
+  }, [composerValue]);
   const assistantTitle = revisionBusy
     ? "Modification et contrôles en cours"
     : revisionMode
@@ -244,7 +255,7 @@ export function ChatCommandPanel({
   const assistantMessage = revisionBusy
     ? "La version actuelle reste visible pendant la création et la validation de la nouvelle version."
     : revisionMode
-      ? "Demandez un changement précis. Le système conserve la version actuelle si la QA refuse la modification."
+      ? "Demandez un changement précis. La version actuelle reste disponible si les contrôles refusent la modification."
       : disabled
         ? "La demande confirmée est en cours d’assemblage. Le résultat ne sera annoncé qu’après Blender et la QA."
       : phase === "completed"
@@ -252,129 +263,176 @@ export function ChatCommandPanel({
         : phase === "failed"
           ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération certifiée."
           : "Les contraintes sont extraites puis confirmées avant toute génération Blender.";
+  const failedIssue = phase === "failed" && failureIssue
+    ? humanizeUserIssue(failureIssue)
+    : null;
+  const submitCurrentCommand = () => {
+    if (revisionMode) {
+      if (!revisionBusy && revisionPrompt.trim()) onRevisionSubmit();
+      return;
+    }
+    if (!analysisBusy && prompt.trim()) onAnalyze();
+  };
   return (
     <section className="command-center" aria-label="Conversation de commande">
-      <div className="conversation-heading">
-        <span className="eyebrow">Conception assistée</span>
-        <h1>{revisionMode ? "Modifier le site telecom" : "Concevoir le site telecom"}</h1>
-      </div>
-
-      <div className={`assistant-card conversation-message${revisionBusy ? " busy" : ""}`}>
-        {revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <RadioTower size={18} aria-hidden="true" />}
-        <div>
-          <strong>{assistantTitle}</strong>
-          <p>{assistantMessage}</p>
+      <div className="conversation-header">
+        <div className="conversation-heading">
+          <span className="eyebrow">Assistant de conception</span>
+          <h1>{revisionMode ? "Modifier le design" : "Créer un design 3D"}</h1>
         </div>
+        {phase !== "failed" ? (
+          <div className={`assistant-card conversation-message${revisionBusy ? " busy" : ""}`}>
+            {revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <RadioTower size={18} aria-hidden="true" />}
+            <div>
+              <strong>{assistantTitle}</strong>
+              <p>{assistantMessage}</p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
-      <ConversationHistory
-        activeRequirements={activeRequirements ?? null}
-        currentPrompt={prompt}
-        versions={versions ?? []}
-      />
-
-      {bootstrapError ? (
-        <ResourceRecovery
-          busy={bootstrapLoading}
-          label="L’état initial du studio n’a pas pu être entièrement synchronisé."
-          message={bootstrapError}
-          onRetry={onRetryBootstrap}
+      <div className="conversation-feed" aria-label="Conversation et cahier des charges">
+        <ConversationHistory
+          activeRequirements={prompt.trim() ? null : activeRequirements ?? null}
+          currentPrompt={analysis || analysisSubmitted ? prompt : ""}
+          versions={versions ?? []}
         />
-      ) : bootstrapLoading ? (
-        <p className="resource-loading" aria-live="polite" role="status">
-          <Loader2 className="spin" size={15} aria-hidden="true" /> Synchronisation de l’état vérifié du studio…
-        </p>
-      ) : null}
 
-      {canEdit ? (
-        <div className="command-mode" role="group" aria-label="Type de commande">
-          <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
-          <button className={revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
+        {phase === "failed" ? (
+          <article className="workflow-recovery" role="alert">
+            <div className="workflow-recovery-heading">
+              <AlertTriangle size={18} aria-hidden="true" />
+              <div>
+                <strong>La construction 3D n’a pas abouti</strong>
+                <p>
+                  {failureRecoveryMessage(failedIssue)}
+                </p>
+              </div>
+            </div>
+            <div className="workflow-recovery-actions">
+              <button
+                className="secondary-action"
+                onClick={() => composerRef.current?.focus()}
+                type="button"
+              >
+                Corriger la demande
+              </button>
+            </div>
+          </article>
+        ) : null}
+
+        {bootstrapError ? (
+          <ResourceRecovery
+            busy={bootstrapLoading}
+            label="L’état initial du studio n’a pas pu être entièrement synchronisé."
+            message={bootstrapError}
+            onRetry={onRetryBootstrap}
+          />
+        ) : bootstrapLoading ? (
+          <p className="resource-loading" aria-live="polite" role="status">
+            <Loader2 className="spin" size={15} aria-hidden="true" /> Synchronisation du studio…
+          </p>
+        ) : null}
+
+        {analysis && !revisionMode ? (
+          <RequirementsUnderstanding
+            analysis={analysis}
+            failedWorkflow={phase === "failed"}
+            onConfirm={onConfirm}
+            submitted={analysisSubmitted}
+            submitting={disabled}
+          />
+        ) : null}
+        {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
+
+        {!revisionMode ? (
+          <DocumentPackIntake
+            busy={documentPackBusy}
+            capabilities={documentCapabilities}
+            capabilitiesError={documentCapabilitiesError}
+            capabilitiesLoading={documentCapabilitiesLoading}
+            correctionBusy={correctionBusy}
+            message={documentPackMessage}
+            onCorrect={onDocumentPackCorrection}
+            onGenerate={onDocumentPackGenerate}
+            onCapabilitiesRetry={onDocumentCapabilitiesRetry}
+            onReviewRetry={onDocumentPackReviewRetry}
+            onUpload={onDocumentPackUpload}
+            review={documentPackReview}
+            reviewError={documentPackReviewError}
+            reviewLoading={documentPackReviewLoading}
+            summary={documentPackSummary}
+          />
+        ) : null}
+
+        {editMessage ? (
+          <p
+            aria-live="polite"
+            className={`command-feedback${editMessage.includes("non appliquée") || editMessage.includes("refusée") ? " warning" : " success"}`}
+            role="status"
+          >
+            {editMessage}
+          </p>
+        ) : null}
+
+        {error && phase !== "failed" ? (
+          <p className="inline-alert">
+            <AlertTriangle size={16} aria-hidden="true" /> {error}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="command-dock">
+        {canEdit ? (
+          <div className="command-mode" role="group" aria-label="Type de commande">
+            <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
+            <button className={revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
+          </div>
+        ) : null}
+
+        <div className="command-composer">
+          <textarea
+            aria-label={revisionMode ? "Revision prompt" : "Design prompt"}
+            placeholder={revisionMode
+              ? "Décrivez la modification à appliquer au design…"
+              : "Décrivez le site, ses contraintes et le résultat attendu…"}
+            value={revisionMode ? revisionPrompt : prompt}
+            disabled={disabled || revisionBusy}
+            onChange={(event) => revisionMode
+              ? onRevisionPromptChange(event.target.value)
+              : onPromptChange(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                submitCurrentCommand();
+              }
+            }}
+            ref={composerRef}
+            rows={3}
+          />
+          <button
+            aria-label={revisionMode ? "Appliquer la révision" : "Analyser la demande"}
+            className="composer-submit"
+            disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
+            onClick={revisionMode ? onRevisionSubmit : onAnalyze}
+            title={revisionMode ? "Appliquer la modification" : "Analyser les contraintes"}
+            type="button"
+          >
+            {revisionMode ? (
+              revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <Send size={18} aria-hidden="true" />
+            ) : analysisBusy ? (
+              <Loader2 className="spin" size={18} aria-hidden="true" />
+            ) : (
+              <Sparkles size={18} aria-hidden="true" />
+            )}
+          </button>
         </div>
-      ) : null}
-
-      <div className="command-composer">
-        <textarea
-          aria-label={revisionMode ? "Revision prompt" : "Design prompt"}
-          placeholder={revisionMode
-            ? "Ex: augmente la hauteur à 35 m, ajoute une plateforme, corrige les labels…"
-            : "Ex: pylône treillis 30 m, 3 secteurs à 24 m, azimuts 0/120/240, RRU, câbles, GPS…"}
-          value={revisionMode ? revisionPrompt : prompt}
-          disabled={disabled || revisionBusy}
-          onChange={(event) => revisionMode
-            ? onRevisionPromptChange(event.target.value)
-            : onPromptChange(event.target.value)}
-          rows={4}
-        />
-        <button
-          aria-label={revisionMode ? "Appliquer la révision" : "Analyser la demande"}
-          className="composer-submit"
-          disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
-          onClick={revisionMode ? onRevisionSubmit : onAnalyze}
-          title={revisionMode ? "Appliquer la modification" : "Analyser les contraintes"}
-          type="button"
-        >
-          {revisionMode ? (
-            revisionBusy ? <Loader2 className="spin" size={18} aria-hidden="true" /> : <Send size={18} aria-hidden="true" />
-          ) : analysisBusy ? (
-            <Loader2 className="spin" size={18} aria-hidden="true" />
-          ) : (
-            <Sparkles size={18} aria-hidden="true" />
-          )}
-        </button>
+        <p className="composer-hint">
+          {revisionMode
+            ? revisionBusy ? "Révision et validation en cours…" : "⌘ Entrée pour appliquer · la version actuelle reste protégée."
+            : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "⌘ Entrée pour analyser · les paramètres seront confirmés avant génération."}
+        </p>
       </div>
-      <p className="composer-hint">
-        {revisionMode
-          ? revisionBusy ? "Révision et validation en cours…" : "La modification passe par les outils bornés et la QA Blender."
-          : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "Vous confirmerez les paramètres extraits avant génération."}
-      </p>
-
-      {analysis && !revisionMode ? (
-        <RequirementsUnderstanding
-          analysis={analysis}
-          failedWorkflow={phase === "failed"}
-          onConfirm={onConfirm}
-          submitted={analysisSubmitted}
-          submitting={disabled}
-        />
-      ) : null}
-      {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
-
-      {!revisionMode ? (
-        <DocumentPackIntake
-          busy={documentPackBusy}
-          capabilities={documentCapabilities}
-          capabilitiesError={documentCapabilitiesError}
-          capabilitiesLoading={documentCapabilitiesLoading}
-          correctionBusy={correctionBusy}
-          message={documentPackMessage}
-          onCorrect={onDocumentPackCorrection}
-          onGenerate={onDocumentPackGenerate}
-          onCapabilitiesRetry={onDocumentCapabilitiesRetry}
-          onReviewRetry={onDocumentPackReviewRetry}
-          onUpload={onDocumentPackUpload}
-          review={documentPackReview}
-          reviewError={documentPackReviewError}
-          reviewLoading={documentPackReviewLoading}
-          summary={documentPackSummary}
-        />
-      ) : null}
-
-      {editMessage ? (
-        <p
-          aria-live="polite"
-          className={`command-feedback${editMessage.includes("non appliquée") || editMessage.includes("refusée") ? " warning" : " success"}`}
-          role="status"
-        >
-          {editMessage}
-        </p>
-      ) : null}
-
-      {error ? (
-        <p className="inline-alert">
-          <AlertTriangle size={16} aria-hidden="true" /> {error}
-        </p>
-      ) : null}
     </section>
   );
 }
@@ -408,7 +466,10 @@ export function conversationHistoryEntries({
     });
   }
   versions
-    .filter((version) => Boolean(version.edit_description?.trim()))
+    .filter((version) => {
+      const description = version.edit_description?.trim() ?? "";
+      return Boolean(description) && !/^initial from [a-z0-9._-]+$/i.test(description);
+    })
     .slice(-3)
     .forEach((version) => {
       entries.push({
@@ -437,17 +498,26 @@ function ConversationHistory({
   });
   if (!entries.length) return null;
   return (
-    <details className="conversation-history">
-      <summary>Contexte de la conversation <small>{entries.length}</small></summary>
+    <div className="conversation-history" aria-label="Conversation">
+      <span className="conversation-history-label">Conversation</span>
       <div className="conversation-history-list">
-        {entries.map((entry) => (
-          <article className={`conversation-entry ${entry.role}`} key={entry.id}>
-            <strong>{entry.label}</strong>
-            <p>{entry.message}</p>
-          </article>
-        ))}
+        {entries.map((entry) => {
+          const compact = entry.message.length > 280;
+          return (
+            <article className={`conversation-entry ${entry.role}`} key={entry.id}>
+              <strong>{entry.label}</strong>
+              <p className={compact ? "message-clamp" : undefined}>{entry.message}</p>
+              {compact ? (
+                <details>
+                  <summary>Voir la demande complète</summary>
+                  <p>{entry.message}</p>
+                </details>
+              ) : null}
+            </article>
+          );
+        })}
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -474,7 +544,7 @@ function RequirementsUnderstanding({
     );
   }
   const warnings = uniqueRequirementWarnings([...analysis.warnings, ...requirements.warnings]);
-  const confirmationLocked = submitted && !failedWorkflow;
+  const confirmationLocked = submitted;
   const unresolvedConflicts = (requirements.conflicts ?? []).filter(
     (conflict) => !conflict.resolved
   );
@@ -483,11 +553,7 @@ function RequirementsUnderstanding({
   return (
     <div className="understanding-card" aria-label="Compréhension de la demande">
       <span className="eyebrow">
-        {confirmationLocked
-          ? "Compréhension utilisée pour le design"
-          : failedWorkflow && submitted
-            ? "Compréhension de la demande échouée"
-            : "Paramètres compris à confirmer"}
+        {confirmationLocked ? "Cahier des charges utilisé" : "Paramètres compris à confirmer"}
       </span>
       <strong>{requirements.network_type} · {humanTowerType(requirements.tower_type)}</strong>
       <div className="metric-grid">
@@ -527,7 +593,7 @@ function RequirementsUnderstanding({
             ))}
           </ul>
           <small>
-            Ils seront écrits comme programmes géométriques typés, puis contrôlés avant Blender.
+            Ils seront conçus par le spécialiste 3D, puis contrôlés avant la construction.
           </small>
         </div>
       ) : null}
@@ -578,7 +644,10 @@ function RequirementsUnderstanding({
       ) : null}
       {confirmationLocked ? (
         <p className="confirmation-complete" role="status">
-          <CheckCircle2 size={16} aria-hidden="true" /> Cette compréhension a déjà lancé le design affiché.
+          {failedWorkflow ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
+          {failedWorkflow
+            ? "Cette demande est conservée et peut être corrigée ou relancée depuis le message ci-dessus."
+            : "Cette compréhension a déjà lancé le design affiché."}
         </p>
       ) : (
         <button
@@ -588,7 +657,7 @@ function RequirementsUnderstanding({
           type="button"
         >
           <Send size={18} aria-hidden="true" />
-          {failedWorkflow && submitted ? "Relancer avec cette demande" : "Confirmer et générer"}
+          Confirmer et générer
         </button>
       )}
     </div>
@@ -977,7 +1046,7 @@ export function CurrentOperationStrip({
     <section className="operation-strip" aria-label="Opération courante">
       <Clock3 size={18} aria-hidden="true" />
       <div>
-        <strong>{operation?.human_label ?? operation?.current_operation ?? (running ? "Conception en cours" : "Studio prêt")}</strong>
+        <strong>{operation?.human_label ?? humanOperationLabel(operation?.current_operation) ?? (running ? "Conception en cours" : "Studio prêt")}</strong>
         <span>{operation?.progress_message ?? "Les étapes de conception apparaissent ici pendant la génération."}</span>
         {notice ? <small className="operation-notice" aria-live="polite">{notice}</small> : null}
       </div>
@@ -1010,22 +1079,17 @@ export function LiveGenerationOverlay({
     return null;
   }
   const liveOperation = operation?.is_terminal ? null : operation;
-  const timelineRows = (timeline?.timeline_steps ?? [])
-    .filter((step) => step.status !== "pending")
-    .map((step, index) => ({
-      id: `${step.step}-${step.timestamp ?? index}`,
-      label: step.human_label ?? step.label ?? step.human_readable,
-      status: step.status
+  const activity = summarizeStages(events, timeline, phase)
+    .filter((stage) => stage.status !== "pending" && stage.status !== "waiting")
+    .slice(-3)
+    .map((stage) => ({
+      id: stage.phase,
+      label: stage.label,
+      status: stage.status
     }));
-  const eventRows = events.map((event) => ({
-    id: event.event_id,
-    label: event.human_label,
-    status: event.status ?? event.event_type
-  }));
-  const activity = (timelineRows.length ? timelineRows : eventRows).slice(-3);
   const label =
     liveOperation?.human_label ??
-    liveOperation?.current_operation ??
+    humanOperationLabel(liveOperation?.current_operation) ??
     (intent === "revision"
       ? "Modification du design"
       : intent === "rollback"
@@ -1071,7 +1135,7 @@ export function LiveGenerationOverlay({
         ) : (
           <div className="generation-awaiting">
             <Loader2 size={15} aria-hidden="true" />
-            Initialisation du workflow…
+            Préparation de la conception…
           </div>
         )}
       </div>
@@ -1091,6 +1155,24 @@ function stageStatusTone(status: string): string {
     return "completed";
   }
   return "running";
+}
+
+function humanOperationLabel(operation: string | null | undefined): string | null {
+  if (!operation) return null;
+  const normalized = operation.toLowerCase();
+  if (normalized.includes("requirement") || normalized.includes("extract")) {
+    return "Compréhension de la demande";
+  }
+  if (normalized.includes("plan") || normalized.includes("blueprint") || normalized.includes("scene")) {
+    return "Conception du plan 3D";
+  }
+  if (normalized.includes("blender") || normalized.includes("build") || normalized.includes("geometry")) {
+    return "Construction dans Blender";
+  }
+  if (normalized.includes("qa") || normalized.includes("quality") || normalized.includes("certif")) {
+    return "Vérification du résultat";
+  }
+  return "Conception en cours";
 }
 
 export function AgentStageRail({
@@ -1123,41 +1205,34 @@ export function AgentStageRail({
 }
 
 export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflowEvent[]; timeline: TimelineSummary | null }) {
-  const rawRows =
-    timeline?.timeline_steps.map((step, index) => ({
-      id: `${step.step}-${step.timestamp ?? step.duration_ms ?? index}-${index}`,
-      label: step.human_label ?? step.label ?? step.human_readable,
-      message: step.progress_message ?? step.human_readable,
-      status: step.status,
-      phase: step.phase
-    })) ??
-    events.map((event) => ({
-      id: event.event_id,
-      label: event.human_label,
-      message: event.progress_message,
-      status: event.status ?? event.event_type,
-      phase: event.phase
-    }));
-  const rows = summarizeTimelineRows(rawRows);
+  const terminalEvent = [...events].reverse().find((event) =>
+    event.event_type === "workflow_completed" || event.event_type === "workflow_failed"
+  );
+  const phase: WorkflowPhase =
+    timeline?.status === "completed" || terminalEvent?.event_type === "workflow_completed"
+      ? "completed"
+      : timeline?.status === "failed" || terminalEvent?.event_type === "workflow_failed"
+        ? "failed"
+        : events.length || timeline?.timeline_steps.length
+          ? "running"
+          : "idle";
+  const rows = summarizeStages(events, timeline, phase);
 
   return (
     <section className="drawer-section" aria-label="Timeline agents">
-      <PanelTitle icon={<Sparkles size={17} />} title="Narration du workflow" />
-      <div className="timeline-list">
-        {rows.length ? (
-          rows.slice(-14).map((row) => (
-            <article className="timeline-item" key={row.id}>
+      <PanelTitle icon={<Sparkles size={17} />} title="Progression du design" />
+      <p className="muted">Les détails techniques sont regroupés en étapes lisibles.</p>
+      <div className="timeline-list macro-progress">
+        {rows.map((row) => (
+            <article className="timeline-item" key={row.phase}>
               <span className={`timeline-dot ${row.status}`} />
               <div>
                 <strong>{row.label}</strong>
-                <p>{humanTimelineMessage(row.message)}</p>
-                <small>{humanPhase(row.phase)} · {stageStatusLabel(row.status)}</small>
+                <p>{macroStageMessage(row.label, row.status)}</p>
+                <small>{stageStatusLabel(row.status)}</small>
               </div>
             </article>
-          ))
-        ) : (
-          <p className="muted">Les spécialistes apparaîtront au démarrage de la conception.</p>
-        )}
+          ))}
       </div>
     </section>
   );
@@ -1285,12 +1360,12 @@ export function InspectorDock({
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
   const issueCount = displayIssueCount(issues, bundle);
   const drawers: DrawerDefinition[] = [];
-  if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Aperçu", icon: <CheckCircle2 size={16} /> });
-  if (events.length || timeline) drawers.push({ id: "agents", label: "Activité", icon: <Sparkles size={16} /> });
+  if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Vue", icon: <CheckCircle2 size={16} /> });
+  if (events.length || timeline) drawers.push({ id: "agents", label: "Progression", icon: <Sparkles size={16} /> });
   if (assemblyPlan || componentProofs || cognitiveEvidenceError || cognitiveEvidenceLoading) {
     drawers.push({
       id: "scene",
-      label: "Scène",
+      label: "Composition",
       badge: componentProofs ? String(sceneInstanceCount(componentProofs)) : undefined,
       icon: <Layers3 size={16} />
     });
@@ -1298,14 +1373,12 @@ export function InspectorDock({
   if (bundle || issueCount || viewerBundleError || qaEvidenceError || qaEvidenceLoading) {
     drawers.push({
       id: "quality",
-      label: "Contrôles",
-      badge: issueCount ? String(issueCount) : "OK",
+      label: "Vérification",
+      badge: issueCount ? String(issueCount) : undefined,
       icon: <ShieldAlert size={16} />
     });
   }
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
-  if (assetLibrarySummary?.catalog_available || assetInventory || assetLibrarySummaryError || assetInventoryError || assetLibraryLoading) drawers.push({ id: "library", label: "Bibliothèque", icon: <Boxes size={16} /> });
-  if (bundle || summary || adaptationCapabilitiesError || adaptationCatalogError || llmProvenanceError || llmProvenanceLoading) drawers.push({ id: "system", label: "Système", icon: <Cpu size={16} /> });
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -1704,11 +1777,16 @@ export function QaPanel({
   loading?: boolean;
   onRetry?: () => void;
 }) {
-  const qa = bundle?.qa_summary ?? {};
+  const qa = bundle?.qa_summary;
   const passed = bundle?.mesh_qa_passed === true;
+  const qaExecuted =
+    qa?.qa_executed !== false &&
+    bundle?.status === "completed" &&
+    bundle.generation_mode === "real_blender" &&
+    typeof bundle.mesh_qa_passed === "boolean";
   return (
     <section className="drawer-section" aria-label="Validation QA">
-      <PanelTitle icon={<ShieldAlert size={17} />} title="Validation honnête" />
+      <PanelTitle icon={<ShieldAlert size={17} />} title="Vérification du résultat" />
       {loading ? (
         <p className="muted" aria-live="polite">Synchronisation du rapport QA vérifié…</p>
       ) : error ? (
@@ -1722,7 +1800,7 @@ export function QaPanel({
           <CheckCircle2 size={15} aria-hidden="true" /> Rapport QA détaillé chargé depuis l’artefact backend.
         </p>
       ) : null}
-      {bundle ? (
+      {qaExecuted && bundle ? (
         <>
           <div className="metric-grid">
             <Metric label="Score" value={formatScore(bundle.qa_score)} />
@@ -1747,14 +1825,28 @@ export function QaPanel({
               value={completionCertificateLabel(bundle.completion_certificate_status)}
             />
           </div>
-          <List title="Échecs QA" items={stringArray(qa["checks_failed"])} empty="Aucun échec QA remonté." />
+          <List title="Échecs QA" items={stringArray(qa?.checks_failed)} empty="Aucun échec QA remonté." />
           <details className="drawer-disclosure">
             <summary>Portée et limites de cette validation</summary>
             <List title="Ce que la QA ne garantit pas" items={bundle.limitations} empty="Aucune limitation remontée." />
           </details>
         </>
+      ) : bundle ? (
+        <div className="qa-not-run" role="status">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <div>
+            <strong>Validation 3D non exécutée</strong>
+            <p>
+              {bundle.status === "failed"
+                ? qa?.blocked_before_qa === true
+                  ? "La conception a été bloquée avant la QA; aucun contrôle 3D ne peut être annoncé."
+                  : "La conception s’est arrêtée avant la construction Blender; aucun contrôle 3D ne peut être annoncé."
+                : "Aucune preuve complète de construction Blender et de QA n’est disponible pour ce résultat."}
+            </p>
+          </div>
+        </div>
       ) : (
-        <p className="muted">La QA apparaîtra après un viewer bundle réel.</p>
+        <p className="muted">La vérification apparaîtra après une construction Blender réelle.</p>
       )}
     </section>
   );
@@ -1764,13 +1856,20 @@ export function IssuesPanel({ issues }: { issues: UserIssues | null }) {
   const summarizedIssues = summarizeUserIssues(issues?.human_readable_issues ?? []);
   const primaryIssues = summarizedIssues.slice(0, 4);
   const additionalIssues = summarizedIssues.slice(4);
-  const renderIssue = (issue: UserIssue, index: number) => (
-    <article className={`issue-card ${issue.severity}`} key={`${issue.title}-${issue.technical_code ?? "issue"}-${index}`}>
-      <strong>{issue.title}</strong>
-      <p>{issue.impact}</p>
-      <small>{issue.recommended_action}</small>
-    </article>
-  );
+  const renderIssue = (issue: UserIssue, index: number) => {
+    const titleKey = normalizedIssueCopy(issue.title);
+    const impactKey = normalizedIssueCopy(issue.impact);
+    const actionKey = normalizedIssueCopy(issue.recommended_action);
+    return (
+      <article className={`issue-card ${issue.severity}`} key={`${issue.title}-${issue.technical_code ?? "issue"}-${index}`}>
+        <strong>{issue.title}</strong>
+        {impactKey && impactKey !== titleKey ? <p>{issue.impact}</p> : null}
+        {actionKey && actionKey !== titleKey && actionKey !== impactKey ? (
+          <small>{issue.recommended_action}</small>
+        ) : null}
+      </article>
+    );
+  };
   return (
     <section className="drawer-section" aria-label="Limites et actions">
       <PanelTitle icon={<AlertTriangle size={17} />} title="Limites et actions" />
@@ -2456,39 +2555,27 @@ export function summarizeStages(events: NormalizedWorkflowEvent[], timeline: Tim
   const stages = [
     {
       phase: "requirements",
-      label: "Compréhension",
-      phases: ["requirements", "extraction"],
-      nodes: ["extract_requirements", "validate_requirements", "requirements"]
-    },
-    {
-      phase: "rag",
-      label: "Contexte RAG",
-      phases: ["rag", "memory"],
-      nodes: ["retrieve_rag_context", "memory_recall", "rag", "memory"]
+      label: "Compréhension de la demande",
+      phases: ["requirements", "extraction", "rag", "memory"],
+      nodes: ["extract_requirements", "validate_requirements", "requirements", "retrieve_rag_context", "memory_recall"]
     },
     {
       phase: "planning",
-      label: "Plan SceneSpec",
+      label: "Conception du plan 3D",
       phases: ["planning", "validation", "scene"],
       nodes: ["plan_scene", "validate_scene", "scene_repair_handler", "scene_planner"]
     },
     {
       phase: "generation",
-      label: "Génération 3D",
+      label: "Construction dans Blender",
       phases: ["generation", "blender", "viewer"],
       nodes: ["generate_blender", "blender_worker", "blender_failure_handler"]
     },
     {
       phase: "qa",
-      label: "Validation",
-      phases: ["qa"],
-      nodes: ["qa_generation", "quality_gate"]
-    },
-    {
-      phase: "workflow",
-      label: "Résultat",
-      phases: ["workflow", "completion"],
-      nodes: ["workflow"]
+      label: "Vérification du résultat",
+      phases: ["qa", "workflow", "completion"],
+      nodes: ["qa_generation", "quality_gate", "workflow"]
     }
   ];
   const statusByPhase = new Map<string, string>();
@@ -2561,12 +2648,28 @@ function terminalStageFallback(itemPhase: string, terminalStatus: string | null,
     return "waiting";
   }
   if (terminalStatus === "completed") {
-    return itemPhase === "workflow" ? "completed" : "not_reported";
+    return itemPhase === "qa" ? "completed" : "not_reported";
   }
   if (terminalStatus === "failed") {
-    return itemPhase === "workflow" ? "failed" : "not_reported";
+    return itemPhase === "qa" ? "failed" : "not_reported";
   }
-  return itemPhase === "workflow" ? "waiting" : "pending";
+  return itemPhase === "qa" ? "waiting" : "pending";
+}
+
+function macroStageMessage(label: string, status: string): string {
+  if (status.includes("failed") || status === "error") {
+    return `${label} a rencontré un blocage. Consultez l’action proposée dans la conversation.`;
+  }
+  if (status.includes("completed") || status === "passed" || status === "generated") {
+    return `${label} terminée avec une preuve backend enregistrée.`;
+  }
+  if (status.includes("running")) {
+    return `${label} en cours.`;
+  }
+  if (status === "not_reported") {
+    return "Cette étape n’a pas publié de preuve exploitable pour ce résultat.";
+  }
+  return "En attente de l’étape précédente.";
 }
 
 export function summarizeUserIssues(issues: UserIssue[]): UserIssue[] {
@@ -2703,7 +2806,7 @@ function humanizeUserIssue(issue: UserIssue): UserIssue {
       ...issue,
       title: "Recherche documentaire temporairement dégradée",
       impact: "Le classement secondaire des sources n’a pas répondu; l’ordre de recherche initial a été conservé.",
-      recommended_action: "Le design reste inspectable, mais vérifiez les sources dans le volet Système."
+      recommended_action: "Le design reste inspectable; vérifiez les sources publiées dans les livrables."
     };
   }
   if (
@@ -2729,6 +2832,25 @@ function humanizeUserIssue(issue: UserIssue): UserIssue {
     };
   }
   return issue;
+}
+
+function failureRecoveryMessage(issue: UserIssue | null): string {
+  if (!issue) {
+    return "Votre demande est conservée. Corrigez-la avant de relancer la conception.";
+  }
+  const impact = issue.impact.trim();
+  const title = issue.title.trim();
+  if (impact) {
+    return impact;
+  }
+  if (title) {
+    return title;
+  }
+  return "Votre demande est conservée. Corrigez-la avant de relancer la conception.";
+}
+
+function normalizedIssueCopy(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function isAssetIssueText(text: string): boolean {
@@ -2924,7 +3046,7 @@ function summaryHeadline(bundle: ViewerBundle | null): string {
     return "Aucun design chargé";
   }
   if (bundle.status === "failed") {
-    return "Workflow échoué";
+    return "Conception non produite";
   }
   if (bundle.generation_mode !== "real_blender") {
     return "Résultat dégradé";
@@ -2963,16 +3085,16 @@ function summarySignals(bundle: ViewerBundle | null, issueCount: number): string
   }
   const failed = bundle.status === "failed";
   const signals = [
-    `GLB: ${failed ? "absent car workflow échoué" : bundle.primary_glb_url ? "disponible" : "manquant"}`,
-    `Preview: ${failed ? "absente car workflow échoué" : bundle.preview_url ? "disponible" : "manquante"}`,
-    `Mesh QA: ${meshQaLevelLabel(bundle.mesh_qa_level)}`,
-    `Warnings utilisateur: ${issueCount}`
+    `Modèle 3D : ${failed ? "non produit" : bundle.primary_glb_url ? "disponible" : "manquant"}`,
+    `Aperçu : ${failed ? "non produit" : bundle.preview_url ? "disponible" : "manquant"}`,
+    `Niveau de contrôle : ${meshQaLevelLabel(bundle.mesh_qa_level)}`,
+    `Points à examiner : ${issueCount}`
   ];
   if (bundle.llm_fallback_used) {
-    signals.push(`Fallback LLM: ${bundle.llm_fallback_reason ?? "raison indisponible"}`);
+    signals.push("La compréhension de la demande a utilisé un mode de secours contrôlé.");
   }
   if (bundle.rag_reranker_degraded_reason) {
-    signals.push(`Reranker RAG dégradé: ${bundle.rag_reranker_degraded_reason}`);
+    signals.push("Le classement secondaire des sources documentaires a fonctionné en mode de secours.");
   }
   return signals;
 }
@@ -2992,6 +3114,14 @@ function workflowStatusLabel(status?: string | null): string {
     pending: "en attente"
   };
   return status ? labels[status] ?? "état disponible" : "pas lancée";
+}
+
+function compactFidelityLabel(fidelity: string): string {
+  return {
+    vendor_qualified: "Fidélité constructeur",
+    technical_generic: "Fidélité technique générique",
+    schematic: "Fidélité schématique"
+  }[fidelity] ?? "Fidélité à vérifier";
 }
 
 function serviceStatusLabel(status?: string | null): string {

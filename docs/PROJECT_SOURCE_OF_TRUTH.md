@@ -458,10 +458,11 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   things and are no longer presented with the same `composants` wording.
 - The telecom camera fit includes explicit framing margin for tall assemblies,
   and the viewer offers a retry action when a real GLB load fails.
-- Frontend regression proof after the M0 recovery changes: 139 Vitest tests,
-  TypeScript typecheck and production build pass. The earlier connected browser
-  smoke on 2026-07-31 remains historical evidence; a new connected M0 smoke is
-  still a release gate.
+- Frontend regression proof after the M0 recovery changes: 150 Vitest tests,
+  TypeScript typecheck and production build pass. A connected current-tree
+  browser smoke on 2026-08-03 exercised real prompt analysis, live progress,
+  certified GLB display, bounded edit and version creation against FastAPI and
+  Blender 4.5 LTS.
 - Frontend proof on 2026-07-31: 125 Vitest tests, TypeScript production build,
   and local browser smoke against FastAPI on port 8000 and Vite on port 5173.
   Rolldown code splitting keeps every production JavaScript chunk below 371 kB
@@ -473,14 +474,15 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 
 ## Current verdict
 
-`M0_TRUSTED_ASSEMBLY_AND_RECOVERY_PARTIAL`
+`ASSET_DRIVEN_TELECOM_ASSEMBLY_V1_ACCEPTED_LOCAL`
 
-The implementation now contains the trusted assembly, component-proof,
-build-lock, completion-proof, SQLite/Qdrant recovery and frontend recovery
-contracts described below. This is not a global convergence claim. The isolated
-real-Blender E2E and the real HTTP generation/edit/version scenario are
-confirmed on the current tree. The M0 gate remains partial only until a
-connected browser smoke is recorded on this exact tree.
+The implementation contains the trusted assembly, component-proof, build-lock,
+completion-proof, SQLite/Qdrant recovery and frontend recovery contracts
+described below. The required asset-driven telecom generation/edit/version
+scenario is confirmed from the current frontend through the real API and
+Blender runtime. This is a local milestone acceptance, not a global convergence,
+vendor-grade engineering certification, or acceptance of every generic 3D
+scenario.
 
 ## ASSET-DRIVEN TELECOM ASSEMBLY V1 — delivered scope
 
@@ -553,6 +555,29 @@ connected browser smoke is recorded on this exact tree.
   and covered by revision tests. The recorded initial workflow predates those
   two provenance fields, so its revision cannot prove recovery of values that
   were not persisted originally.
+- Current-tree acceptance on 2026-08-03 used the full French 5G brief through
+  the browser. GPT-OSS preserved the explicit 45 m tower, 40 m HBA and
+  0/120/240 degree azimuths, and reconciled the 4 m gate into one bounded
+  14 x 14 x 2.4 m perimeter-fence request instead of generating a disconnected
+  duplicate. Workflow `wf_3f66e833e1c0` completed with `real_blender`, a
+  2,032,248-byte GLB, five 1920 x 1080 previews, mesh QA passed, QA score 1.0,
+  full requirement coverage and completion certificate issued. Active initial
+  version was `v02af93b0`.
+- The same browser session requested only a tower-height change to 48 m. The
+  Groq `openai/gpt-oss-120b` adaptation specialist selected the declared
+  `/tower/height_m` capability and `parametric_rebuild`; deterministic contract
+  validation and Blender produced certified active version `v74e009a3` with QA
+  score 1.0 while preserving sector, accessory and generated-fence geometry.
+  A final 47 m revision produced active version `vec35e56d` with the same real
+  Blender/QA proof and confirmed that product history preserves the user's
+  French instruction while the normalized LLM decision stays in provenance.
+  Failed historical workflows now expose no artifact, download or trace URL;
+  quarantined candidate files cannot be advertised as product deliverables.
+- The corresponding current-tree regression proof is 150/150 frontend tests,
+  frontend typecheck and production build, 33 targeted Product/API tests and 46
+  extraction/Groq/GeometryProgram tests. The latter set includes real Blender
+  compilation of transformed Boolean operands and ground-aligned generated
+  geometry.
 
 ### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
 
@@ -569,10 +594,11 @@ connected browser smoke is recorded on this exact tree.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 145 passing
-component/contract tests. It is not yet the final M0 product gate because the
-current-tree connected smoke and all relevant degraded/retry paths have not
-been replayed in one recorded acceptance session.
+frontend now has a verified chat-first/3D-first product baseline and 150 passing
+component/contract tests. The required current-tree connected creation and
+edit/version path has passed. Exhaustive browser replay of every degraded,
+document-pack, rollback and recovery branch remains a broader product release
+gate, outside this milestone.
 
 The frontend must keep these limitations visible: `mesh_level_spatial_basic`,
 `mesh_level_transform_basic` or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack
@@ -608,7 +634,9 @@ Statut autoritaire: `IMPLEMENTED_PARTIAL`.
   la galerie des previews réelles. Il ne présente plus une erreur globale de
   synchronisation lorsque le bundle certifié principal est déjà disponible.
 
-Ce statut n'est pas `IMPLEMENTED`: le parcours complet GPT-OSS réel reste
-instable sur les sorties JSON Groq, les trois scénarios génériques réels ne sont
-pas tous passés, et la sélection/réutilisation d'assets génériques hors domaine
-télécom reste `procedural_only`. Aucune convergence globale n'est déclarée.
+Ce statut n'est pas `IMPLEMENTED`: le parcours télécom GPT-OSS réel du
+2026-08-03 passe après correction des contrats JSON, des bounds de sweep, des
+transformations booléennes et de l'ancrage au sol, mais les trois scénarios
+génériques réels ne sont pas tous passés et la sélection/réutilisation d'assets
+génériques hors domaine télécom reste `procedural_only`. Aucune convergence
+globale n'est déclarée.

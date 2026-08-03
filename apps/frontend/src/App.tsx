@@ -8,6 +8,7 @@ import {
   useState,
   type Dispatch
 } from "react";
+import { CheckCircle2 } from "lucide-react";
 import {
   ApiClientError,
   api,
@@ -102,6 +103,7 @@ export default function App({ apiClient = api }: AppProps) {
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [versions, setVersions] = useState<PublicVersionInfo[]>([]);
+  const [lastCertifiedBundle, setLastCertifiedBundle] = useState<ViewerBundle | null>(null);
   const [revisionPrompt, setRevisionPrompt] = useState("");
   const [revisionMessage, setRevisionMessage] = useState<string | null>(null);
   const [revisionBusy, setRevisionBusy] = useState(false);
@@ -257,14 +259,8 @@ export default function App({ apiClient = api }: AppProps) {
   useEffect(() => {
     void loadHealth().catch(() => undefined);
     void loadStudioSummary().catch(() => undefined);
-    void loadAssetLibrarySummary().catch(() => undefined);
-    void loadAssetInventory().catch(() => undefined);
-    void loadAdaptationCatalog().catch(() => undefined);
     void loadDocumentCapabilities().catch(() => undefined);
   }, [
-    loadAdaptationCatalog,
-    loadAssetInventory,
-    loadAssetLibrarySummary,
     loadDocumentCapabilities,
     loadHealth,
     loadStudioSummary
@@ -273,12 +269,9 @@ export default function App({ apiClient = api }: AppProps) {
   useEffect(() => {
     const bundle = state.viewerBundle;
     for (const resource of [
-      "adaptation_scene",
       "assembly_plan",
       "component_proofs",
       "qa_evidence",
-      "llm_provenance",
-      "rag_evidence",
       "requirements_context"
     ]) {
       resourceRequestRef.current[resource] =
@@ -295,13 +288,6 @@ export default function App({ apiClient = api }: AppProps) {
     if (!bundle) {
       return;
     }
-    void loadSurfaceResource(
-      "adaptation_scene",
-      () => apiClient.designAdaptationCapabilities(bundle.workflow_id),
-      setAdaptationCapabilities,
-      "resource",
-      () => setAdaptationCapabilities(null)
-    ).catch(() => undefined);
     if (bundle.assembly_plan_url) {
       void loadSurfaceResource(
         "assembly_plan",
@@ -345,31 +331,6 @@ export default function App({ apiClient = api }: AppProps) {
       ).catch(() => undefined);
     } else {
       dispatch({ type: "RESOURCE_RECOVERED", resource: "qa_evidence" });
-    }
-    if (bundle.llm_decision_provenance) {
-      setLlmProvenance(bundle.llm_decision_provenance);
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
-    } else if (bundle.llm_decision_provenance_url) {
-      void loadSurfaceResource(
-        "llm_provenance",
-        () => apiClient.llmDecisionProvenance(bundle.llm_decision_provenance_url),
-        setLlmProvenance,
-        "resource",
-        () => setLlmProvenance(null)
-      ).catch(() => undefined);
-    } else {
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
-    }
-    if (bundle.rag_evidence_url) {
-      void loadSurfaceResource(
-        "rag_evidence",
-        () => apiClient.artifactJson(bundle.rag_evidence_url),
-        setRagEvidence,
-        "resource",
-        () => setRagEvidence(null)
-      ).catch(() => undefined);
-    } else {
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
     }
   }, [apiClient, loadSurfaceResource, state.viewerBundle]);
 
@@ -959,6 +920,7 @@ export default function App({ apiClient = api }: AppProps) {
     }
     revisionInFlightRef.current = true;
     const workflowId = state.workflowId;
+    const submittedRevisionPrompt = revisionPrompt.trim();
     setRevisionMessage(null);
     setRevisionBusy(true);
     let streamNotice: string | null = null;
@@ -979,9 +941,9 @@ export default function App({ apiClient = api }: AppProps) {
       }
       dispatch({ type: "REVISION_STARTED", runtimeMode });
       const result = await apiClient.editDesign(workflowId, {
-        edit_prompt: revisionPrompt
+        edit_prompt: submittedRevisionPrompt
       });
-      const outcome = revisionOutcomeMessage(result);
+      const outcome = revisionOutcomeMessage(result, submittedRevisionPrompt);
       setRevisionMessage([outcome, streamNotice].filter(Boolean).join(" · "));
       if (result.status !== "applied") {
         dispatch({ type: "REVISION_FINISHED" });
@@ -1273,6 +1235,23 @@ export default function App({ apiClient = api }: AppProps) {
   const viewerSurfaceLoading =
     state.resourceLoads.viewer_bundle?.status === "loading" ||
     (!state.workflowId && state.resourceLoads.design_list?.status === "loading");
+  const displayedViewerBundle = selectViewerBundleForDisplay(
+    state.phase,
+    state.viewerBundle,
+    lastCertifiedBundle
+  );
+
+  useEffect(() => {
+    const bundle = state.viewerBundle;
+    if (
+      bundle?.status === "completed" &&
+      bundle.generation_mode === "real_blender" &&
+      bundle.mesh_qa_passed === true &&
+      bundle.completion_certificate_status === "issued"
+    ) {
+      setLastCertifiedBundle(bundle);
+    }
+  }, [state.viewerBundle]);
 
   return (
     <div className="studio-root">
@@ -1308,6 +1287,11 @@ export default function App({ apiClient = api }: AppProps) {
             documentPackSummary={documentPackSummary}
             editMessage={revisionMessage}
             error={state.error}
+            failureIssue={
+              state.userIssues?.human_readable_issues.find((issue) => issue.severity === "error") ??
+              state.userIssues?.human_readable_issues[0] ??
+              null
+            }
             onAnalyze={analyzePrompt}
             onConfirm={submitPrompt}
             onDocumentPackCorrection={applyDocumentPackCorrection}
@@ -1326,7 +1310,7 @@ export default function App({ apiClient = api }: AppProps) {
             revisionPrompt={revisionPrompt}
             versions={versions}
           />
-          {workflowActive || operationNotice ? (
+          {workflowActive && operationNotice ? (
             <CurrentOperationStrip
               notice={operationNotice}
               operation={state.currentOperation}
@@ -1338,7 +1322,7 @@ export default function App({ apiClient = api }: AppProps) {
         <section className="workbench" aria-label="Studio 3D">
           <Suspense fallback={<ViewerLoadingFallback />}>
             <TelecomGlbViewer
-              bundle={state.viewerBundle}
+              bundle={displayedViewerBundle}
               loadError={viewerSurfaceError}
               loading={viewerSurfaceLoading}
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
@@ -1346,6 +1330,15 @@ export default function App({ apiClient = api }: AppProps) {
               toAbsoluteUrl={toArtifactUrl}
             />
           </Suspense>
+          {state.phase === "failed" && lastCertifiedBundle ? (
+            <div className="retained-design-notice" role="status">
+              <CheckCircle2 size={16} aria-hidden="true" />
+              <div>
+                <strong>Dernier résultat certifié conservé</strong>
+                <span>La nouvelle demande a échoué; elle n’a pas remplacé ce modèle validé.</span>
+              </div>
+            </div>
+          ) : null}
           <LiveGenerationOverlay
             events={state.events}
             operation={state.currentOperation}
@@ -1431,6 +1424,18 @@ export default function App({ apiClient = api }: AppProps) {
       </main>
     </div>
   );
+}
+
+export function selectViewerBundleForDisplay(
+  phase: WorkflowPhase,
+  current: ViewerBundle | null,
+  lastCertified: ViewerBundle | null
+): ViewerBundle | null {
+  const preserveCertified =
+    lastCertified &&
+    (phase === "submitting" || phase === "streaming" || phase === "running" || phase === "failed") &&
+    (!current || current.status === "failed");
+  return preserveCertified ? lastCertified : current;
 }
 
 function ViewerLoadingFallback() {
@@ -1697,17 +1702,20 @@ function applyResourceResult<T>(
   });
 }
 
-export function revisionOutcomeMessage(result: EditDesignResponse): string {
+export function revisionOutcomeMessage(
+  result: EditDesignResponse,
+  submittedPrompt?: string
+): string {
   const patch = result.patch as Record<string, unknown> | null | undefined;
   const unsupported = Array.isArray(patch?.unsupported_requests)
     ? patch.unsupported_requests.filter(
         (item): item is string => typeof item === "string" && Boolean(item.trim())
       ).map(humanUnsupportedEditRequest)
     : [];
-  const description =
-    typeof patch?.edit_description === "string" && patch.edit_description.trim()
+  const description = submittedPrompt?.trim()
+    || (typeof patch?.edit_description === "string" && patch.edit_description.trim()
       ? patch.edit_description.trim()
-      : null;
+      : null);
   if (result.status === "applied") {
     const applied = description
       ? `Modification appliquée : ${description}`

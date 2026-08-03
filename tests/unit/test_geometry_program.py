@@ -4,6 +4,7 @@ import shutil
 import struct
 from pathlib import Path
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -11,6 +12,9 @@ from core.agents.geometry_program_planner import (
     GeometryProgramPlanner,
     _fit_to_maximum_dimensions,
     _normalize_disclosures,
+    _normalize_explicit_point_placeholders,
+    _normalize_profile_definitions,
+    _strict_json_schema,
 )
 from core.agents.scene_planner import ScenePlanner
 from core.contracts.geometry_program import (
@@ -267,6 +271,76 @@ def test_geometry_program_planner_uses_strict_schema_and_pins_provenance() -> No
     )
 
 
+def test_geometry_program_strict_schema_uses_only_supported_union_and_refs() -> None:
+    schema = _strict_json_schema(GeometryProgram.model_json_schema())
+
+    def visit(value):
+        if isinstance(value, dict):
+            assert "oneOf" not in value
+            assert "discriminator" not in value
+            if "$ref" in value:
+                assert set(value) == {"$ref"}
+            if value.get("type") == "object" or "properties" in value:
+                assert value.get("additionalProperties") is False
+                assert set(value.get("required", [])) == set(value.get("properties", {}))
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(schema)
+    assert "anyOf" in schema["properties"]["nodes"]["items"]
+
+
+def test_geometry_program_planner_falls_back_after_strict_groq_400() -> None:
+    class FakeGroq:
+        model = "openai/gpt-oss-120b"
+
+        def __init__(self) -> None:
+            self.payloads = []
+
+        def request_json(self, payload, *, policy):
+            self.payloads.append(payload)
+            if len(self.payloads) == 1:
+                request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+                response = httpx.Response(400, request=request)
+                raise httpx.HTTPStatusError(
+                    "strict structured output rejected",
+                    request=request,
+                    response=response,
+                )
+            payload = _program_payload()
+            payload["nodes"][0]["semantic_role"] = "perimeter_fence"
+            return payload
+
+    fake = FakeGroq()
+    planner = GeometryProgramPlanner(fake)  # type: ignore[arg-type]
+
+    program = planner.plan(
+        prompt="Créer une clôture grillagée galvanisée autour du site.",
+        semantic_role="perimeter fence",
+        design_context={"site_envelope_m": {"x": 14.0, "y": 14.0, "z": 2.4}},
+    )
+
+    assert len(fake.payloads) == 2
+    assert fake.payloads[0]["response_format"]["type"] == "json_schema"
+    assert "must contain at least three nodes" in fake.payloads[0]["messages"][0]["content"]
+    assert "never put a primary semantic node" in fake.payloads[0]["messages"][0]["content"]
+    assert fake.payloads[1]["response_format"] == {"type": "json_object"}
+    fallback_contract = fake.payloads[1]["messages"][-1]["content"]
+    assert 'base_color_rgba as {"r":0..1' in fallback_contract
+    assert '"translation_m":{"x":7.0' in fallback_contract
+    assert "at least three nodes in total" in fallback_contract
+    assert "must never appear in construction_node_ids" in fallback_contract
+    assert "ellipsis tokens" in fallback_contract
+    assert "placeholder objects" in fallback_contract
+    assert "Never emit ellipsis tokens" in fake.payloads[0]["messages"][0]["content"]
+    assert program.semantic_role == "perimeter_fence"
+    assert program.structured_output_mode == "json_object_validated"
+    assert program.schema_version == "2.0.0"
+
+
 def test_geometry_program_disclosure_normalization_never_changes_geometry() -> None:
     payload = _program_payload()
     original_nodes = json.loads(json.dumps(payload["nodes"]))
@@ -279,6 +353,171 @@ def test_geometry_program_disclosure_normalization_never_changes_geometry() -> N
     assert payload["assumptions"] == ['{"basis":"generic outdoor enclosure"}']
     assert payload["limitations"] == ['{"not_certified":true}']
     GeometryProgram.model_validate(payload)
+
+
+def test_geometry_program_planner_canonicalizes_profile_fields_from_strict_output() -> None:
+    class FakeGroq:
+        model = "openai/gpt-oss-120b"
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def request_json(self, payload, *, policy):
+            self.call_count += 1
+            return {
+                "schema_version": "2.0.0",
+                "program_id": "model_generated_id",
+                "semantic_role": "perimeter_fence",
+                "requested_quantity": 1,
+                "units": "meters",
+                "authorship": "llm_generated",
+                "generator_provider": "groq",
+                "generator_model": self.model,
+                "structured_output_mode": "strict_json_schema",
+                "source_prompt_sha256": "0" * 64,
+                "materials": [
+                    {
+                        "material_id": "galvanized_steel",
+                        "base_color_rgba": _rgba(0.55, 0.58, 0.6, 1.0),
+                    }
+                ],
+                "nodes": [
+                    {
+                        "kind": "profile",
+                        "node_id": "fence_panel_profile",
+                        "points_m": [
+                            _xy(-7.0, 0.0),
+                            _xy(7.0, 0.0),
+                            _xy(7.0, 2.4),
+                            _xy(-7.0, 2.4),
+                        ],
+                        "closed": True,
+                        "parent_id": "fence_panel",
+                        "material_id": "galvanized_steel",
+                        "semantic_role": "profile_definition",
+                        "transform": {
+                            "translation_m": _xyz(0.0, 0.0, 1.2),
+                            "rotation_deg": _xyz(0.0, 0.0, 0.0),
+                            "scale": _xyz(1.0, 1.0, 1.0),
+                        },
+                    },
+                    {
+                        "kind": "extrude",
+                        "node_id": "fence_panel",
+                        "profile_node_id": "fence_panel_profile",
+                        "depth_m": 0.04,
+                        "material_id": "galvanized_steel",
+                        "semantic_role": "perimeter_fence",
+                    },
+                    {
+                        "kind": "primitive",
+                        "node_id": "gate_post_left",
+                        "primitive": "box",
+                        "size_m": _xyz(0.12, 0.12, 2.4),
+                        "material_id": "galvanized_steel",
+                    },
+                ],
+                "construction_node_ids": [],
+                "assumptions": ["Rectangular galvanized perimeter fence."],
+                "limitations": ["No structural certification."],
+            }
+
+    fake = FakeGroq()
+    planner = GeometryProgramPlanner(fake)  # type: ignore[arg-type]
+
+    program = planner.plan(
+        prompt=(
+            "Créer une clôture périmétrique rectangulaire galvanisée de 14 x 14 m, "
+            "hauteur 2,4 m, avec un portail de 4 m."
+        ),
+        semantic_role="perimeter fence",
+        design_context={"site_envelope_m": {"x": 14.0, "y": 14.0, "z": 2.4}},
+    )
+
+    assert fake.call_count == 1
+    profile = next(node for node in program.nodes if node.node_id == "fence_panel_profile")
+    assert profile.parent_id is None
+    assert profile.material_id is None
+    assert profile.semantic_role is None
+    assert profile.transform.model_dump(mode="json") == {
+        "translation_m": _xyz(0.0, 0.0, 0.0),
+        "rotation_deg": _xyz(0.0, 0.0, 0.0),
+        "scale": _xyz(1.0, 1.0, 1.0),
+    }
+    assert "fence_panel_profile" in program.construction_node_ids
+    assert program.deterministic_adjustments
+    assert "transform-free geometry profile" in program.deterministic_adjustments[0]
+
+
+def test_profile_normalization_is_idempotent() -> None:
+    payload = _v2_program_payload()
+    profile = _v2_node(payload, "rail_profile")
+    profile["transform"] = {"translation_m": _xyz(1.0, 2.0, 3.0)}
+    profile["material_id"] = "steel"
+
+    _normalize_profile_definitions(payload)
+    first = json.loads(json.dumps(payload))
+    _normalize_profile_definitions(payload)
+
+    assert payload == first
+    GeometryProgram.model_validate(payload)
+
+
+def test_geometry_program_planner_removes_safe_explicit_point_ellipsis() -> None:
+    class FakeGroq:
+        model = "openai/gpt-oss-120b"
+
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def request_json(self, payload, *, policy):
+            self.call_count += 1
+            candidate = _v2_program_payload()
+            path = _v2_node(candidate, "handrail")["path_points_m"]
+            path.insert(3, {"...": "..."})
+            return candidate
+
+    fake = FakeGroq()
+    planner = GeometryProgramPlanner(fake)  # type: ignore[arg-type]
+
+    program = planner.plan(
+        prompt="Créer un escalier technique avec garde-corps et palier.",
+        semantic_role="technical staircase",
+        design_context={"design_domain": "generic_technical_access"},
+    )
+
+    assert fake.call_count == 1
+    handrail = next(node for node in program.nodes if node.node_id == "handrail")
+    assert len(handrail.path_points_m) == 3
+    assert any(
+        "explicit non-geometric ellipsis" in adjustment
+        for adjustment in program.deterministic_adjustments
+    )
+
+
+def test_point_ellipsis_normalization_is_idempotent_and_keeps_unsafe_list_invalid() -> None:
+    payload = _v2_program_payload()
+    handrail = _v2_node(payload, "handrail")
+    handrail["path_points_m"].append({"x": "…", "y": "…", "z": "…"})
+
+    _normalize_explicit_point_placeholders(payload)
+    first = json.loads(json.dumps(payload))
+    _normalize_explicit_point_placeholders(payload)
+
+    assert payload == first
+    assert len(handrail["path_points_m"]) == 3
+    GeometryProgram.model_validate(payload)
+
+    unsafe = _v2_program_payload()
+    profile = _v2_node(unsafe, "rail_profile")
+    profile["points_m"] = [_xy(-0.1, -0.1), {"...": "..."}, _xy(0.1, 0.1)]
+    before = json.loads(json.dumps(unsafe))
+
+    _normalize_explicit_point_placeholders(unsafe)
+
+    assert unsafe == before
+    with pytest.raises(ValidationError):
+        GeometryProgram.model_validate(unsafe)
 
 
 @pytest.mark.skipif(
@@ -350,8 +589,7 @@ def test_blender_compiles_validated_geometry_program_without_executing_model_cod
 def test_blender_compiles_geometry_program_v2_closed_registry(tmp_path: Path) -> None:
     registry = AssetRegistry(Path("assets/manifests"))
     requirements = parse_requirements_text(
-        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "
-        "Azimuts : 0°, 120°, 240°."
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. Azimuts : 0°, 120°, 240°."
     )
     tower = registry.select_tower(
         requirements.tower_type,

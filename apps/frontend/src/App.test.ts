@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { createElement, StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClientError, TelecomStudioApi } from "./api/client";
-import type { EditDesignResponse, WorkflowStatus } from "./api/schemas";
+import type { EditDesignResponse, ViewerBundle, WorkflowStatus } from "./api/schemas";
 import App, {
   documentPackFilesSizeError,
   documentPackSizeError,
@@ -12,6 +12,7 @@ import App, {
   parseCorrectionValue,
   reconcileAfterAmbiguousMutation,
   revisionOutcomeMessage,
+  selectViewerBundleForDisplay,
   selectWorkflowToRestore,
   shouldForgetDocumentPackSession,
   userFacingError
@@ -107,6 +108,15 @@ describe("frontend runtime selection", () => {
     ]);
 
     expect(selected?.workflow_id).toBe("wf_completed_new");
+  });
+
+  it("keeps the last certified model visible when a new workflow fails", () => {
+    const certified = { workflow_id: "wf_certified", status: "completed" } as ViewerBundle;
+    const failed = { workflow_id: "wf_failed", status: "failed" } as ViewerBundle;
+
+    expect(selectViewerBundleForDisplay("failed", failed, certified)).toBe(certified);
+    expect(selectViewerBundleForDisplay("running", null, certified)).toBe(certified);
+    expect(selectViewerBundleForDisplay("completed", certified, null)).toBe(certified);
   });
 
   it("does not auto-restore an uncertified completed design", () => {
@@ -205,6 +215,25 @@ describe("frontend runtime selection", () => {
     expect(message).toContain("Ajout d’une armoire d’alimentation");
     expect(message).toContain("porte ou barrière au sol");
     expect(message).not.toContain("Ground door");
+  });
+
+  it("keeps the user's revision wording instead of an internal LLM paraphrase", () => {
+    const message = revisionOutcomeMessage({
+      workflow_id: "wf_1",
+      edit_id: "edit_1",
+      status: "applied",
+      available_actions: [],
+      unsupported_actions: [],
+      warnings: [],
+      errors: [],
+      patch: {
+        edit_description: "Reduce tower height to 47 meters.",
+        unsupported_requests: []
+      }
+    } as EditDesignResponse, "Réduis la hauteur du pylône à 47 m.");
+
+    expect(message).toContain("Réduis la hauteur du pylône à 47 m.");
+    expect(message).not.toContain("Reduce tower height");
   });
 
   it("normalizes simple user correction values without inventing structure", () => {

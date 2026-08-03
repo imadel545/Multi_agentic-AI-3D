@@ -138,6 +138,7 @@ def test_edit_design_creates_version(client, tmp_path):
         )
         assert edited_version["active"] is True
         assert edited_version["status"] == "completed"
+        assert edited_version["edit_description"] == "mets les antennes à 26m"
         assert edited_version["llm_decision_provenance"]["provider"] == ("deterministic_fallback")
         assert "artifact_dir" not in edited_version
         assert edited_version["artifacts"]["qa_report"].startswith(

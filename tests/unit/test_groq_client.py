@@ -238,6 +238,48 @@ def test_groq_client_extracts_arbitrary_geometry_as_typed_intent(monkeypatch) ->
     assert spec.field_evidence["geometry_requests"].selected_source == "llm"
 
 
+def test_groq_client_composes_explicit_nested_geometry_into_host(monkeypatch) -> None:
+    def post(url, headers, json, timeout):
+        payload = json_module.loads(_requirements_content())
+        payload["geometry_requests"] = [
+            {
+                "request_id": "fence_perimeter_01",
+                "semantic_role": "perimeter_fence",
+                "description": "Rectangular galvanized fence around the telecom site.",
+                "quantity": 1,
+                "placement_context": "around tower and power cabinet, no intersection",
+                "maximum_dimensions_m": {"x": 14.0, "y": 14.0, "z": 2.4},
+            },
+            {
+                "request_id": "gate_01",
+                "semantic_role": "gate",
+                "description": "Four metre access gate integrated in the perimeter fence.",
+                "quantity": 1,
+                "placement_context": "installed within the fence",
+                "maximum_dimensions_m": {"x": 4.0, "y": 0.5, "z": 2.4},
+            },
+        ]
+        return _response(url, json_module.dumps(payload))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    spec = GroqStructuredClient(api_key="test-key").extract_requirements(
+        (
+            "Créer une clôture de 14 × 14 m, hauteur 2,4 m, avec un portail "
+            "de 4 m intégré dans la clôture."
+        ),
+        "high",
+    )
+
+    assert [request.request_id for request in spec.geometry_requests] == ["fence_perimeter_01"]
+    assert "integrated gate" in spec.geometry_requests[0].description
+    assert "installed within the fence" in spec.geometry_requests[0].description
+    assert spec.repair_events[-1].handler == "compose_nested_geometry_requests"
+    assert spec.repair_events[-1].success is True
+    evidence = spec.field_evidence["geometry_requests"]
+    assert len(evidence.selected_value) == 1
+
+
 def _response(url: str, content: str) -> httpx.Response:
     return httpx.Response(
         200,

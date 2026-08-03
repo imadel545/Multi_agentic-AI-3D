@@ -514,6 +514,7 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         assert isinstance(bundle["human_errors_count"], int)
         assert isinstance(bundle["viewer_artifacts"], list)
         names = {a["name"] for a in bundle["viewer_artifacts"]}
+        assert len(names) == len(bundle["viewer_artifacts"])
         assert "design.glb" in names
         assert "preview.png" in names
         assert {
@@ -1084,6 +1085,113 @@ def test_product_issues_humanize_failed_runtime_nodes_without_internal_details()
         }
     ]
     assert "/Users/" not in str(issues)
+
+
+def test_product_issues_keep_one_explicit_root_cause_instead_of_runtime_duplicates() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    status = {
+        "status": "failed",
+        "warnings": [],
+        "errors": [
+            {
+                "code": "GEOMETRY_PROGRAM_GENERATION_FAILED",
+                "message": (
+                    "La géométrie demandée n'a pas pu être produite; Blender n'a pas été lancé."
+                ),
+                "severity": "error",
+            }
+        ],
+    }
+    events = [
+        {
+            "event_type": "node_failed",
+            "payload": {"node": "plan_generated_geometry", "status": "failed"},
+        },
+        {
+            "event_type": "node_failed",
+            "payload": {
+                "node": "geometry_program_failure_handler",
+                "status": "failed",
+            },
+        },
+    ]
+
+    issues = _collect_user_issues(status, events)
+
+    assert [issue["technical_code"] for issue in issues] == ["GEOMETRY_PROGRAM_GENERATION_FAILED"]
+    assert issues[0]["title"] == "Composant personnalisé non généré"
+    assert "spécialiste LLM" not in str(issues[0])
+    assert "Blender" in issues[0]["impact"]
+
+
+def test_product_issues_humanize_and_deduplicate_geometry_qa_failures() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    issues = _collect_user_issues(
+        {
+            "status": "failed",
+            "warnings": [],
+            "errors": [
+                {
+                    "code": "GEOMETRY_VALIDATION_VALID",
+                    "message": "QA check failed: geometry_validation_valid",
+                    "severity": "error",
+                },
+                {
+                    "code": "GEOMETRY_VALIDATION_mesh_qa_passed",
+                    "message": "Geometry validation failed: mesh_qa_passed",
+                    "severity": "error",
+                },
+            ],
+        }
+    )
+
+    assert issues == [
+        {
+            "title": "Contrôle géométrique refusé",
+            "severity": "error",
+            "impact": (
+                "Blender a produit le modèle, mais une règle obligatoire de placement ou "
+                "de géométrie a échoué. Ce résultat n'a pas été publié et la dernière "
+                "version certifiée reste protégée."
+            ),
+            "recommended_action": (
+                "Corrigez le placement ou les dimensions signalés dans Vérification, "
+                "puis relancez la demande."
+            ),
+            "technical_code": "GEOMETRY_VALIDATION_FAILED",
+        }
+    ]
+    assert "geometry_validation_valid" not in str(issues)
+
+
+def test_viewer_qa_summary_distinguishes_upstream_failure_from_empty_qa() -> None:
+    from apps.api.telecom_studio_api.product import _viewer_qa_summary
+
+    qa = _viewer_qa_summary(
+        {
+            "status": "failed",
+            "warnings": [],
+            "errors": [
+                {
+                    "code": "GEOMETRY_PROGRAM_GENERATION_FAILED",
+                    "message": "La génération a échoué avant Blender.",
+                }
+            ],
+            "mesh_qa_level": None,
+            "mesh_qa_passed": None,
+            "qa_score": None,
+        }
+    )
+
+    assert qa["qa_status"] == "not_started"
+    assert qa["qa_executed"] is False
+    assert qa["blocked_before_qa"] is True
+    assert qa["checks_passed"] == []
+    assert qa["checks_failed"] == []
+    assert qa["errors"] == []
+    assert qa["upstream_errors"] == ["GEOMETRY_PROGRAM_GENERATION_FAILED"]
 
 
 def test_product_issues_expose_bounded_planning_fallback_without_degrading_3d() -> None:

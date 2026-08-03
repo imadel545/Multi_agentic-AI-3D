@@ -103,6 +103,21 @@ def test_azimuth_list_stops_before_4g_antenna_and_detects_energy_cabinet() -> No
     assert spec.confirmation_fields == []
 
 
+def test_site_envelope_dimensions_do_not_conflict_with_tower_height() -> None:
+    spec = parse_requirements_text(
+        "Créer un site 5G avec un pylône treillis galvanisé de 45 m, "
+        "trois secteurs à 40 m aux azimuts 0, 120 et 240, RRU, câbles, GPS, "
+        "armoire d’alimentation et labels. Ajouter une clôture de 14 × 14 m, "
+        "hauteur 2,4 m, avec un portail de 4 m, autour du pylône sans intersection."
+    )
+
+    assert spec.tower_height_m == 45
+    assert spec.antenna_install_height_m == 40
+    assert spec.include_power_cabinet is True
+    assert spec.requires_confirmation is False
+    assert spec.confirmation_fields == []
+
+
 def test_parser_extracts_rf_controls_and_marks_only_real_defaults() -> None:
     spec = parse_requirements_text(
         "Créer un site 4G sur monopole 42m avec 2 secteurs à 36m. "

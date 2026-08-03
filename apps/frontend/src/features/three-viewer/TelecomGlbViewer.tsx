@@ -406,15 +406,15 @@ function GlbObjectSummary({
   }
   const rows = Object.entries(summary.roles).filter(([, count]) => count > 0);
   return (
-    <details className="viewer-object-summary" aria-label="GLB object summary">
+    <details className="viewer-object-summary" aria-label="Résumé du modèle 3D">
       <summary>
       <strong>
-        <Layers3 size={14} aria-hidden="true" /> Scène GLB réelle
+        <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
       </strong>
       <small>
         {summary.evidenceMode === "semantic_extras"
-          ? `${summary.semanticEntityCount} équipements vérifiables dans ${summary.totalNamedObjects} nœuds GLB`
-          : `${summary.totalNamedObjects} nœuds GLB · comptage hérité par nom`} · {viewerHealthLabel(health)}
+          ? `${summary.semanticEntityCount} équipements identifiables`
+          : "Structure 3D inspectable"} · {viewerHealthLabel(health)}
       </small>
       </summary>
       <div>

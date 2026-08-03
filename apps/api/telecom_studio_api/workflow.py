@@ -828,7 +828,17 @@ class WorkflowService:
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""
         status = self.get_status(workflow_id)
-        payload = _public_status_payload(workflow_id, status)
+        active_version_id = status.get("active_version_id")
+        verified_artifacts = (
+            self._verified_version_artifact_inventory(workflow_id, active_version_id)
+            if isinstance(active_version_id, str)
+            else {}
+        )
+        payload = _public_status_payload(
+            workflow_id,
+            status,
+            verified_artifacts=verified_artifacts,
+        )
         payload.update(llm_truth(payload, workflow_service=self))
         payload["runtime_capabilities"] = runtime_capabilities()
         payload["unsupported_actions"] = unsupported_actions()
@@ -872,25 +882,9 @@ class WorkflowService:
 
         path: Path | None = None
         if version_id:
-            version = self.versioning.get_version(workflow_id, version_id)
-            if version is None or not version.artifact_dir:
-                raise KeyError(version_id)
-            artifact_dir = Path(version.artifact_dir).resolve()
-            try:
-                artifact_dir.relative_to(workflow_dir)
-            except ValueError as exc:
-                raise KeyError(version_id) from exc
-            if version.status == "completed":
-                try:
-                    verify_persisted_version(
-                        artifact_dir,
-                        workflow_id=workflow_id,
-                        expected_scene=version.scene,
-                    )
-                except ValueError as exc:
-                    raise KeyError(artifact_name) from exc
-                if artifact_name == "download":
-                    self._make_archive(artifact_dir)
+            _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+            if artifact_name == "download":
+                self._make_archive(artifact_dir)
             path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
         else:
             status = self.get_status(workflow_id)
@@ -915,6 +909,58 @@ class WorkflowService:
         except ValueError as exc:
             raise KeyError(artifact_name) from exc
         return path
+
+    def _verified_version_artifact_dir(self, workflow_id: str, version_id: str):
+        """Resolve a public version only after its persisted completion proof passes."""
+
+        workflow_dir = (self.outputs_dir / workflow_id).resolve()
+        version = self.versioning.get_version(workflow_id, version_id)
+        if version is None or version.status != "completed" or not version.artifact_dir:
+            raise KeyError(version_id)
+        artifact_dir = Path(version.artifact_dir).resolve()
+        try:
+            artifact_dir.relative_to(workflow_dir)
+        except ValueError as exc:
+            raise KeyError(version_id) from exc
+        try:
+            verify_persisted_version(
+                artifact_dir,
+                workflow_id=workflow_id,
+                expected_scene=version.scene,
+            )
+        except ValueError as exc:
+            raise KeyError(version_id) from exc
+        return version, artifact_dir
+
+    def _verified_version_artifact_inventory(
+        self,
+        workflow_id: str,
+        version_id: str,
+    ) -> dict[str, str]:
+        """Return canonical existing files for a certified persisted version."""
+
+        try:
+            _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+        except KeyError:
+            return {}
+        return {
+            artifact_name: str(artifact_dir / filename)
+            for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
+            if (artifact_dir / filename).is_file()
+        }
+
+    def _public_version_artifact_urls(
+        self,
+        workflow_id: str,
+        version_id: str | None,
+    ) -> dict[str, str]:
+        if not version_id:
+            return {}
+        return _public_artifact_urls(
+            workflow_id,
+            self._verified_version_artifact_inventory(workflow_id, version_id),
+            version_id=version_id,
+        )
 
     def list_designs(self, limit: int = 50, offset: int = 0) -> list[dict]:
         self._sync_output_services()
@@ -1224,7 +1270,10 @@ class WorkflowService:
             workflow_id,
             patched_scene,
             parent_version_id=active_version.version_id,
-            edit_description=patch.edit_description,
+            # The version history is a product-facing audit trail. Preserve the
+            # user's own instruction here; the LLM-normalized description remains
+            # available in the patch and decision-provenance artifacts.
+            edit_description=edit_prompt,
             diff_summary=diff_summary,
             status="generating",
             activate=False,
@@ -1465,10 +1514,13 @@ class WorkflowService:
         )
 
     def public_edit_response(self, result: SceneEditResult) -> dict:
-        artifacts = _public_artifact_urls(
-            result.workflow_id,
-            result.artifacts,
-            version_id=result.version_id,
+        artifacts = (
+            self._public_version_artifact_urls(
+                result.workflow_id,
+                result.version_id,
+            )
+            if result.status == "applied"
+            else {}
         )
         llm = llm_truth(
             {
@@ -1543,30 +1595,31 @@ class WorkflowService:
     def list_versions_public(self, workflow_id: str) -> list[dict]:
         self._sync_output_services()
         versions = self.versioning.list_versions(workflow_id)
-        return [
-            {
-                "version_id": v.version_id,
-                "parent_version_id": v.parent_version_id,
-                "created_at": v.created_at,
-                "edit_description": v.edit_description,
-                "diff_summary": v.diff_summary,
-                "status": v.status,
-                "active": v.active,
-                "artifacts": _public_artifact_urls(
-                    workflow_id,
-                    v.artifacts,
-                    version_id=v.version_id,
-                ),
-                "qa_score": v.qa_score,
-                "generation_mode": v.generation_mode,
-                "llm_decision_provenance": (
-                    v.llm_decision_provenance.model_dump(mode="json")
-                    if v.llm_decision_provenance
-                    else None
-                ),
-            }
-            for v in versions
-        ]
+        public_versions = []
+        for version in versions:
+            public_versions.append(
+                {
+                    "version_id": version.version_id,
+                    "parent_version_id": version.parent_version_id,
+                    "created_at": version.created_at,
+                    "edit_description": version.edit_description,
+                    "diff_summary": version.diff_summary,
+                    "status": version.status,
+                    "active": version.active,
+                    "artifacts": self._public_version_artifact_urls(
+                        workflow_id,
+                        version.version_id,
+                    ),
+                    "qa_score": version.qa_score,
+                    "generation_mode": version.generation_mode,
+                    "llm_decision_provenance": (
+                        version.llm_decision_provenance.model_dump(mode="json")
+                        if version.llm_decision_provenance
+                        else None
+                    ),
+                }
+            )
+        return public_versions
 
     def rollback_version(self, workflow_id: str, version_id: str) -> dict:
         with self._workflow_operation(workflow_id):
@@ -1717,15 +1770,16 @@ class WorkflowService:
         version_id: str | None,
     ) -> None:
         if (
-            result.generation is not None
+            result.status == "completed"
+            and version_id is not None
+            and result.generation is not None
             and result.generation.status == "generated"
             and result.generation.mode == "real_blender"
             and Path(result.generation.artifacts.get("glb", "")).is_file()
         ):
-            artifacts = _public_artifact_urls(
+            artifacts = self._public_version_artifact_urls(
                 workflow_id,
-                result.generation.artifacts,
-                version_id=version_id,
+                version_id,
             )
             self._emit_workflow_event(
                 workflow_id,
@@ -2642,29 +2696,42 @@ def _asset_import_metadata(output_dir: Path) -> dict:
     }
 
 
-def _public_status_payload(workflow_id: str, status: dict) -> dict:
+def _public_status_payload(
+    workflow_id: str,
+    status: dict,
+    *,
+    verified_artifacts: dict[str, str] | None = None,
+) -> dict:
     payload = dict(status)
     active_version_id = payload.get("active_version_id")
-    payload["artifacts"] = _public_artifact_urls(
-        workflow_id,
-        payload.get("artifacts") or {},
-        version_id=None,
-    )
     certified = (
         payload.get("status") == "completed"
         and payload.get("completion_certificate_status") == "issued"
+        and isinstance(active_version_id, str)
+        and bool(verified_artifacts)
+    )
+    payload["artifacts"] = (
+        _public_artifact_urls(
+            workflow_id,
+            verified_artifacts or {},
+            version_id=None,
+        )
+        if certified
+        else {}
     )
     payload["trace_url"] = _artifact_url(workflow_id, "trace") if certified else None
     payload["trace_path"] = None
     payload["download_url"] = f"/designs/{workflow_id}/download" if certified else None
     payload["available_actions"] = _status_available_actions(payload)
     payload["asset_imports"] = _public_asset_imports(payload.get("asset_imports"))
-    if active_version_id:
+    if certified:
         payload["active_version_artifacts"] = _public_artifact_urls(
             workflow_id,
-            status.get("artifacts") or {},
+            verified_artifacts or {},
             version_id=active_version_id,
         )
+    else:
+        payload["active_version_artifacts"] = None
     return payload
 
 

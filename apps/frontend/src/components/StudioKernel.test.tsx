@@ -61,7 +61,14 @@ const bundle: ViewerBundle = {
   rag_reranker_status: "passthrough",
   rag_reranker_degraded_reason: "NVIDIA reranker unavailable",
   memory_context_count: 0,
-  qa_summary: {},
+  qa_summary: {
+    checks_passed: [],
+    checks_failed: [],
+    warnings: [],
+    errors: [],
+    upstream_errors: [],
+    limitations: []
+  },
   viewer_artifacts: [],
   limitations: [],
   unsupported_actions: [{ action: "download_artifacts", reason: "missing artifact" }],
@@ -162,6 +169,18 @@ describe("studio kernel components", () => {
         edit_description: "Ajouter un cabinet au sol",
         diff_summary: null,
         status: "completed"
+      }, {
+        version_id: "v1",
+        parent_version_id: null,
+        created_at: "2026-08-02T09:00:00Z",
+        active: false,
+        artifacts: {},
+        qa_score: 1,
+        generation_mode: "real_blender",
+        llm_decision_provenance: null,
+        edit_description: "initial from confirmed_requirement_spec",
+        diff_summary: null,
+        status: "completed"
       }]
     });
 
@@ -203,11 +222,10 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(
-      screen.getByText(
-        "Équipements génériques techniques · 6 modèles sélectionnés · antennes, radios"
-      )
-    ).toHaveAttribute("data-geometry-fidelity", "technical_generic");
+    expect(screen.getByText("Fidélité technique générique")).toHaveAttribute(
+      "data-geometry-fidelity",
+      "technical_generic"
+    );
     expect(screen.queryByText(/Modèle fournisseur qualifié/)).not.toBeInTheDocument();
   });
 
@@ -228,6 +246,35 @@ describe("studio kernel components", () => {
     expect(screen.getByText("interférences contrôlées")).toBeInTheDocument();
     expect(screen.getByText("vérifiée localement")).toBeInTheDocument();
     expect(screen.queryByText("mesh_level_spatial_basic")).not.toBeInTheDocument();
+  });
+
+  it("states that QA did not run when generation was blocked before Blender", () => {
+    render(
+      <QaPanel
+        bundle={{
+          ...bundle,
+          status: "failed",
+          generation_mode: "not_generated",
+          mesh_qa_passed: false,
+          qa_summary: {
+            qa_status: "not_started",
+            qa_executed: false,
+            blocked_before_qa: true,
+            checks_passed: [],
+            checks_failed: [],
+            warnings: [],
+            errors: [],
+            upstream_errors: ["GEOMETRY_PROGRAM_GENERATION_FAILED"],
+            limitations: []
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByText("Validation 3D non exécutée")).toBeInTheDocument();
+    expect(screen.getByText(/bloquée avant la QA/)).toBeInTheDocument();
+    expect(screen.queryByText("Aucun échec QA remonté.")).not.toBeInTheDocument();
+    expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();
   });
 
   it("requires real backend analysis before confirming the design", async () => {
@@ -251,6 +298,33 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/Source d’analyse : intelligence décisionnelle/)).toBeInTheDocument();
     expect(screen.queryByText(/groq:openai\/gpt-oss-120b/)).not.toBeInTheDocument();
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
+  });
+
+  it("shows one actionable recovery message for a failed generation", () => {
+    const repeatedFailure = "La géométrie demandée hors catalogue n'a pas pu être produite; Blender n'a pas été lancé.";
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={parsedRequirements}
+        analysisSubmitted
+        failureIssue={{
+          title: repeatedFailure,
+          severity: "error",
+          impact: repeatedFailure,
+          recommended_action: repeatedFailure,
+          technical_code: "GEOMETRY_PROGRAM_GENERATION_FAILED"
+        }}
+        phase="failed"
+        prompt="site 5G avec clôture"
+      />
+    );
+
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.getAllByText(repeatedFailure)).toHaveLength(1);
+    expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Relancer cette demande" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Corriger la demande" }));
+    expect(screen.getByRole("textbox", { name: "Design prompt" })).toHaveFocus();
   });
 
   it("shows new components extracted for typed LLM geometry before generation", () => {
@@ -282,7 +356,7 @@ describe("studio kernel components", () => {
     expect(screen.getByText("Placement demandé : À droite du pylône.")).toBeInTheDocument();
     expect(screen.getByText(/Enveloppe maximale : 3 × 2.2 × 2.5 m/)).toBeInTheDocument();
     expect(
-      screen.getByText(/programmes géométriques typés, puis contrôlés avant Blender/)
+      screen.getByText(/conçus par le spécialiste 3D, puis contrôlés avant la construction/)
     ).toBeInTheDocument();
   });
 
@@ -791,7 +865,8 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("Construction du SceneSpec")).toBeInTheDocument();
+    expect(screen.getByText("Conception du plan 3D")).toBeInTheDocument();
+    expect(screen.queryByText("Construction du SceneSpec")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "scene_planner_node" })).not.toBeInTheDocument();
   });
 
@@ -1072,9 +1147,9 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("Compréhension").closest("article")).toHaveTextContent("terminé");
-    expect(screen.getByText("Plan SceneSpec").closest("article")).toHaveTextContent("terminé");
-    expect(screen.getByText("Génération 3D").closest("article")).toHaveTextContent("terminé");
+    expect(screen.getByText("Compréhension de la demande").closest("article")).toHaveTextContent("terminé");
+    expect(screen.getByText("Conception du plan 3D").closest("article")).toHaveTextContent("terminé");
+    expect(screen.getByText("Construction dans Blender").closest("article")).toHaveTextContent("terminé");
   });
 
   it("does not invent RAG evidence when the artifact is absent", () => {
@@ -1095,8 +1170,8 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("Workflow échoué")).toBeInTheDocument();
-    expect(screen.getByText("GLB: absent car workflow échoué")).toBeInTheDocument();
+    expect(screen.getByText("Conception non produite")).toBeInTheDocument();
+    expect(screen.getByText("Modèle 3D : non produit")).toBeInTheDocument();
   });
 
   it("summarizes RAG evidence before raw details", () => {
@@ -1470,17 +1545,65 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Aperçu" }));
+    fireEvent.click(screen.getByRole("button", { name: "Vue" }));
     expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    fireEvent.click(screen.getByRole("button", { name: /Activité/ }));
-    expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Narration du workflow");
-    fireEvent.click(screen.getByRole("button", { name: "Système" }));
-    expect(screen.getByLabelText("RAG evidence")).toHaveTextContent(
-      "Aucune preuve RAG chargée"
-    );
+    fireEvent.click(screen.getByRole("button", { name: /Progression/ }));
+    expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Progression du design");
+    expect(screen.queryByRole("button", { name: "Système" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bibliothèque" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps a repeated workflow failure out of the closed QA drawer and renders it once when opened", () => {
+    const repeatedFailure = "La géométrie demandée hors catalogue n'a pas pu être produite; Blender n'a pas été lancé.";
+    render(
+      <InspectorDock
+        bundle={{
+          ...bundle,
+          status: "failed",
+          generation_mode: "not_generated",
+          mesh_qa_passed: false,
+          qa_summary: {
+            qa_status: "not_started",
+            qa_executed: false,
+            blocked_before_qa: true,
+            checks_passed: [],
+            checks_failed: [],
+            warnings: [],
+            errors: [],
+            upstream_errors: ["GEOMETRY_PROGRAM_GENERATION_FAILED"],
+            limitations: []
+          }
+        }}
+        canRollback={false}
+        events={[]}
+        issues={{
+          workflow_id: "wf_1",
+          status: "failed",
+          human_readable_issues: [{
+            title: repeatedFailure,
+            severity: "error",
+            impact: repeatedFailure,
+            recommended_action: repeatedFailure,
+            technical_code: "GEOMETRY_PROGRAM_GENERATION_FAILED"
+          }]
+        }}
+        summary={null}
+        timeline={null}
+        toAbsoluteUrl={(url) => url ?? null}
+        onRollbackVersion={vi.fn()}
+        rollbackBusyVersionId={null}
+        versionMessage={null}
+        versions={[]}
+      />
+    );
+
+    expect(screen.queryByText(repeatedFailure)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Vérification/ }));
+    expect(screen.getAllByText(repeatedFailure)).toHaveLength(1);
+    expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();
   });
 
   it("groups repeated asset warnings in the displayed issue count", () => {

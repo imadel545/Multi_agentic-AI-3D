@@ -356,8 +356,13 @@ def _compile_boolean(bpy, name: str, spec: dict, left, right):
     operation = str(spec["operation"])
     if operation not in _BOOLEAN_OPERATIONS:
         raise RuntimeError(f"GEOMETRY_PROGRAM_UNKNOWN_BOOLEAN:{operation}")
-    obj = _copy_mesh_object(bpy, name, left)
-    operand = _copy_mesh_object(bpy, f"{name}_operand", right)
+    # Boolean operands are spatial inputs, unlike modifier/array source
+    # definitions. Bake each evaluated operand in the common program/world
+    # frame before applying the exact Boolean. Resetting the copies to the
+    # identity without baking their matrices silently moves translated or
+    # parented operands back to the origin.
+    obj = _copy_evaluated_mesh_in_world_space(bpy, name, left)
+    operand = _copy_evaluated_mesh_in_world_space(bpy, f"{name}_operand", right)
     modifier = obj.modifiers.new(name=f"{name}_boolean", type="BOOLEAN")
     modifier.operation = operation.upper()
     modifier.solver = "EXACT"
@@ -365,7 +370,10 @@ def _compile_boolean(bpy, name: str, spec: dict, left, right):
     try:
         _apply_modifier(bpy, obj, modifier.name, "BOOLEAN")
     finally:
+        operand_mesh = operand.data
         bpy.data.objects.remove(operand, do_unlink=True)
+        if operand_mesh.users == 0:
+            bpy.data.meshes.remove(operand_mesh)
     return obj
 
 
@@ -440,6 +448,35 @@ def _copy_mesh_object(bpy, name: str, source):
     obj.location = (0.0, 0.0, 0.0)
     obj.rotation_euler = (0.0, 0.0, 0.0)
     obj.scale = (1.0, 1.0, 1.0)
+    bpy.context.collection.objects.link(obj)
+    return obj
+
+
+def _copy_evaluated_mesh_in_world_space(bpy, name: str, source):
+    """Copy a mesh operand with its evaluated world transform baked in.
+
+    Exact booleans need both operands in one coordinate system. This helper is
+    deliberately boolean-specific: instance, array and modifier nodes keep
+    their existing source-definition semantics.
+    """
+
+    if getattr(source, "type", None) != "MESH" or getattr(source, "data", None) is None:
+        raise RuntimeError(f"GEOMETRY_PROGRAM_MESH_SOURCE_REQUIRED:{source.name}")
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    evaluated = source.evaluated_get(depsgraph)
+    mesh = bpy.data.meshes.new_from_object(
+        evaluated,
+        preserve_all_data_layers=True,
+        depsgraph=depsgraph,
+    )
+    if not mesh.vertices or not mesh.polygons:
+        bpy.data.meshes.remove(mesh)
+        raise RuntimeError(f"GEOMETRY_PROGRAM_EMPTY_MESH:{name}")
+    mesh.name = f"{name}_mesh"
+    mesh.transform(source.matrix_world)
+    mesh.update(calc_edges=True)
+    obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     return obj
 

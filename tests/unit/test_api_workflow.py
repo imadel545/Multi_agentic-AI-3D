@@ -72,6 +72,52 @@ def test_public_workflow_status_sanitizes_legacy_asset_file_paths() -> None:
     assert "/Users/" not in json.dumps(payload)
 
 
+def test_failed_status_never_advertises_quarantined_artifacts(tmp_path: Path) -> None:
+    candidate = tmp_path / "qa_report.json"
+    candidate.write_text('{"status":"failed"}', encoding="utf-8")
+
+    payload = _public_status_payload(
+        "wf_failed_candidate",
+        {
+            "status": "failed",
+            "version_id": "v_failed",
+            "active_version_id": None,
+            "completion_certificate_status": None,
+            "artifacts": {"qa_report": str(candidate)},
+        },
+        verified_artifacts={"qa_report": str(candidate)},
+    )
+
+    assert payload["artifacts"] == {}
+    assert payload["active_version_artifacts"] is None
+    assert payload["download_url"] is None
+    assert payload["trace_url"] is None
+
+
+def test_certified_status_advertises_only_verified_artifacts(tmp_path: Path) -> None:
+    glb = tmp_path / "design.glb"
+    glb.write_bytes(b"glTF")
+
+    payload = _public_status_payload(
+        "wf_certified",
+        {
+            "status": "completed",
+            "active_version_id": "v_certified",
+            "completion_certificate_status": "issued",
+            "artifacts": {"qa_report": str(tmp_path / "missing.json")},
+        },
+        verified_artifacts={"glb": str(glb)},
+    )
+
+    assert payload["artifacts"] == {
+        "glb": "/designs/wf_certified/artifacts/glb"
+    }
+    assert payload["active_version_artifacts"] == {
+        "glb": "/designs/wf_certified/artifacts/glb?version_id=v_certified"
+    }
+    assert payload["download_url"] == "/designs/wf_certified/download"
+
+
 def test_workflow_admission_is_bounded_and_rejected_work_has_no_orphan(tmp_path: Path) -> None:
     started = threading.Event()
     release = threading.Event()

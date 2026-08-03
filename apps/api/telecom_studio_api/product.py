@@ -868,6 +868,20 @@ def _viewer_qa_summary(status: dict) -> dict:
     checks = geometry.get("checks") if isinstance(geometry.get("checks"), dict) else {}
     checks_passed = sorted(name for name, passed in checks.items() if passed is True)
     checks_failed = sorted(name for name, passed in checks.items() if passed is False)
+    qa_executed = bool(geometry or glb or preview) or any(
+        status.get(field) is not None for field in ("mesh_qa_level", "mesh_qa_passed", "qa_score")
+    )
+    if not qa_executed:
+        qa_status = "not_started"
+    elif status.get("mesh_qa_passed") is False or checks_failed:
+        qa_status = "failed"
+    elif (
+        status.get("mesh_qa_passed") is True
+        and status.get("completion_certificate_status") == "issued"
+    ):
+        qa_status = "passed"
+    else:
+        qa_status = "incomplete"
     warnings = [
         item.get("code") or item.get("message")
         for item in status.get("warnings", [])
@@ -879,13 +893,20 @@ def _viewer_qa_summary(status: dict) -> dict:
         if isinstance(item, dict)
     ]
     return {
+        "qa_status": qa_status,
+        "qa_executed": qa_executed,
+        "blocked_before_qa": (
+            not qa_executed
+            and status.get("status") in {"failed", "legacy_unverified", "integrity_failed"}
+        ),
         "mesh_qa_level": status.get("mesh_qa_level"),
         "mesh_qa_passed": status.get("mesh_qa_passed"),
         "qa_score": status.get("qa_score"),
         "checks_passed": checks_passed,
         "checks_failed": checks_failed,
         "warnings": [warning for warning in warnings if warning],
-        "errors": [error for error in errors if error],
+        "errors": [error for error in errors if error] if qa_executed else [],
+        "upstream_errors": [] if qa_executed else [error for error in errors if error],
         "limitations": _collect_limitations(status),
         "geometry_source": status.get("geometry_source"),
         "generation_strategy": status.get("generation_strategy"),
@@ -1036,6 +1057,7 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
         if issue:
             issue["severity"] = "error"
             issues.append(issue)
+    has_explicit_user_error = any(issue.get("severity") == "error" for issue in issues)
 
     # Add inferred limitations as issues when no explicit warning exists
     if status.get("blender_available") is False and not any(
@@ -1167,7 +1189,11 @@ def _collect_user_issues(status: dict, events: list[dict] | None = None) -> list
                 "technical_code": "PLANNING_DECISION_FALLBACK_INFERRED",
             }
         )
-    issues.extend(_collect_runtime_event_issues(events or [], status))
+    # Runtime nodes stay available in the timeline. When the workflow already
+    # published a product-level error, replaying every failed implementation
+    # node as another user issue only duplicates the same root cause.
+    if not has_explicit_user_error:
+        issues.extend(_collect_runtime_event_issues(events or [], status))
     return _deduplicate_user_issues(issues)
 
 
@@ -1196,6 +1222,7 @@ def _deduplicate_user_issues(issues: list[dict]) -> list[dict]:
 
 def _collect_runtime_event_issues(events: list[dict], status: dict) -> list[dict]:
     issues: list[dict] = []
+    failed_nodes: list[str] = []
     seen: set[str] = set()
     workflow_status = status.get("status", "unknown")
     if workflow_status == "completed" and not status.get("active_operation"):
@@ -1210,6 +1237,21 @@ def _collect_runtime_event_issues(events: list[dict], status: dict) -> list[dict
         if node in seen:
             continue
         seen.add(node)
+        failed_nodes.append(node)
+
+    # Failure-handler nodes describe deterministic routing after the primary
+    # failure. They belong to the technical timeline, not beside the primary
+    # product issue as another apparent root cause.
+    handler_nodes = {
+        "blender_failure_handler",
+        "geometry_program_failure_handler",
+        "qa_failure_handler",
+        "quality_gate_failure_handler",
+        "scene_repair_handler",
+    }
+    primary_nodes = [node for node in failed_nodes if node not in handler_nodes]
+    user_issue_nodes = primary_nodes or failed_nodes[:1]
+    for node in user_issue_nodes:
         issues.append(
             {
                 "title": f"{_trace_node_label(node)} en mode dégradé",
@@ -1258,6 +1300,16 @@ def _runtime_node_recommended_action(node: str) -> str:
 
 
 _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
+    "GEOMETRY_PROGRAM_GENERATION_FAILED": {
+        "title": "Composant personnalisé non généré",
+        "impact": (
+            "La demande a été bloquée avant Blender : aucun nouveau modèle ni contrôle 3D "
+            "n'a remplacé votre dernière version validée."
+        ),
+        "recommended_action": (
+            "Corrigez la description du composant puis relancez la génération."
+        ),
+    },
     "ASSET_IMPORT_INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR": {
         "title": "Asset interne minimal",
         "impact": (
@@ -1446,6 +1498,21 @@ def _warning_to_user_issue(item: dict) -> dict | None:
             "impact": mapping["impact"],
             "recommended_action": mapping["recommended_action"],
             "technical_code": code,
+        }
+    if isinstance(code, str) and code.startswith("GEOMETRY_VALIDATION_"):
+        return {
+            "title": "Contrôle géométrique refusé",
+            "severity": severity,
+            "impact": (
+                "Blender a produit le modèle, mais une règle obligatoire de placement ou "
+                "de géométrie a échoué. Ce résultat n'a pas été publié et la dernière "
+                "version certifiée reste protégée."
+            ),
+            "recommended_action": (
+                "Corrigez le placement ou les dimensions signalés dans Vérification, "
+                "puis relancez la demande."
+            ),
+            "technical_code": "GEOMETRY_VALIDATION_FAILED",
         }
     # Generic fallback for unknown warnings
     return {

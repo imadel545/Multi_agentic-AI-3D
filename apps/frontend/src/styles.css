@@ -4,19 +4,19 @@
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: #edf1f0;
   color: #172126;
-  --bg: #f0f3f2;
+  --bg: #edf2f1;
   --surface: #ffffff;
   --surface-soft: #f6f8f7;
-  --line: #d7dfdd;
+  --line: #d8e1df;
   --muted: #64747a;
   --text: #172126;
-  --accent: #1d766f;
-  --accent-strong: #155f59;
+  --accent: #147a70;
+  --accent-strong: #0f625b;
   --warning: #9c650b;
   --danger: #a33131;
   --ok: #217a4b;
   --viewer: #16242a;
-  --shadow: 0 16px 42px rgba(23, 33, 38, 0.12);
+  --shadow: 0 18px 48px rgba(19, 36, 42, 0.12);
   font-synthesis: none;
   text-rendering: geometricPrecision;
 }
@@ -54,7 +54,7 @@ select:focus-visible {
 .studio-root {
   height: 100vh;
   display: grid;
-  grid-template-rows: 66px 1fr;
+  grid-template-rows: 62px 1fr;
   overflow: hidden;
 }
 
@@ -62,11 +62,12 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 66px;
-  padding: 0 18px;
+  min-height: 62px;
+  padding: 0 20px;
   border-bottom: 1px solid var(--line);
-  background: rgba(251, 252, 252, 0.96);
+  background: rgba(252, 253, 253, 0.92);
   gap: 16px;
+  backdrop-filter: blur(16px);
 }
 
 .brand-lockup {
@@ -190,9 +191,9 @@ small {
 .studio-layout {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(320px, 350px) minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: minmax(380px, 420px) minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
 }
 
 .left-rail {
@@ -219,18 +220,47 @@ small {
 .viewer-shell {
   border: 1px solid var(--line);
   background: var(--surface);
-  border-radius: 8px;
+  border-radius: 14px;
 }
 
 .command-center {
   height: 100%;
   min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 16px;
+  overflow: hidden;
+  padding: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  box-shadow: 0 10px 32px rgba(31, 49, 54, 0.07);
+}
+
+.conversation-header {
+  display: grid;
+  gap: 10px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdfc 100%);
+}
+
+.conversation-feed {
+  min-height: 0;
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 11px;
+  padding: 13px 14px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.command-dock {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -12px 30px rgba(27, 45, 50, 0.07);
+  backdrop-filter: blur(16px);
 }
 
 .conversation-heading {
@@ -245,7 +275,7 @@ small {
 }
 
 .conversation-heading h1 {
-  font-size: 23px;
+  font-size: 22px;
   line-height: 1.08;
 }
 
@@ -265,7 +295,7 @@ small {
 .summary-card {
   border: 1px solid var(--line);
   background: var(--surface-soft);
-  border-radius: 8px;
+  border-radius: 11px;
   padding: 10px;
 }
 
@@ -313,9 +343,9 @@ small {
 }
 
 .conversation-message {
-  padding: 12px;
+  padding: 11px 12px;
   border-left: 3px solid var(--accent);
-  background: #f4f8f7;
+  background: #f3f9f7;
 }
 
 .conversation-message.busy {
@@ -323,44 +353,48 @@ small {
   background: #edf8f6;
 }
 
-.conversation-history {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-soft);
+.conversation-message.failure {
+  color: #612d2d;
+  border-left-color: var(--danger);
+  background: #fff5f4;
 }
 
-.conversation-history > summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 9px 10px;
-  cursor: pointer;
-  font-size: 13px;
+.conversation-history {
+  display: grid;
+  gap: 7px;
+}
+
+.conversation-history-label {
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .conversation-history-list {
   display: grid;
   gap: 7px;
-  padding: 0 8px 8px;
 }
 
 .conversation-entry {
   display: grid;
   gap: 3px;
-  padding: 8px 9px;
-  border-radius: 7px;
+  padding: 10px 11px;
+  border-radius: 11px;
   background: #fff;
+  box-shadow: 0 4px 14px rgba(27, 45, 50, 0.05);
 }
 
 .conversation-entry.user {
-  margin-left: 18px;
+  margin-left: 28px;
   border-right: 3px solid var(--accent);
+  background: #eef8f5;
 }
 
 .conversation-entry.assistant,
 .conversation-entry.system {
-  margin-right: 18px;
+  margin-right: 28px;
   border-left: 3px solid #8ca7a4;
 }
 
@@ -369,6 +403,62 @@ small {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.35;
+}
+
+.conversation-entry .message-clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+}
+
+.conversation-entry details {
+  font-size: 12px;
+}
+
+.conversation-entry details > summary {
+  width: max-content;
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.conversation-entry details[open] .message-clamp {
+  display: none;
+}
+
+.workflow-recovery {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(163, 49, 49, 0.26);
+  border-radius: 12px;
+  color: #612d2d;
+  background: linear-gradient(145deg, #fff5f4, #fffafa);
+}
+
+.workflow-recovery-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+}
+
+.workflow-recovery-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.workflow-recovery p,
+.workflow-recovery small {
+  margin: 0;
+  line-height: 1.42;
+}
+
+.workflow-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
 }
 
 textarea {
@@ -413,10 +503,13 @@ textarea {
 
 .command-composer textarea {
   width: 100%;
-  min-height: 116px;
+  min-height: 92px;
+  max-height: 210px;
   padding: 12px 50px 12px 12px;
   border-color: #9abcb8;
   background: #ffffff;
+  resize: vertical;
+  box-shadow: inset 0 1px 2px rgba(27, 45, 50, 0.04);
 }
 
 .composer-submit {
@@ -428,10 +521,15 @@ textarea {
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--accent);
   color: #ffffff;
   cursor: pointer;
+}
+
+.composer-submit:not(:disabled):hover {
+  background: var(--accent-strong);
+  transform: translateY(-1px);
 }
 
 .composer-submit:disabled {
@@ -925,6 +1023,36 @@ a:focus-visible {
   display: block;
 }
 
+.retained-design-notice {
+  position: absolute;
+  z-index: 7;
+  top: 68px;
+  left: 16px;
+  right: 92px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  max-width: 470px;
+  padding: 10px 12px;
+  color: #e8f8f1;
+  border: 1px solid rgba(111, 214, 160, 0.36);
+  border-radius: 11px;
+  background: rgba(20, 74, 57, 0.9);
+  box-shadow: 0 12px 32px rgba(5, 20, 17, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.retained-design-notice > div {
+  display: grid;
+  gap: 2px;
+}
+
+.retained-design-notice span {
+  color: #cce4db;
+  font-size: 12px;
+}
+
 .generation-overlay {
   position: absolute;
   z-index: 7;
@@ -1030,16 +1158,16 @@ a:focus-visible {
   background: var(--viewer);
   box-shadow: var(--shadow);
   height: 100%;
-  border-radius: 12px;
+  border-radius: 16px;
 }
 
 .viewer-toolbar {
-  min-height: 58px;
+  min-height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 102px 10px 14px;
+  padding: 9px 90px 9px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: #f7f9f9;
 }
@@ -1344,19 +1472,19 @@ a:focus-visible {
 .context-dock {
   position: absolute;
   z-index: 8;
-  top: 70px;
+  top: 68px;
   right: 10px;
-  bottom: 12px;
+  bottom: 14px;
   pointer-events: none;
 }
 
 .drawer-launcher {
-  width: 82px;
+  width: 72px;
   display: grid;
   gap: 4px;
   padding: 5px;
   border: 1px solid rgba(215, 223, 221, 0.86);
-  border-radius: 12px;
+  border-radius: 15px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 10px 30px rgba(17, 27, 31, 0.12);
   backdrop-filter: blur(10px);
@@ -1381,19 +1509,20 @@ a:focus-visible {
 }
 
 .drawer-action {
-  min-height: 54px;
+  min-height: 50px;
   display: grid;
   grid-template-columns: 1fr;
   justify-items: center;
   align-items: center;
   gap: 3px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text);
   padding: 6px 4px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 10px;
+  line-height: 1.15;
 }
 
 .drawer-action.active {
@@ -1412,14 +1541,14 @@ a:focus-visible {
 
 .context-drawer {
   position: fixed;
-  right: 100px;
-  top: 82px;
-  bottom: 22px;
+  right: 92px;
+  top: 76px;
+  bottom: 20px;
   z-index: 10;
-  width: min(520px, calc(100vw - 124px));
+  width: min(500px, calc(100vw - 116px));
   max-height: none;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.97);
   box-shadow: var(--shadow);
   overflow-x: hidden;
@@ -1749,6 +1878,34 @@ a:focus-visible {
   align-items: start;
 }
 
+.macro-progress .timeline-item {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.qa-not-run {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(156, 101, 11, 0.3);
+  border-radius: 11px;
+  color: #704b12;
+  background: #fff8eb;
+}
+
+.qa-not-run > div {
+  display: grid;
+  gap: 4px;
+}
+
+.qa-not-run p {
+  margin: 0;
+  line-height: 1.42;
+}
+
 .timeline-item p,
 .timeline-item small {
   margin: 3px 0 0;
@@ -1811,9 +1968,9 @@ a:focus-visible {
   cursor: not-allowed;
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1200px) {
   .studio-layout {
-    grid-template-columns: 270px minmax(0, 1fr);
+    grid-template-columns: minmax(330px, 360px) minmax(0, 1fr);
     padding: 8px;
     gap: 8px;
   }
@@ -1828,7 +1985,7 @@ a:focus-visible {
   }
 
   .command-center {
-    padding: 11px;
+    border-radius: 12px;
   }
 
   .conversation-heading h1 {
@@ -1893,6 +2050,10 @@ a:focus-visible {
   .left-rail {
     overflow: visible;
     padding-right: 0;
+  }
+
+  .command-center {
+    height: min(760px, 86vh);
   }
 
   .viewer-shell {
@@ -1966,9 +2127,12 @@ a:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin,
-  .generation-loader span,
-  .generation-awaiting svg {
-    animation: none;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -13,6 +14,7 @@ from core.contracts.geometry_program import (
     GeometryProgram,
     GeometryProgramVector3,
     geometry_program_dimensions,
+    geometry_program_visible_root_bounds,
 )
 from core.llm.groq import GroqStructuredClient
 from core.llm.groq_policy import GroqReasoningEffort, GroqRequestPolicy
@@ -100,6 +102,16 @@ class GeometryProgramPlanner:
                     "modifiers, terrain, anchors, connectors and semantic groups when they improve "
                     "functional construction. "
                     "Create coherent multi-part technical geometry with stable semantic roles. "
+                    "An LLM-authored program must contain at least three nodes, including "
+                    "supporting/detail geometry in addition to its primary semantic node. "
+                    "Put the requested semantic_role only on visible mesh-producing nodes; "
+                    "never put a primary semantic node in construction_node_ids. "
+                    "Never emit ellipsis tokens (... or …), placeholder objects or abbreviated "
+                    "point lists; write every coordinate explicitly. "
+                    "The program frame is meter-based and Z-up. Primitive and extrusion depth "
+                    "are centered on their local origin. Every independent visible root of a "
+                    "ground-contact component must have a minimum world Z of exactly 0; translate "
+                    "centered geometry by its half-height instead of leaving it below ground. "
                     "Do not reference files, URLs, Blender operators, scripts or "
                     "undeclared assets. "
                     "Stay within the declared dimensions and use assumptions/limitations honestly. "
@@ -195,6 +207,9 @@ class GeometryProgramPlanner:
         candidate = raw
         for repair_attempt in range(3):
             _normalize_disclosures(candidate)
+            _normalize_explicit_point_placeholders(candidate)
+            _normalize_profile_definitions(candidate)
+            _normalize_ground_contact(candidate)
             try:
                 return GeometryProgram.model_validate(candidate)
             except ValidationError as exc:
@@ -250,8 +265,7 @@ class GeometryProgramPlanner:
                             "Do not redesign it. Preserve valid geometry intent and correct every "
                             "reported schema error. Every vector must be an object with the "
                             "numeric keys x, y and z; every color must be an object with the "
-                            "numeric keys r, g, b and a. "
-                            + _json_object_contract(schema_version)
+                            "numeric keys r, g, b and a. " + _json_object_contract(schema_version)
                         ),
                     },
                     {
@@ -300,14 +314,16 @@ def _json_object_contract(schema_version: str = "2.0.0") -> str:
   modifier=bevel/solidify/mirror), and terrain(width_m, depth_m, columns, rows, heights_m).
 - V2 may declare anchors, connectors, semantic_groups and construction_node_ids. References
   must resolve and the dependency graph must be acyclic. Use construction_node_ids for profiles,
-  cutters and intermediate sources that must not appear as final visible geometry.
+  cutters and intermediate sources that must not appear as final visible geometry. A profile
+  has no semantic_role; the visible extrude/revolve/sweep result carries the role instead.
 """
     version_contract = (
         v2_contract
         if schema_version == "2.0.0"
         else "- V1 permits only primitive, curve and instance nodes."
     )
-    return f"""
+    return (
+        """
 GeometryProgram compact contract:
 - top-level keys: schema_version, program_id, semantic_role, units, authorship,
   requested_quantity, generator_provider, generator_model, structured_output_mode,
@@ -329,15 +345,21 @@ GeometryProgram compact contract:
   Optional vertices is 8..96 and bevel_m is 0..1.
 - curve node: kind="curve", points_m has 2..128 XYZ objects, bevel_depth_m,
   cyclic.
+- points_m and path_points_m must contain every coordinate explicitly. Never emit
+  ellipsis tokens ("..." or "…"), placeholder objects or abbreviated point lists.
 - instance node: kind="instance", source_node_id references another node.
 - node_id, material_id, parent_id and source_node_id use lowercase identifiers.
 - at least one node semantic_role must equal the top-level semantic_role.
-- exactly requested_quantity nodes must carry the top-level semantic_role; use
-  instances for repeated equal components.
+- every LLM-authored program contains at least three nodes in total; add real
+  supporting/detail geometry instead of padding with duplicate empty parts.
+- exactly requested_quantity visible mesh-producing nodes must carry the
+  top-level semantic_role; use instances for repeated equal components. Those
+  primary nodes must never appear in construction_node_ids.
 - assumptions and limitations are arrays of short JSON strings only, never objects.
 - deterministic_adjustments is backend-owned and must be an empty array.
-{version_contract}
-
+"""
+        + version_contract
+        + """
 Example node list:
 [
   {
@@ -360,6 +382,7 @@ Example node list:
   }
 ]
 """
+    )
 
 
 def _fit_to_maximum_dimensions(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -387,7 +410,12 @@ def _fit_to_maximum_dimensions(payload: dict[str, Any]) -> dict[str, Any] | None
 
     fitted = unbounded.model_dump(mode="json")
     fitted["maximum_dimensions_m"] = maximum
-    root_nodes = [node for node in fitted["nodes"] if node.get("parent_id") is None]
+    construction_node_ids = set(fitted.get("construction_node_ids", []))
+    root_nodes = [
+        node
+        for node in fitted["nodes"]
+        if node.get("parent_id") is None and node.get("node_id") not in construction_node_ids
+    ]
     if not root_nodes:
         return None
     pivot = {
@@ -412,6 +440,124 @@ def _fit_to_maximum_dimensions(payload: dict[str, Any]) -> dict[str, Any] | None
     return fitted
 
 
+_GROUND_CONTACT_ROLES = {
+    "barrier",
+    "cabinet",
+    "equipment_enclosure",
+    "equipment_shelter",
+    "fence",
+    "gate",
+    "ground_enclosure",
+    "ground_equipment",
+    "kiosk",
+    "perimeter_fence",
+    "site_shelter",
+    "solar_canopy",
+}
+_GROUND_CONTACT_SIGNALS = (
+    "at ground level",
+    "ground contact",
+    "ground level",
+    "on ground",
+    "on the ground",
+    "pose au sol",
+    "pose sur le sol",
+    "au niveau du sol",
+    "sur le terrain",
+)
+_ELEVATED_PLACEMENT_SIGNALS = (
+    "above ground",
+    "at height",
+    "elevated",
+    "mounted on tower",
+    "mounted on the tower",
+    "on platform",
+    "rooftop",
+    "suspended",
+    "en hauteur",
+    "monte sur le pylone",
+    "sur plateforme",
+    "suspendu",
+)
+
+
+def _normalize_ground_contact(payload: dict[str, Any]) -> None:
+    """Align validated ground-contact outputs without inventing geometry.
+
+    GPT-OSS chooses the component and its typed geometry. The deterministic
+    adapter enforces only the declared spatial policy: a ground-contact output
+    may not cross below Z=0. Each independent visible root is lifted by its
+    measured envelope, which also handles centered primitives and asymmetric
+    sweep profiles consistently.
+    """
+
+    if not _requires_ground_contact(payload):
+        return
+    candidate = deepcopy(payload)
+    candidate["maximum_dimensions_m"] = None
+    try:
+        program = GeometryProgram.model_validate(candidate)
+    except ValidationError:
+        return
+    root_bounds = geometry_program_visible_root_bounds(program)
+    offsets = {
+        node_id: -minimum[2] for node_id, (minimum, _) in root_bounds.items() if minimum[2] < -1e-6
+    }
+    if not offsets:
+        return
+
+    adjustments = payload.get("deterministic_adjustments")
+    if adjustments is None:
+        adjustments = []
+        payload["deterministic_adjustments"] = adjustments
+    if not isinstance(adjustments, list) or len(adjustments) >= 16:
+        return
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, list):
+        return
+    nodes_by_id = {
+        node.get("node_id"): node
+        for node in nodes
+        if isinstance(node, dict) and isinstance(node.get("node_id"), str)
+    }
+    if any(node_id not in nodes_by_id for node_id in offsets):
+        return
+
+    for node_id, offset in offsets.items():
+        node = nodes_by_id[node_id]
+        transform = node.setdefault("transform", _identity_transform_payload())
+        translation = transform.setdefault("translation_m", _xyz_payload(0.0, 0.0, 0.0))
+        translation["z"] = float(translation.get("z", 0.0)) + offset
+    detail = ", ".join(f"{node_id}:+{offset:.6f}m" for node_id, offset in sorted(offsets.items()))
+    adjustments.append(
+        "Aligned ground-contact visible root envelope(s) to Z=0 "
+        f"({detail}); geometry and XY placement were unchanged."
+    )
+
+
+def _requires_ground_contact(payload: dict[str, Any]) -> bool:
+    role = _normalized_text(str(payload.get("semantic_role") or "")).replace(" ", "_")
+    context = _normalized_text(
+        " ".join(
+            str(payload.get(field) or "") for field in ("placement_context", "source_description")
+        )
+    )
+    if any(signal in context for signal in _ELEVATED_PLACEMENT_SIGNALS):
+        return False
+    if any(signal in context for signal in _GROUND_CONTACT_SIGNALS):
+        return True
+    return role in _GROUND_CONTACT_ROLES
+
+
+def _normalized_text(value: str) -> str:
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", ascii_value.lower()).split())
+
+
+def _xyz_payload(x: float, y: float, z: float) -> dict[str, float]:
+    return {"x": x, "y": y, "z": z}
+
+
 def _normalize_disclosures(payload: dict[str, Any]) -> None:
     """Bound non-executable disclosure metadata after an explicit LLM repair.
 
@@ -432,15 +578,168 @@ def _normalize_disclosures(payload: dict[str, Any]) -> None:
         ]
 
 
+def _normalize_explicit_point_placeholders(payload: dict[str, Any]) -> None:
+    """Remove only explicit ellipsis sentinels from bounded point lists.
+
+    Some JSON-object completions abbreviate an otherwise complete list with an
+    entry such as ``{"...": "..."}``. That is neither geometry nor a value we
+    can repair semantically. It is safe to remove only when the remaining list
+    still satisfies the operation's contract minimum. Any other malformed
+    point, or a list made too short by removal, is left unchanged so Pydantic
+    validation fails closed.
+    """
+
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, list):
+        return
+
+    repairs: list[tuple[dict[str, Any], str, list[Any], str]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        kind = node.get("kind")
+        if kind in {"curve", "profile"}:
+            field_name = "points_m"
+            minimum = 3 if kind == "profile" and node.get("closed", True) else 2
+        elif kind == "sweep":
+            field_name = "path_points_m"
+            minimum = 3 if node.get("cyclic", False) else 2
+        else:
+            continue
+        points = node.get(field_name)
+        if not isinstance(points, list):
+            continue
+        filtered = [point for point in points if not _is_explicit_ellipsis(point)]
+        removed_count = len(points) - len(filtered)
+        if removed_count == 0 or len(filtered) < minimum:
+            continue
+        node_id = node.get("node_id")
+        label = node_id if isinstance(node_id, str) else "unknown_node"
+        repairs.append((node, field_name, filtered, f"{label}.{field_name}:{removed_count}"))
+
+    if not repairs:
+        return
+    adjustments = payload.get("deterministic_adjustments")
+    if adjustments is None:
+        adjustments = []
+        payload["deterministic_adjustments"] = adjustments
+    if not isinstance(adjustments, list) or len(adjustments) >= 16:
+        return
+
+    for node, field_name, filtered, _ in repairs:
+        node[field_name] = filtered
+    labels = [repair[3] for repair in repairs]
+    shown = ", ".join(labels[:8])
+    suffix = "" if len(labels) <= 8 else f", +{len(labels) - 8} more"
+    adjustments.append(
+        "Removed explicit non-geometric ellipsis placeholder(s) from point lists "
+        f"({shown}{suffix}); all remaining coordinates still satisfy contract minima."
+    )
+
+
+def _is_explicit_ellipsis(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip() in {"...", "…"}
+    if not isinstance(value, dict) or not value:
+        return False
+    return all(_is_explicit_ellipsis(item) for item in value.values())
+
+
+def _normalize_profile_definitions(payload: dict[str, Any]) -> None:
+    """Canonicalize V2 profiles before fail-closed graph validation.
+
+    Groq strict structured output requires every property declared by an
+    object schema. Because profile nodes inherit the common node fields, the
+    decoder must emit ``transform`` even though profiles are local 2D
+    definitions and the GeometryProgram contract forbids profile transforms.
+    Model repair can therefore repeat the same invalid shape indefinitely.
+
+    This normalization never invents geometry: it removes metadata and
+    transforms that have no executable meaning on a profile and makes profile
+    construction-only status explicit. Placement and materials remain owned by
+    the consuming extrude/revolve/sweep mesh node. Any semantic change is
+    recorded in deterministic provenance.
+    """
+
+    nodes = payload.get("nodes")
+    if not isinstance(nodes, list):
+        return
+
+    profile_ids: list[str] = []
+    normalized_ids: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("kind") != "profile":
+            continue
+        node_id = node.get("node_id")
+        if isinstance(node_id, str):
+            profile_ids.append(node_id)
+
+        changed = False
+        for field_name in ("parent_id", "material_id", "semantic_role"):
+            if node.get(field_name) is not None:
+                node.pop(field_name, None)
+                changed = True
+
+        transform = node.pop("transform", None)
+        if transform is not None and transform != _identity_transform_payload():
+            changed = True
+        if changed and isinstance(node_id, str):
+            normalized_ids.append(node_id)
+
+    construction_ids = payload.get("construction_node_ids")
+    if construction_ids is None:
+        construction_ids = []
+        payload["construction_node_ids"] = construction_ids
+    if isinstance(construction_ids, list):
+        for profile_id in profile_ids:
+            if profile_id not in construction_ids:
+                construction_ids.append(profile_id)
+                if profile_id not in normalized_ids:
+                    normalized_ids.append(profile_id)
+
+    if not normalized_ids:
+        return
+    adjustments = payload.get("deterministic_adjustments")
+    if not isinstance(adjustments, list) or len(adjustments) >= 16:
+        return
+    shown = ", ".join(normalized_ids[:8])
+    suffix = "" if len(normalized_ids) <= 8 else f", +{len(normalized_ids) - 8} more"
+    adjustments.append(
+        "Canonicalized transform-free geometry profile definition(s) "
+        f"({shown}{suffix}); placement and material remain on consuming mesh nodes."
+    )
+
+
+def _identity_transform_payload() -> dict[str, dict[str, float]]:
+    return {
+        "translation_m": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "rotation_deg": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+    }
+
+
 def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Make every object field required for Groq strict structured output."""
+    """Normalize Pydantic JSON Schema to Groq's strict supported subset."""
 
     strict = deepcopy(schema)
 
     def visit(value: Any) -> None:
         if isinstance(value, dict):
+            # Groq strict structured output documents ``anyOf`` as the supported
+            # union construct. Pydantic emits discriminated unions as
+            # ``oneOf`` plus a discriminator, which the API rejects with 400.
+            if "oneOf" in value:
+                value["anyOf"] = value.pop("oneOf")
+            value.pop("discriminator", None)
+
+            # A reference is already closed by its target definition. Siblings
+            # added next to ``$ref`` are neither needed nor part of the subset
+            # shown by Groq, and can make an otherwise valid strict schema fail.
             if "$ref" in value:
-                value["additionalProperties"] = False
+                reference = value["$ref"]
+                value.clear()
+                value["$ref"] = reference
+                return
             if value.get("type") == "object" or "properties" in value:
                 properties = value.get("properties", {})
                 value["additionalProperties"] = False

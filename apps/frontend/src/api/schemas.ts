@@ -447,6 +447,33 @@ export const GeometryFidelitySummarySchema = publicSchema(
   })
 );
 
+export const ViewerQaSummarySchema = UnknownRecord.extend({
+  qa_status: z.enum(["not_started", "incomplete", "failed", "passed"]).optional(),
+  qa_executed: z.boolean().optional(),
+  blocked_before_qa: z.boolean().optional(),
+  mesh_qa_level: z.string().nullish(),
+  mesh_qa_passed: z.boolean().nullish(),
+  qa_score: z.number().nullish(),
+  checks_passed: z.array(z.string()).default([]),
+  checks_failed: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([]),
+  errors: z.array(z.string()).default([]),
+  upstream_errors: z.array(z.string()).default([]),
+  limitations: z.array(z.string()).default([]),
+  geometry_source: z.string().nullish(),
+  generation_strategy: z.string().nullish(),
+  object_counts: UnknownRecord.nullish(),
+  missing_objects: z.array(z.string()).nullish(),
+  glb_parse_structural: z.boolean().nullish(),
+  preview_pixel_framing_qa: z.boolean().optional(),
+  preview_subject_framing_valid: z.boolean().nullish(),
+  preview_subject_bbox_width_ratio: z.number().nullish(),
+  preview_subject_bbox_height_ratio: z.number().nullish(),
+  preview_subject_center_x_ratio: z.number().nullish(),
+  preview_subject_min_edge_margin_ratio: z.number().nullish(),
+  preview_subject_touches_frame: z.boolean().nullish()
+});
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
@@ -493,7 +520,7 @@ export const ViewerBundleSchema = publicSchema(
     rag_reranker_status: z.string().nullish(),
     rag_reranker_degraded_reason: z.string().nullish(),
     memory_context_count: z.number().nullish(),
-    qa_summary: UnknownRecord.nullish(),
+    qa_summary: ViewerQaSummarySchema.nullish(),
     viewer_artifacts: z.array(ViewerArtifactSchema).default([]),
     limitations: z.array(z.string()).default([]),
     runtime_capabilities: RuntimeCapabilitiesSchema.nullish(),

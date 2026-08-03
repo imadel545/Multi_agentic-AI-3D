@@ -20,6 +20,27 @@ TOWER_SYNONYMS = {
     "small cell": "small_cell_pole",
 }
 
+POWER_CABINET_TERMS = (
+    "armoire énergie",
+    "armoire energie",
+    "armoire d'énergie",
+    "armoire d'energie",
+    "armoire d’énergie",
+    "armoire d’energie",
+    "armoire d'alimentation",
+    "armoire d’alimentation",
+    "armoire alimentation",
+    "armoire électrique",
+    "armoire electrique",
+    "boîte alimentation",
+    "boite alimentation",
+    "boîtier alimentation",
+    "boitier alimentation",
+    "power cabinet",
+    "power box",
+    "cabinet",
+)
+
 
 def parse_requirements_text(
     requirements_text: str, detail_level: str | None = None
@@ -160,41 +181,8 @@ def parse_requirements_text(
         "include_cables": include_cables,
         "include_beams": include_beams,
         "include_labels": include_labels,
-        "include_power_cabinet": _contains_any(
-            text,
-            [
-                "armoire énergie",
-                "armoire energie",
-                "armoire d'énergie",
-                "armoire d'energie",
-                "armoire d’énergie",
-                "armoire d’energie",
-                "armoire électrique",
-                "armoire electrique",
-                "boîte alimentation",
-                "boite alimentation",
-                "boîtier alimentation",
-                "boitier alimentation",
-                "power cabinet",
-                "power box",
-                "cabinet",
-            ],
-        )
-        and not _contains_negation_for(
-            text,
-            [
-                "armoire énergie",
-                "armoire energie",
-                "armoire d'énergie",
-                "armoire d'energie",
-                "armoire d’énergie",
-                "armoire d’energie",
-                "boîte alimentation",
-                "boite alimentation",
-                "power cabinet",
-                "cabinet",
-            ],
-        ),
+        "include_power_cabinet": _contains_any(text, POWER_CABINET_TERMS)
+        and not _contains_negation_for(text, POWER_CABINET_TERMS),
         "include_gps_antenna": _contains_any(
             text,
             ["gps", "antenne gps", "gps antenna"],
