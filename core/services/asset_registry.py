@@ -271,18 +271,30 @@ def _candidate_score(
     tower_type: str | None,
     min_height_m: float | None,
 ) -> AssetCandidateScore:
-    compatibility = 55.0
+    compatibility = 70.0
     reasons = [f"compatible avec le réseau {network_type}"]
     if tower_type:
         if not asset.compatible_tower_types or tower_type in asset.compatible_tower_types:
-            compatibility += 25.0
+            compatibility += 30.0
             reasons.append(f"compatible avec le support {tower_type}")
     if asset.allows_generation_mode("imported_glb_exact"):
         generation = 100.0
         reasons.append("import GLB exact qualifié")
     else:
-        generation = 82.0
+        generation = 75.0
         reasons.append("génération paramétrique qualifiée")
+    fidelity = {
+        "schematic": 35.0,
+        "technical_generic": 65.0,
+        "vendor_qualified": 100.0,
+    }[asset.geometry_fidelity]
+    reasons.append(
+        {
+            "schematic": "fidélité schématique déclarée",
+            "technical_generic": "fidélité technique générique déclarée",
+            "vendor_qualified": "géométrie fournisseur qualifiée",
+        }[asset.geometry_fidelity]
+    )
     dimensional = 100.0
     if min_height_m is not None and asset.height_m is not None:
         if asset.height_m >= min_height_m:
@@ -290,13 +302,20 @@ def _candidate_score(
         else:
             dimensional = max(0.0, 100.0 - ((min_height_m - asset.height_m) / min_height_m) * 100)
             reasons.append("hauteur nominale inférieure à la cible")
-    total = round(compatibility * 0.6 + generation * 0.25 + dimensional * 0.15, 2)
+    total = round(
+        compatibility * 0.35
+        + fidelity * 0.3
+        + generation * 0.2
+        + dimensional * 0.15,
+        2,
+    )
     return AssetCandidateScore(
         asset_id=asset.asset_id,
         total_score=total,
         compatibility_score=round(compatibility, 2),
         generation_score=generation,
         dimensional_score=round(dimensional, 2),
+        fidelity_score=fidelity,
         reasons=reasons,
     )
 

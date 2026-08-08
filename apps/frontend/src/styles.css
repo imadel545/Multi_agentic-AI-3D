@@ -1193,6 +1193,33 @@ a:focus-visible {
   cursor: not-allowed;
 }
 
+.viewer-aids-toggle {
+  align-items: center;
+  background: #f7faf9;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 12px;
+}
+
+.viewer-aids-toggle.active {
+  background: rgba(20, 122, 112, 0.1);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.viewer-aids-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .canvas-frame,
 .viewer-empty,
 .preview-fallback {

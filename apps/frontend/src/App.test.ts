@@ -191,7 +191,7 @@ describe("frontend runtime selection", () => {
     } as EditDesignResponse);
 
     expect(message).toContain("contrôle géométrique");
-    expect(message).toContain("version certifiée précédente");
+    expect(message).toContain("version vérifiée précédente");
     expect(message).not.toContain("geometry_validation_valid");
   });
 

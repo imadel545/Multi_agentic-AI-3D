@@ -6,10 +6,10 @@ frontend.
 ## Visible during frontend build
 
 - `apps/frontend` has a visually verified historical real-backend product
-  baseline and 145 passing M0 Vitest tests plus green typecheck/build. The
-  current-tree connected smoke is still missing; document-pack generation,
-  edit, rollback and relevant degraded/retry paths still need one recorded
-  end-to-end acceptance pass.
+  baseline and 151 passing M0 Vitest tests plus green typecheck/build. The
+  2026-08-04 Docker smoke restored a certified real GLB and two-version design
+  without browser console errors. Document-pack generation, rollback and
+  relevant degraded/retry paths still need a recorded browser acceptance pass.
 - The first technical kernel was rejected as too dashboard-like; permanent
   stage grids, capability counters, raw workflow ids, and raw JSON surfaces must
   not come back.
@@ -67,11 +67,11 @@ frontend.
   aggregator, recalled-design candidate authority or bounded post-Blender
   critique/rebuild loop.
 - GPT-OSS may now author an out-of-catalog `GeometryProgram`, but this is not an
-  unrestricted arbitrary-design system. The vocabulary is limited to boxes,
-  cylinders, cones, UV spheres, polygonal curves, instances, simple materials
-  and transforms. There is no CSG, boolean modeling, constrained extrusion,
-  surface modeling, arbitrary topology, imported-mesh editing or generalized
-  Geometry Nodes graph.
+  unrestricted arbitrary-design system. GeometryProgram V2 supports governed
+  primitives, polygonal curves, instances, profiles, extrusion, revolution,
+  sweep, arrays, exact booleans and a bounded modifier set. It still has no
+  B-Rep surface modeler, arbitrary topology editor, imported-mesh editing or
+  generalized Geometry Nodes graph.
 - Geometry generation is fail-closed and requires the configured Groq
   specialist. There is no deterministic substitute that fabricates the missing
   component. When deterministic requirement extraction is used, it cannot
@@ -116,12 +116,11 @@ frontend.
   committed SQLite state remains authoritative.
 
 - NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024 dimensions is the
-  product provider. `baai/bge-m3` remains supported as an explicit model choice.
+  product provider. A 2026-08-06 live probe returned 200 and a 1024D vector for
+  both query and passage profiles; this availability probe is not a telecom
+  retrieval-quality benchmark.
 - A configured provider is reported as `configured_unverified` until a real
-  operation succeeds. On 2026-07-28, the key authenticated successfully and
-  listed `baai/bge-m3`, but that model returned HTTP 500 for both scalar and
-  batched embedding calls. The configured Nemotron replacement returned a real
-  1024D embedding with the same key.
+  operation succeeds.
 - The product path does not silently load a local embedding model. Deterministic
   hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
   hash is not production quality.
@@ -140,12 +139,12 @@ frontend.
 - RAG search accepts logical collection names only. Runtime invalidation removes
   active, obsolete, base and abandoned `__build_` collections and serializes
   searches/writes across the publication boundary.
-- The optional Docker service is loopback-only but still pins legacy Qdrant
-  server `v1.9.2`. Existing storage needs a tested stepwise migration before an
-  upgrade; this server must not be exposed to a LAN or the Internet.
+- Docker pins Qdrant server and Python client to `v1.18.0`. A future upgrade of
+  a non-empty volume still requires a tested supported migration; the server
+  must not be exposed to a LAN or the Internet.
 - Reranker product path is NVIDIA API, but it is fail-open. If unavailable,
   vector order is used and `rag_reranker_degraded_reason` must be displayed.
-  Local reranker is an explicit developer override, not product default.
+  No local neural reranker is loaded by the product runtime.
 - Memory is still limited: workflow recall is predominantly deterministic SQL
   matching. The compact Qdrant projection is operational for explicit semantic
   search and future bounded recall, but it is not yet allowed to mutate
@@ -154,6 +153,31 @@ frontend.
   structured, whitelisted `payload.planning_hints` can affect planning; RAG is
   not used for RequirementSpec extraction. Use `rag_evidence.json` for sources
   and candidate hint proof.
+
+## Docker runtime
+
+- On Apple Silicon the API and Blender run as `linux/amd64`. Rendering is
+  materially slower under Docker Desktop emulation, so the stack permits one
+  running workflow, two queued requests and a 600-second Blender timeout.
+- Docker uses a governed 8-sample EEVEE preview profile. It is suitable for the
+  technical GLB/preview workflow and QA gates, but it is less polished than a
+  higher-sample native render and is not a photorealistic certification.
+- Adminer reads integrity-checked SQLite backups, never live database files.
+  Its view may trail the API by up to the five-second snapshot interval.
+- The four Docker named volumes are independent of host `data/` and `outputs/`.
+  There is no automatic import or migration in either direction.
+- SQLite remains canonical and local-first. PostgreSQL would require replacing
+  repository, checkpoint, transaction/outbox and recovery contracts; it is not
+  part of this delivery and would not improve the current single-user runtime.
+- Docker health proves process and dependency availability, not that external
+  Groq/NVIDIA calls will succeed. Provider status becomes operational only after
+  a real successful request and remains visibly degraded otherwise.
+- The 2026-08-04 full native test run was stopped at 12% after 14 minutes because
+  it executes many long Blender scenarios. Before interruption it exposed three
+  pre-existing failures: a deterministic small-cell asset height outside its
+  manifest limit and two hardening tests whose fixtures no longer satisfy the
+  current certificate/version contract. These are not hidden by the Docker
+  delivery; they remain backend test debt outside this Compose change.
 
 ## Documents
 
@@ -178,9 +202,14 @@ frontend.
   models contain `3DSOLID` ACIS/B-Rep entities, so converting them through DXF
   alone is not accepted as mesh proof. A real B-Rep conversion tool and
   post-conversion unit, mesh, semantic-role and visual QA are still required.
-- Tool failures, timeouts and non-UTF/invalid JSON probe output are returned as
-  controlled quarantine errors; they never qualify a file or expose a raw decode
-  exception as a product result.
+- A focused probe of `Axians_Nedea_36m.dwg` found 99 `3DSOLID`, 440 block
+  inserts and no mesh-convertible entity. `INSUNITS` says millimeters while the
+  display-unit label conflicts. The candidate is not Blender-ready and cannot
+  be promoted by metadata retrieval, RAG or an LLM decision.
+- Tool failures, timeouts and invalid probe output are returned as controlled
+  quarantine errors. The observed LibreDWG Latin-1 and bare non-finite-number
+  dialect is normalized narrowly, with parser mode and replacement count in the
+  response; it never qualifies a file by itself.
 - The catalog links 15 nearby source images to 7 CAD files for retrieval and
   human comparison. These links do not prove that an image matches the complete
   CAD geometry. No local preview is sent to a remote vision model by default.
@@ -195,12 +224,15 @@ frontend.
 ## 3D and QA
 
 - Real Blender is required for a real GLB.
-- The audited macOS host now has Blender 4.5.12 LTS arm64 installed at
-  `/Applications/Blender 4.5 LTS.app`; its background/factory-startup smoke and
-  28 focused Blender/golden/runtime tests pass. The older Blender 5.1.2 bundle
-  remains installed and still crashes during Metal detection, so the resolver
-  deliberately prefers the pinned LTS path. Executable presence alone remains
-  insufficient proof on other hosts.
+- The macOS host has Blender 4.5.12 LTS arm64 at
+  `/Applications/Blender 4.5 LTS.app`, but the 2026-08-05
+  background/factory-startup smoke exits by `SIGSEGV` in USD
+  `Arch_ValidateAssumptions`; eight focused Blender-runner tests therefore fail
+  before the worker script executes. Blender 5.1.2 fails the same smoke. The
+  Product API now reports Blender unavailable when this runtime smoke fails;
+  executable presence is no longer treated as readiness proof. The Docker
+  `linux/amd64` Blender runtime is a separate path and must pass its own health
+  smoke.
 - Blender fallback is rejected by default, but missing assets can still become
   visible procedural geometry during a real Blender generation.
 - Geometry source of truth is `SceneSpec`, including selected manifests,
@@ -281,8 +313,10 @@ frontend.
 
 - Trusted assembly/recovery remains
   `M0_TRUSTED_ASSEMBLY_AND_RECOVERY_PARTIAL`. The isolated real-Blender E2E and
-  a real HTTP 4G generation/edit/version run passed on the final backend tree;
-  the connected frontend smoke on the exact final tree is still unrecorded.
+  a real HTTP 4G generation/edit/version run passed. A connected smoke on the
+  2026-08-04 Docker tree restored the certified active version and real GLB in
+  the viewer with no browser console error or warning; degraded/document-pack,
+  rollback and recovery branches are not exhaustively replayed in-browser.
 - The current output is technical generic/schematic: the accepted live scene
   has zero vendor-qualified components, a compact simplified staircase and
   crowded summit annotations. Two GeometryPrograms used visible

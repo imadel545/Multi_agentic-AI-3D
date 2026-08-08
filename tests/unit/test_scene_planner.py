@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from core.agents.scene_planner import ScenePlanner
+from core.agents.scene_planner import ScenePlanner, _assembly_generation_strategy
+from core.contracts.assembly import AssemblyComponentSelection, AssemblyPlan
 from core.contracts.assets import AssetManifest, AssetQualification, DimensionsM
 from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
@@ -267,6 +268,38 @@ def test_scene_planner_uses_only_manifest_authorized_generation_modes() -> None:
     assert scene.sectors[0].radio_generation_strategy == "internal_project_generated"
     assert scene.accessory_assets[0].generation_strategy == "imported_glb_exact"
     assert scene.sectors[0].antenna_asset_metadata.verified_file_sha256 == "a" * 64
+
+
+def test_scene_planner_honors_exact_tower_strategy_selected_by_assembly_plan() -> None:
+    tower = _tower().model_copy(
+        update={
+            "qualification": AssetQualification(
+                status="qualified_for_generation",
+                allowed_generation_modes=["imported_glb_exact"],
+                verified_file_sha256="a" * 64,
+                mesh_integrity_verified=True,
+                dimensions_verified=True,
+                pivot_verified=True,
+                orientation_verified=True,
+                qualification_method="test exact tower qualification",
+            )
+        }
+    )
+    component = AssemblyComponentSelection.model_construct(
+        role_id="support_structure",
+        selected_asset_id=tower.asset_id,
+        generation_strategy="imported_glb_exact",
+    )
+    plan = AssemblyPlan.model_construct(components=[component])
+
+    strategy = _assembly_generation_strategy(
+        plan,
+        role_id="support_structure",
+        asset=tower,
+        tower=True,
+    )
+
+    assert strategy == "imported_glb_exact"
 
 
 def test_scene_planner_propagates_geometry_fidelity_to_runtime_metadata() -> None:

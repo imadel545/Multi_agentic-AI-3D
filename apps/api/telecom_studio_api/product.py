@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -437,7 +439,41 @@ def _inventory_status(inventory: dict) -> str:
 
 
 def _blender_available() -> bool:
-    return _resolve_blender_binary(settings.resolved_blender_binary) is not None
+    binary = _resolve_blender_binary(settings.resolved_blender_binary)
+    if binary is None:
+        return False
+    try:
+        stat = binary.stat()
+    except OSError:
+        return False
+    return _probe_blender_runtime(str(binary), stat.st_mtime_ns, stat.st_size)
+
+
+@lru_cache(maxsize=8)
+def _probe_blender_runtime(binary: str, _mtime_ns: int, _size: int) -> bool:
+    """Treat Blender as available only after a real headless startup succeeds."""
+
+    marker = "TELECOM_STUDIO_BLENDER_READY"
+    try:
+        completed = subprocess.run(
+            [
+                binary,
+                "--background",
+                "--factory-startup",
+                "--python-expr",
+                f'print("{marker}")',
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    output = f"{completed.stdout}\n{completed.stderr}"
+    return completed.returncode == 0 and marker in output
 
 
 def _rag_summary(rag_service: Any | None) -> dict:
@@ -480,9 +516,6 @@ def _rag_summary(rag_service: Any | None) -> dict:
     elif provider_name.startswith("nvidia:"):
         status = "primary_nvidia_embedding"
         degraded = False
-    elif provider_name.startswith("sentence-transformers:"):
-        status = "local_sentence_transformers_explicit"
-        degraded = True
     elif provider_name.startswith("hashing-"):
         status = "deterministic_hash_fallback"
         degraded = True
@@ -518,8 +551,6 @@ def _rag_reranker_status(rag_service: Any) -> str:
         return "passthrough_no_rerank"
     if name.startswith("nvidia:"):
         return "primary_nvidia_reranker"
-    if name.startswith("cross-encoder:"):
-        return "explicit_local_reranker"
     if name == "not_loaded":
         return "not_loaded"
     return "custom"
@@ -1846,12 +1877,16 @@ def _studio_warnings(inventory: dict, rag: dict | None = None) -> list[dict]:
     if not _blender_available():
         warnings.append(
             {
-                "title": "Blender non installé",
+                "title": "Blender indisponible ou invalide",
                 "severity": "warning",
                 "impact": (
-                    "Aucun design ne produira de vrai GLB tant que Blender n'est pas installé."
+                    "Aucun design ne produira de vrai GLB tant que le démarrage headless "
+                    "de Blender échoue."
                 ),
-                "recommended_action": "Installez Blender 4.5+ et redémarrez l'API.",
+                "recommended_action": (
+                    "Installez un Blender LTS compatible, vérifiez son smoke headless, "
+                    "puis redémarrez l'API."
+                ),
                 "technical_code": "STUDIO_BLENDER_NOT_AVAILABLE",
             }
         )

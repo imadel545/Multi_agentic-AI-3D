@@ -6,7 +6,6 @@ dense similarity alone. This is especially useful for short French telecom queri
 
 Product default: NVIDIA API reranker.
 Bootstrap/test mode: explicit passthrough.
-Developer override: local CrossEncoder.
 """
 
 from __future__ import annotations
@@ -23,7 +22,6 @@ from core.rag.models import RagSearchResult
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LOCAL_RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 DEFAULT_NVIDIA_RERANKER_MODEL = "nvidia/llama-nemotron-rerank-1b-v2"
 DEFAULT_RERANKER_MODEL = DEFAULT_NVIDIA_RERANKER_MODEL
 DEFAULT_RERANKER_TIMEOUT_S = 8.0
@@ -90,51 +88,6 @@ class PassthroughReranker:
         top_k: int,
     ) -> list[RagSearchResult]:
         return results[:top_k]
-
-
-class CrossEncoderReranker:
-    """Local cross-encoder re-ranker. Default model: BAAI/bge-reranker-v2-m3."""
-
-    def __init__(
-        self,
-        model_name: str = DEFAULT_LOCAL_RERANKER_MODEL,
-        *,
-        device: str = "cpu",
-        max_length: int = 512,
-    ) -> None:
-        from sentence_transformers import CrossEncoder
-
-        self.model_name = model_name
-        # Cross-encoders are memory-hungry; default to CPU and a conservative
-        # max_length to avoid OOM on consumer GPUs/MPS while keeping latency low.
-        self.model = CrossEncoder(
-            model_name,
-            trust_remote_code=False,
-            device=device,
-            max_length=max_length,
-        )
-        self.name = f"cross-encoder:{model_name}"
-        self.provider = "local"
-        self.status = "explicit_local_reranker"
-        self.degraded_reason = None
-
-    def rerank(
-        self,
-        query: str,
-        results: list[RagSearchResult],
-        top_k: int,
-    ) -> list[RagSearchResult]:
-        if not results:
-            return []
-
-        pairs = [(query, result.text) for result in results]
-        scores = self.model.predict(pairs)
-        scored = sorted(
-            zip(results, scores, strict=False),
-            key=lambda item: float(item[1]),
-            reverse=True,
-        )
-        return [result for result, _ in scored[:top_k]]
 
 
 class NvidiaReranker:
@@ -438,34 +391,16 @@ def build_reranker(
 ) -> Reranker:
     """Build the configured re-ranker.
 
-    The product path avoids hidden local model downloads/loads. Use
-    provider_name="local" only when the developer explicitly wants the
-    local cross-encoder.
+    The product path avoids hidden local model downloads and loads.
     """
     provider_name = provider_name.strip().lower()
     if provider_name in {"", "none", "passthrough", "disabled"}:
         return PassthroughReranker(provider=provider_name or "passthrough", model_name=model_name)
     if provider_name == "nvidia":
         return NvidiaReranker(model_name, api_key=api_key, base_url=base_url)
-    if provider_name != "local":
-        raise RuntimeError(
-            f"Unsupported reranker provider {provider_name!r}. Use nvidia, passthrough, or local."
-        )
-    try:
-        reranker = CrossEncoderReranker(model_name)
-        logger.info("Using local cross-encoder re-ranker: %s", reranker.name)
-        return reranker
-    except Exception as exc:
-        logger.warning(
-            "Cross-encoder re-ranker %s failed to load (%s); using passthrough.",
-            model_name,
-            exc,
-        )
-        return PassthroughReranker(
-            provider="local",
-            model_name=model_name,
-            degraded_reason=f"local_reranker_load_error:{type(exc).__name__}",
-        )
+    raise RuntimeError(
+        f"Unsupported reranker provider {provider_name!r}. Use nvidia or passthrough."
+    )
 
 
 def _parse_rankings(payload: dict[str, Any]) -> list[tuple[int, float]]:

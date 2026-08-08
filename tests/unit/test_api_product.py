@@ -1,17 +1,68 @@
 """Tests for product-oriented API endpoints."""
 
+import subprocess
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
 from apps.api.telecom_studio_api.product import (
+    _blender_available,
     _events_to_timeline,
     _geometry_fidelity_summary,
     _geometry_program_summary_from_path,
+    _probe_blender_runtime,
     _studio_warnings,
 )
 from apps.api.telecom_studio_api.runtime_contract import memory_status
+
+
+def test_blender_availability_requires_successful_headless_smoke(
+    tmp_path: Path, monkeypatch
+) -> None:
+    binary = tmp_path / "blender"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._resolve_blender_binary",
+        lambda _configured: binary,
+    )
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=-11,
+            stdout="Blender 4.5.12 LTS",
+            stderr="Arch_ValidateAssumptions",
+        ),
+    )
+    _probe_blender_runtime.cache_clear()
+
+    assert _blender_available() is False
+
+
+def test_blender_availability_accepts_verified_headless_smoke(
+    tmp_path: Path, monkeypatch
+) -> None:
+    binary = tmp_path / "blender"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._resolve_blender_binary",
+        lambda _configured: binary,
+    )
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout="Blender 4.5.12 LTS\nTELECOM_STUDIO_BLENDER_READY",
+            stderr="",
+        ),
+    )
+    _probe_blender_runtime.cache_clear()
+
+    assert _blender_available() is True
 
 
 def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
@@ -63,14 +114,12 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
             "primary_nvidia_embedding",
             "configured_unverified",
             "configured_but_last_operation_failed",
-            "local_sentence_transformers_explicit",
             "deterministic_hash_fallback",
             "custom_provider",
         }
         assert isinstance(summary["rag_degraded"], bool)
         assert summary["rag_reranker_status"] in {
             "passthrough_no_rerank",
-            "explicit_local_reranker",
             "primary_nvidia_reranker",
             "degraded_passthrough",
             "not_loaded",
@@ -78,7 +127,6 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
         }
         assert summary["rag_reranker_provider"] in {
             "nvidia",
-            "local",
             "passthrough",
             "disabled",
             None,

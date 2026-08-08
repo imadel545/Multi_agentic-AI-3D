@@ -2182,7 +2182,7 @@ class WorkflowService:
             design_blueprint=getattr(result, "design_blueprint", None),
             scene=result.scene,
             generation=result.generation,
-            cognitive_plan=result.cognitive_plan,
+            cognitive_plan=getattr(result, "cognitive_plan", None),
         ):
             raise RuntimeError(
                 "COMPLETION_CERTIFICATE_INVALID: terminal artifacts or hashes are not proven"

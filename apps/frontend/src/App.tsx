@@ -1334,7 +1334,7 @@ export default function App({ apiClient = api }: AppProps) {
             <div className="retained-design-notice" role="status">
               <CheckCircle2 size={16} aria-hidden="true" />
               <div>
-                <strong>Dernier résultat certifié conservé</strong>
+                <strong>Dernier résultat vérifié conservé</strong>
                 <span>La nouvelle demande a échoué; elle n’a pas remplacé ce modèle validé.</span>
               </div>
             </div>
@@ -1728,12 +1728,12 @@ export function revisionOutcomeMessage(
     .map((error) => String(error.code ?? "").toUpperCase())
     .join(" ");
   if (errorCodes.includes("GEOMETRY_VALIDATION")) {
-    return "La nouvelle version a été refusée par le contrôle géométrique. La version certifiée précédente reste active.";
+    return "La nouvelle version a été refusée par le contrôle géométrique. La version vérifiée précédente reste active.";
   }
   if (unsupported.length) {
     return `Modification non appliquée. Capacité indisponible : ${unsupported.join(" ")}`;
   }
-  return "Modification non appliquée. La version certifiée précédente reste active.";
+  return "Modification non appliquée. La version vérifiée précédente reste active.";
 }
 
 function humanUnsupportedEditRequest(message: string): string {

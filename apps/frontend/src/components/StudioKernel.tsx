@@ -69,7 +69,7 @@ export function BackendStatusBar({
   const fidelityBadge = geometryFidelityBadge(bundle);
   const workflowActive =
     phase === "submitting" || phase === "streaming" || phase === "running";
-  const certified =
+  const integrityVerified =
     !workflowActive &&
     bundle?.status === "completed" &&
     bundle.generation_mode === "real_blender" &&
@@ -108,9 +108,9 @@ export function BackendStatusBar({
                 : "Conception en cours"}
           </span>
         ) : bundle ? (
-          <span className={certified ? "topbar-proof ok" : "topbar-proof warn"}>
-            {certified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
-            {certified ? "Résultat certifié" : workflowStatusLabel(bundle.status)}
+          <span className={integrityVerified ? "topbar-proof ok" : "topbar-proof warn"}>
+            {integrityVerified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
+            {integrityVerified ? "Intégrité vérifiée" : workflowStatusLabel(bundle.status)}
           </span>
         ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
         {fidelityBadge ? (
@@ -261,7 +261,7 @@ export function ChatCommandPanel({
       : phase === "completed"
         ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
         : phase === "failed"
-          ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération certifiée."
+          ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération vérifiée."
           : "Les contraintes sont extraites puis confirmées avant toute génération Blender.";
   const failedIssue = phase === "failed" && failureIssue
     ? humanizeUserIssue(failureIssue)

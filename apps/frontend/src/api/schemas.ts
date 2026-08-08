@@ -579,6 +579,7 @@ const AssemblyCandidateScoreSchema = publicSchema(
   UnknownRecord.extend({
     asset_id: z.string(),
     total_score: z.number(),
+    fidelity_score: z.number().default(0),
     reasons: z.array(z.string()).default([])
   })
 );

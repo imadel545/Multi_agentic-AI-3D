@@ -20,11 +20,10 @@ If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` lacks a key, startup fails instead
 of silently degrading. Network reachability is established only by the first
 real index/search/write operation and its failure is exposed explicitly.
 
-The 2026-07-28 live probe proved that the local NVIDIA key is valid:
-`GET /v1/models` returned 200 and listed `baai/bge-m3`. BGE-M3 itself returned
-500 for both scalar and batched requests. The selected Nemotron model returned
-200 and a 1024-dimensional vector with the same key. This distinguishes a
-model-serving incident from an authentication failure.
+The 2026-08-06 live probe proved the configured Nemotron route with the local
+NVIDIA key: query and passage requests both returned 200 and a
+1024-dimensional vector. Provider configuration alone remains insufficient;
+real retrieval evaluation on the controlled French telecom corpus is required.
 
 Construction of the provider is network-free and therefore is not an
 operational health proof. `/studio/summary` reports `configured_unverified`
@@ -36,8 +35,9 @@ until a real index/search/write succeeds, and
 - `TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic` is for tests/bootstrap only.
 - `TELECOM_STUDIO_EMBEDDING_PROVIDER=auto` may fall back to deterministic hash
   for local bootstrap, but it is not acceptable as product-quality RAG.
-- `sentence-transformers` is an explicit developer override only, not an
-  automatic product fallback.
+- No local neural embedding model is part of the product path. This avoids a
+  hidden download, a second unqualified retrieval profile and CPU contention
+  with Blender in the local runtime.
 
 ## Reranker
 
@@ -52,13 +52,6 @@ TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
 If the NVIDIA reranker is unavailable, retrieval falls back to vector order and
 the API exposes `degraded_passthrough` plus `rag_reranker_degraded_reason`.
 This is a visible degraded state, not a silent success.
-
-Local `BAAI/bge-reranker-v2-m3` is an explicit developer override only:
-
-```text
-TELECOM_STUDIO_RERANKER_PROVIDER=local
-TELECOM_STUDIO_RERANKER_MODEL=BAAI/bge-reranker-v2-m3
-```
 
 The backend exposes `rag_reranker_provider`, `rag_reranker_model`,
 `rag_reranker_status`, and `rag_reranker_degraded_reason` in `/studio/summary`

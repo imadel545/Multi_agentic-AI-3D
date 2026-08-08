@@ -55,6 +55,7 @@ export function TelecomGlbViewer({
   const [resetKey, setResetKey] = useState(0);
   const [objectSummary, setObjectSummary] = useState<ModelObjectSummary | null>(null);
   const [viewerHealth, setViewerHealth] = useState<ViewerHealth>("idle");
+  const [showTechnicalAids, setShowTechnicalAids] = useState(false);
   const [webglSupported, setWebglSupported] = useState<boolean | null>(() =>
     source.kind === "glb" ? probeWebGL() : null
   );
@@ -104,6 +105,15 @@ export function TelecomGlbViewer({
             type="button"
           >
             <RotateCcw size={15} aria-hidden="true" />
+          </button>
+          <button
+            aria-pressed={showTechnicalAids}
+            className={`viewer-aids-toggle${showTechnicalAids ? " active" : ""}`}
+            disabled={source.kind !== "glb"}
+            onClick={() => setShowTechnicalAids((value) => !value)}
+            type="button"
+          >
+            <Layers3 size={15} aria-hidden="true" /> Aides techniques
           </button>
           {badges.map((badge) => (
             <span className="status-badge" key={badge}>
@@ -194,6 +204,7 @@ export function TelecomGlbViewer({
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
                     selectedSemanticRoot={selectedSemanticRoot}
+                    showTechnicalAids={showTechnicalAids}
                     url={source.url}
                   />
                 </Suspense>
@@ -203,7 +214,7 @@ export function TelecomGlbViewer({
                     setViewerHealth(visible ? "render_visible" : "render_blank")
                   }
                 />
-                {viewerHealth === "render_visible" ? (
+                {viewerHealth === "render_visible" && showTechnicalAids ? (
                   <Grid
                     args={[42, 42]}
                     cellColor="#52656d"
@@ -260,17 +271,19 @@ function ModelScene({
   controlsRef,
   onHealth,
   onLoaded,
-  selectedSemanticRoot
+  selectedSemanticRoot,
+  showTechnicalAids
 }: {
   url: string;
   controlsRef: MutableRefObject<OrbitControlsImpl | null>;
   onHealth: (health: ViewerHealth) => void;
   onLoaded: (summary: ModelObjectSummary) => void;
   selectedSemanticRoot: string | null;
+  showTechnicalAids: boolean;
 }) {
   const gltf = useGLTF(url);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
-  const { camera, size } = useThree();
+  const { camera, invalidate, size } = useThree();
   const fitted = useRef(false);
   const selectedObject = useMemo(
     () => findSemanticObject(scene, selectedSemanticRoot),
@@ -282,11 +295,12 @@ function ModelScene({
   );
   useEffect(() => () => selectionHelper?.dispose(), [selectionHelper]);
   useEffect(() => {
-    prepareViewerScene(scene);
+    prepareViewerScene(scene, showTechnicalAids);
     onLoaded(summarizeObjects(scene));
     fitted.current = false;
     onHealth("model_loaded");
-  }, [onHealth, onLoaded, scene, size.height, size.width]);
+    invalidate();
+  }, [invalidate, onHealth, onLoaded, scene, showTechnicalAids, size.height, size.width]);
   useEffect(() => {
     fitted.current = false;
   }, [selectedSemanticRoot]);
@@ -408,14 +422,16 @@ function GlbObjectSummary({
   return (
     <details className="viewer-object-summary" aria-label="Résumé du modèle 3D">
       <summary>
-      <strong>
-        <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
-      </strong>
-      <small>
-        {summary.evidenceMode === "semantic_extras"
-          ? `${summary.semanticEntityCount} équipements identifiables`
-          : "Structure 3D inspectable"} · {viewerHealthLabel(health)}
-      </small>
+        <strong>
+          <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
+        </strong>
+        <small>
+          {summary.evidenceMode === "semantic_extras"
+            ? `${summary.physicalEntityCount} composants physiques${
+                summary.technicalAidCount ? ` · ${summary.technicalAidCount} aides d’inspection` : ""
+              }`
+            : "Structure 3D inspectable"} · {viewerHealthLabel(health)}
+        </small>
       </summary>
       <div>
         {rows.map(([role, count]) => (

@@ -75,9 +75,14 @@ describe("viewer math", () => {
 
     const fit = fitCameraToObject(camera, scene, null);
 
-    expect(arrow.visible).toBe(true);
+    prepareViewerScene(scene);
+
+    expect(arrow.visible).toBe(false);
     expect(fit?.box.getSize(new Vector3()).x).toBeLessThan(10);
     expect(fit?.box.getSize(new Vector3()).y).toBeGreaterThan(29);
+
+    prepareViewerScene(scene, true);
+    expect(arrow.visible).toBe(true);
   });
 
   it("keeps the backend material truth and leaves the requested foundation visible", () => {
@@ -170,6 +175,8 @@ describe("viewer math", () => {
     expect(summary.evidenceMode).toBe("semantic_extras");
     expect(summary.totalNamedObjects).toBe(7);
     expect(summary.semanticEntityCount).toBe(3);
+    expect(summary.physicalEntityCount).toBe(3);
+    expect(summary.technicalAidCount).toBe(0);
     expect(summary.roles.tower).toBe(1);
     expect(summary.roles.cabinet).toBe(1);
     expect(summary.roles.rru).toBe(1);
@@ -185,5 +192,29 @@ describe("viewer math", () => {
 
     expect(summary.evidenceMode).toBe("legacy_name_fallback");
     expect(summary.roles.tower).toBe(1);
+    expect(summary.physicalEntityCount).toBe(1);
+    expect(summary.technicalAidCount).toBe(0);
+  });
+
+  it("separates physical components from technical inspection aids", () => {
+    const scene = new Object3D();
+    for (const [name, role] of [
+      ["tower_site", "tower"],
+      ["antenna_S1", "antenna"],
+      ["azimuth_arrow_S1", "azimuth_arrow"],
+      ["sector_beam_S1", "beam"],
+      ["label_sector_S1", "label"]
+    ]) {
+      const object = new Object3D();
+      object.name = name;
+      object.userData = { role, semantic_root: name };
+      scene.add(object);
+    }
+
+    const summary = summarizeObjects(scene);
+
+    expect(summary.semanticEntityCount).toBe(5);
+    expect(summary.physicalEntityCount).toBe(2);
+    expect(summary.technicalAidCount).toBe(3);
   });
 });

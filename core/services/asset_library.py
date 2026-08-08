@@ -150,7 +150,9 @@ class AssetLibraryService:
                     f"dwgread={diagnostic[:300]}"
                 )
             try:
-                payload = json.loads(output.read_bytes())
+                payload, parser_mode, sanitized_non_finite_values = _load_dwg_probe_payload(
+                    output
+                )
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise AssetLibraryError(
                     "Le probe DWG a produit une sortie JSON illisible; "
@@ -163,6 +165,7 @@ class AssetLibraryService:
                 entity_counts[entity] += 1
         header = payload.get("HEADER") if isinstance(payload, dict) else {}
         file_header = payload.get("FILEHEADER") if isinstance(payload, dict) else {}
+        unit_info = _dwg_unit_info(header if isinstance(header, dict) else {})
         contains_acis = entity_counts["3DSOLID"] > 0 or entity_counts["BODY"] > 0
         mesh_convertible = any(
             entity_counts[name] > 0 for name in ("3DFACE", "MESH", "POLYLINE_3D", "POLYLINE_PFACE")
@@ -177,8 +180,14 @@ class AssetLibraryService:
             "file": _public_entry(entry),
             "probe_status": "completed",
             "tool": "dwgread",
+            "parser_mode": parser_mode,
+            "sanitized_non_finite_values": sanitized_non_finite_values,
             "dwg_version": file_header.get("version") if isinstance(file_header, dict) else None,
-            "declared_unit": header.get("unit1_name") if isinstance(header, dict) else None,
+            "declared_unit": unit_info["declared_unit"],
+            "unit_scale_to_meters": unit_info["unit_scale_to_meters"],
+            "insunits_code": unit_info["insunits_code"],
+            "display_unit_name": unit_info["display_unit_name"],
+            "unit_metadata_conflict": unit_info["unit_metadata_conflict"],
             "entity_counts": dict(sorted(entity_counts.items())),
             "contains_acis_3d_solids": contains_acis,
             "contains_mesh_convertible_geometry": mesh_convertible,
@@ -212,6 +221,141 @@ class AssetLibraryService:
         self._by_id = {entry["file_id"]: entry for entry in entries}
         self._catalog_identity = identity
         return entries
+
+
+_NON_FINITE_JSON_TOKEN = re.compile(
+    r"(?P<prefix>[:\[,]\s*)(?:[-+]?nan|[-+]?inf(?:inity)?)(?=\s*[,}\]])",
+    flags=re.IGNORECASE,
+)
+_JSON_STRING_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"', flags=re.DOTALL)
+
+
+def _load_dwg_probe_payload(output: Path) -> tuple[dict[str, Any], str, int]:
+    """Read LibreDWG minJSON without treating its dialect as strict UTF-8 JSON.
+
+    Real DWG files can make ``dwgread -O minJSON`` emit ISO-8859-1 strings and
+    lower-case non-finite numeric tokens such as ``nan``.  Those details are not
+    geometry qualification failures, but Python's strict JSON decoder rejects
+    them.  Decode losslessly, replace only bare non-finite number tokens outside
+    JSON strings, and keep the normalization visible in the probe result.
+    """
+
+    raw = output.read_bytes()
+    try:
+        text = raw.decode("utf-8-sig")
+        encoding = "utf8"
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+        encoding = "latin1"
+
+    normalized, replacement_count = _normalize_non_finite_json_numbers(text)
+    payload = json.loads(normalized)
+    if not isinstance(payload, dict):
+        raise json.JSONDecodeError("DWG probe root must be an object", normalized, 0)
+    mode = encoding if replacement_count == 0 else f"{encoding}_non_finite_normalized"
+    return payload, mode, replacement_count
+
+
+def _normalize_non_finite_json_numbers(text: str) -> tuple[str, int]:
+    """Replace non-standard bare numbers while preserving JSON string contents."""
+
+    chunks: list[str] = []
+    replacement_count = 0
+    cursor = 0
+    for string_match in _JSON_STRING_TOKEN.finditer(text):
+        plain, count = _NON_FINITE_JSON_TOKEN.subn(
+            lambda match: f"{match.group('prefix')}null",
+            text[cursor : string_match.start()],
+        )
+        chunks.extend((plain, string_match.group(0)))
+        replacement_count += count
+        cursor = string_match.end()
+    tail, count = _NON_FINITE_JSON_TOKEN.subn(
+        lambda match: f"{match.group('prefix')}null",
+        text[cursor:],
+    )
+    chunks.append(tail)
+    return "".join(chunks), replacement_count + count
+
+
+_DWG_INSUNITS: dict[int, tuple[str, float | None]] = {
+    0: ("unitless", None),
+    1: ("inches", 0.0254),
+    2: ("feet", 0.3048),
+    3: ("miles", 1609.344),
+    4: ("millimeters", 0.001),
+    5: ("centimeters", 0.01),
+    6: ("meters", 1.0),
+    7: ("kilometers", 1000.0),
+    8: ("microinches", 0.0000000254),
+    9: ("mils", 0.0000254),
+    10: ("yards", 0.9144),
+    11: ("angstroms", 1e-10),
+    12: ("nanometers", 1e-9),
+    13: ("microns", 1e-6),
+    14: ("decimeters", 0.1),
+    15: ("decameters", 10.0),
+    16: ("hectometers", 100.0),
+    17: ("gigameters", 1e9),
+    18: ("astronomical_units", 149_597_870_700.0),
+    19: ("light_years", 9.4607304725808e15),
+    20: ("parsecs", 3.085677581491367e16),
+    21: ("us_survey_feet", 1200.0 / 3937.0),
+    22: ("us_survey_inches", 100.0 / 3937.0),
+    23: ("us_survey_yards", 3600.0 / 3937.0),
+    24: ("us_survey_miles", 6_336_000.0 / 3937.0),
+}
+
+_DISPLAY_UNIT_ALIASES = {
+    "mm": "millimeters",
+    "cm": "centimeters",
+    "m": "meters",
+    "km": "kilometers",
+    "in": "inches",
+    "inch": "inches",
+    "ft": "feet",
+    "foot": "feet",
+}
+
+
+def _dwg_unit_info(header: dict[str, Any]) -> dict[str, Any]:
+    raw_code = header.get("INSUNITS")
+    insunits_code = (
+        raw_code
+        if isinstance(raw_code, int) and not isinstance(raw_code, bool)
+        else None
+    )
+    display_unit = header.get("unit1_name")
+    display_unit_name = str(display_unit).strip() if display_unit not in (None, "") else None
+    display_canonical = (
+        _DISPLAY_UNIT_ALIASES.get(display_unit_name.casefold(), display_unit_name.casefold())
+        if display_unit_name
+        else None
+    )
+    code_unit = _DWG_INSUNITS.get(insunits_code) if insunits_code is not None else None
+    if code_unit is not None:
+        declared_unit, scale = code_unit
+    else:
+        declared_unit = display_canonical
+        scale = {
+            "millimeters": 0.001,
+            "centimeters": 0.01,
+            "meters": 1.0,
+            "kilometers": 1000.0,
+            "inches": 0.0254,
+            "feet": 0.3048,
+        }.get(display_canonical)
+    return {
+        "declared_unit": declared_unit,
+        "unit_scale_to_meters": scale,
+        "insunits_code": insunits_code,
+        "display_unit_name": display_unit_name,
+        "unit_metadata_conflict": bool(
+            code_unit is not None
+            and display_canonical is not None
+            and display_canonical != code_unit[0]
+        ),
+    }
 
 
 def _decode_process_output(value: bytes | str | None) -> str:

@@ -16,7 +16,8 @@ FastAPI
   -> SQLite memory recall
   -> asset registry + inventory
   -> qualified asset-library retrieval only (raw CAD stays quarantined)
-  -> scored asset candidates + AssemblyPlan/connectors
+  -> fidelity-aware scored asset candidates + bounded LLM selection
+  -> AssemblyPlan/connectors
   -> routed DesignBlueprint specialists
   -> SceneSpec planner
   -> optional bounded GPT-OSS GeometryProgram
@@ -60,11 +61,37 @@ active SceneSpec + prompt
 - `core/services/asset_library.py`: immutable-source catalog, SHA-256
   deduplication, metadata search, deterministic CAD-to-source-preview links and
   isolated LibreDWG probes. Preview links are retrieval evidence only. The
-  service does not promote or tessellate a raw CAD asset.
+  probe accepts LibreDWG's observed Latin-1/non-finite JSON dialect, reports
+  every normalization, and resolves scale from `INSUNITS` while exposing unit
+  metadata conflicts. The service does not promote or tessellate a raw CAD
+  asset.
 - `core/qa`: GLB structural parse, mesh/accessor/transform basic QA, proxy
   geometry, preview pixel/framing QA.
 
 ## Runtime truths
+
+### Docker runtime
+
+- `infra/docker-compose.yml` is the only authoritative Compose stack.
+- Nginx serves the compiled frontend on loopback and proxies the stable FastAPI
+  routes same-origin. SSE buffering is disabled only for the design event
+  stream and document uploads retain the backend 200 MB limit.
+- The API runs as UID/GID `10001`, one Uvicorn worker and `linux/amd64` with an
+  archive-hash-pinned Blender 4.5.12 LTS. Startup fails unless the Blender
+  background/factory-startup smoke reports that release. Docker selects the
+  governed EEVEE engine with 8 samples to keep five-view technical previews
+  within the 600-second emulation budget; unsupported engine/sample overrides
+  fail closed.
+- SQLite remains canonical in `sqlite_data`; artifacts use `outputs_data`.
+  `sqlite-snapshot` uses SQLite's online backup API and atomically publishes
+  integrity-checked, read-only copies to `sqlite_preview` for Adminer.
+- Qdrant `v1.18.0` is a derived vector store in `qdrant_data`; its REST port is
+  loopback-only and gRPC remains internal. The local index identity files live
+  in a writable API state directory, not the read-only application image.
+- The CAD library is a read-only bind mount. It is not copied into images and
+  is not mass-converted by container startup.
+- Vite publishes compiled bundles below `/static`; `/assets` therefore remains
+  exclusively the FastAPI asset-library contract in the same-origin proxy.
 
 - `outputs/temp` contains ignored workflow artifacts.
 - `data/sqlite` and `data/qdrant` are local ignored runtime stores.
@@ -108,6 +135,11 @@ active SceneSpec + prompt
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,
   generation-eligible catalog rows may enter the asset RAG collection.
+- Candidate ordering is deterministic and weights declared geometry fidelity
+  separately from compatibility, dimensions and execution strategy. The bounded
+  LLM receives those factors but may select only a supplied qualified ID and an
+  authorized strategy; `ScenePlanner` then consumes that exact AssemblyPlan
+  decision instead of recomputing a conflicting strategy.
 - Geometry QA combines binary accessor checks, semantic role transforms and a
   real-vertex AABB interference screen for primary equipment. It is not exact
   triangle/BVH collision, RF, structural or vendor-grade QA.
@@ -125,10 +157,10 @@ active SceneSpec + prompt
 - Document-pack locks are process-local. Atomic JSON replacements prevent
   partial files and concurrent readers cannot observe an in-flight correction,
   but a crash can still split a multi-file pack revision.
-- Python dependency ranges have explicit advisory-driven security floors but
-  are not accompanied by a committed resolution lock. The optional Qdrant
-  Docker image remains on legacy server `v1.9.2` pending a stepwise storage
-  migration.
+- Native Python dependency ranges have explicit advisory-driven security floors
+  but are not accompanied by a native-environment resolution lock. Docker has
+  a committed Linux/Python 3.12 lock; Qdrant server and client are aligned on
+  `v1.18.0`.
 
 ## Generic cognitive extension V1
 

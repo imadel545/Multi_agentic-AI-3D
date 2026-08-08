@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -198,16 +199,53 @@ def _reset_scene(bpy) -> None:
     bpy.ops.object.delete()
 
 
+def _select_render_engine(available_engines: set[str], requested_engine: str | None) -> str:
+    supported = ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH")
+    requested = (requested_engine or "").strip()
+    if requested:
+        if requested not in supported:
+            raise RuntimeError(f"Unsupported governed Blender render engine: {requested}")
+        if requested not in available_engines:
+            raise RuntimeError(f"Requested Blender render engine is unavailable: {requested}")
+        return requested
+    for engine in supported:
+        if engine in available_engines:
+            return engine
+    raise RuntimeError("No governed Blender render engine is available")
+
+
+def _governed_eevee_render_samples(raw_value: str | None) -> int | None:
+    requested = (raw_value or "").strip()
+    if not requested:
+        return None
+    try:
+        samples = int(requested)
+    except ValueError as exc:
+        raise RuntimeError("EEVEE render samples must be an integer") from exc
+    if samples < 1 or samples > 64:
+        raise RuntimeError("EEVEE render samples must be between 1 and 64")
+    return samples
+
+
 def _configure_scene(bpy, scene: dict) -> None:
     bpy.context.scene.unit_settings.system = "METRIC"
     bpy.context.scene.unit_settings.scale_length = 1.0
     engines = {
         item.identifier for item in bpy.context.scene.render.bl_rna.properties["engine"].enum_items
     }
-    for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "BLENDER_WORKBENCH"):
-        if engine in engines:
-            bpy.context.scene.render.engine = engine
-            break
+    bpy.context.scene.render.engine = _select_render_engine(
+        engines,
+        os.getenv("TELECOM_STUDIO_BLENDER_RENDER_ENGINE"),
+    )
+    eevee_samples = _governed_eevee_render_samples(
+        os.getenv("TELECOM_STUDIO_BLENDER_EEVEE_RENDER_SAMPLES")
+    )
+    if eevee_samples is not None:
+        if not hasattr(bpy.context.scene, "eevee") or not hasattr(
+            bpy.context.scene.eevee, "taa_render_samples"
+        ):
+            raise RuntimeError("Governed EEVEE render samples are unavailable")
+        bpy.context.scene.eevee.taa_render_samples = eevee_samples
     width, height = scene["preview"]["resolution"]
     bpy.context.scene.render.resolution_x = int(width)
     bpy.context.scene.render.resolution_y = int(height)
@@ -3003,8 +3041,7 @@ def _write_metadata(
         "generation_mode": generation_mode,
         "assets_used": _assets_used(scene),
         "geometry_program_ids": [
-            str(program["program_id"])
-            for program in scene.get("geometry_programs", [])
+            str(program["program_id"]) for program in scene.get("geometry_programs", [])
         ],
         "procedural_objects_created": procedural_objects,
         "asset_imports": public_asset_imports,

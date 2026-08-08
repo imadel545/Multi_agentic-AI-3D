@@ -23,6 +23,8 @@ export type RenderSample = [number, number, number, number];
 export type ModelObjectSummary = {
   totalNamedObjects: number;
   semanticEntityCount: number;
+  physicalEntityCount: number;
+  technicalAidCount: number;
   evidenceMode: "semantic_extras" | "legacy_name_fallback";
   roles: Record<string, number>;
 };
@@ -36,6 +38,8 @@ const CameraFitExcludedRoles = new Set([
   "label"
 ]);
 const CameraFitExcludedNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
+const TechnicalAidRoles = new Set(["azimuth_arrow", "beam", "height_marker", "label"]);
+const TechnicalAidNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
 const TelecomCameraFitPadding = 1.4;
 
 export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): CameraFit {
@@ -93,10 +97,12 @@ export function fitCameraToObject(
   return fit;
 }
 
-export function prepareViewerScene(scene: Object3D) {
+export function prepareViewerScene(scene: Object3D, showTechnicalAids = false) {
   scene.traverse((object) => {
     if (shouldHideTechnicalObject(object)) {
       object.visible = false;
+    } else if (isTechnicalAidObject(object)) {
+      object.visible = showTechnicalAids;
     }
   });
 }
@@ -201,6 +207,12 @@ export function summarizeObjects(scene: Object3D): ModelObjectSummary {
       roles,
       totalNamedObjects,
       semanticEntityCount: semanticEntities.size,
+      physicalEntityCount: [...semanticEntities].filter(
+        (entity) => !TechnicalAidRoles.has(entity.slice(0, entity.indexOf(":")))
+      ).length,
+      technicalAidCount: [...semanticEntities].filter((entity) =>
+        TechnicalAidRoles.has(entity.slice(0, entity.indexOf(":")))
+      ).length,
       evidenceMode: "semantic_extras"
     };
   }
@@ -219,10 +231,17 @@ export function summarizeObjects(scene: Object3D): ModelObjectSummary {
     if (name.includes("rru") || name.includes("radio")) roles.rru += 1;
     if (name.includes("tower") || name.includes("lattice") || name.includes("monopole")) roles.tower += 1;
   });
+  const semanticEntityCount = Object.values(roles).reduce((sum, count) => sum + count, 0);
+  const technicalAidCount = [...TechnicalAidRoles].reduce(
+    (sum, role) => sum + (roles[role] ?? 0),
+    0
+  );
   return {
     roles,
     totalNamedObjects,
-    semanticEntityCount: Object.values(roles).reduce((sum, count) => sum + count, 0),
+    semanticEntityCount,
+    physicalEntityCount: Math.max(0, semanticEntityCount - technicalAidCount),
+    technicalAidCount,
     evidenceMode: "legacy_name_fallback"
   };
 }
@@ -276,6 +295,15 @@ function shouldExcludeFromCameraFit(object: Object3D): boolean {
     current = current.parent;
   }
   return false;
+}
+
+function isTechnicalAidObject(object: Object3D): boolean {
+  const role = canonicalSemanticRole(object.userData.role ?? object.userData.object_role);
+  if (role && TechnicalAidRoles.has(role)) {
+    return true;
+  }
+  const name = object.name.toLowerCase();
+  return TechnicalAidNameTokens.some((token) => name.includes(token));
 }
 
 function shouldHideTechnicalObject(object: Object3D): boolean {

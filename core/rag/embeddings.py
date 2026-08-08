@@ -1,10 +1,7 @@
 """Embedding providers.
 
-Primary: NVIDIA API for a configured multilingual retrieval model.
+Primary: NVIDIA API for the configured multilingual retrieval model.
 Emergency fallback: deterministic hash embedding for tests and bootstrap only.
-
-The product path is API-first. Local sentence-transformers is only an explicit
-developer override; it is never used as an automatic fallback for the NVIDIA API.
 """
 
 from __future__ import annotations
@@ -30,7 +27,6 @@ NVIDIA_INPUT_PROFILE = "query_passage_v1"
 # NVIDIA publishes these dimensions for the supported Retriever embedding NIMs.
 # Keeping them local prevents a network probe during application import/startup.
 NVIDIA_MODEL_DIMENSIONS = {
-    "baai/bge-m3": 1024,
     "nvidia/nv-embedqa-e5-v5": 1024,
     "nvidia/llama-nemotron-embed-1b-v2": 2048,
 }
@@ -78,7 +74,7 @@ class HashEmbeddingProvider:
 
 
 class NvidiaEmbeddingProvider:
-    """NVIDIA API provider for BAAI/bge-m3. OpenAI-compatible endpoint."""
+    """NVIDIA API provider using the OpenAI-compatible embedding endpoint."""
 
     def __init__(
         self,
@@ -181,34 +177,6 @@ class NvidiaEmbeddingProvider:
         return vectors
 
 
-class SentenceTransformersProvider:
-    """Local sentence-transformers provider. Default model: BAAI/bge-m3."""
-
-    def __init__(self, model_name: str = DEFAULT_MODEL) -> None:
-        from sentence_transformers import SentenceTransformer
-
-        self.model_name = model_name
-        self.model = SentenceTransformer(model_name, trust_remote_code=False)
-        self.name = f"sentence-transformers:{model_name}"
-        self.dimensions = self.model.get_embedding_dimension()
-        self.input_profile = "symmetric_v1"
-
-    def embed(self, text: str) -> list[float]:
-        return self.model.encode(text, convert_to_numpy=True).tolist()
-
-    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        encoded = self.model.encode(list(texts), convert_to_numpy=True)
-        return encoded.tolist()
-
-    def embed_query(self, text: str) -> list[float]:
-        return self.embed(text)
-
-    def embed_passages(self, texts: Sequence[str]) -> list[list[float]]:
-        return self.embed_many(texts)
-
-
 def _strict_quality_mode() -> bool:
     return os.getenv("TELECOM_STUDIO_EMBEDDING_STRICT_QUALITY", "").lower() in {"1", "true", "yes"}
 
@@ -226,10 +194,7 @@ def build_embedding_provider(
     Strategy:
     - "nvidia": require NVIDIA API.
     - "auto": try NVIDIA API first, then deterministic hash for bootstrap only.
-    - "sentence-transformers": explicit developer override only.
     - "deterministic": hash fallback explicitly for tests/bootstrap.
-
-    The NVIDIA product path does not silently load local sentence-transformers.
     """
     provider_name = provider_name.strip().lower()
     requested = f"{provider_name}:{model_name}"
@@ -272,19 +237,7 @@ def build_embedding_provider(
                 exc,
             )
             return HashEmbeddingProvider()
-    elif provider_name != "sentence-transformers":
-        raise RuntimeError(
-            "Unsupported embedding provider "
-            f"{provider_name!r}. Use nvidia, auto, sentence-transformers, or deterministic."
-        )
-
-    try:
-        provider = SentenceTransformersProvider(model_name)
-        logger.info("Using explicit local sentence-transformers provider: %s", provider.name)
-        return provider
-    except Exception as exc:
-        raise RuntimeError(
-            f"Explicit local embedding provider sentence-transformers failed to load {model_name}. "
-            "Use TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia for the product path or "
-            "TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic for tests/bootstrap."
-        ) from exc
+    raise RuntimeError(
+        "Unsupported embedding provider "
+        f"{provider_name!r}. Use nvidia, auto, or deterministic."
+    )

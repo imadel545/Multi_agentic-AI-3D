@@ -156,19 +156,19 @@ def test_nvidia_embedding_provider_is_strict_when_configured(monkeypatch) -> Non
     monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", FailingNvidiaProvider)
 
     with pytest.raises(RuntimeError, match="NVIDIA API embedding provider is required"):
-        build_embedding_provider("nvidia", "baai/bge-m3")
+        build_embedding_provider("nvidia", "nvidia/llama-nemotron-embed-1b-v2")
 
 
 def test_nvidia_embedding_provider_never_deletes_user_model_cache(
     tmp_path: Path, monkeypatch
 ) -> None:
-    cache_dir = tmp_path / "hub" / "models--BAAI--bge-m3"
+    cache_dir = tmp_path / "hub" / "user-owned-model-cache"
     cache_dir.mkdir(parents=True)
     marker = cache_dir / "user-owned-cache"
     marker.write_text("keep", encoding="utf-8")
 
     class StubNvidiaProvider:
-        name = "nvidia:baai/bge-m3"
+        name = "nvidia:nvidia/llama-nemotron-embed-1b-v2"
         dimensions = 1024
 
         def __init__(self, *args, **kwargs) -> None:
@@ -177,9 +177,11 @@ def test_nvidia_embedding_provider_never_deletes_user_model_cache(
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", StubNvidiaProvider)
 
-    provider = build_embedding_provider("nvidia", "baai/bge-m3", api_key="test")
+    provider = build_embedding_provider(
+        "nvidia", "nvidia/llama-nemotron-embed-1b-v2", api_key="test"
+    )
 
-    assert provider.name == "nvidia:baai/bge-m3"
+    assert provider.name == "nvidia:nvidia/llama-nemotron-embed-1b-v2"
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
@@ -190,7 +192,7 @@ def test_auto_embedding_provider_can_bootstrap_with_hash(monkeypatch) -> None:
 
     monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", FailingNvidiaProvider)
 
-    provider = build_embedding_provider("auto", "baai/bge-m3")
+    provider = build_embedding_provider("auto", "nvidia/llama-nemotron-embed-1b-v2")
 
     assert isinstance(provider, HashEmbeddingProvider)
 
@@ -205,13 +207,26 @@ def test_auto_embedding_provider_honors_explicit_strict_quality(monkeypatch) -> 
     with pytest.raises(RuntimeError, match="nvidia unavailable"):
         build_embedding_provider(
             "auto",
-            "baai/bge-m3",
+            "nvidia/llama-nemotron-embed-1b-v2",
             strict_quality=True,
+        )
+
+
+def test_local_neural_embedding_provider_is_not_supported() -> None:
+    with pytest.raises(RuntimeError, match="Use nvidia, auto, or deterministic"):
+        build_embedding_provider(
+            "sentence-transformers",
+            "unqualified-local-model",
         )
 
 
 def test_reranker_defaults_to_passthrough() -> None:
     assert isinstance(build_reranker(), PassthroughReranker)
+
+
+def test_local_neural_reranker_is_not_supported() -> None:
+    with pytest.raises(RuntimeError, match="Use nvidia or passthrough"):
+        build_reranker("unqualified-local-reranker", provider_name="local")
 
 
 def test_nvidia_reranker_uses_remote_scores_without_real_network() -> None:

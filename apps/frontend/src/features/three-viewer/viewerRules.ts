@@ -32,7 +32,7 @@ export function resolveViewerSource(
     return {
       kind: "error",
       message:
-        "Ce résultat historique n'est pas certifié. Ses artefacts restent en quarantaine jusqu'à une nouvelle génération vérifiée.",
+        "Ce résultat historique n'a pas de preuve d’intégrité valide. Ses artefacts restent en quarantaine jusqu'à une nouvelle génération vérifiée.",
       previewUrl: null
     };
   }

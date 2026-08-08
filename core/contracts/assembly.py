@@ -207,6 +207,7 @@ class AssetCandidateScore(StrictModel):
     compatibility_score: float = Field(ge=0, le=100)
     generation_score: float = Field(ge=0, le=100)
     dimensional_score: float = Field(ge=0, le=100)
+    fidelity_score: float = Field(default=0.0, ge=0, le=100)
     reasons: list[str] = Field(min_length=1, max_length=12)
 
 

@@ -183,6 +183,7 @@ class AssetAssemblyPlanner:
                         ),
                         "compatible_networks": asset.compatible_networks,
                         "compatible_tower_types": asset.compatible_tower_types,
+                        "geometry_fidelity": asset.geometry_fidelity,
                         "allowed_generation_strategies": _allowed_assembly_strategies(asset),
                         "allowed_parameter_ids": [
                             parameter.parameter_id for parameter in asset.allowed_parameters

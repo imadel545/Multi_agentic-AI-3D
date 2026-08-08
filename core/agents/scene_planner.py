@@ -74,6 +74,26 @@ class ScenePlanner:
             radio.radio_geometry_profile if radio else None,
             requirements.detail_level,
         )
+        tower_strategy = _assembly_generation_strategy(
+            assembly_plan,
+            role_id="support_structure",
+            asset=tower,
+            tower=True,
+        )
+        antenna_strategy = _assembly_generation_strategy(
+            assembly_plan,
+            role_id="sector_antenna",
+            asset=antenna,
+        )
+        radio_strategy = (
+            _assembly_generation_strategy(
+                assembly_plan,
+                role_id="remote_radio",
+                asset=radio,
+            )
+            if radio
+            else "procedural_fallback"
+        )
 
         sectors = [
             SectorSpec(
@@ -83,9 +103,12 @@ class ScenePlanner:
                 antenna_asset_source=antenna.source,
                 antenna_asset_metadata=_runtime_asset_metadata(antenna),
                 antenna_import_fallback_allowed=antenna.import_fallback_allowed,
-                antenna_generation_strategy=_component_generation_strategy(antenna),
-                antenna_geometry_source=_component_geometry_source(antenna),
-                antenna_generation_reason=_component_generation_reason(antenna),
+                antenna_generation_strategy=antenna_strategy,
+                antenna_geometry_source=_component_geometry_source(antenna_strategy),
+                antenna_generation_reason=_component_generation_reason(
+                    antenna,
+                    antenna_strategy,
+                ),
                 radio_asset_id=radio.asset_id if radio else None,
                 radio_asset_file=radio.file if radio else None,
                 radio_asset_source=radio.source if radio else None,
@@ -93,11 +116,11 @@ class ScenePlanner:
                 if radio
                 else RuntimeAssetMetadata(),
                 radio_import_fallback_allowed=radio.import_fallback_allowed if radio else True,
-                radio_generation_strategy=_component_generation_strategy(radio)
+                radio_generation_strategy=radio_strategy,
+                radio_geometry_source=_component_geometry_source(radio_strategy)
                 if radio
-                else "procedural_fallback",
-                radio_geometry_source=_component_geometry_source(radio) if radio else "degraded",
-                radio_generation_reason=_component_generation_reason(radio)
+                else "degraded",
+                radio_generation_reason=_component_generation_reason(radio, radio_strategy)
                 if radio
                 else "no radio requested",
                 install_height_m=install_height,
@@ -128,13 +151,9 @@ class ScenePlanner:
                 position=[0.0, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
                 scale=[1.0, 1.0, 1.0],
-                generation_strategy="parametric_generated",
-                geometry_source="parametric_generated",
-                generation_reason=(
-                    "qualified SceneSpec-driven parametric tower profile"
-                    if tower.allows_generation_mode("parametric_generated")
-                    else "tower import is not authorized; using controlled parametric generation"
-                ),
+                generation_strategy=tower_strategy,
+                geometry_source=_component_geometry_source(tower_strategy),
+                generation_reason=_component_generation_reason(tower, tower_strategy),
                 height_m=requirements.tower_height_m,
                 characteristics=tower_characteristics,
             ),
@@ -144,6 +163,7 @@ class ScenePlanner:
                 requirements=requirements,
                 tower=tower,
                 assets=accessory_assets or [],
+                assembly_plan=assembly_plan,
             ),
             assembly_plan=assembly_plan,
         )
@@ -242,6 +262,7 @@ def _accessory_placements(
     requirements: RequirementSpec,
     tower: AssetManifest,
     assets: list[AssetManifest],
+    assembly_plan: AssemblyPlan | None,
 ) -> list[SceneAccessoryPlacement]:
     placements: list[SceneAccessoryPlacement] = []
     assets_by_type = {asset.type: asset for asset in assets}
@@ -257,6 +278,11 @@ def _accessory_placements(
                 # aligns base_center_ground assets to this Z coordinate.
                 position=[offset, 0.0, 0.0],
                 rotation_deg=[0.0, 0.0, 0.0],
+                generation_strategy=_assembly_generation_strategy(
+                    assembly_plan,
+                    role_id="ground_equipment",
+                    asset=cabinet,
+                ),
             )
         )
     if requirements.include_gps_antenna and (gps := assets_by_type.get("gps")):
@@ -277,6 +303,11 @@ def _accessory_placements(
                 asset_type="gps",
                 position=[0.0, mount_radius, gps_height],
                 rotation_deg=[0.0, 0.0, 0.0],
+                generation_strategy=_assembly_generation_strategy(
+                    assembly_plan,
+                    role_id="timing_antenna",
+                    asset=gps,
+                ),
             )
         )
     return placements
@@ -288,6 +319,7 @@ def _accessory_placement(
     asset_type: str,
     position: list[float],
     rotation_deg: list[float],
+    generation_strategy: str,
 ) -> SceneAccessoryPlacement:
     return SceneAccessoryPlacement(
         asset_id=asset.asset_id,
@@ -299,13 +331,13 @@ def _accessory_placement(
         dimensions_m=asset.dimensions_m,
         position=position,
         rotation_deg=rotation_deg,
-        generation_strategy=_component_generation_strategy(asset),
-        geometry_source=_component_geometry_source(asset),
-        generation_reason=_component_generation_reason(asset),
+        generation_strategy=generation_strategy,
+        geometry_source=_component_geometry_source(generation_strategy),
+        generation_reason=_component_generation_reason(asset, generation_strategy),
     )
 
 
-def _component_generation_strategy(asset: AssetManifest):
+def _component_generation_strategy(asset: AssetManifest) -> str:
     if asset.allows_generation_mode("imported_glb_exact"):
         return "imported_glb_exact"
     if asset.allows_generation_mode("parametric_generated"):
@@ -313,19 +345,46 @@ def _component_generation_strategy(asset: AssetManifest):
     return "procedural_fallback"
 
 
-def _component_geometry_source(asset: AssetManifest):
+def _assembly_generation_strategy(
+    assembly_plan: AssemblyPlan | None,
+    *,
+    role_id: str,
+    asset: AssetManifest,
+    tower: bool = False,
+) -> str:
     strategy = _component_generation_strategy(asset)
+    if assembly_plan is not None:
+        component = next(
+            (item for item in assembly_plan.components if item.role_id == role_id),
+            None,
+        )
+        if component is None:
+            raise ValueError(f"ASSEMBLY_COMPONENT_MISSING:{role_id}")
+        if component.selected_asset_id != asset.asset_id:
+            raise ValueError(
+                f"ASSEMBLY_SCENE_ASSET_MISMATCH:{role_id}:"
+                f"{component.selected_asset_id}:{asset.asset_id}"
+            )
+        strategy = component.generation_strategy
+    if tower and strategy == "internal_project_generated":
+        return "parametric_generated"
+    return strategy
+
+
+def _component_geometry_source(strategy: str) -> str:
     if strategy == "imported_glb_exact":
         return "imported_glb_exact"
-    if strategy == "internal_project_generated":
+    if strategy in {"internal_project_generated", "parametric_generated"}:
+        if strategy == "parametric_generated":
+            return "parametric_generated"
         return "internal_project_generated"
     return "degraded"
 
 
-def _component_generation_reason(asset: AssetManifest) -> str:
-    if asset.allows_generation_mode("imported_glb_exact"):
+def _component_generation_reason(asset: AssetManifest, strategy: str) -> str:
+    if strategy == "imported_glb_exact":
         return "qualified exact GLB import authorized by pinned asset manifest"
-    if asset.allows_generation_mode("parametric_generated"):
+    if strategy in {"internal_project_generated", "parametric_generated"}:
         return "qualified SceneSpec-driven parametric component profile"
     return "asset is not qualified for generation; controlled procedural fallback required"
 

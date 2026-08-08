@@ -89,7 +89,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   Deterministic hash is allowed only for tests/bootstrap or explicit degraded
   mode; it is not product-quality retrieval.
 - Reranker: NVIDIA API by default with visible fail-open degraded passthrough.
-  Local `BAAI/bge-reranker-v2-m3` remains an explicit developer override only.
+  No hidden local model is downloaded or loaded by the product runtime.
 - RAG evidence is written to `rag_evidence.json` and exposed through
   `/viewer-bundle`; it lists retrieved sources, controlled candidate hints,
   reranker status, and limitations.
@@ -108,6 +108,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   blocking-field list.
 - Blender: real generation when Blender is found; Blender fallback is rejected
   by default for quality (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
+  "Found" means a real background/factory-startup smoke succeeds, not merely
+  that an executable path exists. The smoke result is cached against the binary
+  identity so the Product API cannot advertise a crashing Blender runtime as
+  available.
 
 ## Current frontend
 
@@ -125,6 +129,10 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   the user can explicitly switch back to a new design.
 - The viewer loads only backend artifact URLs and must show either a visible GLB
   or an explicit backend preview/error fallback during smoke.
+- Technical inspection aids (azimuth arrows, beams, height markers and labels)
+  are hidden by default and explicitly toggleable. The viewer separates their
+  count from physical component count so diagnostic geometry is not presented
+  as telecom equipment.
 - Visual/runtime smoke on 2026-07-24 restored `wf_3c86a159cd7b`, loaded its real
   Blender GLB, proved visible rendering and camera fit, exercised the contextual
   agent, QA, issue, artifact, version, and CAD-library drawers against real
@@ -206,6 +214,11 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   but it is not accepted as a B-Rep tessellator. A controlled ACIS/OpenCascade,
   ODA or vendor-CAD conversion path plus unit/material/geometry QA is required
   before any entry can become a production manifest.
+- The targeted 2026-08-06 probe of catalog file
+  `lib_590cb8d275d2c900a36c` (`Axians_Nedea_36m.dwg`) found 99 `3DSOLID`,
+  440 `INSERT`, millimeter `INSUNITS`, a conflicting display-unit label and no
+  mesh-convertible entity. It therefore remains quarantined and requires an
+  ACIS B-Rep bridge; retrieval or LLM selection cannot make it Blender-ready.
 - ODA Drawings Explorer 27.1 is installed locally and can visually inspect the
   representative DWG, but its application bundle exposes no verified headless
   STL/DAE export route. Its presence therefore does not make conversion active.
@@ -359,8 +372,9 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   `/memory/vector/reindex` rebuilds the remaining projection.
 - Qdrant accepts logical search collections only; runtime invalidation also
   removes abandoned build collections and serializes concurrent reads/writes.
-  The optional Docker server is loopback-bound but remains pinned to legacy
-  `v1.9.2` pending a tested stepwise volume migration.
+  The Docker server is loopback-bound and pinned to `v1.18.0`, matching the
+  Python client. Existing non-empty volumes still require a supported, tested
+  migration before any future version jump.
 - Mutating generation endpoints enforce configurable free-space admission via
   `TELECOM_STUDIO_MIN_FREE_DISK_MB` (256 MB by default) and return HTTP 507
   before creating orphan state when local persistence is unsafe.
@@ -373,6 +387,31 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   including percent-encoded inputs.
 - Frontend "scene plan" maps to the `scene_spec` artifact. `SceneSpec` remains
   the geometry source of truth.
+
+### Docker delivery baseline — 2026-08-04
+
+- `infra/docker-compose.yml` runs five healthy local services: compiled
+  frontend/Nginx, FastAPI plus Blender 4.5.12 LTS, Qdrant 1.18.0,
+  `sqlite-snapshot`, and Adminer.
+- Only ports 5173, 8000, 8080 and 6333 are published, all on `127.0.0.1`.
+  Nginx preserves the existing API and artifact URLs and streams design events
+  with proxy buffering disabled.
+- Fresh named volumes are authoritative for container SQLite, outputs and
+  Qdrant. Host databases and outputs are never imported automatically. The raw
+  CAD library is mounted read-only.
+- Adminer can inspect only integrity-checked SQLite snapshots mounted read-only;
+  it has no path to the API's live database. Qdrant collections remain visible
+  through the Qdrant dashboard.
+- The API image is `linux/amd64` on Apple Silicon because the qualified official
+  Blender archive is x86-64. This is functional but materially slower than a
+  native arm64 Blender runtime. Docker therefore uses a governed 8-sample EEVEE
+  preview profile while preserving real Blender generation and five previews.
+- Frontend bundles are emitted under `/static`; the same-origin `/assets` path
+  remains reserved for the FastAPI asset-library API.
+- The 2026-08-04 Docker acceptance generated a real Blender GLB and five
+  previews, passed QA with an issued completion certificate, used Qdrant/Groq,
+  created a second version through bounded edit, survived API and full-stack
+  restarts, and restored the active GLB in the browser without console errors.
 - `/viewer-bundle` exposes viewer-ready artifact URLs for GLB, preview,
   metadata, SceneSpec, QA report, generation report, geometry validation,
   requirement coverage, completion certificate, and technical report, plus a
@@ -467,7 +506,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   and local browser smoke against FastAPI on port 8000 and Vite on port 5173.
   Rolldown code splitting keeps every production JavaScript chunk below 371 kB
   uncompressed while preserving lazy loading of the viewer.
-- The latest recorded browser smoke restored active version `v86dc95d0` with a
+- A prior recorded browser smoke restored active version `v86dc95d0` with a
   real 217-node GLB, 25 semantic equipment instances, QA score 1.0, issued
   completion certificate and seven visible limitations. No terminal progress
   overlay or duplicate workflow card remained on screen.

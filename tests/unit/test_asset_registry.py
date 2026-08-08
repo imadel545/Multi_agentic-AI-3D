@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.contracts.assets import AssetManifest, AssetQualification
-from core.services.asset_registry import AssetRegistry
+from core.services.asset_registry import AssetRegistry, _candidate_score
 
 
 def test_registry_loads_and_selects_5g_assets() -> None:
@@ -66,3 +66,32 @@ def test_registry_exposes_only_qualified_generation_candidates() -> None:
     assert selected.allows_generation_mode("imported_glb_exact") is True
     assert bracket.is_generation_eligible is True
     assert bracket.builder_profile_id == "mount_bracket_v1"
+
+
+def test_candidate_scoring_prioritizes_declared_vendor_fidelity() -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    base = registry.get("ANT_PANEL_4G_001")
+    schematic = base.model_copy(
+        update={"asset_id": "ANT_SCHEMATIC", "geometry_fidelity": "schematic"}
+    )
+    vendor = base.model_copy(
+        update={"asset_id": "ANT_VENDOR", "geometry_fidelity": "vendor_qualified"}
+    )
+
+    schematic_score = _candidate_score(
+        schematic,
+        network_type="4G",
+        tower_type="lattice_tower",
+        min_height_m=None,
+    )
+    vendor_score = _candidate_score(
+        vendor,
+        network_type="4G",
+        tower_type="lattice_tower",
+        min_height_m=None,
+    )
+
+    assert vendor_score.total_score > schematic_score.total_score
+    assert vendor_score.fidelity_score == 100.0
+    assert schematic_score.fidelity_score == 35.0
+    assert "géométrie fournisseur qualifiée" in vendor_score.reasons

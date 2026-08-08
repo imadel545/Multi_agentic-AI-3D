@@ -47,6 +47,47 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 
 ## Run locally
 
+### Full Docker stack
+
+Docker Compose runs the frontend, API, Blender 4.5.12 LTS, Qdrant, coherent
+SQLite snapshots and Adminer without importing the host runtime databases or
+outputs. Copy `.env.example` to `.env`, add the Groq and NVIDIA keys at runtime,
+then run:
+
+```bash
+docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env up --build -d
+docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env ps
+```
+
+- Studio: `http://127.0.0.1:5173`
+- API and Swagger: `http://127.0.0.1:8000/docs`
+- Adminer: `http://127.0.0.1:8080`
+- Qdrant dashboard: `http://127.0.0.1:6333/dashboard`
+
+In Adminer, choose SQLite and open one of these read-only snapshot databases:
+
+- `file:/db/telecom_studio.db?mode=ro&immutable=1`
+- `file:/db/checkpoints.db?mode=ro&immutable=1`
+
+Adminer never mounts the live API database. The snapshot sidecar publishes a
+verified backup every five seconds and preserves the last valid copy if a
+backup fails. Vector collections are inspected in Qdrant, not Adminer.
+
+```bash
+# Stop containers and preserve all named volumes.
+docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env down
+
+# Destructive, intentional reset of SQLite, outputs, Qdrant and previews.
+docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env down -v
+```
+
+On Apple Silicon, the API image is intentionally `linux/amd64` because the
+qualified official Blender archive is x86-64. Real renders are consequently
+slower under Docker Desktop emulation; the workflow concurrency is limited to
+one and Blender has a 600-second timeout. The container uses the governed EEVEE
+profile with 8 render samples for responsive technical previews; native runs
+keep their existing quality default.
+
 ### Backend
 
 ```bash
@@ -86,20 +127,16 @@ TELECOM_STUDIO_QDRANT_URL=http://127.0.0.1:6333 uvicorn apps.api.telecom_studio_
 ```
 
 Without `TELECOM_STUDIO_QDRANT_URL`, the API uses Qdrant local mode under `data/qdrant`.
-The Compose service is bound to `127.0.0.1` only. Its current server pin is
-`qdrant/qdrant:v1.9.2`; do not expose it to a network and do not jump directly
-to a recent image over an existing volume without following Qdrant's supported
-stepwise migration path.
+The Compose service is bound to `127.0.0.1` only. Its server pin matches the
+Python client at Qdrant `v1.18.0`. Do not expose it to a LAN or upgrade a
+non-empty volume without following Qdrant's supported migration path.
 
 ### Dependency reproducibility
 
-`package-lock.json` pins the frontend dependency tree. Python dependencies are
-still range-based in `pyproject.toml` and no `uv.lock` is committed yet; a fresh
-Python environment is therefore not bit-for-bit reproducible. The validated
-local environment is Python 3.12.7. Direct security floors are enforced for
-LangSmith, pydantic-settings, Pillow, PyTorch and the setuptools build backend,
-but producing and enforcing a reviewed full Python lock remains required before
-a release.
+`package-lock.json` pins the frontend dependency tree.
+`infra/requirements-docker.lock` pins the Linux Python 3.12 Docker resolution;
+the API image installs only that lock. Native editable development installs
+remain range-based in `pyproject.toml` and are not bit-for-bit reproducible.
 
 ### Product intelligence: Groq
 
@@ -209,5 +246,5 @@ requirements_text or document pack
   chat-first / 3D-first smoke with visible GLB or explicit fallback.
 - Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
   `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
-  and preview. This proves that scenario only. The 2026-07-31 frontend gate
-  passes 125 tests, typecheck and production build.
+  and preview. This proves that scenario only. The current frontend gate passes
+  150 tests, typecheck, production build and the 2026-08-04 Docker browser smoke.

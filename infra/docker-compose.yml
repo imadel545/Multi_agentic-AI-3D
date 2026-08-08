@@ -1,8 +1,181 @@
+name: agentic-3d-studio
+
 services:
   qdrant:
-    image: qdrant/qdrant:v1.9.2
+    image: qdrant/qdrant:v1.18.0@sha256:b3063c673f3973877c038eeecc392bad5011f072ee7892b56c9a8e204a3bdea9
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6333:6333"
-      - "127.0.0.1:6334:6334"
+    expose:
+      - "6334"
     volumes:
-      - ../data/qdrant:/qdrant/storage
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -ec ': >/dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - studio
+
+  api:
+    platform: linux/amd64
+    image: agentic-telecom-api:blender-4.5.12
+    build:
+      context: ..
+      dockerfile: infra/api.Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ../.env
+    environment:
+      TELECOM_STUDIO_PROJECT_ROOT: /app
+      TELECOM_STUDIO_ASSET_MANIFESTS_DIR: /app/assets/manifests
+      TELECOM_STUDIO_ASSET_LIBRARY_PATH: /app/assets/library
+      TELECOM_STUDIO_SQLITE_PATH: /var/lib/telecom/sqlite/telecom_studio.db
+      TELECOM_STUDIO_OUTPUTS_DIR: /var/lib/telecom/outputs
+      TELECOM_STUDIO_QDRANT_URL: http://qdrant:6333
+      TELECOM_STUDIO_QDRANT_PATH: /var/lib/telecom/sqlite/qdrant-client-state
+      TELECOM_STUDIO_BLENDER_BINARY: /opt/blender/blender
+      TELECOM_STUDIO_BLENDER_EEVEE_RENDER_SAMPLES: "8"
+      TELECOM_STUDIO_BLENDER_TIMEOUT_S: "600"
+      TELECOM_STUDIO_MAX_CONCURRENT_WORKFLOWS: "1"
+      TELECOM_STUDIO_MAX_PENDING_WORKFLOWS: "2"
+      TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK: "false"
+      TELECOM_STUDIO_CORS_ORIGINS: http://127.0.0.1:5173,http://localhost:5173
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      HOME: /tmp/telecom-studio-home
+    ports:
+      - "127.0.0.1:8000:8000"
+    expose:
+      - "8000"
+    volumes:
+      - sqlite_data:/var/lib/telecom/sqlite
+      - outputs_data:/var/lib/telecom/outputs
+      - ../assets/library:/app/assets/library:ro
+    tmpfs:
+      - /tmp:size=536870912,mode=1777
+    shm_size: "2gb"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json,urllib.request; response=urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); payload=json.load(response); raise SystemExit(0 if response.status == 200 and payload.get('status') == 'ok' else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    networks:
+      - studio
+
+  sqlite-snapshot:
+    image: agentic-telecom-sqlite-snapshot:python-3.12
+    build:
+      context: ..
+      dockerfile: infra/sqlite-snapshot.Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      SQLITE_SNAPSHOT_SOURCE_DIR: /source
+      SQLITE_SNAPSHOT_TARGET_DIR: /preview
+      SQLITE_SNAPSHOT_INTERVAL_S: "5"
+      SQLITE_SNAPSHOT_MAX_AGE_S: "30"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - sqlite_data:/source
+      - sqlite_preview:/preview
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "/opt/sqlite_snapshot.py", "--check"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - studio
+
+  adminer:
+    image: adminer:5.5.0-standalone@sha256:a1e730bf95a18f1d7c38b409ab58a39d57d07bdb090614b81f5c7b37c6021b96
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: file:/db/telecom_studio.db?mode=ro&immutable=1
+      ADMINER_DESIGN: nette
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - sqlite_preview:/db:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      sqlite-snapshot:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - php
+        - -r
+        - "$$socket=@fsockopen('127.0.0.1',8080); exit($$socket ? 0 : 1);"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - studio
+
+  frontend:
+    image: agentic-telecom-frontend:local
+    build:
+      context: ..
+      dockerfile: infra/frontend.Dockerfile
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:5173:8080"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/frontend-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - studio
+
+networks:
+  studio:
+    driver: bridge
+
+volumes:
+  sqlite_data:
+  outputs_data:
+  qdrant_data:
+  sqlite_preview:
