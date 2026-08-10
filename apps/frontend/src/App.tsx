@@ -119,6 +119,8 @@ export default function App({ apiClient = api }: AppProps) {
   const revisionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
   const resourceRequestRef = useRef<Record<string, number>>({});
+  const activeWorkflowRef = useRef<string | null>(null);
+  const terminalBundleRequestRef = useRef(0);
   const mountedRef = useRef(true);
   const lastAssetLibraryQueryRef = useRef<string | null>(null);
   const toArtifactUrl = useCallback(
@@ -133,6 +135,16 @@ export default function App({ apiClient = api }: AppProps) {
     multimodalIntelligence?.enabled === true &&
     (multimodalIntelligence.status === "configured_unverified" ||
       multimodalIntelligence.status === "operational");
+  const activateWorkflow = useCallback((workflowId: string) => {
+    if (activeWorkflowRef.current !== workflowId) {
+      activeWorkflowRef.current = workflowId;
+      terminalBundleRequestRef.current += 1;
+    }
+  }, []);
+  const isActiveWorkflow = useCallback(
+    (workflowId: string) => activeWorkflowRef.current === workflowId,
+    []
+  );
 
   useEffect(() => {
     if (!multimodalConsentAvailable && multimodalConsent !== "disabled") {
@@ -149,13 +161,14 @@ export default function App({ apiClient = api }: AppProps) {
   }, []);
   const receiveWorkflowEvents = useCallback(
     (events: WorkflowEvent[]) => {
-      const normalized = events.map(normalizeWorkflowEvent);
-      rememberEventSequence(latestEventSequence(events));
+      const matching = events.filter((event) => isActiveWorkflow(event.workflow_id));
+      const normalized = matching.map(normalizeWorkflowEvent);
+      rememberEventSequence(latestEventSequence(matching));
       if (normalized.length) {
         dispatch({ type: "EVENTS_RECEIVED", events: normalized });
       }
     },
-    [rememberEventSequence]
+    [isActiveWorkflow, rememberEventSequence]
   );
 
   useEffect(() => {
@@ -379,57 +392,77 @@ export default function App({ apiClient = api }: AppProps) {
 
   const loadLiveStatus = useCallback(
     async (workflowId: string) => {
-      dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
+      if (isActiveWorkflow(workflowId)) {
+        dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
+      }
       let status: WorkflowStatus;
       try {
         status = await apiClient.workflowStatus(workflowId);
       } catch (error) {
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "workflow_status",
-          message: userFacingError(error, "resource")
-        });
+        if (isActiveWorkflow(workflowId)) {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "workflow_status",
+            message: userFacingError(error, "resource")
+          });
+        }
         throw error;
       }
-      dispatch({ type: "STATUS_LOADED", status });
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
+      if (isActiveWorkflow(workflowId)) {
+        dispatch({ type: "STATUS_LOADED", status });
+        dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
+      }
       try {
-        dispatch({ type: "RESOURCE_LOADING", resource: "current_operation" });
+        if (isActiveWorkflow(workflowId)) {
+          dispatch({ type: "RESOURCE_LOADING", resource: "current_operation" });
+        }
         const operation = await apiClient.currentOperation(workflowId);
-        dispatch({ type: "CURRENT_OPERATION_LOADED", currentOperation: operation });
-        dispatch({ type: "RESOURCE_RECOVERED", resource: "current_operation" });
+        if (isActiveWorkflow(workflowId)) {
+          dispatch({ type: "CURRENT_OPERATION_LOADED", currentOperation: operation });
+          dispatch({ type: "RESOURCE_RECOVERED", resource: "current_operation" });
+        }
       } catch (error) {
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "current_operation",
-          message: userFacingError(error, "resource")
-        });
+        if (isActiveWorkflow(workflowId)) {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "current_operation",
+            message: userFacingError(error, "resource")
+          });
+        }
       }
       return status;
     },
-    [apiClient]
+    [apiClient, isActiveWorkflow]
   );
 
   const loadTerminalBundle = useCallback(
     async (workflowId: string) => {
+      if (!isActiveWorkflow(workflowId)) return;
+      const requestId = terminalBundleRequestRef.current + 1;
+      terminalBundleRequestRef.current = requestId;
+      const requestIsCurrent = () =>
+        isActiveWorkflow(workflowId) && terminalBundleRequestRef.current === requestId;
       dispatch({ type: "RESOURCE_LOADING", resource: "terminal_bundle" });
       dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
       let status: WorkflowStatus;
       try {
         status = await apiClient.workflowStatus(workflowId);
       } catch (error) {
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "workflow_status",
-          message: userFacingError(error, "resource")
-        });
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "terminal_bundle",
-          message: userFacingError(error, "resource")
-        });
+        if (requestIsCurrent()) {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "workflow_status",
+            message: userFacingError(error, "resource")
+          });
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "terminal_bundle",
+            message: userFacingError(error, "resource")
+          });
+        }
         throw error;
       }
+      if (!requestIsCurrent() || status.workflow_id !== workflowId) return;
       dispatch({ type: "STATUS_LOADED", status });
       dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
 
@@ -458,6 +491,8 @@ export default function App({ apiClient = api }: AppProps) {
           apiClient.versions(workflowId),
           apiClient.studioSummary()
         ]);
+
+      if (!requestIsCurrent()) return;
 
       applyResourceResult(
         operationResult,
@@ -497,7 +532,7 @@ export default function App({ apiClient = api }: AppProps) {
       );
       dispatch({ type: "RESOURCE_RECOVERED", resource: "terminal_bundle" });
     },
-    [apiClient]
+    [apiClient, isActiveWorkflow]
   );
 
   const reloadViewerBundle = useCallback(async () => {
@@ -518,10 +553,12 @@ export default function App({ apiClient = api }: AppProps) {
         apiClient.streamUrl(workflowId, afterEventId),
         {
           onEvent: (event) => {
+            if (!isActiveWorkflow(workflowId)) return;
             rememberEventSequence(event.sequence);
             dispatch({ type: "EVENT_RECEIVED", event });
           },
           onTerminal: (event) => {
+            if (!isActiveWorkflow(workflowId)) return;
             void loadTerminalBundle(event.workflow_id).catch((error) => {
               dispatch({
                 type: "RESOURCE_FAILED",
@@ -530,27 +567,35 @@ export default function App({ apiClient = api }: AppProps) {
               });
             });
           },
-          onError: (reason) => dispatch({ type: "SSE_FAILED", reason }),
-          onRecovered: () => dispatch({ type: "SSE_RECOVERED" })
+          onError: (reason) => {
+            if (isActiveWorkflow(workflowId)) dispatch({ type: "SSE_FAILED", reason });
+          },
+          onRecovered: () => {
+            if (isActiveWorkflow(workflowId)) dispatch({ type: "SSE_RECOVERED" });
+          }
         }
       );
     },
-    [apiClient, loadTerminalBundle, rememberEventSequence]
+    [apiClient, isActiveWorkflow, loadTerminalBundle, rememberEventSequence]
   );
 
   const loadPollingSnapshot = useCallback(
     async (workflowId: string) => {
+      if (!isActiveWorkflow(workflowId)) return;
       let status: WorkflowStatus;
       try {
         status = await apiClient.workflowStatus(workflowId);
+        if (!isActiveWorkflow(workflowId) || status.workflow_id !== workflowId) return;
         dispatch({ type: "STATUS_LOADED", status });
         dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
       } catch (error) {
-        dispatch({
-          type: "RESOURCE_FAILED",
-          resource: "workflow_status",
-          message: userFacingError(error, "resource")
-        });
+        if (isActiveWorkflow(workflowId)) {
+          dispatch({
+            type: "RESOURCE_FAILED",
+            resource: "workflow_status",
+            message: userFacingError(error, "resource")
+          });
+        }
         return;
       }
 
@@ -581,7 +626,7 @@ export default function App({ apiClient = api }: AppProps) {
         await loadTerminalBundle(workflowId);
       }
     },
-    [apiClient, loadTerminalBundle, receiveWorkflowEvents]
+    [apiClient, isActiveWorkflow, loadTerminalBundle, receiveWorkflowEvents]
   );
 
   const restoreLatestDesign = useCallback(async () => {
@@ -598,6 +643,7 @@ export default function App({ apiClient = api }: AppProps) {
         }
         restoredWorkflowRef.current = true;
         eventSequenceCursorRef.current = null;
+        activateWorkflow(latest.workflow_id);
         dispatch({ type: "WORKFLOW_RESTORED", status: latest });
         if (latest.status === "pending" || latest.status === "running") {
           void loadLiveStatus(latest.workflow_id)
@@ -628,6 +674,7 @@ export default function App({ apiClient = api }: AppProps) {
   }, [
     apiClient,
     loadLiveStatus,
+    activateWorkflow,
     loadSurfaceResource,
     loadTerminalBundle,
     state.phase,
@@ -796,6 +843,7 @@ export default function App({ apiClient = api }: AppProps) {
       setSubmittedRequirementsHash(requirementsAnalysis.requirements_hash);
       setVersions([]);
       eventSequenceCursorRef.current = null;
+      activateWorkflow(created.workflow_id);
       dispatch({ type: "DESIGN_CREATED", workflowId: created.workflow_id });
       const status = await loadLiveStatus(created.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -808,6 +856,7 @@ export default function App({ apiClient = api }: AppProps) {
     }
   }, [
     analyzedPrompt,
+    activateWorkflow,
     apiClient,
     loadLiveStatus,
     loadTerminalBundle,
@@ -923,6 +972,7 @@ export default function App({ apiClient = api }: AppProps) {
       setDocumentPackMessage("Workflow lancé depuis le pack documentaire.");
       setVersions([]);
       eventSequenceCursorRef.current = null;
+      activateWorkflow(generated.workflow_id);
       dispatch({ type: "DESIGN_CREATED", workflowId: generated.workflow_id });
       const status = await loadLiveStatus(generated.workflow_id);
       if (isTerminalStatus(status.status)) {
@@ -937,6 +987,7 @@ export default function App({ apiClient = api }: AppProps) {
     }
   }, [
     apiClient,
+    activateWorkflow,
     documentPackSummary,
     loadLiveStatus,
     loadTerminalBundle,

@@ -17,6 +17,13 @@ le statut, les événements et les versions.
 
 Ces endpoints retournent des données orientées utilisateur. Le frontend ne doit plus parser `workflow_trace.json` ou `status.json` comme source principale.
 
+Toute réponse ou événement portant un `workflow_id` doit correspondre au workflow
+actif avant d'être appliqué. Un changement de workflow invalide les chargements
+terminaux précédents; le client applique une sémantique dernier-appel-gagnant pour
+le bundle, les versions et les ressources associées. Une réponse tardive ne doit
+jamais remplacer le viewer, la timeline, les issues ou le curseur SSE du design
+actif.
+
 Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 "project", c'est un contexte frontend local. Si l'UI parle de "run", c'est le
 `workflow_id`. Si l'UI parle de "scene plan", c'est l'artefact `scene_spec`.

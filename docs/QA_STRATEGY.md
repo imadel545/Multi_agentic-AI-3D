@@ -177,7 +177,7 @@ limitations and never advertises checks it cannot perform.
   requirement/Groq tests after the live-input parser fix, the isolated
   real-Blender E2E (`1 passed`), and the real HTTP 4G generation/edit/version
   scenario with QA 1.0 and an issued certificate.
-- The frontend has 157 passing Vitest tests plus green typecheck/build and a
+- The frontend has 158 passing Vitest tests plus green typecheck/build and a
   connected smoke on the current tree. The real generic multi-project user
   scenario remains open; no global convergence is claimed.
 

@@ -194,9 +194,14 @@ export function workflowReducer(
         transportError: null
       };
     case "EVENT_RECEIVED":
+      if (!matchesActiveWorkflow(state, action.event.workflow_id)) return state;
       return reduceReceivedEvents(state, [action.event]);
-    case "EVENTS_RECEIVED":
-      return reduceReceivedEvents(state, action.events);
+    case "EVENTS_RECEIVED": {
+      const matchingEvents = action.events.filter((event) =>
+        matchesActiveWorkflow(state, event.workflow_id)
+      );
+      return reduceReceivedEvents(state, matchingEvents);
+    }
     case "SSE_FAILED":
       return {
         ...state,
@@ -211,6 +216,7 @@ export function workflowReducer(
         transportError: null
       };
     case "STATUS_LOADED": {
+      if (!matchesActiveWorkflow(state, action.status.workflow_id)) return state;
       const phase = phaseFromStatus(action.status, state.viewerBundle, state.phase);
       return {
         ...state,
@@ -224,8 +230,10 @@ export function workflowReducer(
       };
     }
     case "CURRENT_OPERATION_LOADED":
+      if (!matchesActiveWorkflow(state, action.currentOperation.workflow_id)) return state;
       return { ...state, currentOperation: action.currentOperation };
     case "VIEWER_BUNDLE_LOADED":
+      if (!matchesActiveWorkflow(state, action.viewerBundle.workflow_id)) return state;
       return {
         ...state,
         viewerBundle: action.viewerBundle,
@@ -235,8 +243,10 @@ export function workflowReducer(
         artifactReadiness: artifactsFrom(action.viewerBundle)
       };
     case "TIMELINE_LOADED":
+      if (!matchesActiveWorkflow(state, action.timeline.workflow_id)) return state;
       return { ...state, timeline: action.timeline };
     case "USER_ISSUES_LOADED":
+      if (!matchesActiveWorkflow(state, action.userIssues.workflow_id)) return state;
       return { ...state, userIssues: action.userIssues };
     case "RESOURCE_LOADING":
       return {
@@ -277,6 +287,13 @@ export function workflowReducer(
     case "RESET":
       return { ...initialWorkflowState, summary: state.summary };
   }
+}
+
+function matchesActiveWorkflow(
+  state: WorkflowMachineState,
+  workflowId: string | null | undefined
+): boolean {
+  return state.workflowId === null || workflowId === state.workflowId;
 }
 
 export function isDegraded(

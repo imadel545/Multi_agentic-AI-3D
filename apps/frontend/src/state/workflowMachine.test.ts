@@ -106,6 +106,37 @@ function normalizedEvent(
 }
 
 describe("workflow reducer", () => {
+  it("rejects late payloads and events from a superseded workflow", () => {
+    const activeStatus = { ...runningStatus, workflow_id: "wf_active" };
+    const activeBundle = { ...baseBundle, workflow_id: "wf_active" };
+    const state = {
+      ...initialWorkflowState,
+      workflowId: "wf_active",
+      status: activeStatus,
+      viewerBundle: activeBundle,
+      phase: "running" as const
+    };
+
+    expect(
+      workflowReducer(state, {
+        type: "STATUS_LOADED",
+        status: { ...completedStatus, workflow_id: "wf_superseded" }
+      })
+    ).toBe(state);
+    expect(
+      workflowReducer(state, {
+        type: "VIEWER_BUNDLE_LOADED",
+        viewerBundle: { ...baseBundle, workflow_id: "wf_superseded" }
+      })
+    ).toBe(state);
+    expect(
+      workflowReducer(state, {
+        type: "EVENT_RECEIVED",
+        event: { ...normalizedEvent("evt_99"), workflow_id: "wf_superseded" }
+      })
+    ).toBe(state);
+  });
+
   it("starts without a demo prompt baked into state", () => {
     expect(initialWorkflowState.prompt).toBe("");
   });
