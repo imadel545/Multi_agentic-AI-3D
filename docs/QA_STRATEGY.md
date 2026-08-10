@@ -143,8 +143,8 @@ limitations and never advertises checks it cannot perform.
   HTTP failures cannot make the fast suite nondeterministic.
 - `pytest -q` is the fast gate and excludes `blender_runtime`, `provider_live`
   and `browser_smoke`. An autouse guard fails if an unmarked test reaches the
-  real Blender subprocess boundary. The 2026-08-10 gate completed 584 tests in
-  24.59 seconds, with 52 Blender and 2 live-provider cases classified separately.
+  real Blender subprocess boundary. The 2026-08-10 gate completed 586 tests in
+  24.29 seconds, with 52 Blender and 2 live-provider cases classified separately.
 - `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
   gate. The 2026-08-10 audit exercised the Blender suite in 14 minutes 43 seconds;
   the two non-Blender failure-path cases discovered during classification now run
