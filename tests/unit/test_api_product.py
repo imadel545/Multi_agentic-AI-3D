@@ -492,7 +492,7 @@ def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
 
 
 @pytest.mark.blender_runtime
-def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
+def test_viewer_bundle_returns_artifact_urls(tmp_path: Path, monkeypatch) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
     client = TestClient(app)
@@ -504,8 +504,22 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
             _synchronous=True,
         )
         workflow_id = response["workflow_id"]
+        original_verify = workflow_service._verified_version_artifact_dir
+        verification_calls = 0
+
+        def counted_verify(workflow_id: str, version_id: str):
+            nonlocal verification_calls
+            verification_calls += 1
+            return original_verify(workflow_id, version_id)
+
+        monkeypatch.setattr(
+            workflow_service,
+            "_verified_version_artifact_dir",
+            counted_verify,
+        )
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
 
+        assert verification_calls == 1
         assert bundle["workflow_id"] == workflow_id
         assert bundle["status"] == "completed"
         assert bundle["generation_mode"]
@@ -617,7 +631,6 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
-@pytest.mark.blender_runtime
 def test_failed_blender_workflow_does_not_advertise_viewer_artifacts(
     tmp_path: Path, monkeypatch
 ) -> None:

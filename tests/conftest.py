@@ -17,9 +17,9 @@ os.environ["TELECOM_STUDIO_OUTPUTS_DIR"] = str(_TEST_RUNTIME_ROOT / "outputs")
 os.environ["TELECOM_STUDIO_QDRANT_PATH"] = str(_TEST_RUNTIME_ROOT / "qdrant")
 os.environ["TELECOM_STUDIO_SQLITE_PATH"] = str(_TEST_RUNTIME_ROOT / "sqlite" / "studio.db")
 os.environ["TELECOM_STUDIO_ASSET_LIBRARY_PATH"] = str(_TEST_RUNTIME_ROOT / "asset-library")
-os.environ["TELECOM_STUDIO_EMBEDDING_PROVIDER"] = "deterministic"
-os.environ["TELECOM_STUDIO_RERANKER_PROVIDER"] = "passthrough"
 if not _LIVE_PROVIDERS:
+    os.environ["TELECOM_STUDIO_EMBEDDING_PROVIDER"] = "deterministic"
+    os.environ["TELECOM_STUDIO_RERANKER_PROVIDER"] = "passthrough"
     os.environ["TELECOM_STUDIO_EXTERNAL_PROVIDERS_ENABLED"] = "false"
     os.environ["TELECOM_STUDIO_ENABLE_GROQ_EXTRACTION"] = "false"
     os.environ["TELECOM_STUDIO_ENABLE_GROQ_PLANNING_DECISION"] = "false"
@@ -39,9 +39,11 @@ def reject_unmarked_real_blender(request: pytest.FixtureRequest, monkeypatch) ->
     original = BlenderRunner._run_blender_command
 
     def guarded(self: BlenderRunner, command: list[str]):
-        if request.node.get_closest_marker("blender_runtime") is None:
+        marked_runtime = request.node.get_closest_marker("blender_runtime") is not None
+        marked_live_provider = request.node.get_closest_marker("provider_live") is not None
+        if not (marked_runtime or marked_live_provider):
             pytest.fail(
-                "real Blender subprocess requires @pytest.mark.blender_runtime",
+                "real Blender subprocess requires a blender_runtime or provider_live marker",
                 pytrace=False,
             )
         return original(self, command)

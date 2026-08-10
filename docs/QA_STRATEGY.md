@@ -143,12 +143,18 @@ limitations and never advertises checks it cannot perform.
   HTTP failures cannot make the fast suite nondeterministic.
 - `pytest -q` is the fast gate and excludes `blender_runtime`, `provider_live`
   and `browser_smoke`. An autouse guard fails if an unmarked test reaches the
-  real Blender subprocess boundary. The 2026-08-10 gate completed 583 tests in
-  23.86 seconds after 53 runtime cases were classified separately.
+  real Blender subprocess boundary. The 2026-08-10 gate completed 584 tests in
+  24.59 seconds, with 52 Blender and 2 live-provider cases classified separately.
 - `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
-  gate. The 2026-08-10 audit exercised all 53 current Blender cases in 14 minutes
-  43 seconds. It must never accept fallback artefacts as proof of a successful
-  design.
+  gate. The 2026-08-10 audit exercised the Blender suite in 14 minutes 43 seconds;
+  the two non-Blender failure-path cases discovered during classification now run
+  in the fast gate. It must never accept fallback artefacts as proof of a
+  successful design.
+- `TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1 pytest -m provider_live` is the explicit
+  external capability gate. On 2026-08-10 its full Groq + NVIDIA + Blender product
+  flow and bounded Groq planning contract both passed without fallback (2 tests in
+  31.79 seconds). The result is point-in-time runtime evidence, not a permanent
+  availability guarantee.
 - A real API/browser gate remains required for Canvas/WebGL, GLB loading,
   selection, SSE/polling, document upload, edit/version and rollback flows.
   Vitest/jsdom remains a fast contract gate, not visual runtime evidence.

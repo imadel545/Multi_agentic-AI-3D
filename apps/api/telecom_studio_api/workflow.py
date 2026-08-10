@@ -972,12 +972,26 @@ class WorkflowService:
     ) -> dict[str, str]:
         """Return canonical existing files for a certified persisted version."""
 
+        return {
+            artifact_name: str(path)
+            for artifact_name, path in self.verified_version_artifact_paths(
+                workflow_id, version_id
+            ).items()
+        }
+
+    def verified_version_artifact_paths(
+        self,
+        workflow_id: str,
+        version_id: str,
+    ) -> dict[str, Path]:
+        """Verify one immutable version once, then inventory its public files."""
+
         try:
             _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
         except KeyError:
             return {}
         return {
-            artifact_name: str(artifact_dir / filename)
+            artifact_name: artifact_dir / filename
             for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
             if (artifact_dir / filename).is_file()
         }

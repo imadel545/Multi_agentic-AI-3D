@@ -186,11 +186,13 @@ frontend.
   could take tens of minutes depending on the host PATH. The small-cell and
   certificate/version fixture regressions are fixed. Tests are now split into a
   default fast gate and explicit `blender_runtime`, `provider_live`, and
-  `browser_smoke` gates. The fast gate passed 583 tests in 23.86 seconds on
-  2026-08-10. The runtime audit completed the 53 real-Blender cases; its only
+  `browser_smoke` gates. The fast gate passed 584 tests in 24.59 seconds on
+  2026-08-10. The runtime audit completed the real-Blender cases; its only
   additional failure was a non-Blender domain-routing regression that has since
   been moved back to the fast gate and fixed with positive and negative routing
-  coverage. The Blender gate is intentionally not represented as fast CI.
+  coverage. A missing-Blender failure-path test was also returned to the fast
+  gate, leaving 52 tests that actually require Blender. The Blender gate is
+  intentionally not represented as fast CI.
 
 ## Documents
 

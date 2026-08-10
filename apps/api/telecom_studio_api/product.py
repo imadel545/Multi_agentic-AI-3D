@@ -227,12 +227,17 @@ class ProductService:
         viewer_artifacts = []
         issues = _collect_user_issues(status, self.workflow_service.get_events(workflow_id))
         llm = llm_truth(status, workflow_service=self.workflow_service)
+        verified_artifacts = (
+            self.workflow_service.verified_version_artifact_paths(workflow_id, active_version)
+            if isinstance(active_version, str)
+            else {}
+        )
 
         def _artifact(name: str, content_type: str, filename: str) -> dict:
             url = f"{base_url}/{filename}"
             if active_version:
                 url = f"{url}?version_id={active_version}"
-            path = self._artifact_path_or_none(workflow_id, filename, active_version)
+            path = verified_artifacts.get(filename)
             return {
                 "name": name,
                 "url": url,
@@ -323,16 +328,8 @@ class ProductService:
         llm_decision_provenance = _artifact_by_name(
             viewer_artifacts, "llm_decision_provenance.json"
         )
-        scene_spec_path = self._artifact_path_or_none(
-            workflow_id,
-            "scene_spec",
-            active_version,
-        )
-        assembly_plan_path = self._artifact_path_or_none(
-            workflow_id,
-            "assembly_plan",
-            active_version,
-        )
+        scene_spec_path = verified_artifacts.get("scene_spec")
+        assembly_plan_path = verified_artifacts.get("assembly_plan")
 
         return {
             "workflow_id": workflow_id,
@@ -415,16 +412,6 @@ class ProductService:
             return self.workflow_service.get_status(workflow_id)
         except KeyError as exc:
             raise ProductNotFound(workflow_id) from exc
-
-    def _artifact_path_or_none(
-        self, workflow_id: str, artifact_name: str, version_id: str | None
-    ) -> Path | None:
-        try:
-            return self.workflow_service.artifact_path(
-                workflow_id, artifact_name, version_id=version_id
-            )
-        except KeyError:
-            return None
 
 
 class ProductNotFound(Exception):
