@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api import main as api_main
 from apps.api.telecom_studio_api.main import app, document_pack_service, workflow_service
+from apps.api.telecom_studio_api.workflow import WorkflowStorageError
 
 
 def test_document_pack_events_normalize_legacy_payload(tmp_path: Path) -> None:
@@ -356,6 +357,29 @@ def test_document_pack_generate_design_requires_qa_and_mapping_gate(
         assert payload["mapping"]["status"] == "mapped"
         assert payload["extraction_report"]["qa_ready_to_generate"] is False
         assert payload["extraction_report"]["qa_blocking_issues"] == ["forced_qa_gate"]
+    finally:
+        document_pack_service.outputs_dir = original_outputs
+        document_pack_service.groq_extractor.enabled = original_groq_enabled
+
+
+def test_document_pack_generation_exposes_insufficient_local_storage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    original_outputs = document_pack_service.outputs_dir
+    original_groq_enabled = document_pack_service.groq_extractor.enabled
+    document_pack_service.outputs_dir = tmp_path
+    document_pack_service.groq_extractor.enabled = False
+    summary = document_pack_service.ingest_zip(_pack_zip())
+
+    def reject(*_args, **_kwargs):
+        raise WorkflowStorageError("Espace disque local insuffisant.")
+
+    monkeypatch.setattr(workflow_service, "create_design_from_requirements", reject)
+    try:
+        response = TestClient(app).post(f"/document-packs/{summary.pack_id}/generate-design")
+
+        assert response.status_code == 507
+        assert response.json()["detail"] == "Espace disque local insuffisant."
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled

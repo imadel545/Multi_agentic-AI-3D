@@ -1039,6 +1039,8 @@ def generate_design_from_document_pack(
                     detail=str(exc),
                     headers={"Retry-After": "5"},
                 ) from exc
+            except WorkflowStorageError as exc:
+                raise HTTPException(status_code=507, detail=str(exc)) from exc
             if design.get("workflow_id"):
                 document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
     except KeyError as exc:
