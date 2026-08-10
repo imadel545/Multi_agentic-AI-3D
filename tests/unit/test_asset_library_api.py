@@ -44,7 +44,7 @@ def test_asset_library_probe_rejects_unknown_id(tmp_path: Path, monkeypatch) -> 
     assert "unknown library file_id" in response.json()["detail"]
 
 
-def test_asset_library_probe_returns_422_for_non_utf8_json_output(
+def test_asset_library_probe_traces_lossless_latin1_json_output(
     tmp_path: Path, monkeypatch
 ) -> None:
     root = tmp_path / "asset-library"
@@ -67,6 +67,8 @@ def test_asset_library_probe_returns_422_for_non_utf8_json_output(
         f"/assets/library/{file_id}/probe"
     )
 
-    assert response.status_code == 422
-    assert "sortie JSON illisible" in response.json()["detail"]
-    assert "UnicodeDecodeError" not in response.text
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["probe_status"] == "completed"
+    assert payload["parser_mode"] == "latin1"
+    assert payload["sanitized_non_finite_values"] == 0
