@@ -24,6 +24,7 @@ import type {
   DocumentPackSummary,
   Health,
   LLMDecisionProvenance,
+  MultimodalConsent,
   AssetInventory,
   AssetLibrarySearch,
   AssetLibrarySummary,
@@ -102,6 +103,8 @@ export default function App({ apiClient = api }: AppProps) {
   const [submittedRequirementsHash, setSubmittedRequirementsHash] = useState<string | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [multimodalConsent, setMultimodalConsent] =
+    useState<MultimodalConsent>("disabled");
   const [versions, setVersions] = useState<PublicVersionInfo[]>([]);
   const [lastCertifiedBundle, setLastCertifiedBundle] = useState<ViewerBundle | null>(null);
   const [revisionPrompt, setRevisionPrompt] = useState("");
@@ -122,6 +125,20 @@ export default function App({ apiClient = api }: AppProps) {
     (url: string | null | undefined) => apiClient.artifactUrl(url),
     [apiClient]
   );
+  const multimodalIntelligence =
+    state.summary?.runtime_capabilities?.multimodal_intelligence ??
+    state.viewerBundle?.runtime_capabilities?.multimodal_intelligence ??
+    null;
+  const multimodalConsentAvailable =
+    multimodalIntelligence?.enabled === true &&
+    (multimodalIntelligence.status === "configured_unverified" ||
+      multimodalIntelligence.status === "operational");
+
+  useEffect(() => {
+    if (!multimodalConsentAvailable && multimodalConsent !== "disabled") {
+      setMultimodalConsent("disabled");
+    }
+  }, [multimodalConsent, multimodalConsentAvailable]);
   const rememberEventSequence = useCallback((sequence: number | null | undefined) => {
     if (sequence != null) {
       eventSequenceCursorRef.current = Math.max(
@@ -259,8 +276,10 @@ export default function App({ apiClient = api }: AppProps) {
   useEffect(() => {
     void loadHealth().catch(() => undefined);
     void loadStudioSummary().catch(() => undefined);
+    void loadAssetInventory().catch(() => undefined);
     void loadDocumentCapabilities().catch(() => undefined);
   }, [
+    loadAssetInventory,
     loadDocumentCapabilities,
     loadHealth,
     loadStudioSummary
@@ -768,7 +787,11 @@ export default function App({ apiClient = api }: AppProps) {
         requirements_text: prompt,
         confirmed_requirements: requirementsAnalysis.requirements,
         confirmed_requirements_hash: requirementsAnalysis.requirements_hash,
-        options: { detail_level: ActivePromptDetail, use_llm: null }
+        options: {
+          detail_level: ActivePromptDetail,
+          use_llm: null,
+          multimodal_consent: multimodalConsentAvailable ? multimodalConsent : "disabled"
+        }
       });
       setSubmittedRequirementsHash(requirementsAnalysis.requirements_hash);
       setVersions([]);
@@ -788,6 +811,8 @@ export default function App({ apiClient = api }: AppProps) {
     apiClient,
     loadLiveStatus,
     loadTerminalBundle,
+    multimodalConsent,
+    multimodalConsentAvailable,
     requirementsAnalysis,
     state.phase,
     state.prompt,
@@ -883,7 +908,10 @@ export default function App({ apiClient = api }: AppProps) {
     setRevisionMessage(null);
     dispatch({ type: "SUBMIT_STARTED" });
     try {
-      const generated = await apiClient.generateDesignFromDocumentPack(documentPackSummary.pack_id);
+      const generated = await apiClient.generateDesignFromDocumentPack(
+        documentPackSummary.pack_id,
+        multimodalConsentAvailable ? multimodalConsent : "disabled"
+      );
       if (!generated.workflow_id) {
         dispatch({
           type: "REQUEST_FAILED",
@@ -907,7 +935,14 @@ export default function App({ apiClient = api }: AppProps) {
     } finally {
       setDocumentPackBusy(false);
     }
-  }, [apiClient, documentPackSummary, loadLiveStatus, loadTerminalBundle]);
+  }, [
+    apiClient,
+    documentPackSummary,
+    loadLiveStatus,
+    loadTerminalBundle,
+    multimodalConsent,
+    multimodalConsentAvailable
+  ]);
 
   const submitRevision = useCallback(async () => {
     if (
@@ -1299,6 +1334,9 @@ export default function App({ apiClient = api }: AppProps) {
             onDocumentPackReviewRetry={retryDocumentPackReview}
             onDocumentPackUpload={uploadDocumentPack}
             onDocumentCapabilitiesRetry={() => void loadDocumentCapabilities().catch(() => undefined)}
+            multimodalConsent={multimodalConsent}
+            multimodalIntelligence={multimodalIntelligence}
+            onMultimodalConsentChange={setMultimodalConsent}
             onPromptChange={changePrompt}
             onRevisionPromptChange={setRevisionPrompt}
             onRevisionSubmit={submitRevision}

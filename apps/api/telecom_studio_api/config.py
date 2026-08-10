@@ -20,11 +20,16 @@ class Settings(BaseSettings):
     sqlite_path: Path | None = None
     groq_api_key: str | None = Field(default=None, repr=False)
     groq_model: str = "openai/gpt-oss-120b"
+    groq_text_model: str | None = None
+    groq_vision_model: str = "qwen/qwen3.6-27b"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     enable_groq_extraction: bool = True
     enable_groq_planning_decision: bool = True
     enable_groq_asset_selection: bool = True
     enable_groq_geometry_program: bool = True
+    enable_groq_vision: bool = False
+    enable_groq_visual_design_critic: bool = False
+    groq_vision_consent_mode: Literal["per_project_opt_in"] = "per_project_opt_in"
     groq_extraction_timeout_s: float = Field(default=30.0, ge=3.0, le=120.0)
     groq_extraction_max_completion_tokens: int = Field(default=4096, ge=128, le=8192)
     groq_extraction_reasoning_effort: Literal["low", "medium", "high"] = "medium"
@@ -37,6 +42,15 @@ class Settings(BaseSettings):
     groq_geometry_timeout_s: float = Field(default=90.0, ge=10.0, le=180.0)
     groq_geometry_max_completion_tokens: int = Field(default=8192, ge=1024, le=16_384)
     groq_geometry_reasoning_effort: Literal["low", "medium", "high"] = "medium"
+    groq_vision_timeout_s: float = Field(default=45.0, ge=3.0, le=120.0)
+    groq_vision_max_completion_tokens: int = Field(default=2048, ge=128, le=8192)
+    groq_vision_max_images: int = Field(default=3, ge=1, le=3)
+    groq_vision_max_image_bytes: int = Field(default=20_000_000, ge=1, le=20_000_000)
+    groq_vision_max_pixels: int = Field(default=16_000_000, ge=1_000_000, le=16_000_000)
+    groq_vision_max_edge_px: int = Field(default=4096, ge=512, le=8192)
+    groq_transport_max_retries: int = Field(default=2, ge=0, le=5)
+    groq_circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
+    groq_circuit_reset_s: float = Field(default=30.0, ge=1.0, le=600.0)
     blender_binary: str = "blender"
     blender_timeout_s: int = 180
     max_concurrent_workflows: int = Field(default=2, ge=1, le=8)
@@ -60,6 +74,24 @@ class Settings(BaseSettings):
         normalized = value.strip()
         if not normalized:
             raise ValueError("groq_model must not be empty")
+        return normalized
+
+    @field_validator("groq_text_model")
+    @classmethod
+    def validate_optional_groq_text_model(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("groq_text_model must not be empty when configured")
+        return normalized
+
+    @field_validator("groq_vision_model")
+    @classmethod
+    def validate_groq_vision_model(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("groq_vision_model must not be empty")
         return normalized
 
     @field_validator("groq_base_url")
@@ -95,6 +127,12 @@ class Settings(BaseSettings):
             or os.getenv("GROQ_API_KEY")
             or _read_env_file_value(self.project_root / ".env", ["GROQ_API_KEY", "groq_api"])
         )
+
+    @property
+    def resolved_groq_text_model(self) -> str:
+        """New capability-specific name with compatibility for GROQ_MODEL."""
+
+        return self.groq_text_model or self.groq_model
 
     @property
     def resolved_nvidia_api_key(self) -> str | None:

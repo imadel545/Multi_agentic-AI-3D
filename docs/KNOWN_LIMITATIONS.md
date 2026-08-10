@@ -53,6 +53,16 @@ frontend.
   correct the prompt; GPT-OSS may propose a candidate but cannot silently become
   the authority over conflicting source evidence.
 - Groq improves extraction only when a real key is configured.
+- The shared Groq transport adds bounded transient retries, `Retry-After` and a
+  per-capability circuit breaker, but no live Qwen call was accepted in M1.
+  `configured_unverified` remains different from `operational`; a configured
+  key is not health proof.
+- Qwen multimodal interpretation and asset-preview review are advisory and
+  opt-in per project. Consent is disabled by default and persisted, but the
+  document-pack route currently records `remote_vision_analysis=not_executed`:
+  there is no automatic image/PDF workflow invocation or PDF rasterization.
+  The planned 8 plan/OCR + 8 asset-preview + 8 negative/ambiguous evaluation
+  has not been executed, so vision cannot participate in certification.
 - LLM state is visible through `extraction_provider`, `llm_provider`,
   `llm_available`, `llm_fallback_used`, and `llm_fallback_reason`; fallback is
   acceptable only if the frontend displays it.
@@ -309,6 +319,44 @@ frontend.
   connector intent satisfies electrical, RF, grounding, load, maintenance or
   regulatory rules.
 
+## M1 professional asset qualification gate
+
+- Status is `MILESTONE 1 — PARTIEL`. The verified baseline is local commit
+  `4829995130a43c09c5fb0c23d4216ed007e2d2c2` and tag
+  `cognitive-3d-m1-baseline-20260808` on branch
+  `codex/m1-asset-qualification`.
+- All 13 current runtime assets fail the stronger professional proof gate.
+  They do not collectively provide a neutral master, qualified viewer lineage,
+  explicit professional provenance/licence, five passed asset previews,
+  typed anchors/connectors and the required qualification QA.
+- The public gate is now byte-verified by `ProfessionalAssetVerifier`, not
+  copied from the manifest declaration. Missing/out-of-root/tampered
+  master/viewer/previews/report files, invalid GLB/PNG data, inconsistent
+  dimensions or out-of-bounds anchors fail closed. This verifier does not
+  create the missing neutral CAD source, prove licensing rights or validate a
+  B-Rep semantically.
+- No neutral STEP/B-Rep sample is currently admitted for the requested
+  professional structure, antenna, RRU, support, ground cabinet, GPS and
+  platform roles. DWG `3DSOLID`/ACIS remains `source_only`; metadata search or
+  an LLM decision cannot convert it into exact geometry.
+- `QualifiedAssetCandidateRetriever` and `AssetDecisionPacket` improve the
+  decision contract, not the underlying fidelity. Telecom persists and
+  validates semantic strategies. Generic cognitive retrieval now exposes
+  candidates, but the generic compiler cannot yet execute asset
+  `reuse`/`adapt`/`compose`, so it publishes no allowed asset strategy.
+- No professional M1 Blender/browser E2E has passed with seven qualified real
+  assets, five scene previews plus per-asset previews, reuse/adapt/compose,
+  procedural complement, deterministic QA, provenance and targeted versioned
+  edit. Older technical-generic E2E evidence must not be relabelled as this
+  gate.
+- A 2026-08-10 technical-generic smoke did pass with the real API, a restored
+  certified GLB and the Composition drawer: 0 professional proof, 0 qualified
+  per-asset preview, seven explicit incomplete-proof cards and no console
+  error. It validates truthful degradation only.
+- No BGE-M3, PostgreSQL, new Docker architecture or mass CAD conversion is part
+  of this remediation. Nemotron, SQLite, Qdrant projection and the existing
+  Compose topology remain unchanged.
+
 ## M0 release gate
 
 - Trusted assembly/recovery remains
@@ -348,10 +396,11 @@ frontend.
   n'ont pas tous été générés, révisés et certifiés de bout en bout avec le
   provider réel. Les tests d'intégration utilisent un client LLM contrôlé et
   Blender réel; ils prouvent le déterministe, pas la fiabilité externe.
-- L'Asset Intelligence générique n'est pas encore opérationnelle. Hors domaine
-  télécom, le retriever annonce honnêtement `procedural_only`; il ne recherche,
-  score, adapte ni assemble encore des assets génériques qualifiés de la
-  bibliothèque CAD.
+- L'Asset Intelligence générique sait désormais rechercher et exposer des
+  candidats qualifiés sous forme d'`AssetDecisionPacket`, mais elle n'est pas
+  encore opérationnelle jusqu'à Blender. Le compilateur générique ne sait pas
+  exécuter `reuse`/`adapt`/`compose`; la route publie donc zéro stratégie asset
+  autorisée et reste procédurale à l'exécution.
 - Le compilateur génère chaque composant déclaré, mais il n'existe pas encore de
   solveur générique de placement/relations qui prouve la cohérence spatiale d'un
   assemblage arbitraire à partir d'ancres et connecteurs.

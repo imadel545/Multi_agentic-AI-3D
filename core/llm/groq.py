@@ -20,6 +20,7 @@ from core.llm.groq_policy import (
     GroqRequestPolicy,
     normalize_groq_base_url,
 )
+from core.llm.transport import GroqTransport, GroqTransportError, chat_message_json
 from core.services.requirement_parser import POWER_CABINET_TERMS, parse_requirements_text
 
 REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
@@ -202,6 +203,8 @@ class GroqStructuredClient:
         timeout_s: float = 30.0,
         reasoning_effort: GroqReasoningEffort = "medium",
         max_completion_tokens: int = 4096,
+        *,
+        transport: GroqTransport | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
@@ -218,6 +221,7 @@ class GroqStructuredClient:
             reasoning_effort=reasoning_effort,
             max_completion_tokens=max_completion_tokens,
         )
+        self._transport = transport
 
     def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
         baseline = parse_requirements_text(requirements_text, detail_level=detail_level)
@@ -280,8 +284,13 @@ class GroqStructuredClient:
         )
         try:
             return self._post_and_validate(strict_payload, baseline, requirements_text)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 400:
+        except (httpx.HTTPStatusError, GroqTransportError) as exc:
+            status_code = (
+                exc.response.status_code
+                if isinstance(exc, httpx.HTTPStatusError)
+                else exc.status_code
+            )
+            if status_code != 400:
                 raise
 
         json_object_payload = self._policy.apply(
@@ -365,21 +374,43 @@ class GroqStructuredClient:
         """Execute one JSON response request under an explicit capability policy."""
 
         payload = (policy or self._policy).apply(payload)
-        response = httpx.post(
-            f"{self.base_url}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=self.timeout_s,
-        )
-        response.raise_for_status()
-        body = response.json()
-        content = body["choices"][0]["message"]["content"]
-        if isinstance(content, list):
-            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        return json.loads(content)
+        try:
+            if self._transport is not None:
+                result = self._transport.request_chat_completion(
+                    capability=(policy or self._policy).capability,
+                    payload=payload,
+                    timeout_s=self.timeout_s,
+                )
+                parsed = chat_message_json(result.body)
+                self._transport.mark_operational((policy or self._policy).capability)
+                return parsed
+            response = httpx.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self.timeout_s,
+            )
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            if isinstance(content, list):
+                content = "".join(
+                    part.get("text", "") for part in content if isinstance(part, dict)
+                )
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise TypeError("provider message content must be a JSON object")
+            return parsed
+        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+            if self._transport is not None:
+                self._transport.mark_failed(
+                    (policy or self._policy).capability,
+                    "model_output_rejected",
+                )
+            raise
 
 
 def _restore_missing_baseline_fields(

@@ -45,6 +45,8 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `POST` | `/designs/{id}/versions/{vid}/rollback` | Rollback vers une version. |
 | `GET` | `/designs/{id}/artifacts/{name}` | Télécharger GLB, PNG, metadata, rapports. |
 | `GET` | `/assets/inventory` | Inventaire des assets et leur état. |
+| `GET` | `/assets/{asset_id}/provenance` | Provenance publique, licence, fidélité, route de conversion et état de qualification, sans chemin local. |
+| `GET` | `/assets/{asset_id}/previews/{view}` | Preview qualifiée publiée par le manifest; existence et hash sont vérifiés avant service. |
 | `GET` | `/assets/adaptation-capabilities` | Catalogue versionné des profils d'adaptation. |
 | `GET` | `/designs/{id}/adaptation-capabilities` | Paramètres réellement modifiables dans la version active. |
 | `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles. |
@@ -56,6 +58,15 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `GET` | `/document-packs/{pack_id}/qa` | QA du pack. |
 | `POST` | `/document-packs/{pack_id}/corrections` | Appliquer une correction manuelle. |
 | `POST` | `/document-packs/{pack_id}/generate-design` | Générer un design depuis le pack. |
+
+`POST /designs` accepte `options.multimodal_consent` et
+`POST /document-packs/{pack_id}/generate-design` accepte le même consentement
+dans son body optionnel. Les valeurs publiques sont `disabled`,
+`allow_input_analysis` et `allow_input_and_visual_review`; la valeur par défaut
+est toujours `disabled`. Le consentement est persisté avec le workflow. Le
+contrat actuel du document pack retourne `remote_vision_analysis=not_executed`:
+cocher le consentement n'envoie pas encore automatiquement une pièce jointe à
+Qwen.
 
 `GET /health` est aussi un contrôle d'identité du service, pas seulement un
 ping. Le frontend exige `status=ok`,
@@ -127,6 +138,10 @@ restent internes au backend.
 - `artifacts` : URLs backend, jamais `/Users/...`.
 - `active_version_artifacts` : URLs versionnées quand une version active existe.
 - `runtime_capabilities` : capacités runtime réelles du backend v1.
+- `runtime_capabilities.multimodal_intelligence` : état public
+  `disabled`, `configured_unverified`, `operational` ou `failed`, capabilities
+  disponibles et limites d'entrée. La présence d'une clé ne suffit pas à
+  publier `operational`.
 - `unsupported_actions` : actions explicitement non disponibles avec raison.
 - `available_actions` : actions que l'UI peut proposer pour cet état.
   `rollback_version` n'est présent que pour un résultat certifié avec version
@@ -150,6 +165,7 @@ restent internes au backend.
 - `real_glb_asset_count`
 - `import_qualified_glb_count`
 - `generation_eligible_asset_count`
+- `professional_evidence_asset_count`
 - `reference_only_asset_count`
 - `qualified_integrity_failure_count`
 
@@ -157,6 +173,18 @@ Chaque entrée expose aussi `qualification_status`, `generation_eligible`,
 `allowed_generation_modes`, `qualification_method`, les limites de
 qualification et le résultat du contrôle du hash. La présence d'un `.glb` ne
 signifie donc plus qu'il est automatiquement utilisable par Blender.
+Les entrées M1 peuvent aussi exposer `preview_set`, `provenance_url`,
+`geometry_status`, `fidelity_status`, `milestone_evidence_eligible` et
+`milestone_evidence_failures`. Le catalogue courant contient 13 assets
+runtime mais 0 preuve professionnelle M1; le frontend ne doit donc pas les
+présenter comme composants constructeur qualifiés.
+
+`milestone_evidence_eligible` est une preuve runtime, pas une recopie du
+manifest. Le backend vérifie le confinement des chemins, l'existence et les
+SHA-256 du master, du viewer, des cinq PNG et du rapport QA, ainsi que
+l'intégrité GLB/PNG, la lignée, les dimensions et les anchors. Une preview ne
+peut être présentée comme professionnelle que si le flag asset est vrai et si
+la vue est `available && qa_status == "passed"`.
 - `missing_file_count`
 - `blender_available`
 - `groq_available`
@@ -260,6 +288,10 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `memory_context_count`
 - `qa_summary`
 - `viewer_artifacts[]`
+- `multimodal_consent`
+- `multimodal_intelligence`
+- `asset_decision_summary`
+- `visual_review`
 - `limitations`
 - `runtime_capabilities`
 - `unsupported_actions`
@@ -271,6 +303,16 @@ indisponible, jamais inventer une provenance. Lorsqu'elle est disponible, cette
 URL ouvre la preuve par composant (`reuse`, `adapt`, `compose` ou
 `procedural_generate`), ses paramètres, sa transformation, son empreinte et ses
 contrôles locaux.
+
+`asset_decision_summary` présente par composant la stratégie sémantique
+publique (`reuse_full_design`, `adapt_full_design`, `reuse_component`,
+`adapt_component`, `compose_assets`, `compose_and_generate`,
+`procedural_generate`, `clarify` ou `unsupported` selon la preuve persistée),
+sans exposer les prompts privés ni les chemins locaux.
+`visual_review` est séparé de la QA déterministe et utilise
+`not_requested`, `passed_advisory`, `review_required` ou `failed`. Il reste
+consultatif: il ne peut ni promouvoir un asset, ni annuler un échec
+déterministe, ni certifier une dimension ou une scène.
 
 `assembly_plan.json` schema `1.1.0` expose notamment les candidats scorés, le
 candidat choisi, la stratégie choisie, `selection_provider`, `selection_model`,

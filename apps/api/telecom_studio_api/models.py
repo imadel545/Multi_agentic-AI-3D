@@ -4,10 +4,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from core.contracts.requirements import RequirementSpec
 
+MultimodalConsent = Literal[
+    "disabled",
+    "allow_input_analysis",
+    "allow_input_and_visual_review",
+]
+
 
 class DesignOptions(BaseModel):
     detail_level: Literal["low", "medium", "high"] = "high"
     use_llm: bool | None = None
+    multimodal_consent: MultimodalConsent = "disabled"
 
 
 class CreateDesignRequest(BaseModel):
@@ -62,6 +69,18 @@ class UnsupportedAction(BaseModel):
     future_requirement: str
 
 
+class MultimodalIntelligenceCapability(BaseModel):
+    status: Literal["disabled", "configured_unverified", "operational", "failed"]
+    enabled: bool
+    requires_project_consent: bool = True
+    max_images_per_request: int = Field(default=3, ge=1, le=3)
+    max_image_bytes: int = Field(default=20_000_000, ge=1, le=20_000_000)
+    remote_processing: bool = True
+    capabilities: list[str] = Field(default_factory=list)
+    visual_design_critic: Literal["disabled_until_m5"] = "disabled_until_m5"
+    last_error: str | None = None
+
+
 class RuntimeCapabilities(BaseModel):
     streaming_transport: Literal["push_sse"] = "push_sse"
     event_source: Literal["push_sse"] = "push_sse"
@@ -81,6 +100,7 @@ class RuntimeCapabilities(BaseModel):
     can_retry_same_workflow: bool = False
     can_human_in_loop: bool = False
     websocket_runtime: bool = False
+    multimodal_intelligence: MultimodalIntelligenceCapability
     limitations: list[str] = Field(default_factory=list)
 
 
@@ -91,6 +111,7 @@ class WorkflowStatus(BaseModel):
     version_id: str | None = None
     active_version_id: str | None = None
     active_operation: dict | None = None
+    multimodal_consent: MultimodalConsent = "disabled"
     artifacts: dict[str, str]
     active_version_artifacts: dict[str, str] | None = None
     warnings: list[dict]
@@ -297,6 +318,7 @@ class DocumentPackCapabilitiesView(BaseModel):
     dwg_conversion: DocumentToolCapabilityView
     coordinate_conversion: DocumentToolCapabilityView
     groq_bounded_extraction: DocumentToolCapabilityView
+    multimodal_intelligence: MultimodalIntelligenceCapability
     document_pack_status: str
     supported_upload_format: str
     supported_inputs: dict[str, Any]
@@ -309,6 +331,12 @@ class DocumentPackCapabilitiesView(BaseModel):
     truth: dict[str, Any]
     next_action: str
     capabilities: dict[str, DocumentToolCapabilityView]
+
+
+class DocumentPackGenerateDesignRequest(BaseModel):
+    """Optional generation controls; an omitted body remains backward compatible."""
+
+    multimodal_consent: MultimodalConsent = "disabled"
 
 
 class DocumentPackGenerateDesignResponse(BaseModel):
@@ -346,6 +374,10 @@ class AssetInventoryEntry(BaseModel):
     allowed_generation_modes: list[str] = Field(default_factory=list)
     qualification_method: str | None = None
     qualification_limitations: list[str] = Field(default_factory=list)
+    milestone_evidence_eligible: bool = False
+    milestone_evidence_failures: list[str] = Field(default_factory=list)
+    preview_set: list[dict[str, Any]] = Field(default_factory=list)
+    provenance_url: str | None = None
     verified_file_sha256: str | None = None
     qualified_file_hash_matches: bool | None = None
     mesh_integrity_verified: bool = False
@@ -365,6 +397,7 @@ class AssetInventoryResponse(BaseModel):
     import_ready_asset_count: int
     import_qualified_glb_count: int
     generation_eligible_asset_count: int
+    professional_evidence_asset_count: int
     reference_only_asset_count: int
     qualified_integrity_failure_count: int
     procedural_fallback_count: int
@@ -433,6 +466,7 @@ class UserSummary(BaseModel):
     qa_summary: str
     human_readable_issues: list[UserIssue]
     active_version: str | None = None
+    multimodal_consent: MultimodalConsent = "disabled"
     generation_mode: str | None = None
     generation_strategy: str | None = None
     geometry_source: str | None = None
@@ -596,6 +630,10 @@ class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
     active_version: str | None = None
+    multimodal_consent: MultimodalConsent = "disabled"
+    multimodal_intelligence: MultimodalIntelligenceCapability | None = None
+    asset_decision_summary: dict[str, Any] | None = None
+    visual_review: dict[str, Any] | None = None
     generation_mode: str | None = None
     generation_strategy: str | None = None
     geometry_source: str | None = None

@@ -49,6 +49,7 @@ import {
   type EditDesignResponse,
   type Health,
   type LLMDecisionProvenance,
+  type MultimodalConsent,
   type ParseRequirementsResponse,
   type PublicVersionInfo,
   type RequirementSpec,
@@ -81,6 +82,7 @@ export type CreateDesignPayload = {
   options?: {
     detail_level?: "low" | "medium" | "high";
     use_llm?: boolean | null;
+    multimodal_consent?: MultimodalConsent;
   };
 };
 
@@ -290,11 +292,16 @@ export class TelecomStudioApi {
     );
   }
 
-  async generateDesignFromDocumentPack(packId: string): Promise<DocumentPackGenerateDesignResponse> {
+  async generateDesignFromDocumentPack(
+    packId: string,
+    multimodalConsent: MultimodalConsent = "disabled"
+  ): Promise<DocumentPackGenerateDesignResponse> {
     return parseContract(
       "DocumentPackGenerateDesignResponse",
       DocumentPackGenerateDesignResponseSchema,
-      await this.postJson(`/document-packs/${packId}/generate-design`, {})
+      await this.postJson(`/document-packs/${packId}/generate-design`, {
+        multimodal_consent: multimodalConsent
+      })
     );
   }
 

@@ -2,6 +2,7 @@ import hashlib
 from pathlib import Path
 
 from core.contracts.assets import AssetManifest
+from core.services.asset_evidence import ProfessionalAssetVerifier
 from core.services.asset_registry import AssetRegistry
 
 
@@ -12,7 +13,8 @@ class AssetInventoryService:
 
     def inspect(self) -> dict:
         assets = self.registry.list_assets()
-        entries = [_entry(self.project_root, asset) for asset in assets]
+        verifier = ProfessionalAssetVerifier(self.project_root)
+        entries = [_entry(self.project_root, asset, verifier) for asset in assets]
         missing = [
             entry
             for entry in entries
@@ -22,6 +24,9 @@ class AssetInventoryService:
             entry for entry in entries if entry["asset_import_mode"] == "imported_glb_exact"
         ]
         generation_eligible = [entry for entry in entries if entry["generation_eligible"]]
+        professional_evidence = [
+            entry for entry in entries if entry["milestone_evidence_eligible"]
+        ]
         reference_only = [
             entry for entry in entries if entry["qualification_status"] == "reference_only"
         ]
@@ -60,6 +65,7 @@ class AssetInventoryService:
             "import_ready_asset_count": len(import_ready),
             "import_qualified_glb_count": len(import_ready),
             "generation_eligible_asset_count": len(generation_eligible),
+            "professional_evidence_asset_count": len(professional_evidence),
             "reference_only_asset_count": len(reference_only),
             "qualified_integrity_failure_count": len(integrity_failures),
             "procedural_fallback_count": len(fallback),
@@ -70,7 +76,11 @@ class AssetInventoryService:
         }
 
 
-def _entry(project_root: Path, asset: AssetManifest) -> dict:
+def _entry(
+    project_root: Path,
+    asset: AssetManifest,
+    verifier: ProfessionalAssetVerifier,
+) -> dict:
     file_required = not asset.file.startswith("procedural://")
     path = project_root / asset.file if file_required else None
     file_exists = bool(path and path.exists())
@@ -117,6 +127,28 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
     else:
         asset_import_mode = "quarantined_unverified"
         effective_generation_mode = "quarantined_unverified"
+    preview_set = []
+    for preview in asset.preview_set:
+        preview_path = _safe_project_path(project_root, preview.file)
+        preview_exists = bool(preview_path and preview_path.is_file())
+        preview_hash_matches = (
+            _sha256_file(preview_path) == preview.sha256
+            if preview_path is not None and preview_exists
+            else False
+        )
+        preview_set.append(
+            {
+                "view": preview.view,
+                "url": f"/assets/{asset.asset_id}/previews/{preview.view}",
+                "sha256": preview.sha256,
+                "available": preview_exists and preview_hash_matches,
+                "content_type": "image/png",
+                "width_px": preview.width_px,
+                "height_px": preview.height_px,
+                "qa_status": preview.qa_status,
+            }
+        )
+    evidence = verifier.verify(asset)
     return {
         "asset_id": asset.asset_id,
         "type": asset.type,
@@ -155,6 +187,21 @@ def _entry(project_root: Path, asset: AssetManifest) -> dict:
         "dimensions_m": asset.dimensions_m.model_dump() if asset.dimensions_m else None,
         "asset_dimensions_checked": dimensions_checked,
         "mount_zones": [zone.model_dump() for zone in asset.mount_zones],
+        "family": asset.resolved_family,
+        "subtype": asset.subtype,
+        "manufacturer": asset.manufacturer,
+        "reference": asset.reference,
+        "source_format": asset.resolved_source_format,
+        "geometry_status": asset.resolved_geometry_status,
+        "fidelity_status": asset.geometry_fidelity,
+        "qualification_version": asset.qualification_version,
+        "preview_set": preview_set,
+        "provenance_url": f"/assets/{asset.asset_id}/provenance",
+        "visual_review_status": "not_requested",
+        "milestone_evidence_eligible": evidence.eligible,
+        "milestone_evidence_failures": list(evidence.failures),
+        "anchor_count": len(asset.anchors),
+        "connector_count": len(asset.connectors),
         "warnings": warnings,
     }
 
@@ -165,3 +212,12 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _safe_project_path(project_root: Path, relative_path: str) -> Path | None:
+    candidate = (project_root / relative_path).resolve()
+    try:
+        candidate.relative_to(project_root.resolve())
+    except ValueError:
+        return None
+    return candidate

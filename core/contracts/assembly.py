@@ -221,6 +221,16 @@ class AssemblyComponentSelection(StrictModel):
     generation_strategy: Literal[
         "imported_glb_exact", "internal_project_generated", "procedural_fallback"
     ]
+    semantic_strategy: (
+        Literal[
+            "reuse_component",
+            "adapt_component",
+            "compose_assets",
+            "compose_and_generate",
+            "procedural_generate",
+        ]
+        | None
+    ) = None
     allowed_parameter_ids: list[str] = Field(default_factory=list, max_length=32)
     parameter_values: dict[str, float | int | bool | str] = Field(
         default_factory=dict,
@@ -230,6 +240,7 @@ class AssemblyComponentSelection(StrictModel):
     builder_profile: BuilderProfileSnapshot | None = None
     requirement_links: list[str] = Field(default_factory=list, max_length=16)
     blueprint_links: list[str] = Field(default_factory=list, max_length=16)
+    selection_risks: list[str] = Field(default_factory=list, max_length=32)
     selection_reason: str = Field(min_length=1, max_length=280)
 
     @model_validator(mode="after")
@@ -249,6 +260,16 @@ class AssemblyComponentSelection(StrictModel):
             raise ValueError("required component needs an asset or a procedural fallback")
         if not set(self.parameter_values).issubset(self.allowed_parameter_ids):
             raise ValueError("component parameter values exceed the manifest allowlist")
+        if self.semantic_strategy is not None:
+            allowed_semantics = {
+                "imported_glb_exact": {"reuse_component", "adapt_component"},
+                "internal_project_generated": {"compose_assets", "adapt_component"},
+                "procedural_fallback": {"procedural_generate"},
+            }[self.generation_strategy]
+            if self.semantic_strategy not in allowed_semantics:
+                raise ValueError(
+                    "component semantic strategy is incompatible with its generation strategy"
+                )
         validate_component_parameter_contract(self)
         return self
 

@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from core.contracts.common import NetworkType, StrictModel
+from core.contracts.vision import NormalizedImageRegion
 
 DocumentCategory = Literal[
     "apd_plan",
@@ -64,6 +65,7 @@ SourceEvidenceType = Literal[
     "cad",
     "coordinate_conversion",
     "groq",
+    "vision",
     "user_correction",
 ]
 
@@ -99,6 +101,9 @@ class SourceEvidence(StrictModel):
     page: int | None = Field(default=None, ge=1)
     sheet: str | None = None
     layer: str | None = None
+    artifact_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    region: NormalizedImageRegion | None = None
+    model_invocation_id: str | None = Field(default=None, max_length=160)
     confidence: float | None = Field(default=None, ge=0, le=1)
     evidence: str = Field(min_length=1, max_length=1000)
 

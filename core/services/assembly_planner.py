@@ -8,6 +8,7 @@ from core.contracts.assets import AssetManifest
 from core.contracts.requirements import RequirementSpec
 from core.services.asset_registry import AssetRegistry
 from core.services.builder_registry import BuilderRegistry
+from core.services.qualified_asset_retriever import QualifiedAssetCandidateRetriever
 
 
 class BoundedAssemblyDecisionClient(Protocol):
@@ -33,9 +34,11 @@ class AssetAssemblyPlanner:
         registry: AssetRegistry,
         decision_client: BoundedAssemblyDecisionClient | None = None,
         builder_registry: BuilderRegistry | None = None,
+        candidate_retriever: QualifiedAssetCandidateRetriever | None = None,
     ) -> None:
         self.registry = registry
         self.decision_client = decision_client
+        self.candidate_retriever = candidate_retriever or QualifiedAssetCandidateRetriever(registry)
         self.builder_registry = builder_registry or BuilderRegistry(
             registry.manifests_dir.parent / "capabilities" / "builder_profiles.json"
         )
@@ -62,12 +65,15 @@ class AssetAssemblyPlanner:
                     raise LookupError(
                         f"no validated {asset_type} asset for {requirements.network_type}"
                     )
-            ranked[role_id] = self.registry.rank_candidates(
+            qualified_candidates = self.candidate_retriever.rank_telecom(
                 asset_type=asset_type,
                 network_type=requirements.network_type,
                 tower_type=requirements.tower_type,
                 min_height_m=requirements.tower_height_m if asset_type == "tower" else None,
             )
+            ranked[role_id] = [
+                (candidate.manifest, candidate.score) for candidate in qualified_candidates
+            ]
         selected_ids, decision = self._bounded_decision(ranked)
         components: list[AssemblyComponentSelection] = []
         assets_by_role: dict[str, AssetManifest] = {}
@@ -85,6 +91,14 @@ class AssetAssemblyPlanner:
             if strategy not in _allowed_assembly_strategies(asset):
                 raise ValueError(
                     f"ASSET_GENERATION_STRATEGY_NOT_ALLOWED:{asset.asset_id}:{strategy}"
+                )
+            semantic_strategy = (decision.get("semantic_strategies") or {}).get(role_id)
+            if semantic_strategy is None:
+                semantic_strategy = _deterministic_semantic_strategy(asset, strategy)
+            if semantic_strategy not in _allowed_semantic_strategies(asset, strategy):
+                raise ValueError(
+                    "ASSET_SEMANTIC_STRATEGY_NOT_ALLOWED:"
+                    f"{asset.asset_id}:{strategy}:{semantic_strategy}"
                 )
             manifest_generation_mode = (
                 "imported_glb_exact" if strategy == "imported_glb_exact" else "parametric_generated"
@@ -104,6 +118,7 @@ class AssetAssemblyPlanner:
             manifest_parameters = {item.parameter_id for item in asset.allowed_parameters}
             if not manifest_parameters.issubset(builder_profile.allowed_parameter_ids):
                 raise ValueError(f"BUILDER_PARAMETER_ALLOWLIST_MISMATCH:{asset.builder_profile_id}")
+            selected_packet = self.candidate_retriever.packet_for(asset)
             components.append(
                 AssemblyComponentSelection(
                     role_id=role_id,
@@ -113,6 +128,7 @@ class AssetAssemblyPlanner:
                     selected_asset_id=asset.asset_id,
                     builder_profile_id=asset.builder_profile_id,
                     generation_strategy=strategy,
+                    semantic_strategy=semantic_strategy,
                     allowed_parameter_ids=[item.parameter_id for item in asset.allowed_parameters],
                     parameter_values=_parameter_values(asset, requirements),
                     manifest_snapshot=self.registry.manifest_snapshot(
@@ -122,6 +138,7 @@ class AssetAssemblyPlanner:
                     builder_profile=builder_profile,
                     requirement_links=_requirement_links(role_id),
                     blueprint_links=[f"component:{asset.type}:1"],
+                    selection_risks=selected_packet.rejection_risks,
                     selection_reason=_selection_reason(role_id, asset, options, decision),
                 )
             )
@@ -185,11 +202,15 @@ class AssetAssemblyPlanner:
                         "compatible_tower_types": asset.compatible_tower_types,
                         "geometry_fidelity": asset.geometry_fidelity,
                         "allowed_generation_strategies": _allowed_assembly_strategies(asset),
+                        "allowed_semantic_strategies": _allowed_semantic_strategies(asset),
                         "allowed_parameter_ids": [
                             parameter.parameter_id for parameter in asset.allowed_parameters
                         ],
                         "builder_profile_id": asset.builder_profile_id,
                         "qualification_limitations": asset.qualification.limitations,
+                        "asset_decision_packet": self.candidate_retriever.packet_for(
+                            asset
+                        ).model_dump(mode="json"),
                     }
                     for asset, score in options
                 ],
@@ -216,6 +237,7 @@ class AssetAssemblyPlanner:
                 or "llm_asset_selector_output_rejected",
             }
         generation_strategies = diagnostics.get("generation_strategies") or {}
+        semantic_strategies = diagnostics.get("semantic_strategies") or {}
         selected_assets = {
             role_id: next(asset for asset, _score in ranked[role_id] if asset.asset_id == asset_id)
             for role_id, asset_id in safe.items()
@@ -230,6 +252,21 @@ class AssetAssemblyPlanner:
                 "model_name": diagnostics.get("model_name"),
                 "fallback_used": True,
                 "fallback_reason": "llm_asset_strategy_output_rejected",
+            }
+        if set(semantic_strategies) != set(allowed) or any(
+            semantic_strategies[role_id]
+            not in _allowed_semantic_strategies(
+                asset,
+                generation_strategies.get(role_id),
+            )
+            for role_id, asset in selected_assets.items()
+        ):
+            return {}, {
+                "authority": "deterministic_fallback",
+                "provider": diagnostics.get("provider", "deterministic"),
+                "model_name": diagnostics.get("model_name"),
+                "fallback_used": True,
+                "fallback_reason": "llm_asset_semantic_strategy_output_rejected",
             }
         return safe, {
             "authority": "llm_bounded",
@@ -275,6 +312,36 @@ def _allowed_assembly_strategies(asset: AssetManifest) -> list[str]:
 def _deterministic_generation_strategy(asset: AssetManifest) -> str:
     strategies = _allowed_assembly_strategies(asset)
     return "imported_glb_exact" if "imported_glb_exact" in strategies else strategies[0]
+
+
+def _allowed_semantic_strategies(
+    asset: AssetManifest,
+    generation_strategy: str | None = None,
+) -> list[str]:
+    generation_strategies = (
+        [generation_strategy]
+        if generation_strategy is not None
+        else _allowed_assembly_strategies(asset)
+    )
+    semantics: list[str] = []
+    if "imported_glb_exact" in generation_strategies:
+        semantics.append("reuse_component")
+    if "internal_project_generated" in generation_strategies:
+        semantics.append("compose_assets")
+    if asset.allowed_parameters or asset.adapter_capability_id:
+        semantics.append("adapt_component")
+    return list(dict.fromkeys(semantics))
+
+
+def _deterministic_semantic_strategy(
+    asset: AssetManifest,
+    generation_strategy: str,
+) -> str:
+    strategies = _allowed_semantic_strategies(asset, generation_strategy)
+    preferred = (
+        "reuse_component" if generation_strategy == "imported_glb_exact" else "compose_assets"
+    )
+    return preferred if preferred in strategies else strategies[0]
 
 
 def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyConnection]:

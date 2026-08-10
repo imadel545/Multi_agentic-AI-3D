@@ -277,6 +277,43 @@ describe("studio kernel components", () => {
     expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();
   });
 
+  it("separates deterministic framing from advisory visual review", () => {
+    render(
+      <QaPanel
+        bundle={{
+          ...bundle,
+          qa_summary: {
+            ...bundle.qa_summary,
+            checks_passed: bundle.qa_summary?.checks_passed ?? [],
+            checks_failed: bundle.qa_summary?.checks_failed ?? [],
+            warnings: bundle.qa_summary?.warnings ?? [],
+            errors: bundle.qa_summary?.errors ?? [],
+            upstream_errors: bundle.qa_summary?.upstream_errors ?? [],
+            limitations: bundle.qa_summary?.limitations ?? [],
+            preview_pixel_framing_qa: true,
+            preview_subject_framing_valid: true,
+            preview_subject_bbox_width_ratio: 0.62,
+            preview_subject_bbox_height_ratio: 0.84,
+            preview_subject_min_edge_margin_ratio: 0.08
+          },
+          visual_review: {
+            status: "review_required",
+            advisory_only: true,
+            summary: "Un support est partiellement masqué.",
+            findings: ["Vérifier la lisibilité du support"],
+            limitations: []
+          }
+        }}
+      />
+    );
+
+    expect(screen.getByRole("region", { name: "Cadrage technique" })).toHaveTextContent("conforme");
+    expect(screen.getByRole("region", { name: "Revue visuelle assistée" })).toHaveTextContent(
+      "consultative"
+    );
+    expect(screen.queryByText(/QA visuelle 100/i)).not.toBeInTheDocument();
+  });
+
   it("requires real backend analysis before confirming the design", async () => {
     const onAnalyze = vi.fn();
     const onConfirm = vi.fn();
@@ -298,6 +335,53 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/Source d’analyse : intelligence décisionnelle/)).toBeInTheDocument();
     expect(screen.queryByText(/groq:openai\/gpt-oss-120b/)).not.toBeInTheDocument();
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
+  });
+
+  it("keeps remote image analysis opt-in and hides it without an eligible capability", () => {
+    const onConsentChange = vi.fn();
+    const { rerender } = render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        multimodalIntelligence={{
+          status: "operational",
+          enabled: true,
+          requires_project_consent: true,
+          max_images_per_request: 3,
+          max_image_bytes: 20_000_000,
+          remote_processing: true,
+          capabilities: ["multimodal_interpretation"],
+          visual_design_critic: "disabled_until_m5"
+        }}
+        onMultimodalConsentChange={onConsentChange}
+      />
+    );
+
+    const consent = screen.getByRole("checkbox", {
+      name: /Autoriser l’analyse assistée des images jointes/i
+    });
+    expect(consent).not.toBeChecked();
+    expect(screen.getByText(/Cocher cette autorisation n’envoie aucun fichier/)).toBeInTheDocument();
+    expect(screen.getByText(/flux documentaire actuel ne déclenche pas encore/)).toBeInTheDocument();
+    fireEvent.click(consent);
+    expect(onConsentChange).toHaveBeenCalledWith("allow_input_analysis");
+
+    rerender(
+      <ChatCommandPanel
+        {...commandDefaults}
+        multimodalIntelligence={{
+          status: "failed",
+          enabled: true,
+          requires_project_consent: true,
+          max_images_per_request: 3,
+          max_image_bytes: 20_000_000,
+          remote_processing: true,
+          capabilities: ["multimodal_interpretation"],
+          visual_design_critic: "disabled_until_m5"
+        }}
+        onMultimodalConsentChange={onConsentChange}
+      />
+    );
+    expect(screen.queryByRole("checkbox", { name: /analyse assistée/i })).not.toBeInTheDocument();
   });
 
   it("shows one actionable recovery message for a failed generation", () => {
@@ -1330,6 +1414,24 @@ describe("studio kernel components", () => {
     const onSelect = vi.fn();
     render(
       <SceneCompositionPanel
+        assetDecisionSummary={{
+          components: [{
+            component_id: "antenna_component",
+            role_id: "antenna",
+            strategy: "reuse_component",
+            strategy_evidence: "planned_not_execution_verified",
+            asset_id: "ANT_REAL_1",
+            considered_count: 2,
+            rejected_count: 1,
+            rationale: "Meilleur candidat compatible avec les connecteurs requis.",
+            risks: ["Professional asset QA has not passed."]
+          }],
+          considered_asset_count: 2,
+          selected_asset_count: 1,
+          decision_authority: "llm_bounded",
+          fallback_used: false,
+          fallback_reason: null
+        }}
         assemblyPlan={{
           schema_version: "1.0",
           workflow_id: "wf_1",
@@ -1343,6 +1445,7 @@ describe("studio kernel components", () => {
             candidate_scores: [],
             selected_asset_id: "ANT_REAL_1",
             generation_strategy: "reuse",
+            selection_risks: ["Professional asset QA has not passed."],
             selection_reason: "Meilleur candidat compatible avec les connecteurs requis."
           }],
           connections: [{}],
@@ -1379,13 +1482,63 @@ describe("studio kernel components", () => {
             qa: null
           }]
         }}
+        assetInventory={{
+          status: "qualified",
+          asset_count: 1,
+          missing_file_count: 0,
+          real_glb_asset_count: 1,
+          import_qualified_glb_count: 1,
+          generation_eligible_asset_count: 1,
+          professional_evidence_asset_count: 0,
+          reference_only_asset_count: 0,
+          qualified_integrity_failure_count: 0,
+          entries: [{
+            asset_id: "ANT_REAL_1",
+            type: "antenna",
+            source: "Catalogue qualifié",
+            generation_eligible: true,
+            qualification_status: "qualified",
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: ["Professional QA report file is missing."],
+            allowed_generation_modes: ["reuse"],
+            qualification_limitations: [],
+            qualified_file_hash_matches: true,
+            preview_set: [{
+              view: "front",
+              url: "/assets/ANT_REAL_1/previews/front.png",
+              sha256: "a".repeat(64),
+              available: true,
+              content_type: "image/png",
+              width_px: 1024,
+              height_px: 1024,
+              qa_status: "passed"
+            }],
+            provenance_url: "/assets/ANT_REAL_1/provenance",
+            visual_review_status: "passed_advisory",
+            fidelity_status: "exact_import",
+            qualification_version: "1.0"
+          }],
+          missing_files: []
+        }}
         onSelect={onSelect}
+        toAbsoluteUrl={(url) => url ?? null}
       />
     );
 
-    expect(screen.getByText("Réutilisé")).toBeInTheDocument();
+    expect(screen.getAllByText("Réutilisé").length).toBeGreaterThan(0);
     expect(screen.getByText("Généré")).toBeInTheDocument();
-    expect(screen.getByText(/Meilleur candidat compatible/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Meilleur candidat compatible/)).toHaveLength(2);
+    expect(screen.queryByRole("img", { name: /Aperçu front/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Asset technique — preuve professionnelle incomplète")).toBeInTheDocument();
+    expect(screen.getByText("Le rapport QA professionnel est absent.")).toBeInTheDocument();
+    expect(screen.getByText("Stratégie planifiée, non certifiée par l’exécution")).toBeInTheDocument();
+    expect(screen.getByText("La QA professionnelle de l’asset n’a pas réussi.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Consulter la provenance" })).toHaveAttribute(
+      "href",
+      "/assets/ANT_REAL_1/provenance"
+    );
+    expect(screen.queryByText("groq")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /choisir|sélectionner/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("treeitem", { name: /antenna/i }));
     expect(onSelect).toHaveBeenCalledWith("antenna_S1_REAL_1");
   });
@@ -1415,6 +1568,7 @@ describe("studio kernel components", () => {
           real_glb_asset_count: 12,
           import_qualified_glb_count: 4,
           generation_eligible_asset_count: 10,
+          professional_evidence_asset_count: 0,
           reference_only_asset_count: 2,
           qualified_integrity_failure_count: 0,
           entries: [{
@@ -1423,6 +1577,8 @@ describe("studio kernel components", () => {
             source: "internal_cleaned",
             generation_eligible: true,
             qualification_status: "qualified_for_generation",
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: ["Professional asset QA has not passed."],
             allowed_generation_modes: ["imported_glb_exact"],
             qualification_limitations: ["Géométrie interne générique."],
             qualified_file_hash_matches: true

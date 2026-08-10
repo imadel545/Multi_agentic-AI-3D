@@ -119,6 +119,7 @@ class ProductService:
             "qa_summary": qa_summary,
             "human_readable_issues": issues,
             "active_version": status.get("active_version_id"),
+            "multimodal_consent": status.get("multimodal_consent", "disabled"),
             "generation_mode": status.get("generation_mode"),
             "generation_strategy": status.get("generation_strategy"),
             "geometry_source": status.get("geometry_source"),
@@ -220,6 +221,7 @@ class ProductService:
 
     def viewer_bundle(self, workflow_id: str) -> dict:
         status = self._status_or_raise(workflow_id)
+        runtime = runtime_capabilities()
         active_version = status.get("active_version_id")
         base_url = f"/designs/{workflow_id}/artifacts"
         viewer_artifacts = []
@@ -326,11 +328,23 @@ class ProductService:
             "scene_spec",
             active_version,
         )
+        assembly_plan_path = self._artifact_path_or_none(
+            workflow_id,
+            "assembly_plan",
+            active_version,
+        )
 
         return {
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
             "active_version": active_version,
+            "multimodal_consent": status.get("multimodal_consent", "disabled"),
+            "multimodal_intelligence": runtime["multimodal_intelligence"],
+            "asset_decision_summary": _asset_decision_summary_from_path(assembly_plan_path),
+            "visual_review": _visual_review_summary(
+                status,
+                runtime["multimodal_intelligence"],
+            ),
             "generation_mode": status.get("generation_mode"),
             "generation_strategy": status.get("generation_strategy"),
             "geometry_source": status.get("geometry_source"),
@@ -381,7 +395,7 @@ class ProductService:
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
             "limitations": _collect_limitations(status),
-            "runtime_capabilities": runtime_capabilities(),
+            "runtime_capabilities": runtime,
             "unsupported_actions": unsupported_actions(),
             "available_actions": _available_actions(status, issues),
         }
@@ -766,6 +780,113 @@ def _available_actions(status: dict, issues: list[dict]) -> list[str]:
 
 
 _GEOMETRY_FIDELITIES = ("schematic", "technical_generic", "vendor_qualified")
+
+
+def _asset_decision_summary_from_path(path: Path | None) -> dict | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    raw_components = payload.get("components")
+    if not isinstance(raw_components, list):
+        return None
+    components: list[dict[str, Any]] = []
+    for raw in raw_components:
+        if not isinstance(raw, dict):
+            continue
+        candidates = raw.get("candidate_scores")
+        candidate_count = len(candidates) if isinstance(candidates, list) else 0
+        semantic_strategy = _public_asset_strategy(raw)
+        raw_risks = raw.get("selection_risks")
+        risks = (
+            [str(value)[:600] for value in raw_risks if isinstance(value, str)][:32]
+            if isinstance(raw_risks, list)
+            else []
+        )
+        components.append(
+            {
+                "component_id": raw.get("role_id"),
+                "role_id": raw.get("role_id"),
+                "asset_id": raw.get("selected_asset_id"),
+                "considered_count": candidate_count,
+                "rejected_count": max(0, candidate_count - 1),
+                "strategy": semantic_strategy,
+                "rationale": raw.get("selection_reason"),
+                "risks": risks,
+                "strategy_evidence": "planned_not_execution_verified",
+            }
+        )
+    return {
+        "components": components,
+        "considered_asset_count": sum(
+            int(item.get("considered_count") or 0) for item in components
+        ),
+        "selected_asset_count": sum(1 for item in components if item.get("asset_id")),
+        "decision_authority": payload.get("selection_authority"),
+        "fallback_used": bool(payload.get("llm_fallback_used")),
+        "fallback_reason": payload.get("llm_fallback_reason"),
+    }
+
+
+def _visual_review_summary(status: dict, capability: dict[str, Any]) -> dict[str, Any]:
+    persisted = status.get("visual_review")
+    if isinstance(persisted, dict):
+        raw_status = str(persisted.get("status") or "review_required")
+        public_status = (
+            raw_status
+            if raw_status in {"not_requested", "passed_advisory", "review_required", "failed"}
+            else "review_required"
+        )
+        raw_findings = persisted.get("findings", [])
+        return {
+            "status": public_status,
+            "advisory_only": True,
+            "summary": str(
+                persisted.get("summary") or "Une revue visuelle consultative a été publiée."
+            )[:800],
+            "findings": [str(value)[:800] for value in raw_findings if isinstance(value, str)][:64],
+            "limitations": [
+                str(value) for value in persisted.get("limitations", []) if isinstance(value, str)
+            ],
+        }
+    return {
+        "status": "not_requested",
+        "advisory_only": True,
+        "summary": "Aucune revue sémantique distante n'a été exécutée pour ce résultat.",
+        "findings": [],
+        "limitations": [
+            "La revue visuelle sémantique n'a pas été exécutée pour ce résultat.",
+            "Le cadrage technique ne certifie ni l'intention, ni la fidélité constructeur.",
+        ],
+    }
+
+
+def _public_asset_strategy(component: dict[str, Any]) -> str:
+    declared = component.get("semantic_strategy")
+    if declared in {
+        "reuse_full_design",
+        "adapt_full_design",
+        "reuse_component",
+        "adapt_component",
+        "compose_assets",
+        "compose_and_generate",
+        "procedural_generate",
+        "clarify",
+        "unsupported",
+    }:
+        return str(declared)
+    if declared == "reuse":
+        return "reuse_component"
+    if declared == "adapt":
+        return "adapt_component"
+    if declared == "compose":
+        return "compose_assets"
+    generation = component.get("generation_strategy")
+    if generation == "imported_glb_exact":
+        return "adapt_component" if component.get("parameter_values") else "reuse_component"
+    return "procedural_generate"
 
 
 def _geometry_fidelity_summary_from_path(path: Path | None) -> dict | None:
@@ -1337,9 +1458,7 @@ _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
             "La demande a été bloquée avant Blender : aucun nouveau modèle ni contrôle 3D "
             "n'a remplacé votre dernière version validée."
         ),
-        "recommended_action": (
-            "Corrigez la description du composant puis relancez la génération."
-        ),
+        "recommended_action": ("Corrigez la description du composant puis relancez la génération."),
     },
     "ASSET_IMPORT_INTERNAL_TEST_MINIMAL_ASSET_NOT_VENDOR": {
         "title": "Asset interne minimal",

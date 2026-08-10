@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
+
+_MultimodalHealthProvider = Callable[[], dict[str, dict[str, Any]]]
+_multimodal_health_provider: _MultimodalHealthProvider | None = None
+_multimodal_enabled = False
+_multimodal_key_configured = False
+_multimodal_max_images = 3
+_multimodal_max_image_bytes = 20_000_000
 
 _UNSUPPORTED_ACTIONS = [
     {
@@ -69,6 +77,7 @@ def runtime_capabilities() -> dict[str, Any]:
         "can_retry_same_workflow": False,
         "can_human_in_loop": False,
         "websocket_runtime": False,
+        "multimodal_intelligence": _multimodal_intelligence_capability(),
         "limitations": [
             (
                 "SSE est local-process: replay JSONL puis queue mémoire live jusqu'à "
@@ -77,6 +86,76 @@ def runtime_capabilities() -> dict[str, Any]:
             "Pas de cancellation/pause/retry durable dans le contrat backend v1.",
             "Le frontend doit utiliser workflow_id comme identifiant runtime.",
         ],
+    }
+
+
+def configure_multimodal_intelligence(
+    *,
+    enabled: bool,
+    key_configured: bool,
+    max_images_per_request: int,
+    max_image_bytes: int,
+    health_provider: _MultimodalHealthProvider | None,
+) -> None:
+    """Bind public capability truth to the configured runtime and live health state."""
+
+    if not 1 <= max_images_per_request <= 3:
+        raise ValueError("multimodal max_images_per_request must be between 1 and 3")
+    if not 1 <= max_image_bytes <= 20_000_000:
+        raise ValueError("multimodal max_image_bytes must be between 1 and 20000000")
+    global _multimodal_enabled
+    global _multimodal_key_configured
+    global _multimodal_max_images
+    global _multimodal_max_image_bytes
+    global _multimodal_health_provider
+    _multimodal_enabled = enabled
+    _multimodal_key_configured = key_configured
+    _multimodal_max_images = max_images_per_request
+    _multimodal_max_image_bytes = max_image_bytes
+    _multimodal_health_provider = health_provider
+
+
+def _multimodal_intelligence_capability() -> dict[str, Any]:
+    configured = _multimodal_enabled and _multimodal_key_configured
+    status = "configured_unverified" if configured else "disabled"
+    last_error = None
+    if configured and _multimodal_health_provider is not None:
+        try:
+            health = _multimodal_health_provider()
+            states = [
+                str(health.get(capability, {}).get("status") or "configured_unverified")
+                for capability in ("multimodal_interpretation", "asset_visual_review")
+            ]
+            if any(state == "failed" for state in states):
+                status = "failed"
+                last_error = next(
+                    (
+                        str(health.get(capability, {}).get("last_error") or "")[:160]
+                        for capability in (
+                            "multimodal_interpretation",
+                            "asset_visual_review",
+                        )
+                        if health.get(capability, {}).get("status") == "failed"
+                    ),
+                    "vision capability failed",
+                )
+            elif states and all(state == "operational" for state in states):
+                status = "operational"
+        except Exception:
+            status = "failed"
+            last_error = "vision_health_probe_failed"
+    return {
+        "status": status,
+        "enabled": configured,
+        "requires_project_consent": True,
+        "max_images_per_request": _multimodal_max_images,
+        "max_image_bytes": _multimodal_max_image_bytes,
+        "remote_processing": True,
+        "capabilities": (
+            ["multimodal_interpretation", "asset_visual_review"] if configured else []
+        ),
+        "visual_design_critic": "disabled_until_m5",
+        "last_error": last_error,
     }
 
 

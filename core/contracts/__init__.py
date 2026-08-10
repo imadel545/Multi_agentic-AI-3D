@@ -1,4 +1,4 @@
-from core.contracts.assets import AssetManifest
+from core.contracts.assets import AssetDecisionPacket, AssetManifest
 from core.contracts.document_pack import (
     DocumentPackCorrection,
     DocumentPackQAReport,
@@ -24,8 +24,10 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.tower import TowerCharacteristics
 from core.contracts.validation import ValidationIssue, ValidationReport
+from core.contracts.vision import VisionCapabilityHealth, VisualEvidencePacket
 
 __all__ = [
+    "AssetDecisionPacket",
     "AssetManifest",
     "DocumentPackSummary",
     "DocumentPackCorrection",
@@ -54,4 +56,6 @@ __all__ = [
     "TowerCharacteristics",
     "ValidationIssue",
     "ValidationReport",
+    "VisualEvidencePacket",
+    "VisionCapabilityHealth",
 ]

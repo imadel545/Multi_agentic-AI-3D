@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import type {
   AdaptationCapabilityCatalog,
   AssemblyPlanEvidence,
+  AssetDecisionSummary,
   AssetLibrarySearch,
   AssetLibrarySummary,
   AssetInventory,
@@ -32,6 +33,8 @@ import type {
   DocumentPackSummary,
   Health,
   LLMDecisionProvenance,
+  MultimodalConsent,
+  MultimodalIntelligence,
   ParseRequirementsResponse,
   PublicVersionInfo,
   RequirementSpec,
@@ -164,6 +167,8 @@ export function ChatCommandPanel({
   documentPackSummary,
   documentPackMessage,
   documentPackBusy,
+  multimodalConsent = "disabled",
+  multimodalIntelligence = null,
   onAnalyze,
   onConfirm,
   onDocumentPackCorrection,
@@ -171,6 +176,7 @@ export function ChatCommandPanel({
   onDocumentPackReviewRetry,
   onDocumentPackUpload,
   onDocumentCapabilitiesRetry,
+  onMultimodalConsentChange,
   onPromptChange,
   onRevisionPromptChange,
   onRevisionSubmit,
@@ -203,6 +209,8 @@ export function ChatCommandPanel({
   documentPackSummary: DocumentPackSummary | null;
   documentPackMessage: string | null;
   documentPackBusy: boolean;
+  multimodalConsent?: MultimodalConsent;
+  multimodalIntelligence?: MultimodalIntelligence | null;
   onAnalyze: () => void;
   onConfirm: () => void;
   onDocumentPackCorrection: (field: string, value: string, reason: string) => void;
@@ -210,6 +218,7 @@ export function ChatCommandPanel({
   onDocumentPackReviewRetry?: () => void;
   onDocumentPackUpload: (files: File[]) => Promise<boolean>;
   onDocumentCapabilitiesRetry?: () => void;
+  onMultimodalConsentChange?: (value: MultimodalConsent) => void;
   onPromptChange: (value: string) => void;
   onRevisionPromptChange: (value: string) => void;
   onRevisionSubmit: () => void;
@@ -346,23 +355,31 @@ export function ChatCommandPanel({
         {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
 
         {!revisionMode ? (
-          <DocumentPackIntake
-            busy={documentPackBusy}
-            capabilities={documentCapabilities}
-            capabilitiesError={documentCapabilitiesError}
-            capabilitiesLoading={documentCapabilitiesLoading}
-            correctionBusy={correctionBusy}
-            message={documentPackMessage}
-            onCorrect={onDocumentPackCorrection}
-            onGenerate={onDocumentPackGenerate}
-            onCapabilitiesRetry={onDocumentCapabilitiesRetry}
-            onReviewRetry={onDocumentPackReviewRetry}
-            onUpload={onDocumentPackUpload}
-            review={documentPackReview}
-            reviewError={documentPackReviewError}
-            reviewLoading={documentPackReviewLoading}
-            summary={documentPackSummary}
-          />
+          <>
+            <DocumentPackIntake
+              busy={documentPackBusy}
+              capabilities={documentCapabilities}
+              capabilitiesError={documentCapabilitiesError}
+              capabilitiesLoading={documentCapabilitiesLoading}
+              correctionBusy={correctionBusy}
+              message={documentPackMessage}
+              onCorrect={onDocumentPackCorrection}
+              onGenerate={onDocumentPackGenerate}
+              onCapabilitiesRetry={onDocumentCapabilitiesRetry}
+              onReviewRetry={onDocumentPackReviewRetry}
+              onUpload={onDocumentPackUpload}
+              review={documentPackReview}
+              reviewError={documentPackReviewError}
+              reviewLoading={documentPackReviewLoading}
+              summary={documentPackSummary}
+            />
+            <MultimodalConsentControl
+              capability={multimodalIntelligence}
+              consent={multimodalConsent}
+              disabled={disabled || documentPackBusy}
+              onChange={onMultimodalConsentChange}
+            />
+          </>
         ) : null}
 
         {editMessage ? (
@@ -789,6 +806,61 @@ function DocumentPackIntake({
         {message ? <p className="muted">{message}</p> : null}
       </div>
     </details>
+  );
+}
+
+export function multimodalConsentIsAvailable(
+  capability: MultimodalIntelligence | null | undefined
+): boolean {
+  return capability?.enabled === true &&
+    (capability.status === "operational" || capability.status === "configured_unverified");
+}
+
+function MultimodalConsentControl({
+  capability,
+  consent,
+  disabled,
+  onChange
+}: {
+  capability: MultimodalIntelligence | null;
+  consent: MultimodalConsent;
+  disabled: boolean;
+  onChange?: (value: MultimodalConsent) => void;
+}) {
+  if (!capability || !multimodalConsentIsAvailable(capability) || !onChange) {
+    return null;
+  }
+  const consentGranted = consent === "allow_input_analysis";
+  return (
+    <section className="multimodal-consent" aria-label="Analyse assistée des images">
+      <label>
+        <input
+          checked={consentGranted}
+          disabled={disabled}
+          onChange={(event) =>
+            onChange(event.currentTarget.checked ? "allow_input_analysis" : "disabled")
+          }
+          type="checkbox"
+        />
+        <span>
+          <strong>Autoriser l’analyse assistée des images jointes</strong>
+          <small>
+            Désactivée par défaut. Jusqu’à {capability.max_images_per_request} image(s),
+            limitées à {Math.floor(capability.max_image_bytes / 1_000_000)} Mo chacune,
+            peuvent être traitées à distance pour comprendre plans et croquis.
+          </small>
+        </span>
+      </label>
+      {capability.status === "configured_unverified" ? (
+        <p role="status">Le service sera vérifié au moment de l’analyse; aucun succès n’est supposé.</p>
+      ) : null}
+      <p>
+        Cocher cette autorisation n’envoie aucun fichier. Elle est enregistrée avec la prochaine
+        commande de conception et ne peut être utilisée que par une étape d’analyse explicite.
+        Le flux documentaire actuel ne déclenche pas encore la revue distante.
+      </p>
+      <p>La revue visuelle du design final reste désactivée dans ce milestone.</p>
+    </section>
   );
 }
 
@@ -1468,12 +1540,15 @@ export function InspectorDock({
           {activeDrawer === "scene" ? (
             <SceneCompositionPanel
               assemblyPlan={assemblyPlan}
+              assetDecisionSummary={bundle?.asset_decision_summary}
+              assetInventory={assetInventory}
               componentProofs={componentProofs}
               error={cognitiveEvidenceError}
               loading={cognitiveEvidenceLoading}
               onRetry={onRetryCognitiveEvidence}
               onSelect={onSelectSceneComponent}
               selectedSemanticRoot={selectedSemanticRoot}
+              toAbsoluteUrl={toAbsoluteUrl}
             />
           ) : null}
           {activeDrawer === "quality" ? (
@@ -1559,27 +1634,97 @@ function strategyLabel(strategy: string): string {
     reuse: "Réutilisé",
     adapt: "Adapté",
     compose: "Composé",
-    procedural_generate: "Généré"
+    procedural_generate: "Généré",
+    reuse_full_design: "Design réutilisé",
+    adapt_full_design: "Design adapté",
+    reuse_component: "Composant réutilisé",
+    adapt_component: "Composant adapté",
+    compose_assets: "Assets composés",
+    compose_and_generate: "Composition et génération",
+    clarify: "Clarification requise",
+    unsupported: "Non pris en charge"
   };
   return labels[strategy] ?? strategy;
 }
 
+function visualReviewStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    not_requested: "non demandée",
+    passed_advisory: "aucune anomalie signalée",
+    review_required: "vérification humaine recommandée",
+    failed: "indisponible"
+  };
+  return labels[status] ?? "statut non reconnu";
+}
+
+function assetQualificationLabel(status: string): string {
+  const labels: Record<string, string> = {
+    qualified_for_generation: "qualifié pour la génération",
+    qualified: "qualifié pour la génération",
+    reference_only: "référence uniquement",
+    quarantined_unverified: "en quarantaine"
+  };
+  return labels[status] ?? "qualification non confirmée";
+}
+
+function assetSourceLabel(source: string): string {
+  const labels: Record<string, string> = {
+    vendor_supplied: "fournie par le constructeur",
+    vendor_expected: "source constructeur attendue",
+    internal_cleaned: "géométrie interne nettoyée",
+    internal_test_minimal: "géométrie minimale de test",
+    internal_project_generated: "géométrie générée dans le projet",
+    cc0: "catalogue sous licence CC0",
+    cc_by: "catalogue avec attribution",
+    royalty_free: "catalogue sous licence libre de redevance"
+  };
+  return labels[source] ?? source;
+}
+
+function professionalEvidenceFailureLabel(failure: string): string {
+  const labels: Record<string, string> = {
+    "Professional asset QA has not passed.": "La QA professionnelle de l’asset n’a pas réussi.",
+    "Professional QA report file is missing.": "Le rapport QA professionnel est absent.",
+    "Five QA-passed qualification previews are not published.":
+      "Les cinq vues de qualification validées ne sont pas publiées.",
+    "Master and viewer representations are not both published.":
+      "Le master CAO et sa représentation viewer ne sont pas tous les deux publiés.",
+    "Geometry fidelity is not vendor-qualified.":
+      "La fidélité constructeur n’est pas qualifiée.",
+    "Source provenance is not explicitly documented.":
+      "La provenance de la source n’est pas documentée.",
+    "Asset licence is not explicitly documented.":
+      "La licence d’utilisation n’est pas documentée.",
+    "Qualified dimensions and bounding box are incomplete.":
+      "Les dimensions qualifiées sont incomplètes.",
+    "Qualified anchors and connectors are incomplete.":
+      "Les points d’ancrage et connecteurs qualifiés sont incomplets."
+  };
+  return labels[failure] ?? "Une preuve requise n’a pas été vérifiée.";
+}
+
 export function SceneCompositionPanel({
   assemblyPlan,
+  assetDecisionSummary,
+  assetInventory,
   componentProofs,
   error = null,
   loading = false,
   onRetry,
   onSelect,
-  selectedSemanticRoot = null
+  selectedSemanticRoot = null,
+  toAbsoluteUrl = (url) => url ?? null
 }: {
   assemblyPlan: AssemblyPlanEvidence | null;
+  assetDecisionSummary?: AssetDecisionSummary | null;
+  assetInventory?: AssetInventory | null;
   componentProofs: ComponentProofs | null;
   error?: string | null;
   loading?: boolean;
   onRetry?: () => void;
   onSelect?: (semanticRoot: string | null) => void;
   selectedSemanticRoot?: string | null;
+  toAbsoluteUrl?: (url: string | null | undefined) => string | null;
 }) {
   const strategyCounts = new Map<string, number>();
   componentProofs?.components.forEach((component) => {
@@ -1590,6 +1735,9 @@ export function SceneCompositionPanel({
   });
   const planByRole = new Map(
     (assemblyPlan?.components ?? []).map((component) => [component.role_id, component])
+  );
+  const inventoryByAssetId = new Map(
+    (assetInventory?.entries ?? []).map((asset) => [asset.asset_id, asset])
   );
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
@@ -1609,12 +1757,37 @@ export function SceneCompositionPanel({
       ) : null}
       {assemblyPlan ? (
         <div className="scene-plan-summary">
-          <strong>Décision de sélection tracée</strong>
-          <small>
-            {assemblyPlan.selection_provider}
-            {assemblyPlan.selection_model ? ` · ${assemblyPlan.selection_model}` : ""}
-            {` · ${assemblyPlan.connections.length} connexion(s)`}
-          </small>
+          <strong>Sélection automatique tracée</strong>
+          <small>{assemblyPlan.connections.length} connexion(s) vérifiable(s)</small>
+        </div>
+      ) : null}
+      {assetDecisionSummary?.components.length ? (
+        <div className="asset-decision-list" aria-label="Décisions automatiques par composant">
+          {assetDecisionSummary.components.map((decision, index) => (
+            <article key={decision.component_id ?? `${decision.role_id ?? "component"}-${index}`}>
+              <strong>{humanSemanticRole(decision.role_id ?? decision.component_id ?? "composant")}</strong>
+              <span>{decision.strategy ? strategyLabel(decision.strategy) : "Décision tracée"}</span>
+              {decision.strategy_evidence === "planned_not_execution_verified" ? (
+                <small>Stratégie planifiée, non certifiée par l’exécution</small>
+              ) : null}
+              {decision.rationale ? <small>{decision.rationale}</small> : null}
+              {typeof decision.considered_count === "number" ? (
+                <small>
+                  {decision.considered_count} candidat(s) considéré(s)
+                  {typeof decision.rejected_count === "number"
+                    ? ` · ${decision.rejected_count} rejeté(s)`
+                    : ""}
+                </small>
+              ) : null}
+              {decision.risks.length ? (
+                <ul className="asset-risk-list" aria-label="Limites de la décision">
+                  {decision.risks.slice(0, 3).map((risk) => (
+                    <li key={risk}>{professionalEvidenceFailureLabel(risk)}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </article>
+          ))}
         </div>
       ) : null}
       {strategyCounts.size ? (
@@ -1628,6 +1801,16 @@ export function SceneCompositionPanel({
         <div className="scene-tree" role="tree" aria-label="Arbre réel de la scène">
           {componentProofs.components.map((component) => {
             const plan = planByRole.get(component.role_id);
+            const asset = component.asset_id
+              ? inventoryByAssetId.get(component.asset_id)
+              : undefined;
+            const preview = asset?.milestone_evidence_eligible
+              ? asset.preview_set?.find(
+                  (candidate) => candidate.available && candidate.qa_status === "passed"
+                )
+              : undefined;
+            const previewUrl = toAbsoluteUrl(preview?.url);
+            const provenanceUrl = toAbsoluteUrl(asset?.provenance_url);
             return (
               <div className="scene-tree-group" key={component.component_id} role="group">
                 <div className="scene-tree-heading">
@@ -1638,6 +1821,58 @@ export function SceneCompositionPanel({
                   <span>{component.quantity}</span>
                 </div>
                 {plan?.selection_reason ? <p>{plan.selection_reason}</p> : null}
+                {asset ? (
+                  <article
+                    className={`asset-evidence-card${asset.milestone_evidence_eligible ? " verified" : " incomplete"}`}
+                    aria-label={`État de preuve de l’asset ${asset.asset_id}`}
+                  >
+                    {previewUrl ? (
+                      <img
+                        alt={`Aperçu ${preview?.view ?? "qualifié"} de ${humanSemanticRole(component.role_id)}`}
+                        loading="lazy"
+                        src={previewUrl}
+                      />
+                    ) : (
+                      <div className="asset-preview-unavailable">
+                        {asset.milestone_evidence_eligible
+                          ? "Aperçu vérifié indisponible"
+                          : "Aucune preview professionnelle vérifiée"}
+                      </div>
+                    )}
+                    <div>
+                      <strong>
+                        {asset.milestone_evidence_eligible
+                          ? "Preuve professionnelle vérifiée"
+                          : "Asset technique — preuve professionnelle incomplète"}
+                      </strong>
+                      <span>{asset.asset_id}</span>
+                      <small>
+                        {compactFidelityLabel(asset.fidelity_status ?? "")} ·{" "}
+                        {assetQualificationLabel(asset.qualification_status)}
+                      </small>
+                      {asset.source ? <small>Source : {assetSourceLabel(asset.source)}</small> : null}
+                      {!asset.milestone_evidence_eligible && asset.milestone_evidence_failures.length ? (
+                        <ul className="asset-risk-list" aria-label="Preuves professionnelles manquantes">
+                          {asset.milestone_evidence_failures.slice(0, 3).map((failure) => (
+                            <li key={failure}>{professionalEvidenceFailureLabel(failure)}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {asset.visual_review_status ? (
+                        <small>Revue assistée : {visualReviewStatusLabel(asset.visual_review_status)}</small>
+                      ) : null}
+                      {provenanceUrl ? (
+                        <a href={provenanceUrl} rel="noreferrer" target="_blank">
+                          Consulter la provenance
+                        </a>
+                      ) : null}
+                    </div>
+                  </article>
+                ) : component.asset_id ? (
+                  <p className="asset-proof-missing">
+                    La preuve d’inventaire de cet asset n’est pas publiée dans ce résultat.
+                  </p>
+                ) : null}
                 {component.instances.map((instance) => (
                   <button
                     aria-current={selectedSemanticRoot === instance.semantic_root ? "true" : undefined}
@@ -1848,6 +2083,49 @@ export function QaPanel({
       ) : (
         <p className="muted">La vérification apparaîtra après une construction Blender réelle.</p>
       )}
+      {bundle ? (
+        <div className="qa-evidence-split">
+          <section aria-label="Cadrage technique" className="qa-evidence-card">
+            <div className="qa-evidence-heading">
+              <strong>Cadrage technique</strong>
+              <span>
+                {qa?.preview_pixel_framing_qa
+                  ? qa.preview_subject_framing_valid === true
+                    ? "conforme"
+                    : qa.preview_subject_framing_valid === false
+                      ? "à corriger"
+                      : "exécuté"
+                  : "non exécuté"}
+              </span>
+            </div>
+            <p>
+              Contrôle déterministe de l’occupation, des marges et du centrage de la preview.
+              Il ne valide ni la qualité esthétique ni la conformité métier.
+            </p>
+            {qa?.preview_pixel_framing_qa ? (
+              <small>
+                Occupation : {formatRatio(qa.preview_subject_bbox_width_ratio)} × {formatRatio(qa.preview_subject_bbox_height_ratio)} · marge minimale {formatRatio(qa.preview_subject_min_edge_margin_ratio)}
+              </small>
+            ) : null}
+          </section>
+          <section aria-label="Revue visuelle assistée" className="qa-evidence-card advisory">
+            <div className="qa-evidence-heading">
+              <strong>Revue visuelle assistée</strong>
+              <span>{visualReviewStatusLabel(bundle.visual_review?.status ?? "not_requested")}</span>
+            </div>
+            <p>
+              {bundle.visual_review?.summary ??
+                "Aucune revue sémantique du rendu n’a été demandée pour ce résultat."}
+            </p>
+            {bundle.visual_review?.findings.length ? (
+              <ul>
+                {bundle.visual_review.findings.map((finding) => <li key={finding}>{finding}</li>)}
+              </ul>
+            ) : null}
+            <small>Cette revue est consultative et ne peut jamais remplacer la QA déterministe.</small>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -3302,6 +3580,10 @@ function List({ title, items, empty }: { title: string; items: string[]; empty: 
 
 function formatScore(value: number | null | undefined): string {
   return typeof value === "number" ? `${Math.round(value * 100)}%` : "unknown";
+}
+
+function formatRatio(value: number | null | undefined): string {
+  return typeof value === "number" ? `${Math.round(value * 100)} %` : "non publié";
 }
 
 function formatInteger(value: number): string {

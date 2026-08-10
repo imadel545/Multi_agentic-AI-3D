@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,6 +23,7 @@ from apps.api.telecom_studio_api.models import (
     CurrentOperation,
     DesignListSummary,
     DocumentPackCapabilitiesView,
+    DocumentPackGenerateDesignRequest,
     DocumentPackGenerateDesignResponse,
     EditDesignRequest,
     EditDesignResponse,
@@ -40,6 +42,10 @@ from apps.api.telecom_studio_api.models import (
     WorkflowStatus,
 )
 from apps.api.telecom_studio_api.product import ProductNotFound, ProductService
+from apps.api.telecom_studio_api.runtime_contract import (
+    configure_multimodal_intelligence,
+    runtime_capabilities,
+)
 from apps.api.telecom_studio_api.workflow import (
     WorkflowBusyError,
     WorkflowMemoryPurgeError,
@@ -60,7 +66,12 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
 from core.document_pack import DocumentPackService
-from core.llm import GroqStructuredClient
+from core.llm import (
+    GroqStructuredClient,
+    GroqTransport,
+    build_groq_capability_profiles,
+    build_groq_vision_client,
+)
 from core.llm.asset_selection import GroqAssetSelectionClient
 from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
@@ -71,6 +82,7 @@ from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
 from core.rag.service import RagIndexCompatibilityError
 from core.services.adaptation_capabilities import AdaptationCapabilityService
+from core.services.asset_evidence import ProfessionalAssetVerifier
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound, AssetLibraryService
 from core.services.asset_registry import AssetRegistry
@@ -94,6 +106,8 @@ async def lifespan(_app: FastAPI):
         workflow_service.shutdown()
         memory_service.close()
         rag_service.close()
+        if groq_transport is not None:
+            groq_transport.close()
 
 
 app = FastAPI(
@@ -134,6 +148,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 registry = AssetRegistry(settings.manifests_dir)
+professional_asset_verifier = ProfessionalAssetVerifier(settings.project_root)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
 asset_library_service = AssetLibraryService(settings.asset_library_dir)
 adaptation_capability_service = AdaptationCapabilityService(settings.project_root, registry)
@@ -162,14 +177,64 @@ rag_service = RagService(
     reranker_base_url=settings.reranker_base_url,
 )
 memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_service)
+groq_transport = (
+    GroqTransport(
+        api_key=settings.resolved_groq_api_key,
+        base_url=settings.groq_base_url,
+        max_transient_retries=settings.groq_transport_max_retries,
+        circuit_failure_threshold=settings.groq_circuit_failure_threshold,
+        circuit_reset_s=settings.groq_circuit_reset_s,
+    )
+    if settings.resolved_groq_api_key
+    else None
+)
+groq_capability_profiles = build_groq_capability_profiles(
+    text_model=settings.resolved_groq_text_model,
+    vision_model=settings.groq_vision_model,
+    text_timeout_s=settings.groq_extraction_timeout_s,
+    text_max_completion_tokens=settings.groq_extraction_max_completion_tokens,
+    vision_timeout_s=settings.groq_vision_timeout_s,
+    vision_max_completion_tokens=settings.groq_vision_max_completion_tokens,
+    vision_enabled=bool(settings.enable_groq_vision and groq_transport is not None),
+    visual_design_critic_enabled=False,
+)
+groq_vision_client = (
+    build_groq_vision_client(
+        transport=groq_transport,
+        profiles=groq_capability_profiles,
+        max_images=settings.groq_vision_max_images,
+        max_image_bytes=settings.groq_vision_max_image_bytes,
+        max_output_pixels=settings.groq_vision_max_pixels,
+        max_edge_px=settings.groq_vision_max_edge_px,
+    )
+    if groq_transport is not None
+    else None
+)
+configure_multimodal_intelligence(
+    enabled=settings.enable_groq_vision,
+    key_configured=groq_transport is not None,
+    max_images_per_request=settings.groq_vision_max_images,
+    max_image_bytes=settings.groq_vision_max_image_bytes,
+    health_provider=(
+        lambda: (
+            {
+                capability: groq_vision_client.health(capability).model_dump(mode="json")
+                for capability in ("multimodal_interpretation", "asset_visual_review")
+            }
+            if groq_vision_client is not None
+            else None
+        )
+    ),
+)
 groq_client = (
     GroqStructuredClient(
         api_key=settings.resolved_groq_api_key,
-        model=settings.groq_model,
+        model=settings.resolved_groq_text_model,
         base_url=settings.groq_base_url,
         timeout_s=settings.groq_extraction_timeout_s,
         max_completion_tokens=settings.groq_extraction_max_completion_tokens,
         reasoning_effort=settings.groq_extraction_reasoning_effort,
+        transport=groq_transport,
     )
     if settings.resolved_groq_api_key
     else None
@@ -177,11 +242,12 @@ groq_client = (
 planning_decision_client = (
     GroqPlanningDecisionClient(
         api_key=settings.resolved_groq_api_key,
-        model=settings.groq_model,
+        model=settings.resolved_groq_text_model,
         base_url=settings.groq_base_url,
         timeout_s=settings.groq_planning_timeout_s,
         max_completion_tokens=settings.groq_planning_max_completion_tokens,
         reasoning_effort=settings.groq_planning_reasoning_effort,
+        transport=groq_transport,
     )
     if settings.resolved_groq_api_key and settings.enable_groq_planning_decision
     else None
@@ -189,11 +255,12 @@ planning_decision_client = (
 asset_selection_client = (
     GroqAssetSelectionClient(
         api_key=settings.resolved_groq_api_key,
-        model=settings.groq_model,
+        model=settings.resolved_groq_text_model,
         base_url=settings.groq_base_url,
         timeout_s=settings.groq_asset_selection_timeout_s,
         max_completion_tokens=settings.groq_asset_selection_max_completion_tokens,
         reasoning_effort=settings.groq_asset_selection_reasoning_effort,
+        transport=groq_transport,
     )
     if settings.resolved_groq_api_key and settings.enable_groq_asset_selection
     else None
@@ -201,11 +268,12 @@ asset_selection_client = (
 geometry_program_client = (
     GroqStructuredClient(
         api_key=settings.resolved_groq_api_key,
-        model=settings.groq_model,
+        model=settings.resolved_groq_text_model,
         base_url=settings.groq_base_url,
         timeout_s=settings.groq_geometry_timeout_s,
         max_completion_tokens=settings.groq_geometry_max_completion_tokens,
         reasoning_effort=settings.groq_geometry_reasoning_effort,
+        transport=groq_transport,
     )
     if settings.resolved_groq_api_key and settings.enable_groq_geometry_program
     else None
@@ -225,20 +293,20 @@ design_domain_router = (
     else ConservativeDesignDomainRouter()
 )
 cognitive_design_planner = (
-    build_cognitive_design_planner(groq_client)
+    build_cognitive_design_planner(groq_client, registry)
     if groq_client is not None and geometry_program_planner is not None
     else None
 )
 document_pack_service = DocumentPackService(
     settings.temp_outputs_dir,
     groq_client=groq_client,
-    groq_provider_name=f"groq:{settings.groq_model}" if groq_client else None,
+    groq_provider_name=(f"groq:{settings.resolved_groq_text_model}" if groq_client else None),
     groq_bounded_extraction_enabled=settings.enable_groq_extraction,
     memory_service=memory_service,
 )
 requirement_extractor = RequirementExtractor(
     provider=groq_client,
-    provider_name=f"groq:{settings.groq_model}",
+    provider_name=f"groq:{settings.resolved_groq_text_model}",
     enabled=settings.enable_groq_extraction,
 )
 blender_runner = BlenderRunner(
@@ -322,11 +390,13 @@ def create_design(request: CreateDesignRequest) -> dict:
                 detail_level=request.confirmed_requirements.detail_level,
                 source_label="confirmed_requirement_spec",
                 source_text=request.requirements_text,
+                multimodal_consent=request.options.multimodal_consent,
             )
         return workflow_service.create_design(
             requirements_text=request.requirements_text,
             detail_level=request.options.detail_level,
             use_llm=request.options.use_llm,
+            multimodal_consent=request.options.multimodal_consent,
         )
     except WorkflowBusyError as exc:
         raise HTTPException(
@@ -583,6 +653,80 @@ def get_asset(asset_id: str) -> dict:
         raise HTTPException(status_code=404, detail="asset not found") from exc
 
 
+@app.get("/assets/{asset_id}/provenance")
+def get_asset_provenance(asset_id: str) -> dict:
+    try:
+        asset = registry.get(asset_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    evidence = professional_asset_verifier.verify(asset)
+    return {
+        "asset_id": asset.asset_id,
+        "family": asset.resolved_family,
+        "subtype": asset.subtype,
+        "manufacturer": asset.manufacturer,
+        "reference": asset.reference,
+        "source": asset.source,
+        "source_provenance": asset.source_provenance,
+        "source_format": asset.resolved_source_format,
+        "source_file_sha256": asset.source_file_sha256,
+        "license": asset.license,
+        "attribution_required": asset.attribution_required,
+        "attribution": asset.attribution,
+        "geometry_status": asset.resolved_geometry_status,
+        "geometry_fidelity": asset.geometry_fidelity,
+        "conversion_method": asset.conversion_method,
+        "qualification": asset.qualification.model_dump(mode="json"),
+        "qualification_version": asset.qualification_version,
+        "qa": {
+            key: value
+            for key, value in asset.qa_evidence.model_dump(mode="json").items()
+            if key != "report_file"
+        },
+        "milestone_evidence_eligible": evidence.eligible,
+        "milestone_evidence_failures": list(evidence.failures),
+        "representations": [
+            {
+                key: value
+                for key, value in representation.model_dump(mode="json").items()
+                if key != "file"
+            }
+            for representation in (asset.master_representation, asset.viewer_representation)
+            if representation is not None
+        ],
+        "previews": [
+            {key: value for key, value in preview.model_dump(mode="json").items() if key != "file"}
+            for preview in asset.preview_set
+        ],
+    }
+
+
+@app.get("/assets/{asset_id}/previews/{view}")
+def get_asset_preview(asset_id: str, view: str) -> FileResponse:
+    try:
+        asset = registry.get(asset_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="asset not found") from exc
+    preview = next((item for item in asset.preview_set if item.view == view), None)
+    if preview is None:
+        raise HTTPException(status_code=404, detail="asset preview not found")
+    path = (settings.project_root / preview.file).resolve()
+    try:
+        path.relative_to(settings.project_root.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="asset preview not available") from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="asset preview not available")
+    digest_builder = hashlib.sha256()
+    with path.open("rb") as preview_stream:
+        for chunk in iter(lambda: preview_stream.read(1024 * 1024), b""):
+            digest_builder.update(chunk)
+    digest = digest_builder.hexdigest()
+    if digest != preview.sha256:
+        raise HTTPException(status_code=409, detail="asset preview integrity check failed")
+    return FileResponse(path, media_type="image/png", filename=f"{asset_id}-{view}.png")
+
+
 @app.post("/document-packs")
 async def create_document_pack(request: Request) -> dict:
     limits = document_pack_service.archive_limits()
@@ -667,6 +811,7 @@ def get_document_pack_capabilities() -> dict:
     ]
     payload.update(
         {
+            "multimodal_intelligence": runtime_capabilities()["multimodal_intelligence"],
             "document_pack_status": "limited",
             "supported_upload_format": "zip_or_multiple_files",
             "supported_inputs": {
@@ -852,7 +997,11 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
     "/document-packs/{pack_id}/generate-design",
     response_model=DocumentPackGenerateDesignResponse,
 )
-def generate_design_from_document_pack(pack_id: str) -> dict:
+def generate_design_from_document_pack(
+    pack_id: str,
+    request: DocumentPackGenerateDesignRequest | None = None,
+) -> dict:
+    multimodal_consent = request.multimodal_consent if request else "disabled"
     try:
         with document_pack_service.generation_readiness_snapshot(pack_id) as (
             _spec,
@@ -872,6 +1021,8 @@ def generate_design_from_document_pack(pack_id: str) -> dict:
                         "qa_ready_to_generate": qa_report.ready_to_generate,
                         "qa_blocking_issues": qa_report.blocking_issues,
                         "mapping_loss_report": mapping.mapping_loss_report,
+                        "multimodal_consent": multimodal_consent,
+                        "remote_vision_analysis": "not_executed",
                     },
                 }
             requirements = RequirementSpec.model_validate(mapping.requirements)
@@ -880,6 +1031,7 @@ def generate_design_from_document_pack(pack_id: str) -> dict:
                     requirements=requirements,
                     detail_level="high",
                     source_label="project_design_spec",
+                    multimodal_consent=multimodal_consent,
                 )
             except WorkflowBusyError as exc:
                 raise HTTPException(
@@ -901,6 +1053,8 @@ def generate_design_from_document_pack(pack_id: str) -> dict:
             "provider": "project_design_spec",
             "fallback_used": False,
             "mapping_loss_report": mapping.mapping_loss_report,
+            "multimodal_consent": multimodal_consent,
+            "remote_vision_analysis": "not_executed",
         },
         **design,
     }

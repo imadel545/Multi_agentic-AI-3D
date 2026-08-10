@@ -6,6 +6,7 @@ from core.contracts.common import DetailLevel, NetworkType, StrictModel, Warning
 from core.contracts.geometry_program import GeometryProgramVector3
 from core.contracts.repair import RepairEvent
 from core.contracts.tower import TowerCharacteristics
+from core.contracts.vision import NormalizedImageRegion, VisualEvidencePacket
 
 RequirementEvidenceSource = Literal[
     "user_text",
@@ -13,6 +14,7 @@ RequirementEvidenceSource = Literal[
     "deterministic",
     "default",
     "document",
+    "vision",
     "user_confirmation",
     "repair",
 ]
@@ -61,6 +63,10 @@ class RequirementCandidateEvidence(StrictModel):
     confidence: float = Field(ge=0, le=1)
     span_start: int | None = Field(default=None, ge=0)
     span_end: int | None = Field(default=None, ge=0)
+    visual_source_id: str | None = Field(default=None, pattern=r"^image_[1-3]$")
+    visual_input_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    source_page: int | None = Field(default=None, ge=1)
+    source_region: NormalizedImageRegion | None = None
     selected: bool = False
     rationale: str | None = None
 
@@ -72,6 +78,20 @@ class RequirementCandidateEvidence(StrictModel):
             and self.span_end < self.span_start
         ):
             raise ValueError("span_end cannot be lower than span_start")
+        if self.source == "vision" and not (self.visual_source_id and self.visual_input_sha256):
+            raise ValueError(
+                "vision requirement evidence must reference a visual source and input hash"
+            )
+        if self.source != "vision" and any(
+            value is not None
+            for value in (
+                self.visual_source_id,
+                self.visual_input_sha256,
+                self.source_page,
+                self.source_region,
+            )
+        ):
+            raise ValueError("visual provenance fields require source='vision'")
         return self
 
 
@@ -86,6 +106,14 @@ class RequirementFieldEvidence(StrictModel):
     conflict: bool = False
     requires_confirmation: bool = False
     rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def keep_vision_inferred(self) -> "RequirementFieldEvidence":
+        if self.selected_source == "vision" and (self.explicit or not self.requires_confirmation):
+            raise ValueError(
+                "vision-only requirement evidence must remain inferred and require confirmation"
+            )
+        return self
 
 
 class RequirementConflict(StrictModel):
@@ -130,6 +158,7 @@ class RequirementSpec(StrictModel):
     warnings: list[WarningItem] = Field(default_factory=list)
     repair_events: list[RepairEvent] = Field(default_factory=list)
     field_evidence: dict[str, RequirementFieldEvidence] = Field(default_factory=dict)
+    visual_evidence: list[VisualEvidencePacket] = Field(default_factory=list, max_length=12)
     conflicts: list[RequirementConflict] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     requires_confirmation: bool = False

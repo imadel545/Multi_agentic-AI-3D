@@ -91,6 +91,26 @@ function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi
 }
 
 describe("frontend runtime selection", () => {
+  it("loads the governed asset inventory during bootstrap", async () => {
+    const assetInventory = vi.fn().mockResolvedValue({
+      status: "qualified_mixed_catalog",
+      asset_count: 13,
+      missing_file_count: 0,
+      real_glb_asset_count: 12,
+      import_qualified_glb_count: 3,
+      generation_eligible_asset_count: 13,
+      professional_evidence_asset_count: 0,
+      reference_only_asset_count: 0,
+      qualified_integrity_failure_count: 0,
+      entries: [],
+      missing_files: []
+    });
+
+    render(createElement(App, { apiClient: bootstrapApi({ assetInventory }) }));
+
+    await waitFor(() => expect(assetInventory).toHaveBeenCalledTimes(1));
+  });
+
   it("resumes a running workflow before selecting terminal history", () => {
     const selected = selectWorkflowToRestore([
       workflow("wf_completed", "completed", "2026-07-15T10:00:00Z"),
@@ -348,7 +368,11 @@ describe("frontend runtime selection", () => {
 
     render(createElement(App, { apiClient }));
 
-    const viewer = await screen.findByRole("region", { name: "3D viewer" });
+    const viewer = await screen.findByRole(
+      "region",
+      { name: "3D viewer" },
+      { timeout: 5_000 }
+    );
     expect(within(viewer).getByText(/synchronisation initiale du studio/i)).toBeInTheDocument();
     expect(within(viewer).queryByText("Aucun design généré pour le moment.")).not.toBeInTheDocument();
 

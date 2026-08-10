@@ -36,6 +36,35 @@ class GroqRequestPolicy:
         }
 
 
+@dataclass(frozen=True)
+class GroqVisionRequestPolicy:
+    """Non-streaming JSON Object policy for the Qwen vision capability."""
+
+    capability: str
+    max_completion_tokens: int
+
+    def __post_init__(self) -> None:
+        if not self.capability.strip():
+            raise ValueError("capability must not be empty")
+        if not 128 <= self.max_completion_tokens <= 8192:
+            raise ValueError("vision max_completion_tokens must be between 128 and 8192")
+
+    def apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if payload.get("stream") is True:
+            raise ValueError("Groq vision JSON responses cannot be streamed")
+        if payload.get("tools"):
+            raise ValueError("Groq vision JSON responses cannot use tools")
+        response_format = payload.get("response_format")
+        if response_format not in (None, {"type": "json_object"}):
+            raise ValueError("Groq vision must use JSON Object Mode")
+        return {
+            **payload,
+            "response_format": {"type": "json_object"},
+            "max_completion_tokens": self.max_completion_tokens,
+            "stream": False,
+        }
+
+
 def normalize_groq_base_url(value: str) -> str:
     normalized = value.strip().rstrip("/")
     parsed = urlparse(normalized)
@@ -48,6 +77,11 @@ def normalize_groq_base_url(value: str) -> str:
 
 def groq_fallback_reason(exc: Exception) -> str:
     import httpx
+
+    from core.llm.transport import GroqTransportError
+
+    if isinstance(exc, GroqTransportError):
+        return exc.reason
 
     if isinstance(exc, httpx.TimeoutException):
         return "provider_timeout"

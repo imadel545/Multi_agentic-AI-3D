@@ -10,7 +10,10 @@ FastAPI
   -> requirements text or document pack
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
-  -> Groq extraction or deterministic fallback
+  -> shared GroqTransport + capability profile
+       -> GPT-OSS text decision (strict JSON Schema)
+       -> opt-in Qwen visual evidence (advisory JSON + Pydantic)
+     or visible deterministic/local-only path
   -> NVIDIA API Nemotron query/passage retrieval + NVIDIA reranker evidence
   -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
@@ -54,10 +57,19 @@ active SceneSpec + prompt
 - `core/orchestration`: LangGraph workflow and route logic.
 - `core/agents`: deterministic/LLM wrappers for extraction, planning, editing,
   RF/tower checks and bounded GeometryProgram authorship.
+- `core/llm`: shared persistent Groq transport, versioned text/vision
+  capability profiles, bounded retry/circuit policy, vision preprocessing and
+  typed advisory evidence. The transport owns provider I/O; deterministic
+  contracts still own units, permissions, QA and certification.
 - `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
+- `core/services/qualified_asset_retriever.py`: common qualified-manifest
+  candidate projection into bounded `AssetDecisionPacket` values. The telecom
+  assembly planner executes and validates semantic asset strategies. The
+  generic compiler only observes candidates today and publishes no asset
+  strategy until reuse/adapt/compose execution exists.
 - `core/services/asset_library.py`: immutable-source catalog, SHA-256
   deduplication, metadata search, deterministic CAD-to-source-preview links and
   isolated LibreDWG probes. Preview links are retrieval evidence only. The
@@ -110,6 +122,22 @@ active SceneSpec + prompt
 - `.env.example` contains placeholders only.
 - `apps/frontend` is a real-backend product rework, not an accepted final gate.
 
+### M1 vision boundary
+
+- `openai/gpt-oss-120b` remains the reasoning and structured-decision profile.
+  `qwen/qwen3.6-27b` is a separate advisory profile for multimodal
+  interpretation and asset-preview review; the full design visual critic stays
+  disabled until its later QA milestone.
+- Project consent defaults to `disabled`, is persisted with workflow state and
+  is checked before any preprocessing or provider request. Inputs are content-
+  typed, bounded to three images and 20 000 000 octets per image, normalized
+  locally and represented in logs/contracts by hashes rather than base64.
+- Vision-only observations enter `RequirementSpec` as inferred evidence that
+  requires confirmation. The current document workflow does not invoke Qwen
+  automatically and has no PDF rasterization path. No live Qwen acceptance or
+  8+8+8 vision evaluation exists yet, so runtime health remains honest and
+  visual evidence is never a certificate.
+
 ## Known weak points
 
 - Artifact copying and version bookkeeping remain service-level. Edit planning,
@@ -127,10 +155,13 @@ active SceneSpec + prompt
   specialists, services, quality gates and external tools. A routed specialist
   registry exists, but its domains and dependencies remain declared
   deterministically; it is not an autonomous supervisor.
-- Asset import fallback can still create procedural geometry if an import fails, but the active
-  inventory has 13 manifests and 12 GLB files: 12 manifests are
-  generation-eligible, 3 authorize exact hash-pinned GLB import, 9 use bounded
-  parametric generation, and 1 remains reference-only.
+- The active inventory has 13 internal/technical runtime manifests. Exact
+  imports remain hash-pinned and every fallback is visible, but none of the 13
+  passes the stronger professional M1 evidence gate. The public flag is owned
+  by `ProfessionalAssetVerifier`, which re-hashes and inspects the evidence
+  bytes at inventory/retrieval/provenance boundaries; manifest completeness is
+  only a declaration precondition. Runtime eligibility must not be presented as
+  manufacturer qualification.
 - The separate 11,974-file CAD library is not part of that active inventory.
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,
@@ -172,7 +203,9 @@ DAG des spécialistes, `CapabilityRegistry` autorise les opérations, puis
 Le LLM ne possède ni filesystem, ni `bpy`, ni exécution de code; les programmes
 géométriques sont des contrats JSON validés et compilés déterministiquement.
 
-Cette extension reste partielle: la route d'assets génériques est procédurale,
-la résolution spatiale arbitraire n'est pas un solveur de contraintes complet,
-et la disponibilité/validité JSON du provider Groq reste une dépendance externe
+Cette extension reste partielle: le retriever générique expose désormais des
+candidats qualifiés, mais le compilateur n'exécute pas encore leurs stratégies
+`reuse`/`adapt`/`compose` et maintient donc `allowed_strategies=[]`. La
+résolution spatiale arbitraire n'est pas un solveur de contraintes complet, et
+la disponibilité/validité JSON des providers Groq reste une dépendance externe
 non maîtrisée.

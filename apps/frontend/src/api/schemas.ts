@@ -65,6 +65,25 @@ function publicSchema<T extends z.ZodType>(schema: T) {
   return schema.superRefine((value, ctx) => forbidInternalPaths(value, ctx));
 }
 
+export const MultimodalConsentSchema = z.enum([
+  "disabled",
+  "allow_input_analysis",
+  "allow_input_and_visual_review"
+]);
+
+export const MultimodalIntelligenceSchema = publicSchema(
+  UnknownRecord.extend({
+    status: z.enum(["disabled", "configured_unverified", "operational", "failed"]),
+    enabled: z.boolean(),
+    requires_project_consent: z.literal(true),
+    max_images_per_request: z.number().int().positive().max(3),
+    max_image_bytes: z.number().int().positive().max(20_000_000),
+    remote_processing: z.literal(true),
+    capabilities: z.array(z.string()).default([]),
+    visual_design_critic: z.literal("disabled_until_m5")
+  })
+);
+
 const RuntimeCapabilitiesSchema = UnknownRecord.extend({
   streaming_transport: z.string().optional(),
   workflow_id_source: z.string().optional(),
@@ -78,7 +97,8 @@ const RuntimeCapabilitiesSchema = UnknownRecord.extend({
   can_download_artifacts: z.boolean().optional(),
   can_view_versions: z.boolean().optional(),
   can_edit_completed_design: z.boolean().optional(),
-  can_rollback_versions: z.boolean().optional()
+  can_rollback_versions: z.boolean().optional(),
+  multimodal_intelligence: MultimodalIntelligenceSchema.nullish()
 });
 
 const RequirementWarningSchema = publicSchema(
@@ -474,6 +494,53 @@ export const ViewerQaSummarySchema = UnknownRecord.extend({
   preview_subject_touches_frame: z.boolean().nullish()
 });
 
+export const VisualReviewSchema = publicSchema(
+  UnknownRecord.extend({
+    status: z
+      .enum(["not_requested", "passed_advisory", "review_required", "failed"])
+      .default("not_requested"),
+    advisory_only: z.literal(true),
+    summary: z.string().nullish(),
+    findings: z.array(z.string()).default([]),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
+export const AssetDecisionComponentSummarySchema = publicSchema(
+  UnknownRecord.extend({
+    component_id: z.string().nullish(),
+    role_id: z.string().nullish(),
+    strategy: z.enum([
+      "reuse_full_design",
+      "adapt_full_design",
+      "reuse_component",
+      "adapt_component",
+      "compose_assets",
+      "compose_and_generate",
+      "procedural_generate",
+      "clarify",
+      "unsupported"
+    ]).nullish(),
+    asset_id: z.string().nullish(),
+    considered_count: z.number().int().nonnegative().optional(),
+    rejected_count: z.number().int().nonnegative().optional(),
+    rationale: z.string().nullish(),
+    risks: z.array(z.string()).default([]),
+    strategy_evidence: z.literal("planned_not_execution_verified").nullish()
+  })
+);
+
+export const AssetDecisionSummarySchema = publicSchema(
+  UnknownRecord.extend({
+    components: z.array(AssetDecisionComponentSummarySchema).default([]),
+    considered_asset_count: z.number().int().nonnegative().optional(),
+    selected_asset_count: z.number().int().nonnegative().optional(),
+    decision_authority: z.string().nullish(),
+    fallback_used: z.boolean().default(false),
+    fallback_reason: z.string().nullish()
+  })
+);
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
@@ -520,6 +587,10 @@ export const ViewerBundleSchema = publicSchema(
     rag_reranker_status: z.string().nullish(),
     rag_reranker_degraded_reason: z.string().nullish(),
     memory_context_count: z.number().nullish(),
+    multimodal_consent: MultimodalConsentSchema.optional(),
+    multimodal_intelligence: MultimodalIntelligenceSchema.nullish(),
+    asset_decision_summary: AssetDecisionSummarySchema.nullish(),
+    visual_review: VisualReviewSchema.nullish(),
     qa_summary: ViewerQaSummarySchema.nullish(),
     viewer_artifacts: z.array(ViewerArtifactSchema).default([]),
     limitations: z.array(z.string()).default([]),
@@ -592,6 +663,7 @@ const AssemblyPlanComponentSchema = publicSchema(
     candidate_scores: z.array(AssemblyCandidateScoreSchema).default([]),
     selected_asset_id: z.string().nullish(),
     generation_strategy: z.string(),
+    selection_risks: z.array(z.string()).default([]),
     selection_reason: z.string().nullish()
   })
 );
@@ -666,16 +738,42 @@ export const UserIssuesSchema = publicSchema(
   })
 );
 
+export const AssetPreviewSchema = publicSchema(
+  UnknownRecord.extend({
+    view: z.string(),
+    url: z.string(),
+    sha256: z.string().regex(/^[a-f0-9]{64}$/).nullish(),
+    available: z.boolean().default(true),
+    content_type: z.string().nullish(),
+    width_px: z.number().int().positive().nullish(),
+    height_px: z.number().int().positive().nullish(),
+    qa_status: z
+      .enum(["not_run", "passed", "failed", "review_required"])
+      .default("not_run")
+  })
+);
+
 export const QualifiedAssetInventoryEntrySchema = publicSchema(
   UnknownRecord.extend({
     asset_id: z.string(),
     type: z.string(),
     source: z.string().nullish(),
+    license: z.string().nullish(),
+    geometry_status: z.string().nullish(),
     generation_eligible: z.boolean().default(false),
     qualification_status: z.string(),
     allowed_generation_modes: z.array(z.string()).default([]),
     qualification_limitations: z.array(z.string()).default([]),
-    qualified_file_hash_matches: z.boolean().nullish()
+    qualified_file_hash_matches: z.boolean().nullish(),
+    preview_set: z.array(AssetPreviewSchema).optional(),
+    provenance_url: z.string().nullish(),
+    visual_review_status: z
+      .enum(["not_requested", "passed_advisory", "review_required", "failed"])
+      .nullish(),
+    fidelity_status: z.string().nullish(),
+    qualification_version: z.string().nullish(),
+    milestone_evidence_eligible: z.boolean().default(false),
+    milestone_evidence_failures: z.array(z.string()).default([])
   })
 );
 
@@ -687,6 +785,7 @@ export const AssetInventorySchema = publicSchema(
     real_glb_asset_count: z.number(),
     import_qualified_glb_count: z.number().int().nonnegative().default(0),
     generation_eligible_asset_count: z.number().int().nonnegative().default(0),
+    professional_evidence_asset_count: z.number().int().nonnegative().default(0),
     reference_only_asset_count: z.number().int().nonnegative().default(0),
     qualified_integrity_failure_count: z.number().int().nonnegative().default(0),
     entries: z.array(QualifiedAssetInventoryEntrySchema).default([]),
@@ -1035,6 +1134,10 @@ export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;
 export type ViewerBundle = z.infer<typeof ViewerBundleSchema>;
+export type MultimodalConsent = z.infer<typeof MultimodalConsentSchema>;
+export type MultimodalIntelligence = z.infer<typeof MultimodalIntelligenceSchema>;
+export type VisualReview = z.infer<typeof VisualReviewSchema>;
+export type AssetDecisionSummary = z.infer<typeof AssetDecisionSummarySchema>;
 export type ComponentProofs = z.infer<typeof ComponentProofsSchema>;
 export type ComponentProof = z.infer<typeof ComponentProofSchema>;
 export type ComponentProofInstance = z.infer<typeof ComponentProofInstanceSchema>;
@@ -1047,6 +1150,7 @@ export type CurrentOperation = z.infer<typeof CurrentOperationSchema>;
 export type UserIssues = z.infer<typeof UserIssuesSchema>;
 export type UserIssue = z.infer<typeof UserIssueSchema>;
 export type AssetInventory = z.infer<typeof AssetInventorySchema>;
+export type QualifiedAssetInventoryEntry = z.infer<typeof QualifiedAssetInventoryEntrySchema>;
 export type AssetLibrarySummary = z.infer<typeof AssetLibrarySummarySchema>;
 export type AssetLibraryEntry = z.infer<typeof AssetLibraryEntrySchema>;
 export type AssetLibrarySearch = z.infer<typeof AssetLibrarySearchSchema>;

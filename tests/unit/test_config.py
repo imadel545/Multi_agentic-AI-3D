@@ -27,6 +27,24 @@ def test_groq_defaults_match_bounded_gpt_oss_runtime_policy() -> None:
     assert settings.groq_extraction_reasoning_effort == "medium"
     assert settings.groq_planning_reasoning_effort == "medium"
     assert settings.groq_asset_selection_reasoning_effort == "medium"
+    assert settings.resolved_groq_text_model == "openai/gpt-oss-120b"
+    assert settings.groq_vision_model == "qwen/qwen3.6-27b"
+    assert settings.enable_groq_vision is False
+    assert settings.enable_groq_visual_design_critic is False
+    assert settings.groq_vision_consent_mode == "per_project_opt_in"
+    assert settings.groq_vision_max_images == 3
+    assert settings.groq_vision_max_image_bytes == 20_000_000
+
+
+def test_capability_specific_text_model_overrides_legacy_model() -> None:
+    settings = Settings(
+        _env_file=None,
+        groq_model="legacy/text-model",
+        groq_text_model="preferred/text-model",
+    )
+
+    assert settings.groq_model == "legacy/text-model"
+    assert settings.resolved_groq_text_model == "preferred/text-model"
 
 
 def test_groq_remote_base_url_must_use_https() -> None:

@@ -438,6 +438,7 @@ class WorkflowService:
         detail_level: str,
         use_llm: bool | None = None,
         _synchronous: bool = False,
+        multimodal_consent: str = "disabled",
     ) -> dict:
         self._sync_output_services()
         self._ensure_storage_capacity()
@@ -445,10 +446,22 @@ class WorkflowService:
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
 
-        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm)
+        self._write_pending_status(
+            workflow_id,
+            output_dir,
+            detail_level,
+            use_llm,
+            multimodal_consent,
+        )
         self._mark_workflow_active(workflow_id)
         self._emit_workflow_event(
-            workflow_id, "design_created", {"detail_level": detail_level, "use_llm": use_llm}
+            workflow_id,
+            "design_created",
+            {
+                "detail_level": detail_level,
+                "use_llm": use_llm,
+                "multimodal_consent": multimodal_consent,
+            },
         )
 
         def _run() -> None:
@@ -531,6 +544,7 @@ class WorkflowService:
         detail_level: str,
         source_label: str = "project_design_spec",
         source_text: str | None = None,
+        multimodal_consent: str = "disabled",
         _synchronous: bool = False,
     ) -> dict:
         self._sync_output_services()
@@ -540,12 +554,23 @@ class WorkflowService:
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
         context_text = source_text or _requirements_context_text(requirements, source_label)
-        self._write_pending_status(workflow_id, output_dir, detail_level, use_llm=False)
+        self._write_pending_status(
+            workflow_id,
+            output_dir,
+            detail_level,
+            use_llm=False,
+            multimodal_consent=multimodal_consent,
+        )
         self._mark_workflow_active(workflow_id)
         self._emit_workflow_event(
             workflow_id,
             "design_created",
-            {"detail_level": detail_level, "use_llm": False, "source": source_label},
+            {
+                "detail_level": detail_level,
+                "use_llm": False,
+                "source": source_label,
+                "multimodal_consent": multimodal_consent,
+            },
         )
 
         def _run() -> None:
@@ -1136,6 +1161,7 @@ class WorkflowService:
             )
         original_scene = active_version.scene
         edit_id = edit_id or f"edit_{uuid.uuid4().hex[:8]}"
+        multimodal_consent = self.get_status(workflow_id).get("multimodal_consent", "disabled")
 
         self._emit_workflow_event(
             workflow_id,
@@ -1333,6 +1359,7 @@ class WorkflowService:
             version_id=version.version_id,
             active_version_id=self.versioning.active_version_id(workflow_id),
             llm_decision_provenance=llm_decision_provenance,
+            multimodal_consent=multimodal_consent,
         )
         self._make_archive(version_output_dir)
         self._write_status(
@@ -1343,6 +1370,7 @@ class WorkflowService:
             version_id=version.version_id,
             active_version_id=self.versioning.active_version_id(workflow_id),
             llm_decision_provenance=llm_decision_provenance,
+            multimodal_consent=multimodal_consent,
         )
         version_status = self._read_json(version_output_dir / "status.json")
         self.versioning.update_version(
@@ -1848,6 +1876,7 @@ class WorkflowService:
         version_id: str | None = None,
         active_version_id: str | None = None,
         llm_decision_provenance: LLMDecisionProvenance | None = None,
+        multimodal_consent: str | None = None,
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
@@ -1856,6 +1885,10 @@ class WorkflowService:
         created_at = _status_created_at(previous_status, output_dir)
         metrics = dict(result.metrics)
         metrics.setdefault("started_at", created_at)
+        effective_multimodal_consent = multimodal_consent or previous_status.get(
+            "multimodal_consent", "disabled"
+        )
+        metrics.setdefault("multimodal_consent", effective_multimodal_consent)
         llm_available = llm_available_from_workflow_service(self)
         effective_llm_provider = result.llm_provider
         effective_llm_fallback_used = result.llm_fallback_used
@@ -1917,6 +1950,7 @@ class WorkflowService:
             "workflow_id": workflow_id,
             "status": status,
             "created_at": created_at,
+            "multimodal_consent": effective_multimodal_consent,
             "version_id": version_id,
             "active_version_id": active_version_id,
             "artifacts": artifacts,
@@ -2019,12 +2053,17 @@ class WorkflowService:
             "workflow_id": workflow_id,
             "status": "failed",
             "created_at": created_at,
+            "multimodal_consent": previous_status.get("multimodal_consent", "disabled"),
             "artifacts": {},
             "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
             "warnings": [],
             "runtime_capabilities": runtime_capabilities(),
             "unsupported_actions": unsupported_actions(),
-            "metrics": {"status": "failed", "started_at": created_at},
+            "metrics": {
+                "status": "failed",
+                "multimodal_consent": previous_status.get("multimodal_consent", "disabled"),
+                "started_at": created_at,
+            },
         }
         self._write_json(output_dir / "status.json", payload)
 
@@ -2034,6 +2073,7 @@ class WorkflowService:
         output_dir: Path,
         detail_level: str,
         use_llm: bool | None,
+        multimodal_consent: str = "disabled",
     ) -> None:
         created_at = _utc_now_iso()
         payload = {
@@ -2042,6 +2082,7 @@ class WorkflowService:
             "created_at": created_at,
             "version_id": None,
             "active_version_id": None,
+            "multimodal_consent": multimodal_consent,
             "artifacts": {},
             "warnings": [],
             "errors": [],
@@ -2065,6 +2106,7 @@ class WorkflowService:
                 "status": "pending",
                 "detail_level": detail_level,
                 "use_llm": use_llm,
+                "multimodal_consent": multimodal_consent,
                 "started_at": created_at,
             },
         }

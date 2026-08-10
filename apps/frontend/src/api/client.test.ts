@@ -253,7 +253,7 @@ describe("TelecomStudioApi", () => {
       requirements_text: "site 5G confirmé",
       confirmed_requirements: confirmedRequirements,
       confirmed_requirements_hash: "b".repeat(64),
-      options: { detail_level: "high" }
+      options: { detail_level: "high", multimodal_consent: "allow_input_analysis" }
     });
 
     expect(fetcher).toHaveBeenCalledWith(new URL("/designs", "http://127.0.0.1:8000"), {
@@ -261,7 +261,7 @@ describe("TelecomStudioApi", () => {
         requirements_text: "site 5G confirmé",
         confirmed_requirements: confirmedRequirements,
         confirmed_requirements_hash: "b".repeat(64),
-        options: { detail_level: "high" }
+        options: { detail_level: "high", multimodal_consent: "allow_input_analysis" }
       }),
       headers: { "content-type": "application/json" },
       method: "POST"
@@ -670,13 +670,15 @@ describe("TelecomStudioApi", () => {
     );
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
 
-    await expect(client.generateDesignFromDocumentPack("pack_1")).resolves.toMatchObject({
+    await expect(
+      client.generateDesignFromDocumentPack("pack_1", "allow_input_analysis")
+    ).resolves.toMatchObject({
       workflow_id: "wf_from_pack"
     });
     expect(fetcher).toHaveBeenCalledWith(
       new URL("/document-packs/pack_1/generate-design", "http://127.0.0.1:8000"),
       {
-        body: JSON.stringify({}),
+        body: JSON.stringify({ multimodal_consent: "allow_input_analysis" }),
         headers: { "content-type": "application/json" },
         method: "POST"
       }

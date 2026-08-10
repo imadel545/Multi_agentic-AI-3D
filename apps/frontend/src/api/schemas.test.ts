@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   AssemblyPlanEvidenceSchema,
+  AssetInventorySchema,
   ContractValidationError,
   AssetLibrarySearchSchema,
   ComponentProofsSchema,
   DocumentPackFieldSchema,
   DocumentPackQASchema,
+  MultimodalIntelligenceSchema,
   ParseRequirementsResponseSchema,
   SceneAdaptationCapabilitiesSchema,
   ViewerBundleSchema,
@@ -65,6 +67,91 @@ const viewerBundlePayload = {
 };
 
 describe("frontend contract schemas", () => {
+  it("accepts optional governed multimodal, visual review and asset evidence fields", () => {
+    const bundle = parseContract("ViewerBundle", ViewerBundleSchema, {
+      ...viewerBundlePayload,
+      multimodal_consent: "allow_input_analysis",
+      multimodal_intelligence: {
+        status: "operational",
+        enabled: true,
+        requires_project_consent: true,
+        max_images_per_request: 3,
+        max_image_bytes: 20_000_000,
+        remote_processing: true,
+        capabilities: ["multimodal_interpretation"],
+        visual_design_critic: "disabled_until_m5"
+      },
+      visual_review: {
+        status: "review_required",
+        advisory_only: true,
+        summary: "Un détail mérite une vérification humaine.",
+        findings: ["Support partiellement masqué"],
+        limitations: ["Avis non certifiant"]
+      }
+    });
+    const inventory = parseContract("AssetInventory", AssetInventorySchema, {
+      status: "qualified",
+      asset_count: 1,
+      missing_file_count: 0,
+      real_glb_asset_count: 1,
+      professional_evidence_asset_count: 0,
+      entries: [{
+        asset_id: "ANT_5011006",
+        type: "antenna",
+        source: "Catalogue qualifié",
+        qualification_status: "qualified",
+        milestone_evidence_eligible: false,
+        milestone_evidence_failures: ["Professional QA report file is missing."],
+        preview_set: [{
+          view: "front",
+          url: "/assets/ANT_5011006/previews/front.png",
+          sha256: "a".repeat(64),
+          width_px: 1024,
+          height_px: 1024,
+          qa_status: "passed"
+        }],
+        provenance_url: "/assets/ANT_5011006/provenance",
+        fidelity_status: "exact_import",
+        visual_review_status: "passed_advisory"
+      }]
+    });
+
+    expect(bundle.multimodal_consent).toBe("allow_input_analysis");
+    expect(bundle.visual_review?.advisory_only).toBe(true);
+    expect(inventory.entries[0]?.preview_set?.[0]?.view).toBe("front");
+    expect(inventory.entries[0]?.milestone_evidence_eligible).toBe(false);
+    expect(inventory.professional_evidence_asset_count).toBe(0);
+  });
+
+  it("keeps legacy viewer and inventory payloads valid without M1 optional fields", () => {
+    expect(() => ViewerBundleSchema.parse(viewerBundlePayload)).not.toThrow();
+    expect(() => AssetInventorySchema.parse({
+      status: "qualified",
+      asset_count: 0,
+      missing_file_count: 0,
+      real_glb_asset_count: 0,
+      entries: []
+    })).not.toThrow();
+  });
+
+  it("enforces the public 20,000,000-byte vision image ceiling", () => {
+    const capability = {
+      status: "operational",
+      enabled: true,
+      requires_project_consent: true,
+      max_images_per_request: 3,
+      max_image_bytes: 20_000_000,
+      remote_processing: true,
+      capabilities: ["multimodal_interpretation"],
+      visual_design_critic: "disabled_until_m5"
+    };
+    expect(() => MultimodalIntelligenceSchema.parse(capability)).not.toThrow();
+    expect(() => MultimodalIntelligenceSchema.parse({
+      ...capability,
+      max_image_bytes: 20 * 1024 * 1024
+    })).toThrow();
+  });
+
   it("validates real component proofs and bounded assembly decisions", () => {
     const proofs = parseContract("ComponentProofs", ComponentProofsSchema, {
       schema_version: "1.0",

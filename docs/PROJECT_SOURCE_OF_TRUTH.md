@@ -21,6 +21,51 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not yet a complete vendor-grade asset library. A large local CAD corpus is
   catalogued, but remains quarantined until rights and geometry are qualified.
 
+## Current delivery checkpoint — 2026-08-10
+
+`MILESTONE 1 — PARTIEL`
+
+- Work is isolated on `codex/m1-asset-qualification`. The verified pre-M1
+  baseline is commit `4829995130a43c09c5fb0c23d4216ed007e2d2c2`, tagged
+  locally as `cognitive-3d-m1-baseline-20260808`; nothing is pushed by this
+  milestone.
+- The existing Groq callers now share a governed transport and versioned
+  capability profiles. `openai/gpt-oss-120b` remains the strict structured
+  text-decision model. `qwen/qwen3.6-27b` is a separate opt-in advisory
+  capability for multimodal interpretation and asset-preview review. Project
+  consent is disabled by default, persisted with the workflow and exposed by
+  the public API. Configuration alone never reports the capability as
+  operational.
+- The vision contract records only bounded observations, input hashes, source
+  regions, confidence, limitations and invocation provenance. Vision-only
+  requirement evidence is inferred and requires confirmation; it cannot create
+  an exact dimension or override deterministic QA. No live Qwen proof,
+  automatic document-workflow invocation, PDF rasterization route, or versioned
+  8+8+8 vision evaluation has passed in this milestone.
+- `QualifiedAssetCandidateRetriever` and typed `AssetDecisionPacket` contracts
+  now unify candidate exposure. The telecom assembly route persists the
+  semantic strategy chosen from its authorized candidates and validates it
+  deterministically. The generic cognitive route can expose qualified
+  candidates, but its compiler does not yet execute generic
+  `reuse`/`adapt`/`compose` strategies.
+- The current runtime catalog still contains 13 usable internal/technical
+  manifests, but **0 of 13 passes the new professional M1 proof gate**.
+  `ProfessionalAssetVerifier` is now the filesystem-aware authority for that
+  flag: it recomputes master/viewer/preview/report hashes, validates GLB/PNG
+  structure, path containment, viewer lineage, dimensions and anchors. Manifest
+  completeness alone can no longer publish an eligible result. No
+  neutral STEP/B-Rep vertical slice for the requested professional structure,
+  antenna, RRU, support, cabinet, GPS and platform families is available in the
+  qualified catalog. Raw DWG ACIS remains `source_only` and cannot be promoted
+  by retrieval or an LLM decision.
+- Consequently, no current-tree professional Blender/browser end-to-end run
+  proves the required seven real assets, asset previews, reuse/adapt/compose,
+  procedural complement, GLB, QA, provenance and targeted new version. The
+  older local technical-generic asset-driven acceptance below remains valid for
+  its stated scope only; it does not close this professional qualification gate.
+- This milestone does not change Nemotron retrieval, SQLite authority, Docker
+  topology, or the ban on PostgreSQL/BGE-M3 work and free-form Blender code.
+
 ## Current backend
 
 - FastAPI exposes design workflow, document-pack, RAG, memory, asset, and
@@ -153,6 +198,13 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   separate Chrome headless run without WebGL displayed the real backend preview
   and the explicit WebGL warning. All requested product endpoints returned 200
   and no application console error was observed.
+- The 2026-08-10 current-tree smoke restored certified workflow
+  `wf_e465a9cd4414`, loaded its real GLB, called `/assets/inventory` during
+  bootstrap and opened Composition against the real API. It displayed seven
+  technical assets as professional-proof incomplete, zero professional preview,
+  zero raw `qualified_for_generation` label and no browser console error. This
+  proves truthful display for the restored technical scene, not the missing
+  professional M1 asset chain.
 - Old dashboard patterns remain rejected.
 
 ## Current assets
@@ -612,11 +664,11 @@ scenario.
   French instruction while the normalized LLM decision stays in provenance.
   Failed historical workflows now expose no artifact, download or trace URL;
   quarantined candidate files cannot be advertised as product deliverables.
-- The corresponding current-tree regression proof is 150/150 frontend tests,
-  frontend typecheck and production build, 33 targeted Product/API tests and 46
-  extraction/Groq/GeometryProgram tests. The latter set includes real Blender
-  compilation of transformed Boolean operands and ground-aligned generated
-  geometry.
+- The corresponding current-tree regression proof is 157/157 frontend tests,
+  frontend typecheck and production build, 73 targeted backend/M1/API tests,
+  plus the focused real-Blender qualified 4G assembly test (1/1 in 25.61 s).
+  This bounded run is not a claim that the entire Python or browser acceptance
+  matrix passed.
 
 ### ASSET-DRIVEN TELECOM ASSEMBLY V1 backlog
 
@@ -677,5 +729,7 @@ Ce statut n'est pas `IMPLEMENTED`: le parcours télécom GPT-OSS réel du
 2026-08-03 passe après correction des contrats JSON, des bounds de sweep, des
 transformations booléennes et de l'ancrage au sol, mais les trois scénarios
 génériques réels ne sont pas tous passés et la sélection/réutilisation d'assets
-génériques hors domaine télécom reste `procedural_only`. Aucune convergence
+génériques hors domaine télécom n'est pas encore exécutable: le retriever expose
+des candidats qualifiés, mais le compilateur maintient
+`allowed_strategies=[]` pour `reuse`/`adapt`/`compose`. Aucune convergence
 globale n'est déclarée.

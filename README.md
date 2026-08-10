@@ -235,9 +235,10 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 13 manifests, 12 local GLBs, 12 generation-eligible, 3 exact imports,
-  9 parametric generation profiles, 1 reference-only,
-  `qualified_mixed_catalog`, not vendor-grade.
+- Assets: 13 manifests, 12 local GLBs, 13 generation-eligible, 3 exact imports,
+  10 parametric generation profiles, 0 reference-only, and 0 professional M1
+  evidence asset after runtime byte verification; `qualified_mixed_catalog`,
+  not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
 - E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
@@ -247,4 +248,5 @@ requirements_text or document pack
 - Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
   `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
   and preview. This proves that scenario only. The current frontend gate passes
-  150 tests, typecheck, production build and the 2026-08-04 Docker browser smoke.
+  157 tests, typecheck, production build and a 2026-08-10 real-API browser smoke
+  of the truthful 0/13 professional asset state.

@@ -41,8 +41,13 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     # lifespan. Close import-time local services so executor threads cannot
     # keep the pytest process alive after results are complete.
     try:
-        from apps.api.telecom_studio_api.main import rag_service, workflow_service
+        from apps.api.telecom_studio_api.main import (
+            memory_service,
+            rag_service,
+            workflow_service,
+        )
     except ImportError:
         return
     workflow_service.shutdown(wait=True)
+    memory_service.close()
     rag_service.close()

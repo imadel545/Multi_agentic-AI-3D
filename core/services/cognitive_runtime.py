@@ -5,25 +5,19 @@ from core.agents.cognitive_design_planner import (
     GroqCognitivePlanningClient,
 )
 from core.agents.cognitive_supervisor import CognitiveSupervisor, GroqSpecialistRouteClient
-from core.contracts.cognitive_design import AssetCandidateEvidence, SpecialistDescriptor
+from core.contracts.cognitive_design import SpecialistDescriptor
 from core.llm.groq import GroqStructuredClient
+from core.services.asset_registry import AssetRegistry
 from core.services.geometry_capabilities import geometry_capability_registry
+from core.services.qualified_asset_retriever import QualifiedAssetCandidateRetriever
 
 
-class ProceduralOnlyCandidateRetriever:
-    """Honest catalog boundary until generic assets gain executable assembly plans.
-
-    Returning no candidate makes GPT-OSS select governed procedural generation.
-    Telecom reuse remains implemented by the existing qualified asset planner.
-    """
-
-    def search(self, component: dict) -> list[AssetCandidateEvidence]:
-        return []
-
-
-def build_cognitive_design_planner(client: GroqStructuredClient) -> CognitiveDesignPlanner:
-    registry = geometry_capability_registry()
-    capability_ids = [item.capability_id for item in registry.discover()]
+def build_cognitive_design_planner(
+    client: GroqStructuredClient,
+    asset_registry: AssetRegistry,
+) -> CognitiveDesignPlanner:
+    capability_registry = geometry_capability_registry()
+    capability_ids = [item.capability_id for item in capability_registry.discover()]
     descriptors = [
         SpecialistDescriptor(
             specialist_id="geometry_program_specialist",
@@ -56,10 +50,10 @@ def build_cognitive_design_planner(client: GroqStructuredClient) -> CognitiveDes
     ]
     return CognitiveDesignPlanner(
         planning_client=GroqCognitivePlanningClient(client),
-        candidate_retriever=ProceduralOnlyCandidateRetriever(),
+        candidate_retriever=QualifiedAssetCandidateRetriever(asset_registry),
         supervisor=CognitiveSupervisor(
             descriptors,
             GroqSpecialistRouteClient(client),
         ),
-        capabilities=registry.discover(),
+        capabilities=capability_registry.discover(),
     )

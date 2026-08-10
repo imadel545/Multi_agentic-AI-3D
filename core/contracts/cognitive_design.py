@@ -4,6 +4,7 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from core.contracts.assets import AssetDecisionPacket
 from core.contracts.common import StrictModel
 from core.contracts.geometry_program import GeometryProgramVector3
 
@@ -145,14 +146,12 @@ class ComponentGraph(StrictModel):
                 raise ValueError("relationship references an unknown component")
             if (
                 relationship.source_port_id is not None
-                and relationship.source_port_id
-                not in ports[relationship.source_component_id]
+                and relationship.source_port_id not in ports[relationship.source_component_id]
             ):
                 raise ValueError("relationship source port is unknown")
             if (
                 relationship.target_port_id is not None
-                and relationship.target_port_id
-                not in ports[relationship.target_component_id]
+                and relationship.target_port_id not in ports[relationship.target_component_id]
             ):
                 raise ValueError("relationship target port is unknown")
         return self
@@ -176,6 +175,7 @@ class AssetCandidateEvidence(StrictModel):
     ] = Field(default_factory=list, max_length=5)
     allowed_parameter_ids: list[str] = Field(default_factory=list, max_length=64)
     limitations: list[str] = Field(default_factory=list, max_length=32)
+    decision_packet: AssetDecisionPacket | None = None
 
 
 class ComponentAssetDecision(StrictModel):
@@ -280,10 +280,7 @@ class SpecialistRoutePlan(StrictModel):
             item.specialist_id
             for item in descriptors
             if item.required_gate
-            and (
-                self.domain in item.compatible_domains
-                or "generic" in item.compatible_domains
-            )
+            and (self.domain in item.compatible_domains or "generic" in item.compatible_domains)
         }
         if not required.issubset(selected):
             missing = sorted(required - selected)

@@ -27,6 +27,9 @@ def test_asset_inventory_reports_present_and_missing_glb_assets() -> None:
     assert inventory["generation_eligible_asset_count"] == sum(
         entry["generation_eligible"] for entry in entries
     )
+    assert inventory["professional_evidence_asset_count"] == 0
+    assert all(not entry["milestone_evidence_eligible"] for entry in entries)
+    assert all(entry["milestone_evidence_failures"] for entry in entries)
     assert inventory["reference_only_asset_count"] == sum(
         entry["asset_import_mode"] == "reference_only" for entry in entries
     )

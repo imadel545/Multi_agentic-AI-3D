@@ -57,10 +57,12 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         *,
         detail_level: str,
         source_label: str,
+        multimodal_consent: str,
     ) -> dict:
         assert requirements.azimuths_deg == [0.0, 120.0, 240.0]
         assert detail_level == "high"
         assert source_label == "project_design_spec"
+        assert multimodal_consent == "allow_input_analysis"
         return {"workflow_id": "wf_from_pack", "status": "pending"}
 
     monkeypatch.setattr(
@@ -137,11 +139,16 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         }
         assert all(required_payload_fields.issubset(event["payload"]) for event in events)
 
-        generation = client.post(f"/document-packs/{pack_id}/generate-design").json()
+        generation = client.post(
+            f"/document-packs/{pack_id}/generate-design",
+            json={"multimodal_consent": "allow_input_analysis"},
+        ).json()
         assert generation["status"] == "pending"
         assert generation["workflow_id"] == "wf_from_pack"
         assert generation["mapping"]["status"] == "mapped"
         assert generation["extraction_report"]["prompt_text_reparse"] is False
+        assert generation["extraction_report"]["multimodal_consent"] == "allow_input_analysis"
+        assert generation["extraction_report"]["remote_vision_analysis"] == "not_executed"
         assert "mapping_loss_report" in generation["mapping"]
         assert generation["extraction_report"]["mapping_loss_report"]["counts"]["mapped"] >= 4
         post_generation_events = client.get(f"/document-packs/{pack_id}/events").json()
@@ -212,7 +219,7 @@ def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
     monkeypatch.setattr(
         workflow_service,
         "create_design_from_requirements",
-        lambda requirements, detail_level, source_label: {
+        lambda requirements, detail_level, source_label, multimodal_consent: {
             "workflow_id": "wf_after_correction",
             "status": "pending",
         },

@@ -26,6 +26,7 @@ from core.llm.groq_policy import (
     groq_fallback_reason,
     normalize_groq_base_url,
 )
+from core.llm.transport import GroqTransport, GroqTransportError
 
 PLANNING_DECISION_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -81,6 +82,7 @@ class GroqPlanningDecisionClient:
         reasoning_effort: GroqReasoningEffort = "medium",
         *,
         post: PostCallable | None = None,
+        transport: GroqTransport | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
@@ -100,30 +102,46 @@ class GroqPlanningDecisionClient:
             reasoning_effort=reasoning_effort,
             max_completion_tokens=max_completion_tokens,
         )
-        self._post = post or httpx.post
+        if post is not None and transport is not None:
+            raise ValueError("post and transport are mutually exclusive")
+        self._transport = transport
+        self._post = post or (None if transport is not None else httpx.post)
 
     def decide(self, request: PlanningDecisionRequest) -> PlanningDecisionResult:
         started_at = time.monotonic()
         try:
-            response = self._post(
-                f"{self.base_url}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=self._payload(request),
-                timeout=self.timeout_s,
-            )
-            response.raise_for_status()
+            if self._transport is not None:
+                result = self._transport.request_chat_completion(
+                    capability="planning_decision",
+                    payload=self._payload(request),
+                    timeout_s=self.timeout_s,
+                )
+                body = result.body
+            else:
+                assert self._post is not None
+                response = self._post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=self._payload(request),
+                    timeout=self.timeout_s,
+                )
+                response.raise_for_status()
+                body = response.json()
             model_decision = PlanningModelDecision.model_validate(
-                _normalize_model_content(_response_content(response.json()))
+                _normalize_model_content(_response_content(body))
             )
-            return resolve_model_decision(
+            resolved = resolve_model_decision(
                 request,
                 model_decision,
                 model_name=self.model,
                 latency_ms=_elapsed_ms(started_at),
             )
+            if self._transport is not None:
+                self._transport.mark_operational("planning_decision")
+            return resolved
         except (
             httpx.HTTPError,
             json.JSONDecodeError,
@@ -132,7 +150,10 @@ class GroqPlanningDecisionClient:
             TypeError,
             ValidationError,
             PlanningDecisionValidationError,
+            GroqTransportError,
         ) as exc:
+            if self._transport is not None and not isinstance(exc, GroqTransportError):
+                self._transport.mark_failed("planning_decision", "model_output_rejected")
             return deterministic_fallback(
                 request,
                 model_name=self.model,
