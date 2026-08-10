@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     groq_vision_max_pixels: int = Field(default=16_000_000, ge=1_000_000, le=16_000_000)
     groq_vision_max_edge_px: int = Field(default=4096, ge=512, le=8192)
     groq_transport_max_retries: int = Field(default=2, ge=0, le=5)
+    groq_retry_after_cap_s: float = Field(default=30.0, ge=1.0, le=300.0)
     groq_circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
     groq_circuit_reset_s: float = Field(default=30.0, ge=1.0, le=600.0)
     blender_binary: str = "blender"

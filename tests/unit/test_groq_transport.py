@@ -49,6 +49,39 @@ def test_transport_honors_retry_after_and_becomes_operational_only_after_validat
         client.close()
 
 
+def test_transport_caps_untrusted_retry_after_without_hiding_provider_value() -> None:
+    calls = 0
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": "7200"}, request=request)
+        return _chat_response(request, {"ok": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport = GroqTransport(
+        api_key="secret-test-key",
+        client=client,
+        max_retry_after_s=30,
+        sleeper=sleeps.append,
+        jitter=lambda: 0,
+    )
+    try:
+        result = transport.request_chat_completion(
+            capability="planning_decision",
+            payload={"model": "openai/gpt-oss-120b"},
+            timeout_s=3,
+        )
+
+        assert result.attempts == 2
+        assert sleeps == [30]
+    finally:
+        transport.close()
+        client.close()
+
+
 def test_authentication_failure_is_not_retried_or_leaked() -> None:
     calls = 0
 

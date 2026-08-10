@@ -81,6 +81,7 @@ class GroqTransport:
         circuit_failure_threshold: int = 3,
         circuit_reset_s: float = 30.0,
         backoff_base_s: float = 0.25,
+        max_retry_after_s: float = 30.0,
         sleeper: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         jitter: Callable[[], float] = random.random,
@@ -96,6 +97,8 @@ class GroqTransport:
             raise ValueError("circuit_reset_s must be between 1 and 600")
         if not 0 < backoff_base_s <= 10:
             raise ValueError("backoff_base_s must be between 0 and 10")
+        if not 1 <= max_retry_after_s <= 300:
+            raise ValueError("max_retry_after_s must be between 1 and 300")
         self.base_url = normalize_groq_base_url(base_url)
         self._owns_client = client is None
         self._client = client or httpx.Client(
@@ -109,6 +112,7 @@ class GroqTransport:
         self._circuit_failure_threshold = circuit_failure_threshold
         self._circuit_reset_s = circuit_reset_s
         self._backoff_base_s = backoff_base_s
+        self._max_retry_after_s = max_retry_after_s
         self._sleeper = sleeper
         self._monotonic = monotonic
         self._jitter = jitter
@@ -161,6 +165,7 @@ class GroqTransport:
                             classified,
                             attempt=attempt,
                             base_s=self._backoff_base_s,
+                            max_retry_after_s=self._max_retry_after_s,
                             jitter=self._jitter(),
                         )
                     )
@@ -349,10 +354,11 @@ def _retry_delay(
     *,
     attempt: int,
     base_s: float,
+    max_retry_after_s: float,
     jitter: float,
 ) -> float:
     if error.retry_after_s is not None:
-        return max(0.0, error.retry_after_s)
+        return min(max_retry_after_s, max(0.0, error.retry_after_s))
     bounded_jitter = min(1.0, max(0.0, jitter))
     return base_s * (2 ** (attempt - 1)) + bounded_jitter * base_s
 

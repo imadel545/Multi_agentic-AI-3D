@@ -53,8 +53,9 @@ frontend.
   correct the prompt; GPT-OSS may propose a candidate but cannot silently become
   the authority over conflicting source evidence.
 - Groq improves extraction only when a real key is configured.
-- The shared Groq transport adds bounded transient retries, `Retry-After` and a
-  per-capability circuit breaker, but no live Qwen call was accepted in M1.
+- The shared Groq transport adds bounded transient retries, a configurable
+  `Retry-After` sleep cap (30 seconds by default) and a per-capability circuit
+  breaker, but no live Qwen call was accepted in M1.
   `configured_unverified` remains different from `operational`; a configured
   key is not health proof.
 - Qwen multimodal interpretation and asset-preview review are advisory and

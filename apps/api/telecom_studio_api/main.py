@@ -182,6 +182,7 @@ groq_transport = (
         api_key=settings.resolved_groq_api_key,
         base_url=settings.groq_base_url,
         max_transient_retries=settings.groq_transport_max_retries,
+        max_retry_after_s=settings.groq_retry_after_cap_s,
         circuit_failure_threshold=settings.groq_circuit_failure_threshold,
         circuit_reset_s=settings.groq_circuit_reset_s,
     )
