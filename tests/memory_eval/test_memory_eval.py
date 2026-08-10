@@ -10,6 +10,8 @@ from core.rag import RagService
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner
 
+pytestmark = pytest.mark.blender_runtime
+
 
 @pytest.mark.skipif(
     shutil.which("blender") is None

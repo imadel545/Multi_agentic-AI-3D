@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
@@ -18,6 +19,8 @@ from core.orchestration import DesignOrchestrator
 from core.performance import requirements_confirmation_hash
 from core.services.asset_registry import AssetRegistry
 from core.services.requirement_parser import parse_requirements_text
+
+pytestmark = pytest.mark.blender_runtime
 
 _BOUNDED_SELECTION_REASON = "Candidat fourni et autorisé par le contrat borné."
 

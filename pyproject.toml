@@ -50,6 +50,13 @@ exclude = ["assets*", "data*", "docs*", "infra*", "outputs*", "tests*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-m 'not blender_runtime and not provider_live and not browser_smoke'"
+markers = [
+  "blender_runtime: launches the qualified Blender binary and validates real artifacts",
+  "provider_live: consumes an explicitly authorized external AI provider",
+  "browser_smoke: requires a live API/frontend and a real browser",
+  "slow: non-interactive test with an intentionally extended runtime",
+]
 
 [tool.ruff]
 line-length = 100

@@ -73,6 +73,7 @@ def test_agentic_route_unrepairable_failure(tmp_path: Path) -> None:
     assert [event["attempt"] for event in scene_repair_routes] == [1, 2]
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -97,6 +98,7 @@ def test_memory_recall_before_planning(tmp_path: Path) -> None:
     assert nodes.index("memory_recall") < nodes.index("plan_scene")
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),

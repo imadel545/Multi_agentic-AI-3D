@@ -184,11 +184,30 @@ The backend reports each capability explicitly and does not pretend extraction s
 
 ## Test
 
-Backend:
+Backend fast gate (default, no Blender subprocess, provider, or browser):
 
 ```bash
 .venv/bin/python -m pytest -q
 ```
+
+Real Blender gate (serialized and explicit):
+
+```bash
+BLENDER_BINARY="/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender" \
+  .venv/bin/python -m pytest -q -m blender_runtime --durations=30
+```
+
+External-provider tests are opt-in only and must be marked `provider_live`:
+
+```bash
+TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1 \
+  .venv/bin/python -m pytest -q -m provider_live --durations=30
+```
+
+The test harness rejects resolved Groq/NVIDIA credentials by default and fails
+immediately if an unmarked test attempts to launch a real Blender subprocess.
+`browser_smoke` is a separate real-API/browser release gate; jsdom tests do not
+count as WebGL evidence.
 
 ---
 

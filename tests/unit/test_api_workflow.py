@@ -109,15 +109,14 @@ def test_certified_status_advertises_only_verified_artifacts(tmp_path: Path) -> 
         verified_artifacts={"glb": str(glb)},
     )
 
-    assert payload["artifacts"] == {
-        "glb": "/designs/wf_certified/artifacts/glb"
-    }
+    assert payload["artifacts"] == {"glb": "/designs/wf_certified/artifacts/glb"}
     assert payload["active_version_artifacts"] == {
         "glb": "/designs/wf_certified/artifacts/glb?version_id=v_certified"
     }
     assert payload["download_url"] == "/designs/wf_certified/download"
 
 
+@pytest.mark.blender_runtime
 def test_workflow_admission_is_bounded_and_rejected_work_has_no_orphan(tmp_path: Path) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -273,6 +272,7 @@ def test_workflow_events_cursor_returns_bounded_deltas_and_preserves_full_histor
     assert invalid_cursor.status_code == 422
 
 
+@pytest.mark.blender_runtime
 def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -422,6 +422,7 @@ def test_create_design_api_generates_artifacts(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_api_status_exposes_structural_qa(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -481,6 +482,7 @@ def test_create_design_async_status_is_available_immediately(tmp_path: Path) -> 
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_geometry_validation_report_written(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -506,6 +508,7 @@ def test_geometry_validation_report_written(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     extractor = workflow_service.orchestrator.extractor
@@ -560,6 +563,7 @@ def test_api_design_uses_configured_llm_provider_when_enabled(tmp_path: Path) ->
         extractor.enabled = original_enabled
 
 
+@pytest.mark.blender_runtime
 def test_api_design_with_use_llm_false_does_not_call_configured_provider(
     tmp_path: Path,
 ) -> None:
@@ -1029,6 +1033,7 @@ def test_startup_reconciliation_restores_active_version_after_interrupted_edit(
     ]
 
 
+@pytest.mark.blender_runtime
 def test_verified_commit_survives_terminal_event_failure_and_running_root_recovery(
     tmp_path: Path,
     monkeypatch,
@@ -1148,6 +1153,7 @@ def test_design_adaptation_capabilities_require_an_active_version() -> None:
     assert response.json()["detail"] == "active design version not found"
 
 
+@pytest.mark.blender_runtime
 def test_design_artifact_endpoint_serves_active_and_version_files(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -1233,6 +1239,7 @@ def test_delete_active_workflow_returns_conflict(tmp_path: Path) -> None:
     assert "active workflow" in response.json()["detail"]
 
 
+@pytest.mark.blender_runtime
 def test_event_stream_replays_complete_push_sse_events(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -1285,6 +1292,7 @@ def test_event_stream_replays_complete_push_sse_events(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_event_stream_cursor_skips_old_terminal_event_for_revision(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -1504,6 +1512,7 @@ def test_event_stream_fans_out_identical_live_events_to_two_subscribers(
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_failed_terminal_event_observes_persisted_failed_status(
     tmp_path: Path,
     monkeypatch,
@@ -1537,6 +1546,7 @@ def test_failed_terminal_event_observes_persisted_failed_status(
     assert terminal_statuses == ["failed"]
 
 
+@pytest.mark.blender_runtime
 def test_completed_terminal_event_cannot_bypass_persisted_completion_proof(
     tmp_path: Path,
     monkeypatch,

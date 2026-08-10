@@ -61,6 +61,7 @@ def test_golden_scene_contract_rejects_missing_blender(scene_name: str, tmp_path
     assert result.glb_inspection.structural_qa_passed is False
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),

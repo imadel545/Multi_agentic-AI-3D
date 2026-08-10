@@ -182,12 +182,15 @@ frontend.
 - Docker health proves process and dependency availability, not that external
   Groq/NVIDIA calls will succeed. Provider status becomes operational only after
   a real successful request and remains visibly degraded otherwise.
-- The 2026-08-04 full native test run was stopped at 12% after 14 minutes because
-  it executes many long Blender scenarios. Before interruption it exposed three
-  pre-existing failures: a deterministic small-cell asset height outside its
-  manifest limit and two hardening tests whose fixtures no longer satisfy the
-  current certificate/version contract. These are not hidden by the Docker
-  delivery; they remain backend test debt outside this Compose change.
+- The historical native suite mixed real Blender scenarios with unit tests and
+  could take tens of minutes depending on the host PATH. The small-cell and
+  certificate/version fixture regressions are fixed. Tests are now split into a
+  default fast gate and explicit `blender_runtime`, `provider_live`, and
+  `browser_smoke` gates. The fast gate passed 583 tests in 23.86 seconds on
+  2026-08-10. The runtime audit completed the 53 real-Blender cases; its only
+  additional failure was a non-Blender domain-routing regression that has since
+  been moved back to the fast gate and fixed with positive and negative routing
+  coverage. The Blender gate is intentionally not represented as fast CI.
 
 ## Documents
 

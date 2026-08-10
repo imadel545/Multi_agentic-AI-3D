@@ -2,9 +2,12 @@ import json
 import time
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
+
+pytestmark = pytest.mark.blender_runtime
 
 E2E_PROMPT = (
     "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m. "

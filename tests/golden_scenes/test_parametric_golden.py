@@ -35,6 +35,7 @@ from apps.api.telecom_studio_api.main import app, workflow_service
         ),
     ],
 )
+@pytest.mark.blender_runtime
 def test_parametric_golden_scene(name: str, requirements_text: str, tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path

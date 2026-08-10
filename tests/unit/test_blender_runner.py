@@ -108,6 +108,7 @@ def test_blender_runner_reports_fail_closed_exact_accessory_when_file_missing(
     assert metadata["asset_import_summary"]["asset_count"] == 9
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -233,6 +234,7 @@ def test_blender_runner_generates_real_artifacts_when_blender_available(tmp_path
     assert not any(item.startswith("label:") for item in geometry_report.missing_objects)
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -291,6 +293,7 @@ def test_blender_runner_imports_requested_accessory_glbs_when_available(tmp_path
     assert geometry_report.object_counts["label"] >= 5
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -360,6 +363,7 @@ def test_blender_runner_assembles_qualified_4g_glbs_with_provenance(tmp_path: Pa
     assert geometry_report.status == "passed"
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -386,6 +390,7 @@ def test_blender_runner_rejects_exact_import_without_trusted_assembly_snapshot(
         ("small_cell_pole", "pole_base", "foundation_pole_base"),
     ],
 )
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -435,6 +440,7 @@ def test_blender_runner_generates_supported_foundation_assemblies(
     )
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -470,6 +476,7 @@ def test_blender_runner_imports_qualified_microwave_dishes_not_panels(tmp_path: 
     assert not any("panel" in name.lower() for name in node_names)
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),

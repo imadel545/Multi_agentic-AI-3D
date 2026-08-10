@@ -38,6 +38,7 @@ def test_edit_unknown_workflow_returns_404(client, tmp_path):
     assert response.json()["detail"] == "workflow not found"
 
 
+@pytest.mark.blender_runtime
 def test_edit_design_creates_version(client, tmp_path):
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -248,6 +249,7 @@ def test_edit_design_creates_version(client, tmp_path):
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_rru_edit_runs_real_blender_and_preserves_groq_provenance_on_rollback(client, tmp_path):
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -407,6 +409,7 @@ def test_rru_edit_runs_real_blender_and_preserves_groq_provenance_on_rollback(cl
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_edit_design_rejected_on_bad_prompt(client, tmp_path):
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path

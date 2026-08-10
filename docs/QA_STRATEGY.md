@@ -137,8 +137,21 @@ limitations and never advertises checks it cannot perform.
 ## Expected tests
 
 - Unit tests force deterministic embeddings and passthrough reranking; they do
-  not contact NVIDIA or Groq. Live-provider checks are explicit integration
-  tests, so external HTTP failures cannot make the unit suite nondeterministic.
+  not contact NVIDIA or Groq. The harness disables external credentials and all
+  provider capabilities unless `TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1` is set
+  explicitly. Live-provider checks use the `provider_live` marker, so external
+  HTTP failures cannot make the fast suite nondeterministic.
+- `pytest -q` is the fast gate and excludes `blender_runtime`, `provider_live`
+  and `browser_smoke`. An autouse guard fails if an unmarked test reaches the
+  real Blender subprocess boundary. The 2026-08-10 gate completed 583 tests in
+  23.86 seconds after 53 runtime cases were classified separately.
+- `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
+  gate. The 2026-08-10 audit exercised all 53 current Blender cases in 14 minutes
+  43 seconds. It must never accept fallback artefacts as proof of a successful
+  design.
+- A real API/browser gate remains required for Canvas/WebGL, GLB loading,
+  selection, SSE/polling, document upload, edit/version and rollback flows.
+  Vitest/jsdom remains a fast contract gate, not visual runtime evidence.
 
 - A lattice workflow with real Blender completes and passes Mesh QA.
 - A workflow selecting a tower without a matching GLB exposes fallback/degraded.
@@ -158,7 +171,7 @@ limitations and never advertises checks it cannot perform.
   requirement/Groq tests after the live-input parser fix, the isolated
   real-Blender E2E (`1 passed`), and the real HTTP 4G generation/edit/version
   scenario with QA 1.0 and an issued certificate.
-- The frontend has 145 passing Vitest tests plus green typecheck/build and a
+- The frontend has 157 passing Vitest tests plus green typecheck/build and a
   connected smoke on the current tree. The real generic multi-project user
   scenario remains open; no global convergence is claimed.
 

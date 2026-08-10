@@ -128,9 +128,7 @@ class FakeGeometryPlanner:
                         "size_m": {"x": 2.8, "y": 1.8, "z": 0.18},
                         "material_id": "steel",
                         "semantic_role": "access_structure",
-                        "transform": {
-                            "translation_m": {"x": 0.0, "y": 0.0, "z": 2.0}
-                        },
+                        "transform": {"translation_m": {"x": 0.0, "y": 0.0, "z": 2.0}},
                     },
                     {
                         "kind": "primitive",
@@ -138,9 +136,7 @@ class FakeGeometryPlanner:
                         "primitive": "box",
                         "size_m": {"x": 0.18, "y": 0.18, "z": 2.0},
                         "material_id": "steel",
-                        "transform": {
-                            "translation_m": {"x": -1.0, "y": 0.0, "z": 1.0}
-                        },
+                        "transform": {"translation_m": {"x": -1.0, "y": 0.0, "z": 1.0}},
                     },
                     {
                         "kind": "primitive",
@@ -148,9 +144,7 @@ class FakeGeometryPlanner:
                         "primitive": "box",
                         "size_m": {"x": 0.18, "y": 0.18, "z": 2.0},
                         "material_id": "steel",
-                        "transform": {
-                            "translation_m": {"x": 1.0, "y": 0.0, "z": 1.0}
-                        },
+                        "transform": {"translation_m": {"x": 1.0, "y": 0.0, "z": 1.0}},
                     },
                 ],
                 "limitations": ["No structural engineering certification."],
@@ -162,11 +156,15 @@ def test_conservative_router_preserves_only_explicit_telecom() -> None:
     router = ConservativeDesignDomainRouter()
 
     assert router.route("Créer un site 5G avec trois antennes").route == "telecom_v1"
+    assert router.route("Tour 5000m avec 100 secteurs").route == "telecom_v1"
+    assert router.route("Tower 30m with 3 sectors").route == "telecom_v1"
     blocked = router.route("Créer un escalier et un jardin")
     assert blocked.route == "blocked"
     assert blocked.fallback_used is True
+    assert router.route("Créer une tour résidentielle de 20 étages").route == "blocked"
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     not Path("/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender").exists(),
     reason="validated Blender LTS is not available",
@@ -213,6 +211,7 @@ def test_generic_request_runs_through_existing_graph_real_blender_and_certificat
     ]
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     not Path("/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender").exists(),
     reason="validated Blender LTS is not available",

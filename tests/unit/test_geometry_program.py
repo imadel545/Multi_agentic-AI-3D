@@ -520,6 +520,7 @@ def test_point_ellipsis_normalization_is_idempotent_and_keeps_unsafe_list_invali
         GeometryProgram.model_validate(unsafe)
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -581,6 +582,7 @@ def test_blender_compiles_validated_geometry_program_without_executing_model_cod
     assert "site_shelter_door_right" in nodes
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),
@@ -644,6 +646,7 @@ def test_blender_compiles_geometry_program_v2_closed_registry(tmp_path: Path) ->
     assert "stair_system" in steps["geometry_program_semantic_groups"]
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender.app/Contents/MacOS/Blender").exists(),

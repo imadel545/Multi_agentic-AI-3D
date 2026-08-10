@@ -3,6 +3,7 @@
 import subprocess
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
@@ -63,6 +64,7 @@ def test_blender_availability_accepts_verified_headless_smoke(tmp_path: Path, mo
     assert _blender_available() is True
 
 
+@pytest.mark.blender_runtime
 def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -353,6 +355,7 @@ def test_studio_warnings_distinguish_unverified_and_failed_rag() -> None:
     assert "Configurer NVIDIA_API_KEY" not in failed[0]["recommended_action"]
 
 
+@pytest.mark.blender_runtime
 def test_user_summary_returns_human_readable_issues(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -390,6 +393,7 @@ def test_user_summary_returns_human_readable_issues(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -448,6 +452,7 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
     tmp_path: Path,
 ) -> None:
@@ -486,6 +491,7 @@ def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -611,6 +617,7 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_failed_blender_workflow_does_not_advertise_viewer_artifacts(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -655,6 +662,7 @@ def test_failed_blender_workflow_does_not_advertise_viewer_artifacts(
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -701,6 +709,7 @@ def test_timeline_summary_returns_readable_steps(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_workflow_events_expose_runtime_nodes_without_premature_blender_event(
     tmp_path: Path,
 ) -> None:
@@ -758,6 +767,7 @@ def test_workflow_events_expose_runtime_nodes_without_premature_blender_event(
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_user_issues_endpoint_returns_issues(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -778,6 +788,7 @@ def test_user_issues_endpoint_returns_issues(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
+@pytest.mark.blender_runtime
 def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -930,6 +941,7 @@ def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
     )
 
 
+@pytest.mark.blender_runtime
 def test_frontend_does_not_need_raw_json_for_primary_ui(tmp_path: Path) -> None:
     """User-summary must expose enough structured data to render UI without status.json."""
     original_outputs = workflow_service.outputs_dir

@@ -53,6 +53,7 @@ def test_envelope_adapter_scales_only_visible_boolean_outputs() -> None:
     assert result["transform"]["scale"] == pytest.approx(_xyz(0.9, 0.9, 0.9))
 
 
+@pytest.mark.blender_runtime
 @pytest.mark.skipif(
     shutil.which("blender") is None
     and not Path("/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender").exists()

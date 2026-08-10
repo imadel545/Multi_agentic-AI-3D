@@ -91,7 +91,7 @@ class GroqDesignDomainRouter:
 class ConservativeDesignDomainRouter:
     """Explicit degraded policy used only when the remote router is unavailable."""
 
-    _TELECOM_MARKERS = frozenset(
+    _STRONG_TELECOM_MARKERS = frozenset(
         {
             "telecom",
             "4g",
@@ -107,10 +107,16 @@ class ConservativeDesignDomainRouter:
             "microwave",
         }
     )
+    _TELECOM_STRUCTURE_MARKERS = frozenset({"tour", "tower", "mast", "mât", "mat"})
+    _RADIO_INSTALLATION_MARKERS = frozenset({"secteur", "secteurs", "sector", "sectors", "rf"})
 
     def route(self, request: str) -> DesignRouteDecision:
         words = {word.strip(".,;:!?()[]{}\"'").lower() for word in request.split()}
-        if words & self._TELECOM_MARKERS:
+        has_explicit_telecom = bool(words & self._STRONG_TELECOM_MARKERS)
+        has_telecom_installation = bool(
+            words & self._TELECOM_STRUCTURE_MARKERS and words & self._RADIO_INSTALLATION_MARKERS
+        )
+        if has_explicit_telecom or has_telecom_installation:
             return DesignRouteDecision(
                 route="telecom_v1",
                 inferred_domain="telecom",

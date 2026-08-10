@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 _TEST_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="telecom-studio-pytest-"))
+_LIVE_PROVIDERS = os.getenv("TELECOM_STUDIO_TEST_LIVE_PROVIDERS") == "1"
 atexit.register(shutil.rmtree, _TEST_RUNTIME_ROOT, ignore_errors=True)
 
 # API modules construct local-first services at import time. Force every mutable
@@ -18,15 +19,34 @@ os.environ["TELECOM_STUDIO_SQLITE_PATH"] = str(_TEST_RUNTIME_ROOT / "sqlite" / "
 os.environ["TELECOM_STUDIO_ASSET_LIBRARY_PATH"] = str(_TEST_RUNTIME_ROOT / "asset-library")
 os.environ["TELECOM_STUDIO_EMBEDDING_PROVIDER"] = "deterministic"
 os.environ["TELECOM_STUDIO_RERANKER_PROVIDER"] = "passthrough"
-os.environ["TELECOM_STUDIO_EXTERNAL_PROVIDERS_ENABLED"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_EXTRACTION"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_PLANNING_DECISION"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_ASSET_SELECTION"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_GEOMETRY_PROGRAM"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISION"] = "false"
-os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISUAL_DESIGN_CRITIC"] = "false"
+if not _LIVE_PROVIDERS:
+    os.environ["TELECOM_STUDIO_EXTERNAL_PROVIDERS_ENABLED"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_EXTRACTION"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_PLANNING_DECISION"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_ASSET_SELECTION"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_GEOMETRY_PROGRAM"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISION"] = "false"
+    os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISUAL_DESIGN_CRITIC"] = "false"
 
 from apps.api.telecom_studio_api.config import settings  # noqa: E402
+from core.services.blender_runner import BlenderRunner  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def reject_unmarked_real_blender(request: pytest.FixtureRequest, monkeypatch) -> None:
+    """Keep the fast gate honest when a test accidentally launches Blender."""
+
+    original = BlenderRunner._run_blender_command
+
+    def guarded(self: BlenderRunner, command: list[str]):
+        if request.node.get_closest_marker("blender_runtime") is None:
+            pytest.fail(
+                "real Blender subprocess requires @pytest.mark.blender_runtime",
+                pytrace=False,
+            )
+        return original(self, command)
+
+    monkeypatch.setattr(BlenderRunner, "_run_blender_command", guarded)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
@@ -38,7 +58,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     }
     if not all(path.is_relative_to(_TEST_RUNTIME_ROOT) for path in mutable_paths):
         raise RuntimeError("pytest mutable stores must be isolated from product data")
-    if settings.resolved_groq_api_key or settings.resolved_nvidia_api_key:
+    if not _LIVE_PROVIDERS and (settings.resolved_groq_api_key or settings.resolved_nvidia_api_key):
         raise RuntimeError("pytest must not resolve external provider credentials")
 
 
