@@ -40,7 +40,7 @@ NUMBER_WORDS = {
 NUMBER_TOKEN = rf"(?:\d+|{'|'.join(sorted(NUMBER_WORDS, key=len, reverse=True))})"
 TOWER_TERMS = (
     r"\b(?:pyl[oô]ne|tower|tour|m[aâ]t|monopole|treillis|lattice|"
-    r"rooftop(?:\s+mast)?|small[- ]cell(?:\s+pole)?)\b"
+    r"rooftop(?:\s+mast)?|small[- ]cell(?:\s+(?:[2345]g\s+)?pole)?)\b"
 )
 CORRECTION_CUES = (
     "correction",

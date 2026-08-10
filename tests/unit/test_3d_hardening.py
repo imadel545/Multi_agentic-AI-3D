@@ -318,6 +318,23 @@ def test_critical_report_proof_detects_single_report_tamper(tmp_path: Path) -> N
             json.dumps({"file": file_name, "status": "passed"}),
             encoding="utf-8",
         )
+    (tmp_path / "completion_certificate.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1.0",
+                "workflow_id": "wf_report_proof_fixture",
+                "status": "rejected",
+                "evaluated_at": "2026-08-10T00:00:00Z",
+                "requirements_sha256": "0" * 64,
+                "scene_spec_sha256": "0" * 64,
+                "generation_mode": None,
+                "artifacts": [],
+                "checks": {},
+                "blockers": ["TEST_FIXTURE_NOT_A_COMPLETION_PROOF"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     proof = _write_critical_report_proof(tmp_path)
     assert len(proof["artifacts"]) == 8

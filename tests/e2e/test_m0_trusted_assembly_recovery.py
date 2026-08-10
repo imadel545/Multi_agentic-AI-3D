@@ -343,11 +343,21 @@ class _StructuredAssetSelectionTransport:
                 selected_candidate = candidates[0]
             selected = selected_candidate["asset_id"]
             strategy = selected_candidate["allowed_generation_strategies"][0]
+            semantic_strategy = next(
+                semantic
+                for semantic in selected_candidate["allowed_semantic_strategies"]
+                if semantic
+                in {
+                    "imported_glb_exact": {"reuse_component", "adapt_component"},
+                    "internal_project_generated": {"compose_assets", "adapt_component"},
+                }[strategy]
+            )
             selections.append(
                 {
                     "role_id": slot["role_id"],
                     "asset_id": selected,
                     "generation_strategy": strategy,
+                    "semantic_strategy": semantic_strategy,
                     "reason": _BOUNDED_SELECTION_REASON,
                 }
             )

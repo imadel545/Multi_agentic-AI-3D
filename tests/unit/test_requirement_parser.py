@@ -28,6 +28,17 @@ def test_tower_height_is_not_confused_with_hba_when_hba_appears_first() -> None:
     assert "DEFAULT_TOWER_HEIGHT_USED" not in {warning.code for warning in spec.warnings}
 
 
+def test_small_cell_network_qualifier_preserves_explicit_pole_height() -> None:
+    spec = parse_requirements_text(
+        "Small cell 5G pole 10m, 1 secteur à 7m azimuth 180, inclure RRU"
+    )
+
+    assert spec.tower_type == "small_cell_pole"
+    assert spec.tower_height_m == 10
+    assert spec.antenna_install_height_m == 7
+    assert "DEFAULT_TOWER_HEIGHT_USED" not in {warning.code for warning in spec.warnings}
+
+
 def test_hba_only_does_not_become_an_explicit_tower_height() -> None:
     spec = parse_requirements_text("Installer 3 secteurs à 24m avec azimuts 0, 120 et 240.")
 

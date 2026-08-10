@@ -907,6 +907,14 @@ class WorkflowService:
 
         path: Path | None = None
         if version_id:
+            version = self.versioning.get_version(workflow_id, version_id)
+            if version is None or version.status != "completed" or not version.artifact_dir:
+                raise KeyError(version_id)
+            candidate_artifact_dir = Path(version.artifact_dir).resolve()
+            try:
+                candidate_artifact_dir.relative_to(workflow_dir)
+            except ValueError as exc:
+                raise KeyError(version_id) from exc
             _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
             if artifact_name == "download":
                 self._make_archive(artifact_dir)
