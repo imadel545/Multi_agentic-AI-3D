@@ -47,6 +47,16 @@ def test_capability_specific_text_model_overrides_legacy_model() -> None:
     assert settings.resolved_groq_text_model == "preferred/text-model"
 
 
+def test_external_provider_kill_switch_hides_all_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "must-not-be-resolved")
+    monkeypatch.setenv("NVIDIA_API_KEY", "must-not-be-resolved")
+
+    settings = Settings(_env_file=None, external_providers_enabled=False)
+
+    assert settings.resolved_groq_api_key is None
+    assert settings.resolved_nvidia_api_key is None
+
+
 def test_groq_remote_base_url_must_use_https() -> None:
     with pytest.raises(ValidationError, match="must use HTTPS"):
         Settings(_env_file=None, groq_base_url="http://api.groq.com/openai/v1")

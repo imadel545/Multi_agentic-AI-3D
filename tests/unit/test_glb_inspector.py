@@ -7,7 +7,7 @@ from typing import Any
 
 from core.agents.scene_planner import ScenePlanner
 from core.qa.glb_inspector import GLBInspector
-from core.qa.preview_inspector import PreviewInspector
+from core.qa.preview_inspector import PreviewInspector, png_structure_is_valid
 from core.services.asset_registry import AssetRegistry
 from core.services.requirement_parser import parse_requirements_text
 
@@ -254,6 +254,13 @@ def test_preview_inspector_missing_png(tmp_path: Path) -> None:
     assert report.file_exists is False
     assert report.preview_qa_passed is False
     assert "PREVIEW_FILE_MISSING" in report.critical_errors
+
+
+def test_supplementary_preview_structure_rejects_truncated_png(tmp_path: Path) -> None:
+    preview_path = tmp_path / "preview_side.png"
+    preview_path.write_bytes(_png_bytes(1920, 1080)[:-16])
+
+    assert png_structure_is_valid(preview_path, (1920, 1080)) is False
 
 
 def _scene(prompt: str | None = None):

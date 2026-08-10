@@ -1,9 +1,11 @@
 import math
 import statistics
 import struct
-import zlib
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image, UnidentifiedImageError
 
 from core.contracts.glb_inspection import PreviewInspectionReport
 from core.contracts.scene import SceneSpec
@@ -165,31 +167,25 @@ def _minimum_resolution(scene: SceneSpec) -> tuple[int, int]:
 
 def _png_stats(data: bytes, width: int, height: int, scene: SceneSpec) -> PreviewStats:
     try:
-        bit_depth, color_type, channels, bytes_per_pixel = _png_color_info(data)
-        if bit_depth != 8 or color_type not in {0, 2, 6}:
-            return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_UNSUPPORTED_FORMAT")
-        raw = zlib.decompress(_png_idat_payload(data))
-        stride = width * channels
-        previous = bytearray(stride)
-        sampled_pixels: list[tuple[int, int, int, int, int]] = []
-        offset = 0
-        sample_stride = max(1, math.ceil(math.sqrt((width * height) / 250_000)))
-        for row_index in range(height):
-            filter_type = raw[offset]
-            offset += 1
-            scanline = bytearray(raw[offset : offset + stride])
-            offset += stride
-            _unfilter_scanline(scanline, previous, filter_type, bytes_per_pixel)
-            if row_index % sample_stride == 0:
-                for index in range(0, stride, channels * sample_stride):
-                    if channels == 1:
-                        r = g = b = scanline[index]
-                    else:
-                        r, g, b = scanline[index], scanline[index + 1], scanline[index + 2]
-                    sampled_pixels.append((index // channels, row_index, r, g, b))
-            previous = scanline
+        with Image.open(BytesIO(data)) as image:
+            if image.format != "PNG" or image.size != (width, height):
+                raise ValueError("preview PNG metadata mismatch")
+            if image.mode not in {"L", "RGB", "RGBA"}:
+                return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_UNSUPPORTED_FORMAT")
+            rgb_image = image.convert("RGB")
+            pixels = rgb_image.load()
+            if pixels is None:
+                return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_EMPTY")
+            sample_stride = max(1, math.ceil(math.sqrt((width * height) / 250_000)))
+            sampled_pixels = [
+                (x, y, *pixels[x, y])
+                for y in range(0, height, sample_stride)
+                for x in range(0, width, sample_stride)
+            ]
         if not sampled_pixels:
             return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_EMPTY")
+        if len(sampled_pixels[0]) != 5:
+            return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_UNSUPPORTED_FORMAT")
         luminance_values = [
             (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
             for _, _, red, green, blue in sampled_pixels
@@ -219,8 +215,23 @@ def _png_stats(data: bytes, width: int, height: int, scene: SceneSpec) -> Previe
             subject_framing_valid=subject["framing_valid"],
             visual_quality_valid=visual_quality_valid,
         )
-    except (IndexError, KeyError, ValueError, zlib.error, struct.error):
+    except (IndexError, KeyError, OSError, UnidentifiedImageError, ValueError, struct.error):
         return _unknown_stats("PREVIEW_PIXEL_ANALYSIS_FAILED")
+
+
+def png_structure_is_valid(path: Path, minimum_resolution: tuple[int, int]) -> bool:
+    """Validate a supplementary PNG in native code without running visual QA twice."""
+
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            if image.format != "PNG":
+                return False
+            image.verify()
+    except (OSError, SyntaxError, UnidentifiedImageError, ValueError):
+        return False
+    min_width, min_height = minimum_resolution
+    return width >= min_width and height >= min_height
 
 
 def _subject_stats(
@@ -322,78 +333,6 @@ def _minimum_subject_height_ratio(scene: SceneSpec) -> float:
     if scene.schema_version == "2.0.0":
         return 0.45
     return MIN_SUBJECT_BBOX_HEIGHT_RATIO
-
-
-def _png_color_info(data: bytes) -> tuple[int, int, int, int]:
-    # IHDR is at offset 8 right after the PNG signature in standard PNGs.
-    # Robustly locate the IHDR chunk in case ancillary chunks precede it.
-    offset = len(PNG_SIGNATURE)
-    while offset + 25 <= len(data):
-        chunk_length = struct.unpack(">I", data[offset : offset + 4])[0]
-        chunk_type = data[offset + 4 : offset + 8]
-        if chunk_type == b"IHDR" and chunk_length == 13:
-            # IHDR payload: width(4) + height(4) + bit_depth(1) + color_type(1) + ...
-            bit_depth = data[offset + 16]
-            color_type = data[offset + 17]
-            channels_by_color_type = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
-            channels = channels_by_color_type.get(color_type, 3)
-            return bit_depth, color_type, channels, channels
-        offset += 12 + chunk_length
-    raise ValueError("IHDR chunk not found in PNG data")
-
-
-def _png_idat_payload(data: bytes) -> bytes:
-    offset = len(PNG_SIGNATURE)
-    payload = bytearray()
-    while offset < len(data):
-        length = struct.unpack(">I", data[offset : offset + 4])[0]
-        chunk_type = data[offset + 4 : offset + 8]
-        chunk_data = data[offset + 8 : offset + 8 + length]
-        if chunk_type == b"IDAT":
-            payload.extend(chunk_data)
-        if chunk_type == b"IEND":
-            break
-        offset += 12 + length
-    if not payload:
-        raise ValueError("PNG has no IDAT payload")
-    return bytes(payload)
-
-
-def _unfilter_scanline(
-    scanline: bytearray,
-    previous: bytearray,
-    filter_type: int,
-    bytes_per_pixel: int,
-) -> None:
-    for index, value in enumerate(scanline):
-        left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
-        up = previous[index]
-        upper_left = previous[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
-        if filter_type == 0:
-            recon = value
-        elif filter_type == 1:
-            recon = value + left
-        elif filter_type == 2:
-            recon = value + up
-        elif filter_type == 3:
-            recon = value + ((left + up) // 2)
-        elif filter_type == 4:
-            recon = value + _paeth_predictor(left, up, upper_left)
-        else:
-            raise ValueError(f"unsupported PNG filter type: {filter_type}")
-        scanline[index] = recon & 0xFF
-
-
-def _paeth_predictor(left: int, up: int, upper_left: int) -> int:
-    estimate = left + up - upper_left
-    left_distance = abs(estimate - left)
-    up_distance = abs(estimate - up)
-    upper_left_distance = abs(estimate - upper_left)
-    if left_distance <= up_distance and left_distance <= upper_left_distance:
-        return left
-    if up_distance <= upper_left_distance:
-        return up
-    return upper_left
 
 
 def _unknown_stats(warning: str | None = None) -> PreviewStats:

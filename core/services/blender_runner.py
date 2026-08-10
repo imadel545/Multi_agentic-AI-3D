@@ -664,7 +664,7 @@ def _validate_additional_preview_artifacts(
     preview_views: object,
 ) -> str | None:
     # Imported lazily to avoid the qa package's GenerationResult dependency cycle.
-    from core.qa.preview_inspector import PreviewInspector
+    from core.qa.preview_inspector import png_structure_is_valid
 
     if not isinstance(preview_views, list):
         return "BLENDER_PREVIEW_VIEWS_METADATA_INVALID"
@@ -683,11 +683,10 @@ def _validate_additional_preview_artifacts(
         return "BLENDER_PREVIEW_VIEWS_INCOMPLETE"
     for file_name in sorted(expected_names):
         path = output_dir / file_name
-        report = PreviewInspector().inspect(path, scene)
         # The primary preview remains the certified visual-framing gate. The
         # supplementary inspection views must be real PNGs at the declared
         # resolution, without falsely claiming semantic visual certification.
-        if not report.file_exists or report.format != "png" or not report.minimum_resolution_valid:
+        if not png_structure_is_valid(path, scene.preview.resolution):
             return f"BLENDER_PREVIEW_VIEW_INVALID:{file_name}"
         record = records_by_name[file_name]
         if record.get("sha256") != _sha256(path) or record.get("size_bytes") != path.stat().st_size:

@@ -18,8 +18,13 @@ os.environ["TELECOM_STUDIO_SQLITE_PATH"] = str(_TEST_RUNTIME_ROOT / "sqlite" / "
 os.environ["TELECOM_STUDIO_ASSET_LIBRARY_PATH"] = str(_TEST_RUNTIME_ROOT / "asset-library")
 os.environ["TELECOM_STUDIO_EMBEDDING_PROVIDER"] = "deterministic"
 os.environ["TELECOM_STUDIO_RERANKER_PROVIDER"] = "passthrough"
+os.environ["TELECOM_STUDIO_EXTERNAL_PROVIDERS_ENABLED"] = "false"
 os.environ["TELECOM_STUDIO_ENABLE_GROQ_EXTRACTION"] = "false"
 os.environ["TELECOM_STUDIO_ENABLE_GROQ_PLANNING_DECISION"] = "false"
+os.environ["TELECOM_STUDIO_ENABLE_GROQ_ASSET_SELECTION"] = "false"
+os.environ["TELECOM_STUDIO_ENABLE_GROQ_GEOMETRY_PROGRAM"] = "false"
+os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISION"] = "false"
+os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISUAL_DESIGN_CRITIC"] = "false"
 
 from apps.api.telecom_studio_api.config import settings  # noqa: E402
 
@@ -33,6 +38,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     }
     if not all(path.is_relative_to(_TEST_RUNTIME_ROOT) for path in mutable_paths):
         raise RuntimeError("pytest mutable stores must be isolated from product data")
+    if settings.resolved_groq_api_key or settings.resolved_nvidia_api_key:
+        raise RuntimeError("pytest must not resolve external provider credentials")
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

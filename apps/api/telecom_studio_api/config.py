@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     qdrant_path: Path | None = None
     sqlite_path: Path | None = None
     groq_api_key: str | None = Field(default=None, repr=False)
+    external_providers_enabled: bool = True
     groq_model: str = "openai/gpt-oss-120b"
     groq_text_model: str | None = None
     groq_vision_model: str = "qwen/qwen3.6-27b"
@@ -121,6 +122,8 @@ class Settings(BaseSettings):
 
     @property
     def resolved_groq_api_key(self) -> str | None:
+        if not self.external_providers_enabled:
+            return None
         return (
             self.groq_api_key
             or os.getenv("TELECOM_STUDIO_GROQ_API_KEY")
@@ -136,6 +139,8 @@ class Settings(BaseSettings):
 
     @property
     def resolved_nvidia_api_key(self) -> str | None:
+        if not self.external_providers_enabled:
+            return None
         return (
             self.nvidia_api_key
             or os.getenv("TELECOM_STUDIO_NVIDIA_API_KEY")
