@@ -79,9 +79,7 @@ class ProfessionalAssetVerifier:
             if dimensions is None:
                 failures.append(f"Qualification preview is not a valid PNG: {preview.view}.")
             elif dimensions != (preview.width_px, preview.height_px):
-                failures.append(
-                    f"Qualification preview dimensions do not match: {preview.view}."
-                )
+                failures.append(f"Qualification preview dimensions do not match: {preview.view}.")
 
         report_path = self._evidence_path(
             manifest.qa_evidence.report_file,

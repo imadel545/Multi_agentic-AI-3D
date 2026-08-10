@@ -628,10 +628,7 @@ class AssetManifest(StrictModel):
         if self.viewer_representation is not None:
             if self.viewer_representation.file != self.file:
                 failures.append("Manifest runtime file does not match the viewer representation.")
-            if (
-                self.qualification.verified_file_sha256
-                != self.viewer_representation.sha256
-            ):
+            if self.qualification.verified_file_sha256 != self.viewer_representation.sha256:
                 failures.append("Qualified runtime hash does not match the viewer representation.")
         if self.dimensions_m is None or self.bounding_box_m is None:
             failures.append("Qualified dimensions and bounding box are incomplete.")

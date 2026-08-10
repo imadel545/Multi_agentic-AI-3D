@@ -24,9 +24,7 @@ class AssetInventoryService:
             entry for entry in entries if entry["asset_import_mode"] == "imported_glb_exact"
         ]
         generation_eligible = [entry for entry in entries if entry["generation_eligible"]]
-        professional_evidence = [
-            entry for entry in entries if entry["milestone_evidence_eligible"]
-        ]
+        professional_evidence = [entry for entry in entries if entry["milestone_evidence_eligible"]]
         reference_only = [
             entry for entry in entries if entry["qualification_status"] == "reference_only"
         ]

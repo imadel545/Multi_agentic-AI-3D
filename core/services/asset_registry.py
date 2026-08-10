@@ -303,10 +303,7 @@ def _candidate_score(
             dimensional = max(0.0, 100.0 - ((min_height_m - asset.height_m) / min_height_m) * 100)
             reasons.append("hauteur nominale inférieure à la cible")
     total = round(
-        compatibility * 0.35
-        + fidelity * 0.3
-        + generation * 0.2
-        + dimensional * 0.15,
+        compatibility * 0.35 + fidelity * 0.3 + generation * 0.2 + dimensional * 0.15,
         2,
     )
     return AssetCandidateScore(

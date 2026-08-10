@@ -150,9 +150,7 @@ class AssetLibraryService:
                     f"dwgread={diagnostic[:300]}"
                 )
             try:
-                payload, parser_mode, sanitized_non_finite_values = _load_dwg_probe_payload(
-                    output
-                )
+                payload, parser_mode, sanitized_non_finite_values = _load_dwg_probe_payload(output)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise AssetLibraryError(
                     "Le probe DWG a produit une sortie JSON illisible; "
@@ -321,9 +319,7 @@ _DISPLAY_UNIT_ALIASES = {
 def _dwg_unit_info(header: dict[str, Any]) -> dict[str, Any]:
     raw_code = header.get("INSUNITS")
     insunits_code = (
-        raw_code
-        if isinstance(raw_code, int) and not isinstance(raw_code, bool)
-        else None
+        raw_code if isinstance(raw_code, int) and not isinstance(raw_code, bool) else None
     )
     display_unit = header.get("unit1_name")
     display_unit_name = str(display_unit).strip() if display_unit not in (None, "") else None

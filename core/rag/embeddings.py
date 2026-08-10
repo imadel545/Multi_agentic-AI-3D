@@ -238,6 +238,5 @@ def build_embedding_provider(
             )
             return HashEmbeddingProvider()
     raise RuntimeError(
-        "Unsupported embedding provider "
-        f"{provider_name!r}. Use nvidia, auto, or deterministic."
+        f"Unsupported embedding provider {provider_name!r}. Use nvidia, auto, or deterministic."
     )

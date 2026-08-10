@@ -41,9 +41,7 @@ def test_blender_availability_requires_successful_headless_smoke(
     assert _blender_available() is False
 
 
-def test_blender_availability_accepts_verified_headless_smoke(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_blender_availability_accepts_verified_headless_smoke(tmp_path: Path, monkeypatch) -> None:
     binary = tmp_path / "blender"
     binary.write_text("binary", encoding="utf-8")
     binary.chmod(0o755)
