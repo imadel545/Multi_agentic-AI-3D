@@ -204,6 +204,9 @@ def test_document_pack_accepts_multiple_direct_files(tmp_path: Path) -> None:
         capabilities = client.get("/document-packs/capabilities").json()
         assert capabilities["supported_upload_format"] == "zip_or_multiple_files"
         assert capabilities["supported_inputs"]["upload"] == "zip_or_multiple_files"
+        assert ".pdf" in capabilities["supported_extensions"]
+        assert ".tiff" not in capabilities["supported_extensions"]
+        assert ".xlsx" not in capabilities["supported_extensions"]
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled
