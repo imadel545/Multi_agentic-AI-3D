@@ -49,12 +49,47 @@ def test_capability_specific_text_model_overrides_legacy_model() -> None:
 
 def test_external_provider_kill_switch_hides_all_credentials(monkeypatch) -> None:
     monkeypatch.setenv("GROQ_API_KEY", "must-not-be-resolved")
+    monkeypatch.setenv("TELECOM_STUDIO_GROQ_API_KEYS", "also-hidden-1,also-hidden-2")
     monkeypatch.setenv("NVIDIA_API_KEY", "must-not-be-resolved")
 
     settings = Settings(_env_file=None, external_providers_enabled=False)
 
     assert settings.resolved_groq_api_key is None
+    assert settings.resolved_groq_api_keys == ()
     assert settings.resolved_nvidia_api_key is None
+
+
+def test_groq_credential_pool_keeps_legacy_primary_and_deduplicates(monkeypatch) -> None:
+    monkeypatch.setenv("GROQ_API_KEY", "primary-key")
+    monkeypatch.setenv(
+        "TELECOM_STUDIO_GROQ_API_KEYS",
+        "secondary-key, primary-key ; tertiary-key",
+    )
+
+    settings = Settings(_env_file=None, external_providers_enabled=True)
+
+    assert settings.resolved_groq_api_key == "primary-key"
+    assert settings.resolved_groq_api_keys == (
+        "primary-key",
+        "secondary-key",
+        "tertiary-key",
+    )
+
+
+def test_explicit_groq_pool_is_secret_in_settings_repr() -> None:
+    settings = Settings(
+        _env_file=None,
+        groq_api_key="primary-secret",
+        groq_api_keys="secondary-secret",
+    )
+
+    rendered = repr(settings)
+
+    assert "primary-secret" not in rendered
+    assert "secondary-secret" not in rendered
+    dumped = settings.model_dump()
+    assert "groq_api_key" not in dumped
+    assert "groq_api_keys" not in dumped
 
 
 def test_groq_remote_base_url_must_use_https() -> None:

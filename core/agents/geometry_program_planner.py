@@ -18,6 +18,7 @@ from core.contracts.geometry_program import (
 )
 from core.llm.groq import GroqStructuredClient
 from core.llm.groq_policy import GroqReasoningEffort, GroqRequestPolicy
+from core.llm.transport import GroqTransportError, groq_error_status_code
 
 
 class GeometryProgramPlanner:
@@ -162,8 +163,8 @@ class GeometryProgramPlanner:
         output_mode = "strict_json_schema"
         try:
             raw = self.groq.request_json(strict_payload, policy=self.policy)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 400:
+        except (httpx.HTTPStatusError, GroqTransportError) as exc:
+            if groq_error_status_code(exc) != 400:
                 raise
             output_mode = "json_object_validated"
             raw = self.groq.request_json(

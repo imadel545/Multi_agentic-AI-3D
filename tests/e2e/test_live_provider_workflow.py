@@ -14,7 +14,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.config import settings
-from apps.api.telecom_studio_api.main import app, workflow_service
+from apps.api.telecom_studio_api.main import (
+    app,
+    groq_client,
+    groq_transport,
+    workflow_service,
+)
 from core.contracts.planning_decision import (
     PlanningCandidate,
     PlanningCandidateProvenance,
@@ -23,6 +28,55 @@ from core.contracts.planning_decision import (
 )
 
 pytestmark = pytest.mark.provider_live
+
+
+def test_live_groq_pool_validates_every_configured_account() -> None:
+    assert len(settings.resolved_groq_api_keys) == 2, (
+        "this live gate requires exactly two explicitly authorized Groq accounts"
+    )
+    assert groq_client is not None
+    assert groq_transport is not None
+
+    for sequence in range(2):
+        result = groq_client.request_json(
+            {
+                "model": settings.resolved_groq_text_model,
+                "temperature": 0,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Return only the requested strict JSON object.",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Return ok=true and sequence={sequence}.",
+                    },
+                ],
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "GroqPoolCredentialProof",
+                        "strict": True,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "ok": {"type": "boolean"},
+                                "sequence": {"type": "integer"},
+                            },
+                            "required": ["ok", "sequence"],
+                        },
+                    },
+                },
+            }
+        )
+        assert result == {"ok": True, "sequence": sequence}
+
+    pool = groq_transport.credential_pool_status()
+    assert pool["configured_credentials"] == 2
+    assert pool["credentials_with_provider_response"] == 2
+    assert pool["ready_credentials"] == 2
+    assert pool["status"] == "operational"
 
 
 def test_live_groq_nvidia_blender_product_flow(tmp_path: Path) -> None:

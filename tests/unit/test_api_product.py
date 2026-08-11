@@ -1,5 +1,6 @@
 """Tests for product-oriented API endpoints."""
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -902,6 +903,24 @@ def test_cors_allows_local_frontend_and_rejects_unknown_origin() -> None:
     rejected = client.get("/health", headers={"Origin": "https://example.invalid"})
     assert rejected.status_code == 200
     assert "access-control-allow-origin" not in rejected.headers
+
+
+def test_health_exposes_only_aggregate_groq_pool_state() -> None:
+    payload = TestClient(app).get("/health").json()
+
+    pool = payload["groq_credential_pool"]
+    assert pool["status"] in {
+        "disabled",
+        "configured_unverified",
+        "operational",
+        "degraded",
+        "unavailable",
+    }
+    assert pool["configured_credentials"] >= 0
+    assert pool["ready_credentials"] >= 0
+    serialized = json.dumps(pool)
+    assert "api_key" not in serialized
+    assert "Authorization" not in serialized
 
 
 def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:

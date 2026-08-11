@@ -107,7 +107,7 @@ class ComponentGraph(StrictModel):
     schema_version: Literal["1.0.0"] = "1.0.0"
     graph_id: str = Field(min_length=1, max_length=120)
     intent_id: str = Field(min_length=1, max_length=120)
-    components: list[ComponentNode] = Field(min_length=1, max_length=512)
+    components: list[ComponentNode] = Field(min_length=1, max_length=24)
     relationships: list[ComponentRelationship] = Field(default_factory=list, max_length=1024)
 
     @model_validator(mode="after")

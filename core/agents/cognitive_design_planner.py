@@ -20,6 +20,7 @@ from core.contracts.cognitive_design import (
 )
 from core.llm.groq import GroqStructuredClient
 from core.llm.groq_policy import GroqRequestPolicy
+from core.llm.transport import GroqTransportError, groq_error_status_code
 
 
 class CognitivePlanningClient(Protocol):
@@ -169,13 +170,13 @@ class GroqCognitivePlanningClient:
             (str(explicit_key), explicit_schema)
             if isinstance(explicit_key, str) and isinstance(explicit_schema, dict)
             else next(
-            (
-                (key.removesuffix("_schema"), value)
-                for key, value in payload.items()
-                if key in {"design_intent_schema", "component_graph_schema"}
-                and isinstance(value, dict)
-            ),
-            None,
+                (
+                    (key.removesuffix("_schema"), value)
+                    for key, value in payload.items()
+                    if key in {"design_intent_schema", "component_graph_schema"}
+                    and isinstance(value, dict)
+                ),
+                None,
             )
         )
         response_format: dict[str, Any] = {"type": "json_object"}
@@ -197,8 +198,8 @@ class GroqCognitivePlanningClient:
         }
         try:
             response = self.client.request_json(request, policy=policy)
-        except httpx.HTTPStatusError as exc:
-            if schema_item is None or exc.response.status_code != 400:
+        except (httpx.HTTPStatusError, GroqTransportError) as exc:
+            if schema_item is None or groq_error_status_code(exc) != 400:
                 raise
             last_error = exc
             for attempt in range(1, 3):
@@ -224,8 +225,8 @@ class GroqCognitivePlanningClient:
                         policy=policy,
                     )
                     break
-                except httpx.HTTPStatusError as retry_error:
-                    if retry_error.response.status_code != 400:
+                except (httpx.HTTPStatusError, GroqTransportError) as retry_error:
+                    if groq_error_status_code(retry_error) != 400:
                         raise
                     last_error = retry_error
             else:
@@ -464,6 +465,7 @@ class CognitiveDesignPlanner:
             if intent.domain in capability.compatible_domains
             or "generic" in capability.compatible_domains
         ]
+
         def decide_one(component_index: int) -> tuple[int, dict[str, Any]]:
             component = graph.components[component_index]
             raw_decisions = self.planning_client.decide_assets(
@@ -499,9 +501,7 @@ class CognitiveDesignPlanner:
                 }
             )
             returned = [
-                item
-                for item in raw_decisions.get("decisions", [])
-                if isinstance(item, dict)
+                item for item in raw_decisions.get("decisions", []) if isinstance(item, dict)
             ]
             if len(returned) != 1:
                 raise ValueError(
@@ -520,17 +520,14 @@ class CognitiveDesignPlanner:
         ) as pool:
             indexed_decisions = list(pool.map(decide_one, range(len(graph.components))))
         raw_by_component = {
-            graph.components[index].component_id: raw
-            for index, raw in sorted(indexed_decisions)
+            graph.components[index].component_id: raw for index, raw in sorted(indexed_decisions)
         }
         known_capabilities = {item["capability_id"] for item in capability_payload}
         decisions: list[ComponentAssetDecision] = []
         for component in graph.components:
             raw = raw_by_component.get(component.component_id)
             if raw is None:
-                raise ValueError(
-                    f"LLM asset plan omitted component {component.component_id!r}"
-                )
+                raise ValueError(f"LLM asset plan omitted component {component.component_id!r}")
             pinned = dict(raw)
             pinned["component_id"] = component.component_id
             pinned["candidates"] = [
@@ -541,8 +538,7 @@ class CognitiveDesignPlanner:
             unknown_capabilities = set(decision.required_capability_ids) - known_capabilities
             if unknown_capabilities:
                 raise ValueError(
-                    "LLM asset plan selected unknown capabilities: "
-                    f"{sorted(unknown_capabilities)}"
+                    f"LLM asset plan selected unknown capabilities: {sorted(unknown_capabilities)}"
                 )
             decisions.append(decision)
         decision_plan = AssetDecisionPlan(
@@ -657,7 +653,7 @@ def _llm_component_graph_schema() -> dict[str, Any]:
             "components": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 128,
+                "maxItems": 24,
                 "items": component,
             },
             "relationships": {

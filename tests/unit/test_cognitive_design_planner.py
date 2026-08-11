@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import hashlib
 
-from core.agents.cognitive_design_planner import CognitiveDesignPlanner
+from core.agents.cognitive_design_planner import (
+    CognitiveDesignPlanner,
+    GroqCognitivePlanningClient,
+    _llm_component_graph_schema,
+)
 from core.agents.cognitive_supervisor import CognitiveSupervisor
 from core.contracts.capabilities import CapabilityCost, CapabilityDefinition
 from core.contracts.cognitive_design import AssetCandidateEvidence, SpecialistDescriptor
 from core.contracts.geometry_program import GeometryProgram
+from core.llm.groq_policy import GroqRequestPolicy
+from core.llm.transport import GroqTransportError
 from core.services.cognitive_scene_compiler import CognitiveSceneCompiler
 
 
@@ -189,3 +195,52 @@ def test_planner_pins_llm_decomposition_assets_capabilities_and_route() -> None:
     assert scene.tower is None
     assert scene.sectors == []
     assert scene.cognitive_plan_sha256 is not None
+
+
+def test_llm_and_runtime_share_the_same_component_fanout_bound() -> None:
+    schema = _llm_component_graph_schema()
+
+    assert schema["properties"]["components"]["maxItems"] == 24
+
+
+def test_cognitive_strict_400_from_shared_transport_reaches_json_object_fallback() -> None:
+    class TransportBackedClient:
+        model = "openai/gpt-oss-120b"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def request_json(self, payload, *, policy):
+            self.calls += 1
+            if self.calls == 1:
+                raise GroqTransportError(
+                    "model_output_rejected",
+                    attempts=1,
+                    retryable=False,
+                    status_code=400,
+                )
+            assert payload["response_format"] == {"type": "json_object"}
+            return {"result": {"name": "validated"}}
+
+    structured = TransportBackedClient()
+    client = GroqCognitivePlanningClient(structured)  # type: ignore[arg-type]
+
+    result = client._request(
+        {
+            "response_key": "result",
+            "response_schema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+        policy=GroqRequestPolicy(
+            capability="generic_design_decomposition",
+            reasoning_effort="medium",
+            max_completion_tokens=1024,
+        ),
+        system="Return the bounded result.",
+    )
+
+    assert result == {"result": {"name": "validated"}}
+    assert structured.calls == 2

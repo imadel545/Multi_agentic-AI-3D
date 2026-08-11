@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -18,7 +19,8 @@ class Settings(BaseSettings):
     qdrant_url: str | None = None
     qdrant_path: Path | None = None
     sqlite_path: Path | None = None
-    groq_api_key: str | None = Field(default=None, repr=False)
+    groq_api_key: str | None = Field(default=None, repr=False, exclude=True)
+    groq_api_keys: str | None = Field(default=None, repr=False, exclude=True)
     external_providers_enabled: bool = True
     groq_model: str = "openai/gpt-oss-120b"
     groq_text_model: str | None = None
@@ -50,7 +52,10 @@ class Settings(BaseSettings):
     groq_vision_max_pixels: int = Field(default=16_000_000, ge=1_000_000, le=16_000_000)
     groq_vision_max_edge_px: int = Field(default=4096, ge=512, le=8192)
     groq_transport_max_retries: int = Field(default=2, ge=0, le=5)
-    groq_retry_after_cap_s: float = Field(default=30.0, ge=1.0, le=300.0)
+    groq_retry_after_cap_s: float = Field(default=3600.0, ge=1.0, le=86_400.0)
+    groq_rate_limit_default_cooldown_s: float = Field(default=60.0, ge=1.0, le=3600.0)
+    groq_max_in_flight_per_credential: int = Field(default=2, ge=1, le=16)
+    groq_pool_acquire_timeout_s: float = Field(default=10.0, ge=0.1, le=60.0)
     groq_circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
     groq_circuit_reset_s: float = Field(default=30.0, ge=1.0, le=600.0)
     blender_binary: str = "blender"
@@ -63,7 +68,7 @@ class Settings(BaseSettings):
     embedding_model: str = "nvidia/llama-nemotron-embed-1b-v2"
     embedding_dimensions: int = Field(default=1024, ge=128, le=4096)
     embedding_strict_quality: bool = False
-    nvidia_api_key: str | None = Field(default=None, repr=False)
+    nvidia_api_key: str | None = Field(default=None, repr=False, exclude=True)
     reranker_provider: str = "nvidia"
     reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2"
     reranker_base_url: str = "https://ai.api.nvidia.com/v1"
@@ -122,15 +127,34 @@ class Settings(BaseSettings):
         return self.sqlite_path or self.project_root / "data" / "sqlite" / "telecom_studio.db"
 
     @property
-    def resolved_groq_api_key(self) -> str | None:
+    def resolved_groq_api_keys(self) -> tuple[str, ...]:
         if not self.external_providers_enabled:
-            return None
-        return (
+            return ()
+        primary = (
             self.groq_api_key
             or os.getenv("TELECOM_STUDIO_GROQ_API_KEY")
             or os.getenv("GROQ_API_KEY")
             or _read_env_file_value(self.project_root / ".env", ["GROQ_API_KEY", "groq_api"])
         )
+        additional = (
+            self.groq_api_keys
+            or os.getenv("TELECOM_STUDIO_GROQ_API_KEYS")
+            or os.getenv("GROQ_API_KEYS")
+            or _read_env_file_value(
+                self.project_root / ".env",
+                ["TELECOM_STUDIO_GROQ_API_KEYS", "GROQ_API_KEYS"],
+            )
+        )
+        ordered = [primary] if primary else []
+        ordered.extend(_split_secret_list(additional))
+        return tuple(dict.fromkeys(value.strip() for value in ordered if value and value.strip()))
+
+    @property
+    def resolved_groq_api_key(self) -> str | None:
+        """Compatibility alias for clients whose transport owns credential selection."""
+
+        keys = self.resolved_groq_api_keys
+        return keys[0] if keys else None
 
     @property
     def resolved_groq_text_model(self) -> str:
@@ -173,6 +197,12 @@ def _read_env_file_value(path: Path, names: list[str]) -> str | None:
         if key.strip() in wanted:
             return value.strip().strip('"').strip("'") or None
     return None
+
+
+def _split_secret_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in re.split(r"[,;\n]", value) if item.strip()]
 
 
 settings = Settings()

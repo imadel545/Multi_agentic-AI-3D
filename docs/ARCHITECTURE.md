@@ -10,7 +10,7 @@ FastAPI
   -> requirements text or document pack
   -> RequirementSpec / ProjectDesignSpec
   -> LangGraph-orchestrated generation pipeline
-  -> shared GroqTransport + capability profile
+  -> shared GroqTransport credential pool + capability profile
        -> GPT-OSS text decision (strict JSON Schema)
        -> opt-in Qwen visual evidence (advisory JSON + Pydantic)
      or visible deterministic/local-only path
@@ -57,10 +57,14 @@ active SceneSpec + prompt
 - `core/orchestration`: LangGraph workflow and route logic.
 - `core/agents`: deterministic/LLM wrappers for extraction, planning, editing,
   RF/tower checks and bounded GeometryProgram authorship.
-- `core/llm`: shared persistent Groq transport, versioned text/vision
-  capability profiles, bounded retry/circuit policy, vision preprocessing and
-  typed advisory evidence. The transport owns provider I/O; deterministic
-  contracts still own units, permissions, QA and certification.
+- `core/llm`: shared persistent Groq transport with a bounded independent-account
+  credential pool, versioned text/vision capability profiles, retry/circuit
+  policy, vision preprocessing and typed advisory evidence. Selection is
+  least-in-flight with round-robin ties; 401/403/429 failures are isolated and
+  Groq's 413/`rate_limit_exceeded` variant is also treated as account quota;
+  aggregated health never exposes credential identity. The transport owns
+  provider I/O; deterministic contracts still own units, permissions, QA and
+  certification.
 - `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
@@ -209,3 +213,7 @@ candidats qualifiés, mais le compilateur n'exécute pas encore leurs stratégie
 résolution spatiale arbitraire n'est pas un solveur de contraintes complet, et
 la disponibilité/validité JSON des providers Groq reste une dépendance externe
 non maîtrisée.
+La décomposition est bornée à 24 composants, mais les décisions d'assets restent
+un fan-out par composant et il n'existe pas encore de deadline/appel/token budget
+global au workflow. Le `CognitiveSupervisor` persiste actuellement une route
+validée qui ne gouverne pas encore le graphe fixe réellement exécuté.

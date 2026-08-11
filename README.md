@@ -143,12 +143,21 @@ remain range-based in `pyproject.toml` and are not bit-for-bit reproducible.
 ```bash
 GROQ_API_KEY=...
 # or TELECOM_STUDIO_GROQ_API_KEY=...
+# Optional independent-account failover pool (comma or semicolon separated):
+TELECOM_STUDIO_GROQ_API_KEYS=...
 ```
 
 The API uses `openai/gpt-oss-120b` by default. Use `options.use_llm=false` to
 force deterministic extraction. Components outside the qualified catalog require
 the enabled Groq geometry specialist; there is no fabricated deterministic
 geometry fallback when that specialist cannot return a valid program.
+The shared transport distributes requests across distinct configured accounts,
+prefers the least-loaded credential, quarantines authentication failures, and
+fails over immediately when one account is rate-limited (`429` or Groq's
+`413/rate_limit_exceeded` TPM response). It never sleeps a
+workflow on `Retry-After`; if every account is unavailable, the existing visible
+fallback/fail-closed capability policy applies. Multiple accounts do not protect
+against a global Groq, network, or model outage.
 
 ### Product intelligence: NVIDIA RAG embeddings
 

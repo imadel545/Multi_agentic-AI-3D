@@ -210,7 +210,7 @@ class GroqStructuredClient:
             raise ValueError("api_key must not be empty")
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
-        self.api_key = api_key.strip()
+        self._api_key = api_key.strip()
         self.model = model.strip()
         if not self.model:
             raise ValueError("model must not be empty")
@@ -387,7 +387,7 @@ class GroqStructuredClient:
             response = httpx.post(
                 f"{self.base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,

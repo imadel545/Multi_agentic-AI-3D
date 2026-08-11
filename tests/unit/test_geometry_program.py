@@ -23,6 +23,7 @@ from core.contracts.geometry_program import (
     geometry_program_dimensions,
 )
 from core.contracts.scene import SceneSpec
+from core.llm.transport import GroqTransportError
 from core.qa.glb_geometry_validator import GLBGeometryValidator
 from core.qa.glb_inspector import GLBInspector
 from core.services.asset_registry import AssetRegistry
@@ -293,7 +294,10 @@ def test_geometry_program_strict_schema_uses_only_supported_union_and_refs() -> 
     assert "anyOf" in schema["properties"]["nodes"]["items"]
 
 
-def test_geometry_program_planner_falls_back_after_strict_groq_400() -> None:
+@pytest.mark.parametrize("transport_backed", [False, True])
+def test_geometry_program_planner_falls_back_after_strict_groq_400(
+    transport_backed: bool,
+) -> None:
     class FakeGroq:
         model = "openai/gpt-oss-120b"
 
@@ -303,6 +307,13 @@ def test_geometry_program_planner_falls_back_after_strict_groq_400() -> None:
         def request_json(self, payload, *, policy):
             self.payloads.append(payload)
             if len(self.payloads) == 1:
+                if transport_backed:
+                    raise GroqTransportError(
+                        "model_output_rejected",
+                        attempts=1,
+                        retryable=False,
+                        status_code=400,
+                    )
                 request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
                 response = httpx.Response(400, request=request)
                 raise httpx.HTTPStatusError(

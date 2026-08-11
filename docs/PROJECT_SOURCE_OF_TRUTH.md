@@ -21,14 +21,14 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not yet a complete vendor-grade asset library. A large local CAD corpus is
   catalogued, but remains quarantined until rights and geometry are qualified.
 
-## Current delivery checkpoint — 2026-08-10
+## Current delivery checkpoint — 2026-08-11
 
 `MILESTONE 1 — PARTIEL`
 
-- Work is isolated on `codex/m1-asset-qualification`. The verified pre-M1
-  baseline is commit `4829995130a43c09c5fb0c23d4216ed007e2d2c2`, tagged
-  locally as `cognitive-3d-m1-baseline-20260808`; nothing is pushed by this
-  milestone.
+- The recovered M1 and convergence work is now local on `main`. The verified
+  pre-M1 baseline remains commit `4829995130a43c09c5fb0c23d4216ed007e2d2c2`,
+  tagged locally as `cognitive-3d-m1-baseline-20260808`; the local convergence
+  commits have not been pushed by this work.
 - The existing Groq callers now share a governed transport and versioned
   capability profiles. `openai/gpt-oss-120b` remains the strict structured
   text-decision model. `qwen/qwen3.6-27b` is a separate opt-in advisory
@@ -36,6 +36,26 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   consent is disabled by default, persisted with the workflow and exposed by
   the public API. Configuration alone never reports the capability as
   operational.
+- The shared Groq transport accepts an ordered pool while preserving the legacy
+  scalar key. Selection is atomic least-in-flight with round-robin ties and a
+  bounded per-credential concurrency. HTTP 401 quarantines one credential,
+  HTTP 403 restricts only the rejected capability, and HTTP 429 cools one
+  credential while another is tried immediately. If all credentials are rate
+  limited the call fails fast without sleeping a workflow thread. Ambiguous
+  read/write/protocol failures are not replayed on another account. Aggregate
+  pool health exposes counts only, never key identity or secret material.
+- A controlled live gate on 2026-08-11 resolved two distinct credentials from
+  separate accounts and completed one locally validated strict JSON response
+  through each pool slot (`1 passed in 2.48s`). This proves both configured
+  accounts for that point-in-time text request only; it is not a permanent Groq
+  availability guarantee and does not qualify the inaccessible Qwen path.
+- The same current-tree provider gate then passed all three scenarios in
+  31.65 seconds: both Groq pool slots, a no-fallback Groq/NVIDIA/real-Blender
+  product workflow with `llm_bounded` asset selection, and the bounded planning
+  contract. A prior run exposed Groq's account-specific HTTP 413
+  `rate_limit_exceeded` response for the larger asset-selection payload; the
+  transport now treats that machine code as credential rate limiting and
+  fails over instead of misclassifying it as invalid model output.
 - The vision contract records only bounded observations, input hashes, source
   regions, confidence, limitations and invocation provenance. Vision-only
   requirement evidence is inferred and requires confirmation; it cannot create
@@ -99,7 +119,7 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   instances, materials and transforms inside the bounded GeometryProgram
   contract; it cannot add a specialist, execute Python or call arbitrary Blender
   operations.
-- Groq `openai/gpt-oss-120b` is used when a real key is configured; otherwise
+- Groq `openai/gpt-oss-120b` is used when at least one real key is configured; otherwise
   explicit deterministic extraction. Extraction, planning and asset selection
   now share one validated request policy: HTTPS outside localhost, explicit
   `low|medium|high` reasoning effort, bounded completion budgets, strict JSON

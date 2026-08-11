@@ -5,6 +5,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from core.document_pack import DocumentPackService, ProjectDesignSpecMapper
+from core.llm.transport import GroqTransportError
 from core.memory import MemoryService
 
 
@@ -82,6 +83,73 @@ def test_document_pack_groq_bounded_extraction_requires_evidence(tmp_path: Path)
     assert spec.llm_fallback_used is False
     assert spec.groq_rejected_fields[0]["reason"] == "missing_evidence"
     assert processing["groq_rejected_fields"]
+
+
+def test_document_pack_transport_400_uses_validated_fallback_and_truthful_trace(
+    tmp_path: Path,
+) -> None:
+    class StrictRejectedThenValid(FakeGroqDocumentProvider):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def _post_raw(self, payload: dict) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                raise GroqTransportError(
+                    "model_output_rejected",
+                    attempts=1,
+                    retryable=False,
+                    status_code=400,
+                )
+            return super()._post_raw(payload)
+
+    provider = StrictRejectedThenValid()
+    service = DocumentPackService(
+        tmp_path,
+        groq_client=provider,
+        groq_provider_name="groq:test",
+        groq_bounded_extraction_enabled=True,
+    )
+
+    summary = service.ingest_zip(
+        _zip({"APD.txt": "Pylone treillis\nHauteur pylone: 30m\nAzimuts: 0, 120, 240"})
+    )
+    spec = service.get_spec(summary.pack_id)
+    groq_node = next(
+        item for item in service.get_trace(summary.pack_id) if item["node"] == "groq_extract"
+    )
+
+    assert provider.calls == 2
+    assert spec.llm_fallback_used is True
+    assert groq_node["status"] == "passed"
+
+
+def test_document_pack_provider_failure_is_not_traced_as_passed(tmp_path: Path) -> None:
+    class RateLimitedProvider:
+        model = "openai/gpt-oss-120b"
+
+        def _post_raw(self, payload: dict) -> dict:
+            raise GroqTransportError(
+                "provider_rate_limited",
+                attempts=2,
+                retryable=True,
+                status_code=429,
+                retry_after_s=60,
+            )
+
+    service = DocumentPackService(
+        tmp_path,
+        groq_client=RateLimitedProvider(),
+        groq_provider_name="groq:test",
+        groq_bounded_extraction_enabled=True,
+    )
+
+    summary = service.ingest_zip(_zip({"APD.txt": "Pylone treillis\nHauteur pylone: 30m"}))
+    groq_node = next(
+        item for item in service.get_trace(summary.pack_id) if item["node"] == "groq_extract"
+    )
+
+    assert groq_node["status"] == "failed"
 
 
 def test_document_pack_groq_values_are_normalized_from_evidence(tmp_path: Path) -> None:

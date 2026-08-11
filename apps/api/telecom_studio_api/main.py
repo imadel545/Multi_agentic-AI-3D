@@ -2,7 +2,7 @@ import hashlib
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi import Path as ApiPath
@@ -180,9 +180,13 @@ memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_servi
 groq_transport = (
     GroqTransport(
         api_key=settings.resolved_groq_api_key,
+        api_keys=settings.resolved_groq_api_keys[1:],
         base_url=settings.groq_base_url,
         max_transient_retries=settings.groq_transport_max_retries,
         max_retry_after_s=settings.groq_retry_after_cap_s,
+        rate_limit_default_cooldown_s=settings.groq_rate_limit_default_cooldown_s,
+        max_in_flight_per_credential=settings.groq_max_in_flight_per_credential,
+        pool_acquire_timeout_s=settings.groq_pool_acquire_timeout_s,
         circuit_failure_threshold=settings.groq_circuit_failure_threshold,
         circuit_reset_s=settings.groq_circuit_reset_s,
     )
@@ -358,12 +362,27 @@ product_service = ProductService(workflow_service, asset_inventory_service)
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "service": "agentic_telecom_3d_studio_api",
         "version": "0.2.0",
         "api_contract_version": "2026-07-29",
+        "groq_credential_pool": (
+            groq_transport.credential_pool_status()
+            if groq_transport is not None
+            else {
+                "status": "disabled",
+                "configured_credentials": 0,
+                "ready_credentials": 0,
+                "cooldown_credentials": 0,
+                "disabled_credentials": 0,
+                "capability_restricted_credentials": 0,
+                "credentials_with_provider_response": 0,
+                "in_flight_requests": 0,
+                "saturated_credentials": 0,
+            }
+        ),
     }
 
 

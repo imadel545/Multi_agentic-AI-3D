@@ -53,11 +53,26 @@ frontend.
   correct the prompt; GPT-OSS may propose a candidate but cannot silently become
   the authority over conflicting source evidence.
 - Groq improves extraction only when a real key is configured.
-- The shared Groq transport adds bounded transient retries, a configurable
-  `Retry-After` sleep cap (30 seconds by default) and a per-capability circuit
-  breaker, but no live Qwen call was accepted in M1.
+- The shared Groq transport supports multiple independent-account credentials,
+  atomic least-in-flight/round-robin selection, bounded per-credential
+  concurrency, credential/capability isolation and a per-capability circuit
+  breaker. `Retry-After` cools only the affected credential and never sleeps a
+  workflow thread; when every credential is cooling the call fails fast with a
+  visible provider fallback or fail-closed result. No live Qwen call was
+  accepted in M1.
+- Groq may express a per-account TPM limit as HTTP 413 with the sanitized code
+  `rate_limit_exceeded`, not only as HTTP 429. The transport recognizes both,
+  applies the credential cooldown and immediately tries another ready account.
+  Different accounts may still have materially different TPM/RPM envelopes;
+  the pool does not pretend they are equal-capacity replicas.
   `configured_unverified` remains different from `operational`; a configured
   key is not health proof.
+- HTTP timeouts remain configured per network attempt rather than as one
+  monotonic deadline shared by every structured-output fallback and repair.
+  Ambiguous read/write/protocol failures are no longer replayed, but connect/5xx
+  retries and application-level repairs can still accumulate latency. A future
+  workflow-level invocation context must govern total calls, requested tokens
+  and deadline without reducing the contractually required design quality.
 - Qwen multimodal interpretation and asset-preview review are advisory and
   opt-in per project. Consent is disabled by default and persisted, but the
   document-pack route currently records `remote_vision_analysis=not_executed`:
@@ -77,6 +92,11 @@ frontend.
   diversity is still small. There is no autonomous supervisor, conflict
   aggregator, recalled-design candidate authority or bounded post-Blender
   critique/rebuild loop.
+- The generic cognitive supervisor currently validates and persists a bounded
+  specialist route, but the actual generic execution still follows the fixed
+  registered dependency chain. The route is provenance, not an operational
+  choice of specialists. Likewise, selected capability IDs prove existence but
+  do not yet constrain every GeometryProgram operation actually used.
 - GPT-OSS may now author an out-of-catalog `GeometryProgram`, but this is not an
   unrestricted arbitrary-design system. GeometryProgram V2 supports governed
   primitives, polygonal curves, instances, profiles, extrusion, revolution,
@@ -91,6 +111,11 @@ frontend.
   nodes, and the workflow at most 1024 GeometryProgram nodes in aggregate. These
   are safety bounds, not a proof that every accepted workload has optimal Blender
   performance.
+- Generic decomposition is now consistently capped at 24 components in both
+  the provider schema and the runtime contract. Asset decisions still fan out
+  per component and GeometryPrograms are still planned per generated component;
+  there is no workflow-global LLM call/token budget or cancellation of sibling
+  futures after the first fail-closed error.
 - Requested `maximum_dimensions_m` is compared deterministically with the
   program envelope. A uniform bounded adapter can correct only an envelope
   overflow; it cannot repair semantic design mistakes. New workflows preserve

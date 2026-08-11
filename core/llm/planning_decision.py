@@ -90,7 +90,7 @@ class GroqPlanningDecisionClient:
             raise ValueError("timeout_s must be positive")
         if not 128 <= max_completion_tokens <= 2048:
             raise ValueError("max_completion_tokens must be between 128 and 2048")
-        self.api_key = api_key.strip()
+        self._api_key = api_key.strip()
         self.model = model.strip()
         if not self.model:
             raise ValueError("model must not be empty")
@@ -122,7 +122,7 @@ class GroqPlanningDecisionClient:
                 response = self._post(
                     f"{self.base_url}/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
+                        "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
                     },
                     json=self._payload(request),

@@ -41,7 +41,7 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 
 | Méthode | Endpoint | Usage frontend |
 |---|---|---|
-| `GET` | `/health` | Vérifier que le backend est en ligne. |
+| `GET` | `/health` | Vérifier que le backend est en ligne; expose aussi un résumé mémoire agrégé du pool Groq sans probe réseau ni identité de clé. |
 | `GET` | `/designs` | Lister les designs récents. |
 | `POST` | `/designs` | Créer un design depuis un prompt. |
 | `GET` | `/designs/{id}` | Statut complet public: artefacts en URLs backend, pas en chemins locaux. |
@@ -80,6 +80,10 @@ ping. Le frontend exige `status=ok`,
 `service=agentic_telecom_3d_studio_api` et
 `api_contract_version=2026-07-29`; une autre application sur le même port doit
 être refusée.
+`groq_credential_pool` est additif et contient uniquement `status`, compteurs
+configurés/prêts/cooldown/désactivés/restreints/saturés, réponses provider
+observées et requêtes en vol. Ce résumé ne rend jamais la liveness dépendante de
+Groq et ne signifie pas qu'une sortie métier a passé sa validation Pydantic.
 
 ## Artifacts importants
 

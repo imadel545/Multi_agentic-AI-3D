@@ -1,12 +1,13 @@
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import httpx
 
 from core.contracts.document_pack import DocumentReference, SourceEvidence
 from core.document_pack.extractor import FieldCandidate
 from core.document_pack.text_extractor import TextPage
+from core.llm.transport import GroqTransportError, groq_error_status_code
 
 MAX_GROQ_CHUNKS = 12
 MAX_CHUNK_CHARS = 2500
@@ -90,6 +91,7 @@ class GroqDocumentExtractionResult:
     fallback_used: bool
     warnings: list[str]
     chunks: list[DocumentTextChunk]
+    status: Literal["skipped", "primary", "validated_fallback", "failed"]
 
 
 class GroqDocumentExtractor:
@@ -118,6 +120,7 @@ class GroqDocumentExtractor:
                 fallback_used=True,
                 warnings=["Groq document extraction disabled or not configured."],
                 chunks=chunks,
+                status="skipped",
             )
         if not chunks:
             return GroqDocumentExtractionResult(
@@ -127,6 +130,7 @@ class GroqDocumentExtractor:
                 fallback_used=False,
                 warnings=["No bounded document chunks selected for Groq extraction."],
                 chunks=[],
+                status="skipped",
             )
         messages = _messages(chunks)
         payload = {
@@ -145,12 +149,13 @@ class GroqDocumentExtractor:
         json_object_fallback_used = False
         try:
             raw = self.provider._post_raw(payload)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code != 400:
+        except (httpx.HTTPStatusError, GroqTransportError) as exc:
+            status_code = groq_error_status_code(exc)
+            if status_code != 400:
                 return _groq_failed(
                     chunks,
                     self.provider_name,
-                    f"Groq document extraction failed: HTTP {exc.response.status_code}.",
+                    f"Groq document extraction failed: HTTP {status_code or 'unknown'}.",
                 )
             try:
                 json_object_fallback_used = True
@@ -201,6 +206,7 @@ class GroqDocumentExtractor:
                 else []
             ),
             chunks=chunks,
+            status="validated_fallback" if json_object_fallback_used else "primary",
         )
 
 
@@ -485,4 +491,5 @@ def _groq_failed(
         fallback_used=True,
         warnings=[warning],
         chunks=chunks,
+        status="failed",
     )

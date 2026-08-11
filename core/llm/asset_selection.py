@@ -57,7 +57,7 @@ class GroqAssetSelectionClient:
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
-        self.api_key = api_key.strip()
+        self._api_key = api_key.strip()
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
         self.model = model.strip()
@@ -92,7 +92,7 @@ class GroqAssetSelectionClient:
                 response = self._post(
                     f"{self.base_url}/chat/completions",
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
+                        "Authorization": f"Bearer {self._api_key}",
                         "Content-Type": "application/json",
                     },
                     json=self._payload(slots),

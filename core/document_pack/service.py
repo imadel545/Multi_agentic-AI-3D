@@ -263,13 +263,20 @@ class DocumentPackService:
             "groq_extract",
             f"{len(outcome.candidates)} candidates, {len(outcome.rejected_fields)} rejected",
             started,
-            status="skipped" if not self.groq_extractor.enabled else "passed",
+            status=(
+                "skipped"
+                if outcome.status == "skipped"
+                else "failed"
+                if outcome.status == "failed"
+                else "passed"
+            ),
             event_type="document_pack_groq_extracted",
             event_payload={
                 "candidate_count": len(outcome.candidates),
                 "rejected_count": len(outcome.rejected_fields),
                 "provider": outcome.provider,
                 "fallback_used": outcome.fallback_used,
+                "outcome_status": outcome.status,
                 "chunk_count": len(outcome.chunks),
             },
         )
