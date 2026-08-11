@@ -949,7 +949,18 @@ class WorkflowService:
             artifact_dir.relative_to(workflow_dir)
         except ValueError as exc:
             raise KeyError(workflow_id) from exc
-        self._make_archive(artifact_dir)
+        version_id = manifest.get("version_id")
+        version = (
+            self.versioning.get_version(workflow_id, version_id)
+            if isinstance(version_id, str)
+            else None
+        )
+        if version is None:
+            raise KeyError(workflow_id)
+        self._make_archive(
+            artifact_dir,
+            excluded_filenames=_unauthorized_artifact_filenames(version.scene),
+        )
         path = artifact_dir / "artifacts.zip"
         if not path.exists():
             raise KeyError(workflow_id)
@@ -978,9 +989,14 @@ class WorkflowService:
                 candidate_artifact_dir.relative_to(workflow_dir)
             except ValueError as exc:
                 raise KeyError(version_id) from exc
-            _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+            version, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+            if not _artifact_authorized_for_scene(artifact_name, version.scene):
+                raise KeyError(artifact_name)
             if artifact_name == "download":
-                self._make_archive(artifact_dir)
+                self._make_archive(
+                    artifact_dir,
+                    excluded_filenames=_unauthorized_artifact_filenames(version.scene),
+                )
             path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
         else:
             status = self.get_status(workflow_id)
@@ -994,8 +1010,22 @@ class WorkflowService:
                 artifact_dir.relative_to(workflow_dir)
             except ValueError as exc:
                 raise KeyError(artifact_name) from exc
+            version_id = manifest.get("version_id")
+            version = (
+                self.versioning.get_version(workflow_id, version_id)
+                if isinstance(version_id, str)
+                else None
+            )
+            if version is None or not _artifact_authorized_for_scene(
+                artifact_name,
+                version.scene,
+            ):
+                raise KeyError(artifact_name)
             if artifact_name == "download":
-                self._make_archive(artifact_dir)
+                self._make_archive(
+                    artifact_dir,
+                    excluded_filenames=_unauthorized_artifact_filenames(version.scene),
+                )
             path = artifact_dir / _ALLOWED_ARTIFACT_FILES[artifact_name]
 
         if path is None or not path.exists() or not path.is_file():
@@ -1050,13 +1080,14 @@ class WorkflowService:
         """Verify one immutable version once, then inventory its public files."""
 
         try:
-            _, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+            version, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
         except KeyError:
             return {}
         return {
             artifact_name: artifact_dir / filename
             for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
-            if (artifact_dir / filename).is_file()
+            if _artifact_authorized_for_scene(artifact_name, version.scene)
+            and (artifact_dir / filename).is_file()
         }
 
     @staticmethod
@@ -1067,7 +1098,8 @@ class WorkflowService:
         artifact_paths = {
             artifact_name: artifact_dir / filename
             for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
-            if (artifact_dir / filename).is_file()
+            if _artifact_authorized_for_scene(artifact_name, version.scene)
+            and (artifact_dir / filename).is_file()
         }
         return VerifiedViewerSnapshot(
             version_id=version.version_id,
@@ -1984,7 +2016,10 @@ class WorkflowService:
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
-        rag_runtime = _rag_runtime_summary(self.orchestrator.rag_service)
+        rag_runtime = _rag_runtime_summary(
+            self.orchestrator.rag_service,
+            rag_context=result.rag_context,
+        )
         previous_status = _read_status_payload(output_dir)
         created_at = _status_created_at(previous_status, output_dir)
         metrics = dict(result.metrics)
@@ -2013,6 +2048,7 @@ class WorkflowService:
             "extraction_report": str(output_dir / "extraction_report.json"),
             "scene_spec": str(output_dir / "scene_spec.json"),
             "assembly_plan": str(output_dir / "assembly_plan.json"),
+            "constraint_evidence": str(output_dir / "constraint_evidence.json"),
             "validation_report": str(output_dir / "validation_report.json"),
             "quality_gates": str(output_dir / "quality_gates.json"),
             "requirement_coverage": str(output_dir / "requirement_coverage.json"),
@@ -2074,6 +2110,8 @@ class WorkflowService:
             "rag_reranker_model": rag_runtime["rag_reranker_model"],
             "rag_reranker_status": rag_runtime["rag_reranker_status"],
             "rag_reranker_degraded_reason": rag_runtime["rag_reranker_degraded_reason"],
+            "rag_retrieval_status": rag_runtime["rag_retrieval_status"],
+            "rag_retrieval_degraded_reason": rag_runtime["rag_retrieval_degraded_reason"],
             "memory_hits": result.memory_recall.memory_hits if result.memory_recall else 0,
             "memory_context_count": result.memory_recall.memory_context_count
             if result.memory_recall
@@ -2296,7 +2334,13 @@ class WorkflowService:
             self._write_json(output_dir / "generation_report.json", result.generation.model_dump())
         self._write_json(
             output_dir / "rag_evidence.json",
-            _rag_evidence(result, _rag_runtime_summary(self.orchestrator.rag_service)),
+            _rag_evidence(
+                result,
+                _rag_runtime_summary(
+                    self.orchestrator.rag_service,
+                    rag_context=result.rag_context,
+                ),
+            ),
         )
         if result.planning_decision:
             self._write_json(output_dir / "planning_decision.json", result.planning_decision)
@@ -2413,7 +2457,11 @@ class WorkflowService:
         )
 
     @staticmethod
-    def _make_archive(output_dir: Path) -> None:
+    def _make_archive(
+        output_dir: Path,
+        *,
+        excluded_filenames: frozenset[str] = frozenset(),
+    ) -> None:
         target = output_dir / "artifacts.zip"
         output_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
@@ -2426,7 +2474,11 @@ class WorkflowService:
         try:
             with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in sorted(output_dir.iterdir()):
-                    if not path.is_file() or path in {target, temp_path}:
+                    if (
+                        not path.is_file()
+                        or path in {target, temp_path}
+                        or path.name in excluded_filenames
+                    ):
                         continue
                     archive.write(path, arcname=path.name)
             temp_path.replace(target)
@@ -2631,15 +2683,62 @@ def _rag_evidence(result: OrchestratorResult, rag_runtime: dict) -> dict:
     }
 
 
-def _rag_runtime_summary(rag_service: object | None) -> dict:
+def _rag_runtime_summary(
+    rag_service: object | None,
+    *,
+    rag_context: list[dict] | None = None,
+) -> dict:
     if rag_service is None:
         return {
             "rag_reranker_provider": None,
             "rag_reranker_model": None,
             "rag_reranker_status": "disabled",
             "rag_reranker_degraded_reason": None,
+            "rag_retrieval_status": "disabled",
+            "rag_retrieval_degraded_reason": None,
         }
     reranker = getattr(rag_service, "_reranker", None)
+    retrieval = getattr(rag_service, "last_retrieval_diagnostics", None)
+    rerank = getattr(rag_service, "last_rerank_diagnostics", None)
+    context_payloads = [
+        item.get("payload")
+        for item in (rag_context or [])
+        if isinstance(item, dict) and isinstance(item.get("payload"), dict)
+    ]
+    persisted_retrieval_status = next(
+        (
+            payload.get("retrieval_mode")
+            for payload in context_payloads
+            if isinstance(payload.get("retrieval_mode"), str)
+        ),
+        None,
+    )
+    persisted_retrieval_reason = next(
+        (
+            payload.get("retrieval_degraded_reason")
+            for payload in context_payloads
+            if isinstance(payload.get("retrieval_degraded_reason"), str)
+        ),
+        None,
+    )
+    persisted_reranker_status = next(
+        (
+            payload.get("reranker_status")
+            for payload in context_payloads
+            if isinstance(payload.get("reranker_status"), str)
+        ),
+        None,
+    )
+    persisted_reranker_reason = next(
+        (
+            payload.get("reranker_degraded_reason")
+            for payload in context_payloads
+            if isinstance(payload.get("reranker_degraded_reason"), str)
+        ),
+        None,
+    )
+    has_persisted_retrieval = persisted_retrieval_status is not None
+    has_persisted_reranker = persisted_reranker_status is not None
     return {
         "rag_reranker_provider": getattr(
             reranker,
@@ -2651,8 +2750,18 @@ def _rag_runtime_summary(rag_service: object | None) -> dict:
             "model_name",
             getattr(rag_service, "_reranker_model", None),
         ),
-        "rag_reranker_status": getattr(reranker, "status", "not_loaded"),
-        "rag_reranker_degraded_reason": getattr(reranker, "degraded_reason", None),
+        "rag_reranker_status": persisted_reranker_status
+        if has_persisted_reranker
+        else getattr(rerank, "status", getattr(reranker, "status", "not_loaded")),
+        "rag_reranker_degraded_reason": persisted_reranker_reason
+        if has_persisted_reranker
+        else getattr(rerank, "degraded_reason", getattr(reranker, "degraded_reason", None)),
+        "rag_retrieval_status": persisted_retrieval_status
+        if has_persisted_retrieval
+        else getattr(retrieval, "status", "configured_unverified"),
+        "rag_retrieval_degraded_reason": persisted_retrieval_reason
+        if has_persisted_retrieval
+        else getattr(retrieval, "degraded_reason", None),
     }
 
 
@@ -3309,6 +3418,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "extraction_report": "extraction_report.json",
     "scene_spec": "scene_spec.json",
     "assembly_plan": "assembly_plan.json",
+    "constraint_evidence": "constraint_evidence.json",
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
     "requirement_coverage": "requirement_coverage.json",
@@ -3344,6 +3454,23 @@ _ALLOWED_ARTIFACT_FILES = {
     "adaptation_capabilities": "adaptation_capabilities.json",
     "llm_decision_provenance": "llm_decision_provenance.json",
 }
+
+
+def _artifact_authorized_for_scene(artifact_name: str, scene: SceneSpec) -> bool:
+    """Keep conditional evidence private unless the verified scene requires it."""
+
+    if artifact_name != "constraint_evidence":
+        return True
+    plan = scene.assembly_plan
+    return plan is not None and plan.schema_version == "1.1.0"
+
+
+def _unauthorized_artifact_filenames(scene: SceneSpec) -> frozenset[str]:
+    return frozenset(
+        filename
+        for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
+        if artifact_name != "download" and not _artifact_authorized_for_scene(artifact_name, scene)
+    )
 
 
 def _edit_llm_decision_provenance(

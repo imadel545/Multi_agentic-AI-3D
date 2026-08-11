@@ -22,7 +22,7 @@ from core.services.requirement_parser import parse_requirements_text
 
 pytestmark = pytest.mark.blender_runtime
 
-_BOUNDED_SELECTION_REASON = "Candidat fourni et autorisé par le contrat borné."
+_LOCAL_SELECTION_EXPLANATION = "compatibilité et permissions vérifiées"
 
 
 def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path) -> None:
@@ -109,7 +109,7 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert plan["selection_provider"] == "groq"
         assert plan["selection_model"] == "openai/gpt-oss-120b"
         assert plan["selection_capability"] == "asset_selection"
-        assert plan["selection_contract_version"] == "bounded_asset_selection@1.1.0"
+        assert plan["selection_contract_version"] == "bounded_asset_selection@1.2.0"
         assert plan["llm_fallback_used"] is False
         assert plan["operations"]
         assert all(operation["instances"] for operation in plan["operations"])
@@ -121,14 +121,14 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert exact_antenna.allows_generation_mode("imported_glb_exact")
         assert antenna_component["generation_strategy"] == "imported_glb_exact"
         assert antenna_component["manifest_snapshot"]["asset_id"] == exact_antenna_id
-        assert _BOUNDED_SELECTION_REASON in antenna_component["selection_reason"]
+        assert _LOCAL_SELECTION_EXPLANATION in antenna_component["selection_reason"]
         assert components["timing_antenna"]["generation_strategy"] == "imported_glb_exact"
         cable_component = components["sector_cable_route"]
         cable_asset = registry.get(cable_component["selected_asset_id"])
         assert cable_asset.type == "cable"
         assert cable_asset.is_generation_eligible
         assert cable_component["manifest_snapshot"]["asset_id"] == cable_asset.asset_id
-        assert _BOUNDED_SELECTION_REASON in cable_component["selection_reason"]
+        assert _LOCAL_SELECTION_EXPLANATION in cable_component["selection_reason"]
         assert scene["geometry_programs"][0]["program_id"] == "maintenance_stair.llm_v2"
         assert scene["geometry_programs"][0]["generator_provider"] == "groq"
         assert scene["geometry_programs"][0]["generator_model"] == "openai/gpt-oss-120b"
@@ -163,9 +163,36 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert program_proof["qa"]["passed"] is True
 
         certificate = client.get(f"/designs/{workflow_id}/artifacts/completion_certificate").json()
-        assert certificate["schema_version"] == "1.2.0"
+        assert certificate["schema_version"] == "1.4.0"
         assert certificate["status"] == "issued"
         assert certificate["checks"]["component_proof_verified"] is True
+        assert certificate["checks"]["assembly_constraint_evidence_verified"] is True
+        constraint_evidence = client.get(
+            f"/designs/{workflow_id}/artifacts/constraint_evidence"
+        ).json()
+        assert constraint_evidence["status"] == "passed"
+        assert constraint_evidence["expected_measurement_count"] == 9
+        assert constraint_evidence["measured_constraint_count"] == 9
+        assert constraint_evidence["failed_constraint_count"] == 0
+        assert all(
+            frame["source"] in {"glb_fixed_anchor", "glb_resolved_anchor"}
+            and frame["gltf_node_index"] is not None
+            for measurement in constraint_evidence["measurements"]
+            for frame in (measurement["source_frame"], measurement["target_frame"])
+        )
+        radio_supports = [
+            measurement["target_frame"]["resolved_support"]
+            for measurement in constraint_evidence["measurements"]
+            if measurement["connection_id"] == "radio-to-mount"
+        ]
+        assert len(radio_supports) == len(scene["sectors"])
+        assert all(
+            support["support_anchor_id"] == "radio_adapter_base"
+            and support["resolved_anchor_id"] == "radio_rail"
+            and support["gltf_node_index"] is not None
+            and support["gltf_mesh_index"] is not None
+            for support in radio_supports
+        )
         qa = client.get(f"/designs/{workflow_id}/artifacts/qa_report").json()
         assert qa["status"] == "passed"
         assert qa["checks"]["glb_structure_valid"] is True
@@ -215,7 +242,12 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert build_lock["blender_runtime"]["version_tuple"] == [4, 5, 12]
         assert build_lock["blender_runtime"]["background"] is True
         assert build_lock["blender_runtime"]["factory_startup"] is True
-        for artifact_name in ("design.glb", "preview.png", "component_proofs.json"):
+        for artifact_name in (
+            "design.glb",
+            "preview.png",
+            "component_proofs.json",
+            "constraint_evidence.json",
+        ):
             artifact_path = initial_dir / artifact_name
             lock_evidence = build_lock["artifacts"][artifact_name]
             assert lock_evidence["size_bytes"] == artifact_path.stat().st_size
@@ -312,8 +344,20 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert edited_instance["resolved_parameters"]["vertical_offset_m"] == requested_offset
         assert edited_proofs["geometry_programs"][0]["qa"]["passed"] is True
         edited_certificate = json.loads((edited_dir / "completion_certificate.json").read_text())
+        edited_evidence = json.loads((edited_dir / "constraint_evidence.json").read_text())
         assert edited_certificate["status"] == "issued"
+        assert edited_certificate["schema_version"] == "1.4.0"
         assert edited_certificate["checks"]["component_proof_verified"] is True
+        assert edited_certificate["checks"]["assembly_constraint_evidence_verified"] is True
+        assert edited_evidence["status"] == "passed"
+        assert edited_evidence["measured_constraint_count"] == 9
+        assert edited_evidence["failed_constraint_count"] == 0
+        assert all(
+            measurement["target_frame"]["resolved_support"]["support_anchor_id"]
+            == "radio_adapter_base"
+            for measurement in edited_evidence["measurements"]
+            if measurement["connection_id"] == "radio-to-mount"
+        )
         versions = client.get(f"/designs/{workflow_id}/versions").json()
         assert len(versions) == 2
         assert [item["version_id"] for item in versions if item["active"]] == [edited.version_id]
@@ -365,10 +409,7 @@ class _StructuredAssetSelectionTransport:
                 and choice["generation_strategy"] == strategy
                 and choice["semantic_strategy"] == semantic_strategy
             )
-            selections[slot["role_id"]] = {
-                "choice_id": choice["choice_id"],
-                "reason": _BOUNDED_SELECTION_REASON,
-            }
+            selections[slot["role_id"]] = choice["choice_id"]
         request = httpx.Request("POST", url)
         return httpx.Response(
             200,

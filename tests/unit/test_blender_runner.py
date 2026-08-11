@@ -12,7 +12,11 @@ from core.qa.glb_geometry_validator import GLBGeometryValidator
 from core.qa.glb_inspector import GLBInspector
 from core.services.assembly_planner import AssetAssemblyPlanner
 from core.services.asset_registry import AssetRegistry
-from core.services.blender_runner import BlenderRunner, _command_failure_details
+from core.services.blender_runner import (
+    BlenderRunner,
+    _command_failure_details,
+    _write_assembly_constraint_evidence,
+)
 from core.services.requirement_parser import parse_requirements_text
 
 
@@ -29,6 +33,69 @@ def test_blender_failure_details_keep_stdout_stderr_and_signal() -> None:
     assert "process_terminated_by=SIGSEGV" in detail
     assert "Python traceback" in detail
     assert "GPU warning" in detail
+
+
+def test_runner_writes_passed_constraint_evidence_for_assembly_plan_1_1(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene = _accessory_scene(trusted_assembly=True)
+    glb_path = tmp_path / "design.glb"
+    glb_path.write_bytes(b"post-export-glb")
+    payload = {
+        "schema_version": "1.0.0",
+        "workflow_id": scene.scene_id,
+        "status": "passed",
+    }
+
+    class _PassedEvidence:
+        status = "passed"
+
+        @staticmethod
+        def model_dump(*, mode: str) -> dict:
+            assert mode == "json"
+            return payload
+
+    monkeypatch.setattr(
+        "core.qa.assembly_constraint_inspector.AssemblyConstraintInspector.inspect",
+        lambda _self, inspected_glb, inspected_plan: (
+            _PassedEvidence()
+            if inspected_glb == glb_path and inspected_plan is scene.assembly_plan
+            else pytest.fail("runner did not inspect the staged GLB and resolved plan")
+        ),
+    )
+
+    error = _write_assembly_constraint_evidence(tmp_path, scene, glb_path)
+
+    assert error is None
+    assert json.loads((tmp_path / "constraint_evidence.json").read_text()) == payload
+
+
+def test_runner_fails_staging_but_persists_failed_constraint_report(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene = _accessory_scene(trusted_assembly=True)
+    glb_path = tmp_path / "design.glb"
+    glb_path.write_bytes(b"post-export-glb")
+
+    class _FailedEvidence:
+        status = "failed"
+
+        @staticmethod
+        def model_dump(*, mode: str) -> dict:
+            assert mode == "json"
+            return {"status": "failed", "errors": ["measured constraint failed"]}
+
+    monkeypatch.setattr(
+        "core.qa.assembly_constraint_inspector.AssemblyConstraintInspector.inspect",
+        lambda *_: _FailedEvidence(),
+    )
+
+    error = _write_assembly_constraint_evidence(tmp_path, scene, glb_path)
+
+    assert error == "BLENDER_ASSEMBLY_CONSTRAINT_EVIDENCE_FAILED"
+    assert json.loads((tmp_path / "constraint_evidence.json").read_text())["status"] == "failed"
 
 
 def test_blender_runner_uses_explicit_fallback_when_binary_missing(tmp_path: Path) -> None:

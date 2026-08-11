@@ -7,6 +7,7 @@ import {
   Cpu,
   FileArchive,
   Layers3,
+  LibraryBig,
   Loader2,
   MessageSquareText,
   RadioTower,
@@ -1451,6 +1452,12 @@ export function InspectorDock({
     });
   }
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
+  if (assetInventory || assetInventoryError || assetLibraryLoading) {
+    drawers.push({ id: "library", label: "Bibliothèque", icon: <LibraryBig size={16} /> });
+  }
+  if (bundle?.rag_evidence_url || bundle?.llm_decision_provenance_url || summary) {
+    drawers.push({ id: "system", label: "Intelligence", icon: <Cpu size={16} /> });
+  }
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   useEffect(() => {
     if (!activeDrawer) {
@@ -1559,6 +1566,7 @@ export function InspectorDock({
                 error={qaEvidenceError ?? viewerBundleError}
                 loading={qaEvidenceLoading || viewerBundleLoading}
                 onRetry={qaEvidenceError ? onRetryQaEvidence : onRetryViewerBundle}
+                toAbsoluteUrl={toAbsoluteUrl}
               />
               <IssuesPanel issues={issues} />
             </>
@@ -2004,15 +2012,19 @@ export function QaPanel({
   evidence,
   error = null,
   loading = false,
-  onRetry
+  onRetry,
+  toAbsoluteUrl = (url) => url ?? null
 }: {
   bundle: ViewerBundle | null;
   evidence?: unknown | null;
   error?: string | null;
   loading?: boolean;
   onRetry?: () => void;
+  toAbsoluteUrl?: (url: string | null | undefined) => string | null;
 }) {
   const qa = bundle?.qa_summary;
+  const assembly = bundle?.assembly_constraint_summary;
+  const assemblyEvidenceUrl = toAbsoluteUrl(bundle?.constraint_evidence_url);
   const passed = bundle?.mesh_qa_passed === true;
   const qaExecuted =
     qa?.qa_executed !== false &&
@@ -2085,6 +2097,46 @@ export function QaPanel({
       )}
       {bundle ? (
         <div className="qa-evidence-split">
+          {assembly ? (
+            <section
+              aria-label="Assemblage post-export"
+              className={`qa-evidence-card${assembly.status === "passed" ? "" : " advisory"}`}
+            >
+              <div className="qa-evidence-heading">
+                <strong>Assemblage post-export</strong>
+                <span>{assemblyConstraintStatusLabel(assembly.status)}</span>
+              </div>
+              <p>
+                Mesures déterministes réalisées sur {assemblyMeasurementScopeLabel(assembly.measurement_scope)}.
+              </p>
+              {assembly.status !== "not_available" ? (
+                <div className="metric-grid">
+                  <Metric label="Connexions requises (toutes)" value={formatInteger(assembly.required_connection_count)} />
+                  <Metric label="Liaisons mécaniques mesurées" value={formatInteger(assembly.measured_instance_count)} />
+                  {assembly.resolved_support_count > 0 ? (
+                    <Metric label="Supports d’adaptation observés" value={formatInteger(assembly.resolved_support_count)} />
+                  ) : null}
+                  <Metric label="Erreur de position max." value={`${formatMeasurement(assembly.max_position_error_m)} m`} />
+                  <Metric label="Erreur angulaire max." value={`${formatMeasurement(assembly.max_angular_error_deg)}°`} />
+                </div>
+              ) : null}
+              {assembly.limitations.length ? (
+                <List
+                  title="Limites de la mesure"
+                  items={assembly.limitations.map(assemblyLimitationLabel)}
+                  empty="Aucune limitation publiée."
+                />
+              ) : null}
+              <small>
+                Ce contrôle décrit des écarts géométriques mesurés après export. Il ne constitue ni une validation d’ingénierie ni une preuve professionnelle.
+              </small>
+              {assemblyEvidenceUrl ? (
+                <a href={assemblyEvidenceUrl} rel="noreferrer" target="_blank">
+                  Consulter la preuve de mesure
+                </a>
+              ) : null}
+            </section>
+          ) : null}
           <section aria-label="Cadrage technique" className="qa-evidence-card">
             <div className="qa-evidence-heading">
               <strong>Cadrage technique</strong>
@@ -2485,11 +2537,18 @@ export function RagEvidencePanel({
       <PanelTitle icon={<Cpu size={17} />} title="RAG et preuves" />
       <div className="metric-grid">
         <Metric label="Provider" value={bundle?.rag_reranker_provider ?? "unknown"} />
+        <Metric label="Recherche" value={serviceStatusLabel(bundle?.rag_retrieval_status)} />
         <Metric label="Reranker" value={bundle?.rag_reranker_status ?? "unknown"} />
         <Metric label="Sources" value={String(bundle?.rag_context_count ?? 0)} />
         <Metric label="Extraction" value={summary.ragUsedForExtraction ? "oui" : "non"} />
         <Metric label="Planning" value={summary.ragUsedForPlanning ? "oui" : "non"} />
       </div>
+      {bundle?.rag_retrieval_status === "degraded_local_lexical" ? (
+        <p className="inline-alert">
+          <WifiOff size={16} aria-hidden="true" /> La recherche vectorielle est indisponible;
+          la recherche utilise temporairement le corpus local réel par correspondance lexicale.
+        </p>
+      ) : null}
       {bundle?.rag_reranker_degraded_reason ? (
         <p className="inline-alert">
           <WifiOff size={16} aria-hidden="true" />{" "}
@@ -3408,7 +3467,9 @@ function serviceStatusLabel(status?: string | null): string {
     [
       "qualified_mixed_catalog",
       "primary_nvidia_embedding",
-      "primary_nvidia_reranker"
+      "primary_nvidia_reranker",
+      "primary_vector",
+      "primary_vector_cache"
     ].includes(normalized)
   ) {
     return "opérationnel";
@@ -3588,6 +3649,36 @@ function formatRatio(value: number | null | undefined): string {
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("fr-FR").format(value);
+}
+
+function formatMeasurement(value: number): string {
+  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 6 }).format(value);
+}
+
+function assemblyConstraintStatusLabel(status: "passed" | "failed" | "not_available"): string {
+  return {
+    passed: "contrôle passé",
+    failed: "écart détecté",
+    not_available: "mesure indisponible"
+  }[status];
+}
+
+function assemblyMeasurementScopeLabel(scope: string): string {
+  if (scope === "exported_glb_anchor_frames") {
+    return "les repères d’ancrage du GLB exporté";
+  }
+  return scope.replaceAll("_", " ");
+}
+
+function assemblyLimitationLabel(limitation: string): string {
+  return {
+    "Required non-mechanical connections are reported but are not geometrically evaluated by AssemblyConstraintEvidence v1.":
+      "Les connexions requises non mécaniques sont signalées, mais ne sont pas encore mesurées géométriquement.",
+    "Anchor frames are semantic coordinate frames reconstructed from exported glTF component roots or dedicated constraint-marker nodes; they are not contact mesh.":
+      "Les repères sont reconstruits depuis le GLB exporté ; ils ne prouvent pas à eux seuls le contact physique des surfaces.",
+    "Collision, physical contact, fastener engagement, deformation, load capacity and electrical or routing continuity are not evaluated.":
+      "Les collisions fines, le contact, la visserie, la déformation, la tenue aux charges et la continuité électrique ou de routage ne sont pas évalués."
+  }[limitation] ?? limitation;
 }
 
 function stringArray(value: unknown): string[] {

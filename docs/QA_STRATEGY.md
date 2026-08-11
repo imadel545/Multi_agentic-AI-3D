@@ -24,6 +24,14 @@ limitations and never advertises checks it cannot perform.
   semantic strategy (`reuse`, `adapt`, `compose`, `procedural_generate`),
   geometry source, resolved parameters, transforms, bounds, fingerprint,
   declared/executed operations and local pass state.
+- Post-export assembly QA: for `AssemblyPlan 1.1`, reconstructs glTF world
+  transforms and measures every required mechanical source/target frame from
+  exported component roots or dedicated exported anchor nodes. It rejects
+  missing, duplicated, mismatched or moved nodes and records non-mechanical
+  required connections as unevaluated. Every `resolved_from_operation`
+  endpoint also requires a unique exported support node with exact identity and
+  a real glTF mesh; this proves mesh existence only, not contact, fasteners,
+  load transfer or manufacturability.
 - GLB binary integrity QA: strict GLB container/chunk parsing, buffer and
   buffer-view ranges, real `POSITION` bytes, finite values, optional index
   ranges, primitive completeness, and semantic entity mesh coverage.
@@ -48,9 +56,10 @@ limitations and never advertises checks it cannot perform.
 - Document-pack QA: evidence, conflicts, blocking fields, plausibility, OCR/CAD
   limits.
 - Completion proof: binds requirement/SceneSpec and certified artifact hashes to
-  successful real-Blender, gate, QA and coverage results. Schema `1.2.0` also
-  binds `component_proofs.json` when trusted assembly or generated geometry
-  requires it.
+  successful real-Blender, gate, QA and coverage results. Schema `1.4.0` binds
+  both `component_proofs.json` and `constraint_evidence.json` for trusted
+  AssemblyPlan 1.1; schema `1.2.0` remains the non-assembly component-proof
+  path.
 
 ## What is real
 
@@ -96,6 +105,10 @@ limitations and never advertises checks it cannot perform.
   verified, hash-bound component proof artifact. Version activation, reads,
   rollback and artifact serving revalidate this evidence; tampering is
   fail-closed.
+- Certificate schema 1.4 additionally requires passed, canonical post-export
+  constraint evidence whose workflow, plan hash and GLB hash match the certified
+  scene. The evidence file is also hash-bound by the build lock; tampering or a
+  schema downgrade is fail-closed.
 - Requested GeometryProgram maximum dimensions are measured from the program
   envelope before Blender. A deterministic uniform adapter can only correct this
   envelope overflow, records the adjustment and revalidates the full contract.
@@ -107,6 +120,9 @@ limitations and never advertises checks it cannot perform.
 - AABB broad-phase interference is implemented for primary equipment, but exact
   triangle/BVH collision, self-intersection and engineering clearance are not.
 - No full manifold, self-intersection, weld/node or structural load validation.
+- Post-export anchor QA does not yet measure contact patches, connector
+  insertion/fasteners, triangle clearance, structural load or non-mechanical
+  continuity.
 - No vendor-grade mesh/material validation.
 - No semantic visual judgement of the preview image.
 - No semantic judgement that a GeometryProgram matches the natural-language
@@ -145,16 +161,17 @@ limitations and never advertises checks it cannot perform.
   and `browser_smoke`. An autouse guard fails if an unmarked test reaches the
   real Blender generation subprocess or the product readiness-probe subprocess.
   Fake probe tests replace that explicit boundary; they never weaken the guard
-  globally. The 2026-08-10 gate completed 586 tests in
-  24.29 seconds, with 52 Blender and 2 live-provider cases classified separately.
+  globally. Older counts are historical and are superseded by the final
+  current-tree collection below.
 - Collection can be audited without executing Blender or a provider with
   `pytest --collect-only -q`, `pytest --collect-only -q -m blender_runtime` and
   `pytest --collect-only -q -m provider_live`. Tests that stop before Blender,
   including admission, invalid-input and terminal-persistence failure paths,
   remain in the fast gate rather than inheriting a runtime marker.
-  The final 2026-08-11 collection contains 617 fast tests, 48
+  The final 2026-08-11 collection contains 702 tests: 650 fast tests, 48
   `blender_runtime` tests and 4 `provider_live` tests; the complete fast gate
-  passed in 23.52 seconds.
+  passed in 23.52 seconds. `browser_smoke` is registered but has zero automated
+  pytest cases; the browser proof remains a recorded interactive runtime gate.
 - `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
   gate. The 2026-08-10 audit exercised the Blender suite in 14 minutes 43 seconds;
   the two non-Blender failure-path cases discovered during classification now run
@@ -163,12 +180,14 @@ limitations and never advertises checks it cannot perform.
 - `TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1 pytest -m provider_live` is the explicit
   external capability gate. On 2026-08-11 it validated all four configured Groq
   accounts, the bounded asset and planning contracts, and the complete Groq +
-  NVIDIA + Blender product flow without fallback (4 tests in 33.41 seconds).
+  NVIDIA + Blender product flow without fallback (4 tests in 34.69 seconds).
   The result is point-in-time runtime evidence, not a permanent availability
   guarantee.
-- A real API/browser gate remains required for Canvas/WebGL, GLB loading,
-  selection, SSE/polling, document upload, edit/version and rollback flows.
-  Vitest/jsdom remains a fast contract gate, not visual runtime evidence.
+- A current-tree real API/browser creation gate has passed for Canvas/WebGL,
+  GLB loading, SSE progress, RAG evidence and contextual drawers. Document
+  upload, edit/version, rollback and degraded-provider branches still require
+  exhaustive browser replay. Vitest/jsdom remains a fast contract gate, not
+  visual runtime evidence.
 
 - A lattice workflow with real Blender completes and passes Mesh QA.
 - A workflow selecting a tower without a matching GLB exposes fallback/degraded.
@@ -184,11 +203,10 @@ limitations and never advertises checks it cannot perform.
 - M0 fault tests must reject changed exact assets, manifest/catalog tampering,
   invalid component proofs/build locks/certificates and Qdrant failure without
   losing the canonical SQLite mutation.
-- The current M0 tree passed 151 targeted backend integration tests, 23
-  requirement/Groq tests after the live-input parser fix, the isolated
-  real-Blender E2E (`1 passed`), and the real HTTP 4G generation/edit/version
-  scenario with QA 1.0 and an issued certificate.
-- The frontend has 158 passing Vitest tests plus green typecheck/build and a
+- The current M0 tree passed the complete fast gate plus the isolated
+  real-Blender assembly/edit/version E2E (`1 passed in 44.39 s`) and the
+  connected browser 4G creation scenario with QA 1.0 and an issued certificate.
+- The frontend has 167 passing Vitest tests plus green typecheck/build and a
   connected smoke on the current tree. The real generic multi-project user
   scenario remains open; no global convergence is claimed.
 

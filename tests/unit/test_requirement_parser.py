@@ -100,6 +100,17 @@ def test_parse_power_cabinet_and_concrete_pad_from_prompt() -> None:
     assert spec.tower_characteristics.foundation_type == "concrete_pad"
 
 
+def test_parser_preserves_coordinated_french_negative_equipment_requirements() -> None:
+    spec = parse_requirements_text(
+        "Concevoir un site 4G avec antenne et RRU. "
+        "Ne pas ajouter d'armoire, GPS ni câble de descente."
+    )
+
+    assert spec.include_power_cabinet is False
+    assert spec.include_gps_antenna is False
+    assert spec.include_cables is False
+
+
 def test_azimuth_list_stops_before_4g_antenna_and_detects_energy_cabinet() -> None:
     spec = parse_requirements_text(
         "Créer un site 4G complet sur pylône treillis de 30 m avec trois secteurs à 24 m "

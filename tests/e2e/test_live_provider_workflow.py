@@ -164,6 +164,8 @@ def test_live_groq_nvidia_blender_product_flow(tmp_path: Path) -> None:
         assert status["rag_reranker_provider"] == "nvidia"
         assert status["rag_reranker_status"] == "primary_nvidia_reranker"
         assert status["rag_reranker_degraded_reason"] is None
+        assert status["rag_retrieval_status"] in {"primary_vector", "primary_vector_cache"}
+        assert status["rag_retrieval_degraded_reason"] is None
 
         extraction = client.get(f"/designs/{workflow_id}/artifacts/extraction_report").json()
         assert extraction["mode"] == "structured_llm"
@@ -181,6 +183,8 @@ def test_live_groq_nvidia_blender_product_flow(tmp_path: Path) -> None:
         assert rag["rag_reranker_provider"] == "nvidia"
         assert rag["rag_reranker_status"] == "primary_nvidia_reranker"
         assert rag["rag_reranker_degraded_reason"] is None
+        assert rag["rag_retrieval_status"] in {"primary_vector", "primary_vector_cache"}
+        assert rag["rag_retrieval_degraded_reason"] is None
 
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
         assert bundle["primary_glb_url"]
@@ -189,6 +193,8 @@ def test_live_groq_nvidia_blender_product_flow(tmp_path: Path) -> None:
         assert bundle["human_errors_count"] == 0
         assert bundle["asset_decision_summary"]["decision_authority"] == "llm_bounded"
         assert bundle["asset_decision_summary"]["fallback_used"] is False
+        assert bundle["rag_retrieval_status"] in {"primary_vector", "primary_vector_cache"}
+        assert bundle["rag_retrieval_degraded_reason"] is None
     finally:
         workflow_service.outputs_dir = original_outputs
 

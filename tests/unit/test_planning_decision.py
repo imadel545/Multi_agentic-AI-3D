@@ -25,16 +25,14 @@ def test_gpt_oss_selects_only_validated_candidates() -> None:
         calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
         return _response(
             url,
-            {
-                "selections": [
-                    _selection("antenna_install_height_m", "select_candidate", "rag:hba:1"),
-                    _selection("beamwidth_deg", "keep_current"),
-                    _selection("mechanical_tilt_deg", "keep_current"),
-                    _selection("electrical_tilt_deg", "keep_current"),
-                    _selection("include_cables", "select_candidate", "memory:cables:1"),
-                    _selection("include_sector_beams", "keep_current"),
-                ]
-            },
+            _provider_decision(
+                _selection("antenna_install_height_m", "select_candidate", "rag:hba:1"),
+                _selection("beamwidth_deg", "keep_current"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
+                _selection("include_cables", "select_candidate", "memory:cables:1"),
+                _selection("include_sector_beams", "keep_current"),
+            ),
         )
 
     result = GroqPlanningDecisionClient(
@@ -60,7 +58,8 @@ def test_gpt_oss_selects_only_validated_candidates() -> None:
         "selections"
     ]["properties"]
     assert all(
-        "value" not in field_schema["properties"] for field_schema in selection_schemas.values()
+        set(field_schema["properties"]) == {"decision", "reason"}
+        for field_schema in selection_schemas.values()
     )
 
 
@@ -71,16 +70,14 @@ def test_provider_schema_excludes_protected_and_cross_field_candidate_actions() 
         captured.update(json)
         return _response(
             url,
-            {
-                "selections": [
-                    _selection("antenna_install_height_m", "keep_current"),
-                    _selection("beamwidth_deg", "keep_current"),
-                    _selection("mechanical_tilt_deg", "keep_current"),
-                    _selection("electrical_tilt_deg", "keep_current"),
-                    _selection("include_cables", "keep_current"),
-                    _selection("include_sector_beams", "keep_current"),
-                ]
-            },
+            _provider_decision(
+                _selection("antenna_install_height_m", "keep_current"),
+                _selection("beamwidth_deg", "keep_current"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
+                _selection("include_cables", "keep_current"),
+                _selection("include_sector_beams", "keep_current"),
+            ),
         )
 
     result = GroqPlanningDecisionClient(api_key="test-key", post=post).decide(_request())
@@ -99,23 +96,60 @@ def test_provider_schema_excludes_protected_and_cross_field_candidate_actions() 
         "include_sector_beams",
     }
     field_schemas = selections_schema["properties"]
-    assert field_schemas["beamwidth_deg"]["properties"]["action"]["enum"] == ["keep_current"]
-    candidate_ids_by_field = {
-        field: set(field_schema["properties"]["candidate_id"]["enum"])
+    decisions_by_field = {
+        field: set(field_schema["properties"]["decision"]["enum"])
         for field, field_schema in field_schemas.items()
     }
-    assert candidate_ids_by_field["antenna_install_height_m"] == {"none", "rag:hba:1"}
-    assert candidate_ids_by_field["include_cables"] == {"none", "memory:cables:1"}
-    assert candidate_ids_by_field["beamwidth_deg"] == {"none"}
+    assert decisions_by_field["antenna_install_height_m"] == {
+        "keep_current",
+        "select:rag:hba:1",
+    }
+    assert decisions_by_field["include_cables"] == {
+        "keep_current",
+        "select:memory:cables:1",
+    }
+    assert decisions_by_field["beamwidth_deg"] == {"keep_current"}
+    assert all(
+        field_schema["properties"]["reason"]
+        == {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+        }
+        for field_schema in field_schemas.values()
+    )
 
 
 def test_unknown_candidate_is_rejected_and_fallback_is_visible() -> None:
     def post(url, headers, json, timeout):
         return _response(
             url,
+            _provider_decision(
+                _selection("antenna_install_height_m", "select_candidate", "unknown"),
+                _selection("beamwidth_deg", "keep_current"),
+                _selection("mechanical_tilt_deg", "keep_current"),
+                _selection("electrical_tilt_deg", "keep_current"),
+                _selection("include_cables", "keep_current"),
+                _selection("include_sector_beams", "keep_current"),
+            ),
+        )
+
+    result = GroqPlanningDecisionClient(api_key="test-key", post=post).decide(_request())
+
+    assert result.resolved_values == _request().current_values
+    assert result.diagnostics.status == "deterministic_fallback"
+    assert result.diagnostics.fallback_used is True
+    assert result.diagnostics.fallback_reason == "model_output_rejected"
+    assert {selection.action for selection in result.selections} == {"keep_current"}
+
+
+def test_legacy_action_candidate_provider_shape_is_rejected() -> None:
+    def post(url, headers, json, timeout):
+        return _response(
+            url,
             {
                 "selections": [
-                    _selection("antenna_install_height_m", "select_candidate", "unknown"),
+                    _selection("antenna_install_height_m", "keep_current"),
                     _selection("beamwidth_deg", "keep_current"),
                     _selection("mechanical_tilt_deg", "keep_current"),
                     _selection("electrical_tilt_deg", "keep_current"),
@@ -127,11 +161,8 @@ def test_unknown_candidate_is_rejected_and_fallback_is_visible() -> None:
 
     result = GroqPlanningDecisionClient(api_key="test-key", post=post).decide(_request())
 
-    assert result.resolved_values == _request().current_values
     assert result.diagnostics.status == "deterministic_fallback"
-    assert result.diagnostics.fallback_used is True
     assert result.diagnostics.fallback_reason == "model_output_rejected"
-    assert {selection.action for selection in result.selections} == {"keep_current"}
 
 
 def test_explicitly_protected_field_cannot_be_overridden() -> None:
@@ -300,6 +331,22 @@ def _selection(field: str, action: str, candidate_id: str | None = None) -> dict
         "action": action,
         "candidate_id": candidate_id,
         "reason": "Selected the strongest bounded evidence.",
+    }
+
+
+def _provider_decision(*selections: dict) -> dict:
+    return {
+        "selections": {
+            selection["field"]: {
+                "decision": (
+                    "keep_current"
+                    if selection["action"] == "keep_current"
+                    else f"select:{selection['candidate_id']}"
+                ),
+                "reason": selection["reason"],
+            }
+            for selection in selections
+        }
     }
 
 

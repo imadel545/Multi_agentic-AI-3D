@@ -128,6 +128,8 @@ class WorkflowStatus(BaseModel):
     rag_reranker_model: str | None = None
     rag_reranker_status: str | None = None
     rag_reranker_degraded_reason: str | None = None
+    rag_retrieval_status: str | None = None
+    rag_retrieval_degraded_reason: str | None = None
     memory_hits: int | None = None
     memory_context_count: int | None = None
     generation_mode: str | None = None
@@ -626,6 +628,17 @@ class ViewerQaSummary(BaseModel):
     preview_subject_touches_frame: bool | None = None
 
 
+class AssemblyConstraintSummary(BaseModel):
+    status: Literal["passed", "failed", "not_available"]
+    measurement_scope: str = Field(min_length=1)
+    required_connection_count: int = Field(ge=0)
+    measured_instance_count: int = Field(ge=0)
+    resolved_support_count: int = Field(default=0, ge=0)
+    max_position_error_m: float = Field(ge=0)
+    max_angular_error_deg: float = Field(ge=0)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class ViewerBundle(BaseModel):
     workflow_id: str
     status: str
@@ -643,6 +656,7 @@ class ViewerBundle(BaseModel):
     asset_import_summary: dict | None = None
     geometry_fidelity_summary: GeometryFidelitySummary | None = None
     geometry_program_summary: GeometryProgramSummary | None = None
+    assembly_constraint_summary: AssemblyConstraintSummary | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
     primary_glb_url: str | None = None
@@ -654,6 +668,7 @@ class ViewerBundle(BaseModel):
     extraction_report_url: str | None = None
     scene_spec_url: str | None = None
     assembly_plan_url: str | None = None
+    constraint_evidence_url: str | None = None
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None
@@ -680,6 +695,8 @@ class ViewerBundle(BaseModel):
     rag_reranker_model: str | None = None
     rag_reranker_status: str | None = None
     rag_reranker_degraded_reason: str | None = None
+    rag_retrieval_status: str | None = None
+    rag_retrieval_degraded_reason: str | None = None
     memory_context_count: int | None = None
     qa_summary: ViewerQaSummary | None = None
     viewer_artifacts: list[ViewerArtifact]

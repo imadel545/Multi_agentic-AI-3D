@@ -131,7 +131,7 @@ class NvidiaReranker:
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
         initial_diagnostics = self._diagnostics(
-            status="primary_nvidia_reranker" if api_key else "degraded_passthrough",
+            status="configured_unverified" if api_key else "degraded_passthrough",
             degraded_reason=None if api_key else "missing_nvidia_api_key",
             input_candidates=0,
             submitted_candidates=0,

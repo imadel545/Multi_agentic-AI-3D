@@ -72,6 +72,7 @@ def main() -> int:
         asset_imports,
         asset_warnings,
     )
+    _create_assembly_constraint_anchors(bpy, scene)
     camera_metadata = _create_camera_and_light(bpy, scene)
     segment_connectivity = _validate_parametric_segment_connectivity(bpy)
     component_proof_report = None
@@ -679,7 +680,28 @@ def _create_sectors(
                 },
             )
             _apply_resolved_instance_transform(bracket, bracket_instance)
+            radio_mount_instance = _assembly_operation_instance(
+                scene,
+                "radio-to-mount",
+                sector_id,
+            )
+            if radio_mount_instance is not None:
+                radio_mount_operation = _assembly_operation(scene, "radio-to-mount")
+                support_contract = _resolved_support_anchor_contract(
+                    radio_mount_operation,
+                    anchors,
+                    endpoint="target",
+                )
+                _create_radio_adapter_geometry(
+                    bpy,
+                    bracket,
+                    support_contract,
+                    radio_mount_instance,
+                    sector_id,
+                )
             bracket_operation_ids = ["assembly:mount-to-support"]
+            if radio_mount_instance is not None:
+                bracket_operation_ids.append("assembly:radio-to-mount")
         else:
             bracket_part = _create_mounting_bracket(
                 bpy,
@@ -1256,8 +1278,9 @@ def _create_cable(
     route_points: list[tuple[float, float, float]],
     *,
     diameter_m: float = 0.05,
+    name_prefix: str = "cable",
 ) -> object:
-    curve = bpy.data.curves.new(f"cable_{sector_id}", "CURVE")
+    curve = bpy.data.curves.new(f"{name_prefix}_{sector_id}", "CURVE")
     curve.dimensions = "3D"
     curve.resolution_u = 8
     curve.bevel_depth = max(0.0025, float(diameter_m) / 2.0)
@@ -1265,7 +1288,7 @@ def _create_cable(
     spline.points.add(len(route_points) - 1)
     for point, coordinate in zip(spline.points, route_points, strict=True):
         point.co = (*coordinate, 1)
-    obj = bpy.data.objects.new(f"cable_{sector_id}", curve)
+    obj = bpy.data.objects.new(f"{name_prefix}_{sector_id}", curve)
     bpy.context.collection.objects.link(obj)
     obj.data.materials.append(_material(bpy, "cable_sheath_black", (0.035, 0.045, 0.055, 1)))
     return obj
@@ -1292,6 +1315,200 @@ def _assembly_operation_instance(
         connection_id=connection_id,
         instance_id=instance_id,
     )
+
+
+def _assembly_operation(scene: dict, connection_id: str) -> dict:
+    operation = next(
+        (
+            item
+            for item in (scene.get("assembly_plan") or {}).get("operations", [])
+            if item.get("connection_id") == connection_id
+        ),
+        None,
+    )
+    if not isinstance(operation, dict):
+        raise RuntimeError(f"ASSEMBLY_OPERATION_MISSING:{connection_id}")
+    return operation
+
+
+def _resolved_support_anchor_contract(
+    operation: dict,
+    anchors: dict[str, dict],
+    *,
+    endpoint: str,
+) -> dict:
+    """Resolve a physical support only from the immutable operation snapshot."""
+
+    if endpoint not in {"source", "target"}:
+        raise RuntimeError(f"ASSEMBLY_RESOLVED_SUPPORT_ENDPOINT_INVALID:{endpoint}")
+    anchor = operation.get(f"{endpoint}_anchor")
+    role_id = operation.get(f"{endpoint}_role_id")
+    connection_id = str(operation.get("connection_id") or "")
+    operation_id = str(operation.get("operation_id") or "")
+    if not isinstance(anchor, dict) or anchor.get("placement_policy") != "resolved_from_operation":
+        raise RuntimeError(
+            f"ASSEMBLY_RESOLVED_SUPPORT_POLICY_INVALID:{operation.get('connection_id')}:{endpoint}"
+        )
+    resolved_anchor_id = str(anchor.get("anchor_id") or "")
+    support_anchor_id = str(anchor.get("resolved_support_anchor_id") or "")
+    support_anchor = anchors.get(support_anchor_id)
+    if (
+        not resolved_anchor_id
+        or not support_anchor_id
+        or not connection_id
+        or not operation_id
+        or not isinstance(role_id, str)
+        or not role_id
+        or not isinstance(support_anchor, dict)
+        or support_anchor.get("anchor_id") != support_anchor_id
+        or support_anchor.get("placement_policy", "fixed") != "fixed"
+    ):
+        raise RuntimeError(
+            f"ASSEMBLY_RESOLVED_SUPPORT_ANCHOR_INVALID:{operation.get('connection_id')}:{endpoint}"
+        )
+    return {
+        "connection_id": connection_id,
+        "operation_id": operation_id,
+        "endpoint": endpoint,
+        "role_id": str(role_id or ""),
+        "resolved_anchor_id": resolved_anchor_id,
+        "support_anchor_id": support_anchor_id,
+        "support_position_m": tuple(float(value) for value in support_anchor["position_m"]),
+    }
+
+
+def _create_radio_adapter_geometry(
+    bpy,
+    bracket_root,
+    support_contract: dict,
+    radio_instance: dict,
+    sector_id: str,
+) -> None:
+    """Build a bounded mount member up to the resolved RRU anchor.
+
+    RRU vertical/radial placement is a public edit capability. This member
+    makes that placement physical in the exported model instead of leaving a
+    plan-only offset between the bracket and the radio. It remains a
+    project-authored technical-generic component, not a load or vendor claim.
+    """
+
+    from mathutils import Vector  # type: ignore[import-not-found]
+
+    bpy.context.view_layer.update()
+    start_world = bracket_root.matrix_world @ Vector(support_contract["support_position_m"])
+    target_world = Vector(
+        tuple(float(value) for value in radio_instance["target_frame_world"]["position_m"])
+    )
+    adapter = _create_cylinder_between(
+        bpy,
+        tuple(float(value) for value in start_world),
+        tuple(float(value) for value in target_world),
+        0.025,
+        f"mount_bracket_{sector_id}_radio_adapter",
+        _material(bpy, "mount_steel", (0.42, 0.44, 0.46, 1)),
+    )
+    adapter["role"] = "radio_mount_adapter"
+    adapter["semantic_root"] = adapter.name
+    adapter["sector_id"] = sector_id
+    adapter["assembly_connection_id"] = "radio-to-mount"
+    adapter["assembly_constraint_support"] = True
+    adapter["constraint_connection_id"] = support_contract["connection_id"]
+    adapter["constraint_operation_id"] = support_contract["operation_id"]
+    adapter["constraint_instance_id"] = sector_id
+    adapter["constraint_endpoint"] = support_contract["endpoint"]
+    adapter["constraint_role_id"] = support_contract["role_id"]
+    adapter["constraint_anchor_id"] = support_contract["resolved_anchor_id"]
+    adapter["constraint_support_anchor_id"] = support_contract["support_anchor_id"]
+    adapter["qualification_scope"] = "technical_generic_not_engineering_qualified"
+
+
+def _create_assembly_constraint_anchors(bpy, scene: dict) -> None:
+    """Export resolved anchor frames as independently measurable glTF nodes."""
+
+    plan = scene.get("assembly_plan") or {}
+    if plan.get("schema_version") != "1.1.0" or plan.get("compilation_status") != "resolved":
+        return
+    required_mechanical = {
+        str(connection["connection_id"])
+        for connection in plan.get("connections") or []
+        if connection.get("required") is True and connection.get("kind") == "mechanical"
+    }
+    for operation in plan.get("operations") or []:
+        connection_id = str(operation.get("connection_id") or "")
+        if operation.get("kind") != "mechanical" or connection_id not in required_mechanical:
+            continue
+        operation_id = str(operation.get("operation_id") or "")
+        endpoints = (
+            (
+                "source",
+                str(operation.get("source_role_id") or ""),
+                operation.get("source_anchor") or {},
+                "source_frame_world",
+            ),
+            (
+                "target",
+                str(operation.get("target_role_id") or ""),
+                operation.get("target_anchor") or {},
+                "target_frame_world",
+            ),
+        )
+        for instance in operation.get("instances") or []:
+            instance_id = str(instance.get("instance_id") or "")
+            for endpoint, role_id, anchor, frame_key in endpoints:
+                if anchor.get("placement_policy", "fixed") == "fixed":
+                    continue
+                _create_assembly_constraint_anchor(
+                    bpy,
+                    frame=instance.get(frame_key) or {},
+                    connection_id=connection_id,
+                    operation_id=operation_id,
+                    instance_id=instance_id,
+                    endpoint=endpoint,
+                    role_id=role_id,
+                    anchor_id=str(anchor.get("anchor_id") or ""),
+                )
+
+
+def _create_assembly_constraint_anchor(
+    bpy,
+    *,
+    frame: dict,
+    connection_id: str,
+    operation_id: str,
+    instance_id: str,
+    endpoint: str,
+    role_id: str,
+    anchor_id: str,
+) -> None:
+    from mathutils import Matrix, Vector  # type: ignore[import-not-found]
+
+    position = Vector(tuple(float(value) for value in frame["position_m"]))
+    normal = Vector(tuple(float(value) for value in frame["normal"])).normalized()
+    up = Vector(tuple(float(value) for value in frame["up"])).normalized()
+    lateral = up.cross(normal).normalized()
+    corrected_up = normal.cross(lateral).normalized()
+    marker = bpy.data.objects.new(
+        f"assembly_anchor_{connection_id}_{instance_id}_{endpoint}",
+        None,
+    )
+    bpy.context.collection.objects.link(marker)
+    marker.empty_display_type = "ARROWS"
+    marker.empty_display_size = 0.08
+    marker.matrix_world = Matrix(
+        (
+            (normal.x, lateral.x, corrected_up.x, position.x),
+            (normal.y, lateral.y, corrected_up.y, position.y),
+            (normal.z, lateral.z, corrected_up.z, position.z),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+    )
+    marker["assembly_constraint_anchor"] = True
+    marker["constraint_connection_id"] = connection_id
+    marker["constraint_operation_id"] = operation_id
+    marker["constraint_instance_id"] = instance_id
+    marker["constraint_endpoint"] = endpoint
+    marker["constraint_role_id"] = role_id
+    marker["constraint_anchor_id"] = anchor_id
 
 
 def _component_execution_properties(
@@ -1396,17 +1613,24 @@ def _create_remaining_assembly_routes(
             if len(route_points) < 2:
                 raise RuntimeError(f"ASSEMBLY_ROUTE_POINTS_MISSING:{operation['connection_id']}")
             instance_id = str(instance["instance_id"])
-            name = f"connection_{operation['connection_id']}_{instance_id}"
+            connection_kind = str(operation["kind"])
+            name = f"{operation['connection_id']}_{instance_id}"
+            semantic_name, semantic_role = _assembly_route_object_identity(
+                connection_kind,
+                str(operation["connection_id"]),
+                instance_id,
+            )
             connection = _create_cable(
                 bpy,
                 name,
                 route_points,
                 diameter_m=0.018,
+                name_prefix=semantic_role,
             )
             _set_semantic_properties(
                 connection,
-                role="connection",
-                semantic_root=name,
+                role=semantic_role,
+                semantic_root=semantic_name,
                 sector_id=instance_id if instance_id != "global" else None,
                 properties={
                     "assembly_operation_ids": operation_id,
@@ -1418,6 +1642,19 @@ def _create_remaining_assembly_routes(
             procedural_objects.append(
                 f"assembly_connection:{operation['connection_id']}:{instance_id}"
             )
+
+
+def _assembly_route_object_identity(
+    connection_kind: str,
+    connection_id: str,
+    instance_id: str,
+) -> tuple[str, str]:
+    """Keep non-cable assembly links out of the product cable count."""
+
+    if connection_kind not in {"power", "fiber", "rf", "grounding", "routing"}:
+        raise RuntimeError(f"ASSEMBLY_ROUTE_KIND_UNSUPPORTED:{connection_kind}")
+    semantic_role = f"{connection_kind}_connection"
+    return f"{semantic_role}_{connection_id}_{instance_id}", semantic_role
 
 
 def _create_beam(

@@ -269,6 +269,8 @@ export const StudioSummarySchema = publicSchema(
     rag_reranker_model: z.string().nullish(),
     rag_reranker_status: z.string().nullish(),
     rag_reranker_degraded_reason: z.string().nullish(),
+    rag_retrieval_status: z.string().nullish(),
+    rag_retrieval_degraded_reason: z.string().nullish(),
     memory_status: z.string().nullish(),
     runtime_capabilities: RuntimeCapabilitiesSchema.nullish(),
     unsupported_actions: z.array(UnsupportedActionSchema).default([]),
@@ -336,6 +338,8 @@ export const WorkflowStatusSchema = publicSchema(
     rag_reranker_model: z.string().nullish(),
     rag_reranker_status: z.string().nullish(),
     rag_reranker_degraded_reason: z.string().nullish(),
+    rag_retrieval_status: z.string().nullish(),
+    rag_retrieval_degraded_reason: z.string().nullish(),
     memory_context_count: z.number().nullish(),
     asset_import_summary: UnknownRecord.nullish(),
     runtime_capabilities: RuntimeCapabilitiesSchema.nullish(),
@@ -541,6 +545,19 @@ export const AssetDecisionSummarySchema = publicSchema(
   })
 );
 
+export const AssemblyConstraintSummarySchema = publicSchema(
+  UnknownRecord.extend({
+    status: z.enum(["passed", "failed", "not_available"]),
+    measurement_scope: z.string().min(1),
+    required_connection_count: z.number().int().nonnegative(),
+    measured_instance_count: z.number().int().nonnegative(),
+    resolved_support_count: z.number().int().nonnegative().default(0),
+    max_position_error_m: z.number().nonnegative(),
+    max_angular_error_deg: z.number().nonnegative(),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
@@ -554,6 +571,7 @@ export const ViewerBundleSchema = publicSchema(
     asset_import_summary: UnknownRecord.nullish(),
     geometry_fidelity_summary: GeometryFidelitySummarySchema.nullish(),
     geometry_program_summary: GeometryProgramSummarySchema.nullish(),
+    assembly_constraint_summary: AssemblyConstraintSummarySchema.nullish(),
     human_warnings_count: z.number().default(0),
     human_errors_count: z.number().default(0),
     primary_glb_url: z.string().nullish(),
@@ -562,6 +580,7 @@ export const ViewerBundleSchema = publicSchema(
     metadata_url: z.string().nullish(),
     scene_spec_url: z.string().nullish(),
     assembly_plan_url: z.string().nullish(),
+    constraint_evidence_url: z.string().nullish(),
     qa_report_url: z.string().nullish(),
     generation_report_url: z.string().nullish(),
     geometry_validation_url: z.string().nullish(),
@@ -586,6 +605,8 @@ export const ViewerBundleSchema = publicSchema(
     rag_reranker_model: z.string().nullish(),
     rag_reranker_status: z.string().nullish(),
     rag_reranker_degraded_reason: z.string().nullish(),
+    rag_retrieval_status: z.string().nullish(),
+    rag_retrieval_degraded_reason: z.string().nullish(),
     memory_context_count: z.number().nullish(),
     multimodal_consent: MultimodalConsentSchema.optional(),
     multimodal_intelligence: MultimodalIntelligenceSchema.nullish(),

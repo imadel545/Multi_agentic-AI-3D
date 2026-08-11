@@ -28,7 +28,8 @@
   "anchors": [
     {"anchor_id": "tower_clamp", "position_m": [-0.4, 0, 0], "normal": [-1, 0, 0], "roles": ["tower_mount"]},
     {"anchor_id": "antenna_rail", "position_m": [0.4, 0, 0], "normal": [1, 0, 0], "roles": ["antenna_mount"]},
-    {"anchor_id": "radio_rail", "position_m": [0.2, -0.16, -0.8], "normal": [1, 0, 0], "roles": ["radio_mount"]}
+    {"anchor_id": "radio_adapter_base", "position_m": [0.2, -0.16, -0.8], "normal": [1, 0, 0], "roles": ["radio_adapter_support"]},
+    {"anchor_id": "radio_rail", "position_m": [0.2, -0.16, -0.8], "normal": [1, 0, 0], "placement_policy": "resolved_from_operation", "resolved_support_anchor_id": "radio_adapter_base", "roles": ["radio_mount"]}
   ],
   "connectors": [
     {"connector_id": "tower_clamp", "kind": "mechanical", "gender": "source", "anchor_id": "tower_clamp", "compatible_connector_kinds": ["mechanical"]},

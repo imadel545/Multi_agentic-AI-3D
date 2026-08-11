@@ -109,6 +109,7 @@ Noms d'artifact utilisés par le frontend :
 - `design_blueprint` → `design_blueprint.json`
 - `assembly_plan` → `assembly_plan.json`
 - `component_proofs` → `component_proofs.json`
+- `constraint_evidence` → `constraint_evidence.json`
 - `blueprint_requirement_coverage` → `blueprint_requirement_coverage.json`
 - `blueprint_scene_coverage` → `blueprint_scene_coverage.json`
 
@@ -274,6 +275,8 @@ visible and ask the user to clean temporary artifacts before retrying.
 - `scene_spec_url`
 - `assembly_plan_url`
 - `component_proofs_url`
+- `constraint_evidence_url`
+- `assembly_constraint_summary`
 - `qa_report_url`
 - `generation_report_url`
 - `geometry_validation_url`
@@ -315,6 +318,19 @@ URL ouvre la preuve par composant (`reuse`, `adapt`, `compose` ou
 `procedural_generate`), ses paramètres, sa transformation, son empreinte et ses
 contrôles locaux.
 
+`constraint_evidence_url` et `assembly_constraint_summary` sont présents
+uniquement pour une version certifiée qui contient une preuve valide. Le résumé
+expose `status`, `measurement_scope=exported_glb_anchor_frames`, le nombre de
+connexions requises, le nombre d'instances mécaniques mesurées,
+`resolved_support_count`, les erreurs
+maximales de position/orientation et les limitations. L'UI doit distinguer les
+connexions requises non mécaniques des liaisons mécaniques mesurées et rappeler
+qu'un support observé prouve seulement un mesh exporté avec l'identité attendue:
+ni contact, visserie, transmission de charge, fabrication, validation
+d'ingénierie ou preuve professionnelle ne sont établis. Un fichier
+`constraint_evidence.json` parasite d'une version non-assembly est exclu du
+viewer bundle, du service d'artefact et de l'archive publique.
+
 `asset_decision_summary` présente par composant la stratégie sémantique
 publique (`reuse_full_design`, `adapt_full_design`, `reuse_component`,
 `adapt_component`, `compose_assets`, `compose_and_generate`,
@@ -327,9 +343,14 @@ déterministe, ni certifier une dimension ou une scène.
 
 `assembly_plan.json` schema `1.1.0` expose notamment les candidats scorés, le
 candidat choisi, la stratégie choisie, `selection_provider`, `selection_model`,
-la capability et la version `bounded_asset_selection@1.1.0`, les snapshots de manifest/builder, les
+la capability et la version `bounded_asset_selection@1.2.0`, les snapshots de manifest/builder, les
 connecteurs et les opérations hashées. Une décision Groq reste limitée aux IDs
 fournis; la validation, les unités et les opérations restent déterministes.
+Le provider reçoit un mapping fermé `role_id -> choice_id`; le tuple
+asset/génération/stratégie est reconstruit localement. Seul
+`model_output_rejected` autorise un second appel immédiat. Auth, rate-limit,
+timeout et transport ne sont pas rejoués par ce client; après deux rejets, le
+fallback déterministe reste public.
 
 `geometry_program_summary` expose uniquement une preuve bornée:
 
@@ -352,11 +373,17 @@ comme une sortie strictement décodée.
 - `rag_used_for_planning=true` seulement si un `payload.planning_hints`
   structuré, validé et autorisé a réellement été appliqué.
 - `rag_context_count` seul ne prouve pas que le RAG a changé le `SceneSpec`.
+- `rag_retrieval_status` distingue `primary_vector`, cache vectoriel et
+  `degraded_local_lexical`; `rag_retrieval_degraded_reason` expose la catégorie
+  de panne sans secret.
 - `candidate_hint_fields` et `controlled_hint_fields` expliquent les champs
   candidats et les champs autorisés.
 - `top_contexts[].source_path` est relatif au repo, jamais `/Users/...`.
 - `rag_evidence_url` ouvre `rag_evidence.json`: sources RAG, hints contrôlés,
-  hints rejetés, politique et statut reranker.
+  hints rejetés, politique, statut retrieval et statut reranker. Les champs
+  workflow `llm_fallback_*` décrivent l'extraction principale; la sélection
+  d'assets possède sa vérité distincte dans `assembly_plan.selection_authority`,
+  `assembly_plan.llm_fallback_*` et `asset_decision_summary`.
 
 ## Séquence frontend recommandée
 
@@ -392,8 +419,10 @@ Le frontend doit rendre:
 Le frontend M0 ne doit conserver aucun succès obsolète après une erreur ou un
 changement de version. Les ressources GLB/WebGL, assets, QA, RAG, provenance,
 documents et versions ont des états de chargement/erreur/retry indépendants. La
-suite courante compte 145 tests Vitest et passe le typecheck/build; le smoke
-navigateur connecté reste une gate distincte et non encore confirmée.
+suite courante compte 167 tests Vitest et passe le typecheck/build. Un smoke
+connecté current-tree a confirmé la création, le flux SSE, le GLB/WebGL réel,
+le RAG et les drawers; les mutations navigateur exhaustives restent une gate
+distincte ouverte.
 
 `/designs/{id}/edit` expose, en cas de succès:
 

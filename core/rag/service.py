@@ -72,6 +72,13 @@ class _CachedRagSearch:
     diagnostics: RerankDiagnostics | None
 
 
+@dataclass(frozen=True, slots=True)
+class RetrievalDiagnostics:
+    status: str
+    degraded_reason: str | None
+    candidate_count: int
+
+
 @dataclass(slots=True)
 class _ReindexFlight:
     completed: threading.Event = field(default_factory=threading.Event)
@@ -126,6 +133,12 @@ class RagService:
         self._last_rerank_diagnostics: contextvars.ContextVar[RerankDiagnostics | None] = (
             contextvars.ContextVar(
                 f"rag_service_rerank_diagnostics_{id(self)}",
+                default=None,
+            )
+        )
+        self._last_retrieval_diagnostics: contextvars.ContextVar[RetrievalDiagnostics | None] = (
+            contextvars.ContextVar(
+                f"rag_service_retrieval_diagnostics_{id(self)}",
                 default=None,
             )
         )
@@ -199,12 +212,16 @@ class RagService:
         created_collections: list[str] = []
 
         try:
+            all_points = self._points_for_documents(documents)
+            points_by_collection: dict[str, list[PointStruct]] = defaultdict(list)
+            for document, point in zip(documents, all_points, strict=True):
+                points_by_collection[document.collection].append(point)
             for collection in RAG_COLLECTIONS:
                 collection_docs = grouped.get(collection, [])
                 staged_name = staged_collections[collection]
                 self._create_collection(staged_name)
                 created_collections.append(staged_name)
-                points = self._points_for_documents(collection_docs)
+                points = points_by_collection.get(collection, [])
                 for point_batch in _batches(points, _POINT_UPSERT_BATCH_SIZE):
                     self.client.upsert(
                         collection_name=staged_name,
@@ -256,6 +273,8 @@ class RagService:
         collection: str | None = None,
         filters: dict[str, str | int | float | bool | None] | None = None,
     ) -> list[RagSearchResult]:
+        self._last_retrieval_diagnostics.set(None)
+        self._last_rerank_diagnostics.set(None)
         allowed_collections = {*RAG_COLLECTIONS, *RUNTIME_MEMORY_COLLECTIONS}
         if collection is not None and collection not in allowed_collections:
             raise ValueError(f"unsupported RAG collection: {collection}")
@@ -264,6 +283,15 @@ class RagService:
                 self._ensure_static_index_current()
         except Exception as exc:
             self._record_failure("search:index", exc)
+            if collection is None or collection in RAG_COLLECTIONS:
+                return self._static_lexical_fallback(
+                    query,
+                    limit=limit,
+                    collection=collection,
+                    filters=filters,
+                    error=exc,
+                    failure_stage="index",
+                )
             raise
         collections = [collection] if collection else RAG_COLLECTIONS
         cacheable = collection not in RUNTIME_MEMORY_COLLECTIONS
@@ -281,11 +309,27 @@ class RagService:
                 cached = self.query_cache.get(query_hash)
             if cached is not None:
                 self._restore_rerank_diagnostics(cached.diagnostics)
+                self._last_retrieval_diagnostics.set(
+                    RetrievalDiagnostics(
+                        status="primary_vector_cache",
+                        degraded_reason=None,
+                        candidate_count=len(cached.results),
+                    )
+                )
                 return cached.results
         try:
             vector = _embed_query(self.embedding_provider, query)
         except Exception as exc:
             self._record_failure("search:embedding", exc)
+            if collection is None or collection in RAG_COLLECTIONS:
+                return self._static_lexical_fallback(
+                    query,
+                    limit=limit,
+                    collection=collection,
+                    filters=filters,
+                    error=exc,
+                    failure_stage="embedding",
+                )
             raise
         query_tokens = _tokenize(query)
         results: list[RagSearchResult] = []
@@ -332,6 +376,17 @@ class RagService:
                     )
         sorted_results = sorted(results, key=lambda result: result.score, reverse=True)
         reranked = self._rerank(query, sorted_results, top_k=limit)
+        retrieval_diagnostics = RetrievalDiagnostics(
+            status="primary_vector",
+            degraded_reason=None,
+            candidate_count=len(sorted_results),
+        )
+        self._last_retrieval_diagnostics.set(retrieval_diagnostics)
+        reranked = _annotate_rag_results(
+            reranked,
+            retrieval=retrieval_diagnostics,
+            reranker=self.last_rerank_diagnostics,
+        )
         diagnostics = self.last_rerank_diagnostics
         if cacheable:
             with self._cache_lock:
@@ -341,6 +396,59 @@ class RagService:
                 )
         self._record_success("search")
         return reranked
+
+    def _static_lexical_fallback(
+        self,
+        query: str,
+        *,
+        limit: int,
+        collection: str | None,
+        filters: dict[str, str | int | float | bool | None] | None,
+        error: BaseException,
+        failure_stage: str,
+    ) -> list[RagSearchResult]:
+        """Retrieve from the real local corpus when remote embeddings are unavailable."""
+        query_tokens = set(_tokenize(query))
+        candidates: list[RagSearchResult] = []
+        for document in load_rag_documents(self.project_root):
+            if collection is not None and document.collection != collection:
+                continue
+            if not _payload_matches_filters(document.payload, filters):
+                continue
+            document_tokens = set(_tokenize(document.text))
+            overlap = query_tokens & document_tokens
+            if not overlap:
+                continue
+            score = len(overlap) / max(1.0, (len(query_tokens) * len(document_tokens)) ** 0.5)
+            candidates.append(
+                RagSearchResult(
+                    collection=document.collection,
+                    doc_id=document.doc_id,
+                    score=score,
+                    text=document.text,
+                    payload=document.payload
+                    | {
+                        "retrieval_mode": "local_lexical_fallback",
+                        "retrieval_degraded_reason": _retrieval_error_reason(
+                            error, stage=failure_stage
+                        ),
+                    },
+                )
+            )
+        candidates.sort(key=lambda result: (-result.score, result.collection, result.doc_id))
+        selected = candidates[: max(limit * 4, limit)]
+        reranked = self._rerank(query, selected, top_k=limit)
+        retrieval_diagnostics = RetrievalDiagnostics(
+            status="degraded_local_lexical",
+            degraded_reason=_retrieval_error_reason(error, stage=failure_stage),
+            candidate_count=len(selected),
+        )
+        self._last_retrieval_diagnostics.set(retrieval_diagnostics)
+        return _annotate_rag_results(
+            reranked,
+            retrieval=retrieval_diagnostics,
+            reranker=self.last_rerank_diagnostics,
+        )
 
     def cache_stats(self) -> dict[str, int]:
         with self._cache_lock:
@@ -822,6 +930,11 @@ class RagService:
         """Diagnostics isolated to the current thread or asynchronous task context."""
         return self._last_rerank_diagnostics.get()
 
+    @property
+    def last_retrieval_diagnostics(self) -> RetrievalDiagnostics | None:
+        """Retrieval diagnostics isolated to the current workflow execution context."""
+        return self._last_retrieval_diagnostics.get()
+
     def _create_collection(self, collection: str) -> None:
         self.client.create_collection(
             collection_name=collection,
@@ -1067,6 +1180,48 @@ def _embed_passages(
     if callable(embed_many):
         return embed_many(texts)
     return [provider.embed(text) for text in texts]
+
+
+def _payload_matches_filters(
+    payload: dict,
+    filters: dict[str, str | int | float | bool | None] | None,
+) -> bool:
+    if not filters:
+        return True
+    for key, expected in filters.items():
+        actual = payload.get(key)
+        if isinstance(actual, list):
+            if expected not in actual:
+                return False
+        elif actual != expected:
+            return False
+    return True
+
+
+def _retrieval_error_reason(error: BaseException, *, stage: str) -> str:
+    if stage not in {"index", "embedding"}:
+        raise ValueError(f"unsupported retrieval failure stage: {stage}")
+    name = type(error).__name__.lower()
+    if "timeout" in name:
+        return f"{stage}_timeout"
+    return f"{stage}_error:{type(error).__name__}"
+
+
+def _annotate_rag_results(
+    results: list[RagSearchResult],
+    *,
+    retrieval: RetrievalDiagnostics,
+    reranker: RerankDiagnostics | None,
+) -> list[RagSearchResult]:
+    annotation = {
+        "retrieval_mode": retrieval.status,
+        "retrieval_degraded_reason": retrieval.degraded_reason,
+        "reranker_status": reranker.status if reranker is not None else "not_recorded",
+        "reranker_degraded_reason": reranker.degraded_reason if reranker is not None else None,
+    }
+    return [
+        result.model_copy(update={"payload": result.payload | annotation}) for result in results
+    ]
 
 
 def _batches[T](items: Sequence[T], batch_size: int) -> Iterator[list[T]]:

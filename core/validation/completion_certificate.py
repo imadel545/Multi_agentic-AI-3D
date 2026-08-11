@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.blueprint_composer import design_blueprint_hash
+from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.completion import (
     CertifiedArtifact,
@@ -30,6 +32,14 @@ _M0_CERTIFIED_ARTIFACTS = (
     "component_proofs",
     "build_lock",
 )
+_ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS = (
+    "glb",
+    "preview",
+    "metadata",
+    "component_proofs",
+    "constraint_evidence",
+    "build_lock",
+)
 
 
 def build_completion_certificate(
@@ -50,7 +60,7 @@ def build_completion_certificate(
     post_blender_gate: QualityGateReport | None,
     cognitive_plan: CognitiveDesignPlan | None = None,
 ) -> CompletionCertificate:
-    if cognitive_plan is not None:
+    if cognitive_plan is not None and not _assembly_constraint_evidence_required(scene):
         return _build_cognitive_completion_certificate(
             workflow_id=workflow_id,
             cognitive_plan=cognitive_plan,
@@ -71,9 +81,13 @@ def build_completion_certificate(
             or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
         )
     )
-    certified_artifact_names = (
-        _M0_CERTIFIED_ARTIFACTS if component_proof_required else _BASE_CERTIFIED_ARTIFACTS
-    )
+    constraint_evidence_required = _assembly_constraint_evidence_required(scene)
+    if constraint_evidence_required:
+        certified_artifact_names = _ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS
+    elif component_proof_required:
+        certified_artifact_names = _M0_CERTIFIED_ARTIFACTS
+    else:
+        certified_artifact_names = _BASE_CERTIFIED_ARTIFACTS
     artifacts = _artifact_evidence(generation, certified_artifact_names)
     requirements_sha256 = requirements_hash(requirements) if requirements else "0" * 64
     blueprint_sha256 = (
@@ -125,14 +139,35 @@ def build_completion_certificate(
             generation,
             scene,
         )
+    if constraint_evidence_required:
+        checks["assembly_constraint_evidence_verified"] = _constraint_evidence_verified(
+            generation,
+            scene,
+        )
     blockers = [name for name, passed in checks.items() if not passed]
+    constraint_evidence_path = (
+        Path(generation.artifacts["constraint_evidence"])
+        if generation is not None and generation.artifacts.get("constraint_evidence")
+        else None
+    )
     return CompletionCertificate(
-        schema_version="1.2.0" if component_proof_required else "1.1.0",
+        schema_version=(
+            "1.4.0"
+            if constraint_evidence_required
+            else "1.2.0"
+            if component_proof_required
+            else "1.1.0"
+        ),
         workflow_id=workflow_id,
         status="issued" if not blockers else "rejected",
         evaluated_at=datetime.now(UTC),
         requirements_sha256=requirements_sha256,
         design_blueprint_sha256=blueprint_sha256,
+        constraint_evidence_sha256=(
+            _sha256(constraint_evidence_path)
+            if constraint_evidence_path is not None and constraint_evidence_path.is_file()
+            else None
+        ),
         scene_spec_sha256=scene_sha256,
         generation_mode=generation.mode if generation else None,
         artifacts=artifacts,
@@ -150,7 +185,11 @@ def verify_completion_certificate(
     generation: GenerationResult | None,
     cognitive_plan: CognitiveDesignPlan | None = None,
 ) -> bool:
-    if certificate is not None and certificate.schema_version == "1.3.0":
+    if (
+        certificate is not None
+        and certificate.schema_version == "1.3.0"
+        and not _assembly_constraint_evidence_required(scene)
+    ):
         return _verify_cognitive_completion_certificate(
             certificate,
             cognitive_plan=cognitive_plan,
@@ -171,11 +210,17 @@ def verify_completion_certificate(
         or certificate.scene_spec_sha256 != scene_spec_hash(scene)
     ):
         return False
-    certified_artifact_names = (
-        _M0_CERTIFIED_ARTIFACTS
-        if certificate.schema_version == "1.2.0"
-        else _BASE_CERTIFIED_ARTIFACTS
-    )
+    constraint_evidence_required = _assembly_constraint_evidence_required(scene)
+    if constraint_evidence_required != (certificate.schema_version == "1.4.0"):
+        return False
+    certified_artifact_names = {
+        "1.0.0": _BASE_CERTIFIED_ARTIFACTS,
+        "1.1.0": _BASE_CERTIFIED_ARTIFACTS,
+        "1.2.0": _M0_CERTIFIED_ARTIFACTS,
+        "1.4.0": _ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS,
+    }.get(certificate.schema_version)
+    if certified_artifact_names is None:
+        return False
     expected = {artifact.logical_name: artifact for artifact in certificate.artifacts}
     if set(expected) != set(certified_artifact_names):
         return False
@@ -192,6 +237,12 @@ def verify_completion_certificate(
             or _sha256(path) != artifact.sha256
         ):
             return False
+    if certificate.schema_version == "1.4.0" and (
+        not _constraint_evidence_verified(generation, scene)
+        or certificate.constraint_evidence_sha256
+        != _sha256(Path(generation.artifacts["constraint_evidence"]))
+    ):
+        return False
     return True
 
 
@@ -241,8 +292,7 @@ def _build_cognitive_completion_certificate(
             and glb_inspection.primitive_count > 0
         ),
         "geometry_program_mesh_coverage_complete": bool(
-            glb_inspection
-            and glb_inspection.checks.get("geometry_program_mesh_coverage") is True
+            glb_inspection and glb_inspection.checks.get("geometry_program_mesh_coverage") is True
         ),
         "geometry_validation_passed": bool(
             geometry_validation and geometry_validation.status == "passed"
@@ -402,6 +452,56 @@ def _component_proof_verified(
         and proof.get("operation_execution", {}).get("passed") is True
         and all(item.get("strategy") in proof_strategies for item in proofs)
         and all(item.get("qa", {}).get("passed") is True for item in proofs)
+    )
+
+
+def _constraint_evidence_verified(
+    generation: GenerationResult | None,
+    scene: SceneSpec,
+) -> bool:
+    if (
+        generation is None
+        or scene.assembly_plan is None
+        or scene.assembly_plan.schema_version != "1.1.0"
+    ):
+        return False
+    evidence_value = generation.artifacts.get("constraint_evidence")
+    glb_value = generation.artifacts.get("glb")
+    if not evidence_value or not glb_value:
+        return False
+    evidence_path = Path(evidence_value)
+    glb_path = Path(glb_value)
+    if not evidence_path.is_file() or not glb_path.is_file():
+        return False
+    try:
+        evidence = AssemblyConstraintEvidence.model_validate_json(
+            evidence_path.read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    return bool(
+        evidence.status == "passed"
+        and evidence.workflow_id == scene.scene_id
+        and evidence.glb_sha256 == _sha256(glb_path)
+        and evidence.assembly_plan_sha256
+        == _canonical_payload_sha256(scene.assembly_plan.model_dump(mode="json"))
+    )
+
+
+def _canonical_payload_sha256(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _assembly_constraint_evidence_required(scene: SceneSpec | None) -> bool:
+    return bool(
+        scene and scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
     )
 
 

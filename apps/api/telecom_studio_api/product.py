@@ -24,6 +24,7 @@ from apps.api.telecom_studio_api.runtime_contract import (
     unsupported_actions,
 )
 from apps.api.telecom_studio_api.workflow import WorkflowService
+from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.services.asset_inventory import AssetInventoryService
 
@@ -272,6 +273,9 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("assembly_plan.json", "application/json", "assembly_plan")
         )
+        viewer_artifacts.append(
+            _artifact("constraint_evidence.json", "application/json", "constraint_evidence")
+        )
         viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
         viewer_artifacts.append(
             _artifact("generation_report.json", "application/json", "generation_report")
@@ -321,6 +325,7 @@ class ProductService:
         extraction_report = _artifact_by_name(viewer_artifacts, "extraction_report.json")
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         assembly_plan = _artifact_by_name(viewer_artifacts, "assembly_plan.json")
+        constraint_evidence = _artifact_by_name(viewer_artifacts, "constraint_evidence.json")
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
         rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
@@ -345,6 +350,7 @@ class ProductService:
             if verified_snapshot is not None and "assembly_plan" in verified_artifacts
             else None
         )
+        constraint_evidence_path = verified_artifacts.get("constraint_evidence")
 
         return {
             "workflow_id": workflow_id,
@@ -353,6 +359,9 @@ class ProductService:
             "multimodal_consent": status.get("multimodal_consent", "disabled"),
             "multimodal_intelligence": runtime["multimodal_intelligence"],
             "asset_decision_summary": _asset_decision_summary(verified_assembly_plan),
+            "assembly_constraint_summary": _assembly_constraint_summary_from_path(
+                constraint_evidence_path
+            ),
             "visual_review": _visual_review_summary(
                 status,
                 runtime["multimodal_intelligence"],
@@ -377,6 +386,7 @@ class ProductService:
             "extraction_report_url": _available_artifact_url(extraction_report),
             "scene_spec_url": _available_artifact_url(scene_spec),
             "assembly_plan_url": _available_artifact_url(assembly_plan),
+            "constraint_evidence_url": _available_artifact_url(constraint_evidence),
             "qa_report_url": _available_artifact_url(qa_report),
             "generation_report_url": _available_artifact_url(generation_report),
             "rag_evidence_url": _available_artifact_url(rag_evidence),
@@ -403,6 +413,8 @@ class ProductService:
             "rag_reranker_model": status.get("rag_reranker_model"),
             "rag_reranker_status": status.get("rag_reranker_status"),
             "rag_reranker_degraded_reason": status.get("rag_reranker_degraded_reason"),
+            "rag_retrieval_status": status.get("rag_retrieval_status"),
+            "rag_retrieval_degraded_reason": status.get("rag_retrieval_degraded_reason"),
             "memory_context_count": status.get("memory_context_count"),
             "qa_summary": _viewer_qa_summary(status),
             "viewer_artifacts": viewer_artifacts,
@@ -789,6 +801,48 @@ def _available_actions(status: dict, issues: list[dict]) -> list[str]:
 
 
 _GEOMETRY_FIDELITIES = ("schematic", "technical_generic", "vendor_qualified")
+
+
+def _assembly_constraint_summary_from_path(path: Path | None) -> dict | None:
+    if path is None or not path.is_file():
+        return None
+    try:
+        evidence = AssemblyConstraintEvidence.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    max_position_error_m = max(
+        (measurement.position_error_m for measurement in evidence.measurements),
+        default=0.0,
+    )
+    max_angular_error_deg = max(
+        (
+            max(
+                measurement.normal_opposition_error_deg,
+                measurement.up_alignment_error_deg,
+            )
+            for measurement in evidence.measurements
+        ),
+        default=0.0,
+    )
+    required_connection_count = len(
+        {measurement.connection_id for measurement in evidence.measurements}
+        | {connection.connection_id for connection in evidence.unevaluated_required_connections}
+    )
+    resolved_support_count = sum(
+        frame.resolved_support is not None
+        for measurement in evidence.measurements
+        for frame in (measurement.source_frame, measurement.target_frame)
+    )
+    return {
+        "status": evidence.status,
+        "measurement_scope": "exported_glb_anchor_frames",
+        "required_connection_count": required_connection_count,
+        "measured_instance_count": evidence.measured_constraint_count,
+        "resolved_support_count": resolved_support_count,
+        "max_position_error_m": float(max_position_error_m),
+        "max_angular_error_deg": float(max_angular_error_deg),
+        "limitations": evidence.limitations,
+    }
 
 
 def _asset_decision_summary_from_path(path: Path | None) -> dict | None:

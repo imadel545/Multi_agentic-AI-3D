@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from core.contracts.common import StrictModel
 
@@ -31,6 +31,7 @@ class CertifiedArtifact(StrictModel):
         "preview",
         "metadata",
         "component_proofs",
+        "constraint_evidence",
         "build_lock",
     ]
     file_name: str = Field(min_length=1)
@@ -39,7 +40,7 @@ class CertifiedArtifact(StrictModel):
 
 
 class CompletionCertificate(StrictModel):
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"] = "1.0.0"
     workflow_id: str = Field(min_length=1)
     status: Literal["issued", "rejected"]
     evaluated_at: datetime
@@ -49,8 +50,19 @@ class CompletionCertificate(StrictModel):
         pattern=r"^[a-f0-9]{64}$",
     )
     cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    constraint_evidence_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     scene_spec_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     generation_mode: str | None = None
     artifacts: list[CertifiedArtifact] = Field(default_factory=list)
     checks: dict[str, bool] = Field(default_factory=dict)
     blockers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_constraint_hash_for_issued_v1_4(self) -> CompletionCertificate:
+        if (
+            self.schema_version == "1.4.0"
+            and self.status == "issued"
+            and self.constraint_evidence_sha256 is None
+        ):
+            raise ValueError("completion certificate 1.4 requires constraint evidence hash")
+        return self

@@ -34,6 +34,68 @@ def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
     )
 
 
+def test_static_reindex_embeds_the_cross_collection_corpus_in_one_batch(tmp_path: Path) -> None:
+    class CountingEmbeddingProvider(HashEmbeddingProvider):
+        def __init__(self) -> None:
+            super().__init__(dimensions=32)
+            self.passage_calls = 0
+
+        def embed_passages(self, texts) -> list[list[float]]:
+            self.passage_calls += 1
+            return super().embed_passages(texts)
+
+    provider = CountingEmbeddingProvider()
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=provider,
+        reranker=PassthroughReranker(),
+    )
+
+    report = service.reindex()
+
+    assert report.total_documents > 0
+    assert provider.passage_calls == 1
+
+
+def test_static_rag_uses_visible_local_lexical_fallback_when_embeddings_fail(
+    tmp_path: Path,
+) -> None:
+    class TimedOutEmbeddingProvider:
+        name = "nvidia:test-timeout"
+        dimensions = 8
+
+        def embed(self, text: str) -> list[float]:
+            raise TimeoutError("remote embedding timed out")
+
+        def embed_many(self, texts) -> list[list[float]]:
+            raise TimeoutError("remote embedding timed out")
+
+        def embed_query(self, text: str) -> list[float]:
+            raise TimeoutError("remote embedding timed out")
+
+        def embed_passages(self, texts) -> list[list[float]]:
+            raise TimeoutError("remote embedding timed out")
+
+    service = RagService(
+        project_root=Path.cwd(),
+        qdrant_path=tmp_path / "qdrant",
+        embedding_provider=TimedOutEmbeddingProvider(),
+        reranker=PassthroughReranker(),
+    )
+
+    results = service.search("site 5G pylone trois secteurs RRU", limit=5)
+
+    assert results
+    assert all(result.payload["retrieval_mode"] == "degraded_local_lexical" for result in results)
+    assert all(result.payload["retrieval_degraded_reason"] == "index_timeout" for result in results)
+    assert all(result.payload["reranker_status"] == "not_recorded" for result in results)
+    assert service.last_retrieval_diagnostics is not None
+    assert service.last_retrieval_diagnostics.status == "degraded_local_lexical"
+    assert service.last_retrieval_diagnostics.degraded_reason == "index_timeout"
+    assert service.health_snapshot()["status"] == "failed"
+
+
 def test_rag_search_reindexes_when_docs_change(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     (project_root / "docs").mkdir(parents=True)
@@ -249,6 +311,15 @@ def test_nvidia_reranker_uses_remote_scores_without_real_network() -> None:
 
     assert [result.doc_id for result in reranked] == ["b", "a"]
     assert reranker.status == "primary_nvidia_reranker"
+    assert reranker.degraded_reason is None
+    client.close()
+
+
+def test_nvidia_reranker_is_unverified_before_first_provider_response() -> None:
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(500)))
+    reranker = NvidiaReranker(api_key="nvidia-test-token", http_client=client)
+
+    assert reranker.status == "configured_unverified"
     assert reranker.degraded_reason is None
     client.close()
 

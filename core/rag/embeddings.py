@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_NVIDIA_TIMEOUT_S = 8.0
-DEFAULT_NVIDIA_MAX_RETRIES = 1
+DEFAULT_NVIDIA_MAX_RETRIES = 0
 DEFAULT_NVIDIA_BATCH_SIZE = 32
 NVIDIA_INPUT_PROFILE = "query_passage_v1"
 

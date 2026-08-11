@@ -102,6 +102,21 @@ class AssetManifestSnapshot(StrictModel):
         parameter_ids = [parameter.parameter_id for parameter in self.allowed_parameters]
         if len(parameter_ids) != len(set(parameter_ids)):
             raise ValueError("asset manifest snapshot parameter IDs must be unique")
+        anchor_ids = [anchor.anchor_id for anchor in self.anchors]
+        if len(anchor_ids) != len(set(anchor_ids)):
+            raise ValueError("asset manifest snapshot anchor IDs must be unique")
+        anchors_by_id = {anchor.anchor_id: anchor for anchor in self.anchors}
+        for anchor in self.anchors:
+            support_anchor_id = anchor.resolved_support_anchor_id
+            if support_anchor_id is None:
+                continue
+            support_anchor = anchors_by_id.get(support_anchor_id)
+            if support_anchor is None:
+                raise ValueError("snapshot resolved support anchor is missing")
+            if support_anchor.anchor_id == anchor.anchor_id:
+                raise ValueError("snapshot resolved support anchor cannot reference itself")
+            if support_anchor.placement_policy != "fixed":
+                raise ValueError("snapshot resolved support anchor must be fixed")
         payload = self.model_dump(mode="json", exclude={"snapshot_sha256"})
         if _canonical_sha256(payload) != self.snapshot_sha256:
             raise ValueError("asset manifest snapshot hash mismatch")
@@ -354,10 +369,11 @@ class AssemblyPlan(StrictModel):
     selection_provider: str | None = Field(default=None, min_length=1, max_length=80)
     selection_model: str | None = Field(default=None, min_length=1, max_length=160)
     selection_capability: Literal["asset_selection"] = "asset_selection"
-    selection_contract_version: str = Field(
-        default="bounded_asset_selection@1.1.0",
-        min_length=1,
-        max_length=80,
+    selection_contract_version: Literal[
+        "bounded_asset_selection@1.1.0",
+        "bounded_asset_selection@1.2.0",
+    ] = Field(
+        default="bounded_asset_selection@1.2.0",
     )
     llm_fallback_used: bool
     llm_fallback_reason: str | None = Field(default=None, max_length=160)

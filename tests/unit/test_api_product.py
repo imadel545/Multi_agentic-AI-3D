@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,8 @@ from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
 from apps.api.telecom_studio_api.product import (
+    ProductService,
+    _assembly_constraint_summary_from_path,
     _blender_available,
     _events_to_timeline,
     _geometry_fidelity_summary,
@@ -17,6 +20,10 @@ from apps.api.telecom_studio_api.product import (
     _studio_warnings,
 )
 from apps.api.telecom_studio_api.runtime_contract import memory_status
+from apps.api.telecom_studio_api.workflow import _rag_runtime_summary
+from core.contracts.assembly_evidence import canonical_evidence_sha256
+from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
+from core.contracts.versioning import SceneVersion
 from core.services import scene_versioning
 
 
@@ -42,6 +49,173 @@ def test_blender_availability_requires_successful_headless_smoke(
     _probe_blender_runtime.cache_clear()
 
     assert _blender_available() is False
+
+
+def test_constraint_summary_is_derived_from_valid_hashed_evidence(tmp_path: Path) -> None:
+    evidence_path = tmp_path / "constraint_evidence.json"
+    payload = _constraint_evidence_payload()
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = _assembly_constraint_summary_from_path(evidence_path)
+
+    assert summary == {
+        "status": "passed",
+        "measurement_scope": "exported_glb_anchor_frames",
+        "required_connection_count": 1,
+        "measured_instance_count": 1,
+        "resolved_support_count": 0,
+        "max_position_error_m": 0.004,
+        "max_angular_error_deg": 0.0,
+        "limitations": ["limit one", "limit two", "limit three"],
+    }
+
+
+def test_constraint_summary_rejects_tampered_evidence(tmp_path: Path) -> None:
+    evidence_path = tmp_path / "constraint_evidence.json"
+    payload = _constraint_evidence_payload()
+    payload["measurements"][0]["position_error_m"] = 0.005
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert _assembly_constraint_summary_from_path(evidence_path) is None
+
+
+def test_rag_runtime_summary_prefers_durable_result_diagnostics_across_threads() -> None:
+    class Probe:
+        _reranker = type(
+            "Reranker",
+            (),
+            {
+                "provider": "nvidia",
+                "model_name": "nvidia/test",
+                "status": "configured_unverified",
+                "degraded_reason": None,
+            },
+        )()
+        last_retrieval_diagnostics = type(
+            "Retrieval",
+            (),
+            {"status": "primary_vector_cache", "degraded_reason": None},
+        )()
+        last_rerank_diagnostics = type(
+            "Rerank",
+            (),
+            {"status": "degraded_passthrough", "degraded_reason": "stale_failure"},
+        )()
+
+    summary = _rag_runtime_summary(
+        Probe(),
+        rag_context=[
+            {
+                "payload": {
+                    "retrieval_mode": "degraded_local_lexical",
+                    "retrieval_degraded_reason": "embedding_timeout",
+                    "reranker_status": "primary_nvidia_reranker",
+                    "reranker_degraded_reason": None,
+                }
+            }
+        ],
+    )
+
+    assert summary["rag_retrieval_status"] == "degraded_local_lexical"
+    assert summary["rag_retrieval_degraded_reason"] == "embedding_timeout"
+    assert summary["rag_reranker_status"] == "primary_nvidia_reranker"
+    assert summary["rag_reranker_degraded_reason"] is None
+
+
+def test_nonassembly_version_never_publishes_parasitic_constraint_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workflow_id = "wf_123456789abc"
+    version_id = "v00000001"
+    artifact_dir = tmp_path / workflow_id / "versions" / version_id
+    artifact_dir.mkdir(parents=True)
+    evidence_path = artifact_dir / "constraint_evidence.json"
+    evidence_path.write_text(json.dumps(_constraint_evidence_payload()), encoding="utf-8")
+    scene = SceneSpec(
+        scene_id=workflow_id,
+        network_type="5G",
+        tower=SceneAssetPlacement(
+            asset_id="tower_01",
+            position=[0, 0, 0],
+            rotation_deg=[0, 0, 0],
+            height_m=30,
+        ),
+        sectors=[
+            SectorSpec(
+                sector_id="S1",
+                antenna_asset_id="ant_01",
+                install_height_m=24,
+                azimuth_deg=0,
+                mechanical_tilt_deg=3,
+                beamwidth_deg=65,
+            )
+        ],
+        visual_elements=VisualElements(),
+    )
+    version = SceneVersion(
+        version_id=version_id,
+        workflow_id=workflow_id,
+        scene=scene,
+        created_at="2026-08-11T00:00:00Z",
+        status="completed",
+        artifact_dir=str(artifact_dir),
+    )
+    snapshot = workflow_service._viewer_snapshot_from_verified_version(version, artifact_dir)
+    assert "constraint_evidence" not in snapshot.artifact_paths
+
+    status = {
+        "workflow_id": workflow_id,
+        "status": "completed",
+        "active_version_id": version_id,
+        "completion_certificate_status": "issued",
+        "warnings": [],
+        "errors": [],
+    }
+    monkeypatch.setattr(
+        workflow_service,
+        "get_viewer_status_snapshot",
+        lambda requested: (status, snapshot) if requested == workflow_id else (status, None),
+    )
+    monkeypatch.setattr(workflow_service, "get_events", lambda _workflow_id: [])
+    bundle = ProductService(workflow_service, None).viewer_bundle(workflow_id)  # type: ignore[arg-type]
+    assert bundle["constraint_evidence_url"] is None
+    assert bundle["assembly_constraint_summary"] is None
+    artifact = next(
+        item for item in bundle["viewer_artifacts"] if item["name"] == "constraint_evidence.json"
+    )
+    assert artifact["available"] is False
+
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    workflow_service._sync_output_services()
+    try:
+        monkeypatch.setattr(workflow_service.versioning, "get_version", lambda *_args: version)
+        monkeypatch.setattr(
+            workflow_service,
+            "_verified_version_artifact_dir",
+            lambda *_args: (version, artifact_dir),
+        )
+        with pytest.raises(KeyError):
+            workflow_service.artifact_path(
+                workflow_id,
+                "constraint_evidence",
+                version_id=version_id,
+            )
+        response = TestClient(app).get(
+            f"/designs/{workflow_id}/artifacts/constraint_evidence?version_id={version_id}"
+        )
+        assert response.status_code == 404
+        archive_path = workflow_service.artifact_path(
+            workflow_id,
+            "download",
+            version_id=version_id,
+        )
+        with zipfile.ZipFile(archive_path) as archive:
+            assert "constraint_evidence.json" not in archive.namelist()
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        workflow_service._sync_output_services()
 
 
 def test_blender_availability_accepts_verified_headless_smoke(tmp_path: Path, monkeypatch) -> None:
@@ -124,6 +298,7 @@ def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
             "passthrough_no_rerank",
             "primary_nvidia_reranker",
             "degraded_passthrough",
+            "configured_unverified",
             "not_loaded",
             "custom",
         }
@@ -583,6 +758,8 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path, monkeypatch) -> Non
         assert "rag_reranker_provider" in bundle
         assert "rag_reranker_model" in bundle
         assert "rag_reranker_degraded_reason" in bundle
+        assert "rag_retrieval_status" in bundle
+        assert "rag_retrieval_degraded_reason" in bundle
         assert bundle["memory_context_count"] == 0 or isinstance(
             bundle["memory_context_count"], int
         )
@@ -1017,6 +1194,15 @@ def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
     assert "UnsupportedAction" in schema["components"]["schemas"]
     assert "component_proofs_url" in schema["components"]["schemas"]["ViewerBundle"]["properties"]
     assert (
+        "constraint_evidence_url" in schema["components"]["schemas"]["ViewerBundle"]["properties"]
+    )
+    assert (
+        schema["components"]["schemas"]["ViewerBundle"]["properties"][
+            "assembly_constraint_summary"
+        ]["anyOf"][0]["$ref"]
+        == "#/components/schemas/AssemblyConstraintSummary"
+    )
+    assert (
         schema["paths"]["/document-packs/{pack_id}/generate-design"]["post"]["responses"]["200"][
             "content"
         ]["application/json"]["schema"]["$ref"]
@@ -1358,3 +1544,65 @@ def test_product_issues_expose_bounded_planning_fallback_without_degrading_3d() 
     )
     assert planning_issue["severity"] == "info"
     assert "valeurs déjà validées" in planning_issue["impact"]
+
+
+def _constraint_evidence_payload() -> dict:
+    payload = {
+        "schema_version": "1.0.0",
+        "assembly_plan_schema_version": "1.1.0",
+        "workflow_id": "wf_constraint_api",
+        "status": "passed",
+        "coordinate_space": "scenespec_z_up_meters",
+        "glb_sha256": "a" * 64,
+        "assembly_plan_sha256": "b" * 64,
+        "angular_tolerance_deg": 1.0,
+        "expected_measurement_count": 1,
+        "measured_constraint_count": 1,
+        "failed_constraint_count": 0,
+        "measurements": [
+            {
+                "measurement_id": "mount-to-support:S1",
+                "connection_id": "mount-to-support",
+                "operation_id": "op-mount-to-support",
+                "instance_id": "S1",
+                "source_role_id": "sector_mount",
+                "source_connector_id": "support",
+                "source_anchor_id": "support_anchor",
+                "target_role_id": "support_structure",
+                "target_connector_id": "mount",
+                "target_anchor_id": "mount_anchor",
+                "source_frame": {
+                    "coordinate_space": "scenespec_z_up_meters",
+                    "position_m": [0.0, 0.0, 0.0],
+                    "normal": [1.0, 0.0, 0.0],
+                    "up": [0.0, 0.0, 1.0],
+                    "source": "glb_fixed_anchor",
+                    "gltf_node_index": 1,
+                    "gltf_node_name": "sector_mount_S1",
+                },
+                "target_frame": {
+                    "coordinate_space": "scenespec_z_up_meters",
+                    "position_m": [0.004, 0.0, 0.0],
+                    "normal": [-1.0, 0.0, 0.0],
+                    "up": [0.0, 0.0, 1.0],
+                    "source": "glb_resolved_anchor",
+                    "gltf_node_index": 2,
+                    "gltf_node_name": "support_structure_S1_target_marker",
+                },
+                "position_error_m": 0.004,
+                "position_tolerance_m": 0.01,
+                "normal_opposition_error_deg": 0.0,
+                "up_alignment_error_deg": 0.0,
+                "angular_tolerance_deg": 1.0,
+                "position_passed": True,
+                "normal_opposition_passed": True,
+                "up_alignment_passed": True,
+                "passed": True,
+            }
+        ],
+        "unevaluated_required_connections": [],
+        "errors": [],
+        "limitations": ["limit one", "limit two", "limit three"],
+    }
+    payload["evidence_sha256"] = canonical_evidence_sha256(payload)
+    return payload

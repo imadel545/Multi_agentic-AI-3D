@@ -52,7 +52,20 @@ def test_asset_selector_rejects_an_asset_outside_the_role_candidates() -> None:
     selections, diagnostics = GroqAssetSelectionClient(
         api_key="test-key",
         post=post,
-    ).decide(slots=[{"role_id": "tower", "candidate_asset_ids": ["TOWER_1"]}])
+    ).decide(
+        slots=[
+            {
+                "role_id": "tower",
+                "candidates": [
+                    {
+                        "asset_id": "TOWER_1",
+                        "allowed_generation_strategies": ["internal_project_generated"],
+                        "allowed_semantic_strategies": ["compose_assets"],
+                    }
+                ],
+            }
+        ]
+    )
 
     assert selections == {}
     assert diagnostics["fallback_reason"] == "model_output_rejected"
@@ -65,14 +78,7 @@ def test_asset_selector_chooses_only_a_scored_candidate_and_allowed_strategy() -
         del headers, timeout
         captured.update(json)
         request = httpx.Request("POST", url)
-        content = {
-            "selections": {
-                "tower": {
-                    "choice_id": "choice_0001",
-                    "reason": "Best dimensional score within the allowed strategy.",
-                }
-            }
-        }
+        content = {"selections": {"tower": "choice_0001"}}
         return httpx.Response(
             200,
             request=request,
@@ -107,8 +113,52 @@ def test_asset_selector_chooses_only_a_scored_candidate_and_allowed_strategy() -
     assert prompt_slots[0]["candidates"][0]["score"]["total_score"] == 92.0
     schema = captured["response_format"]["json_schema"]["schema"]
     tower_schema = schema["properties"]["selections"]["properties"]["tower"]
-    assert tower_schema["properties"]["choice_id"]["enum"] == ["choice_0001"]
-    assert set(tower_schema["required"]) == {"choice_id", "reason"}
+    assert tower_schema == {"type": "string", "enum": ["choice_0001"]}
+    assert "selection_reasons" not in diagnostics
+    assert "selection_reasons_by_role" not in diagnostics
+
+
+def test_asset_selector_retries_one_rejected_model_output_then_succeeds() -> None:
+    calls = 0
+
+    def post(url, headers, json, timeout):
+        nonlocal calls
+        del headers, json, timeout
+        calls += 1
+        request = httpx.Request("POST", url)
+        content = (
+            {"selections": {"tower": {"choice_id": "choice_0001"}}}
+            if calls == 1
+            else {"selections": {"tower": "choice_0001"}}
+        )
+        return httpx.Response(
+            200,
+            request=request,
+            json={"choices": [{"message": {"content": json_module(content)}}]},
+        )
+
+    slots = [
+        {
+            "role_id": "tower",
+            "candidates": [
+                {
+                    "asset_id": "TOWER_1",
+                    "allowed_generation_strategies": ["internal_project_generated"],
+                    "allowed_semantic_strategies": ["compose_assets"],
+                }
+            ],
+        }
+    ]
+
+    selections, diagnostics = GroqAssetSelectionClient(
+        api_key="test-key",
+        post=post,
+    ).decide(slots=slots)
+
+    assert calls == 2
+    assert selections == {"tower": "TOWER_1"}
+    assert diagnostics["attempts"] == 2
+    assert "fallback_reason" not in diagnostics
 
 
 def test_asset_selection_choice_schema_represents_only_exact_candidate_tuples() -> None:
@@ -181,11 +231,10 @@ def test_asset_selection_choice_schema_represents_only_exact_candidate_tuples() 
     assert selections_schema["additionalProperties"] is False
     assert selections_schema["required"] == ["tower"]
     tower_schema = selections_schema["properties"]["tower"]
-    assert tower_schema["additionalProperties"] is False
-    assert set(tower_schema["required"]) == {"choice_id", "reason"}
-    assert tower_schema["properties"]["choice_id"]["enum"] == [
-        choice["choice_id"] for choice in prompt["allowed_choices"]
-    ]
+    assert tower_schema == {
+        "type": "string",
+        "enum": [choice["choice_id"] for choice in prompt["allowed_choices"]],
+    }
 
 
 def test_asset_selector_keeps_local_choice_role_validation() -> None:
@@ -194,14 +243,8 @@ def test_asset_selector_keeps_local_choice_role_validation() -> None:
         request = httpx.Request("POST", url)
         content = {
             "selections": {
-                "tower": {
-                    "choice_id": "choice_0002",
-                    "reason": "Choice belongs to another role.",
-                },
-                "antenna": {
-                    "choice_id": "choice_0002",
-                    "reason": "Valid choice for this role.",
-                },
+                "tower": "choice_0002",
+                "antenna": "choice_0002",
             }
         }
         return httpx.Response(

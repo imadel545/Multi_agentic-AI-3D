@@ -132,6 +132,36 @@ def test_groq_client_cannot_override_explicit_source_requirements(monkeypatch) -
     assert "azimuths_deg" in protected[0].message
 
 
+def test_groq_client_cannot_override_coordinated_negative_equipment_requirements(
+    monkeypatch,
+) -> None:
+    def post(url, headers, json, timeout):
+        payload = json_module.loads(_requirements_content())
+        payload["include_power_cabinet"] = True
+        payload["include_gps_antenna"] = True
+        payload["include_cables"] = True
+        return _response(url, json_module.dumps(payload))
+
+    monkeypatch.setattr(httpx, "post", post)
+
+    spec = GroqStructuredClient(api_key="test-key").extract_requirements(
+        "Concevoir un site 4G avec antenne et RRU. "
+        "Ne pas ajouter d'armoire, GPS ni câble de descente.",
+        "high",
+    )
+
+    assert spec.include_power_cabinet is False
+    assert spec.include_gps_antenna is False
+    assert spec.include_cables is False
+    protected = [
+        warning for warning in spec.warnings if warning.code == "LLM_SOURCE_FIELD_PROTECTED"
+    ]
+    assert protected
+    assert "include_power_cabinet" in protected[0].message
+    assert "include_gps_antenna" in protected[0].message
+    assert "include_cables" in protected[0].message
+
+
 def test_groq_client_normalizes_lte_alias_in_json_object_retry(monkeypatch) -> None:
     calls = 0
 

@@ -55,7 +55,12 @@ def resolve_scene_assembly(scene: SceneSpec) -> AssemblyPlan | None:
                 connection.connection_id,
                 sector,
             )
-            if connection.connection_id == "radio-to-mount" and sector is not None:
+            if target_anchor.placement_policy == "resolved_from_operation":
+                if connection.connection_id != "radio-to-mount" or sector is None:
+                    raise ValueError(
+                        "ASSEMBLY_OPERATION_RESOLVED_ANCHOR_UNSUPPORTED:"
+                        f"{connection.connection_id}:{target_anchor.anchor_id}"
+                    )
                 target_frame = _adapt_radio_target_frame(
                     target_frame,
                     sector,
@@ -239,6 +244,9 @@ def _resolved_anchor_frame(
             normal=(0.0, 0.0, 1.0),
             up=(0.0, 1.0, 0.0),
         )
+    # `resolved_from_operation` anchors keep a manifest-local nominal frame so
+    # an explicitly supported operation can derive a bounded per-instance
+    # endpoint. Unknown uses of the policy are rejected by the caller above.
     transform = transforms.get((role_id, instance_id))
     if transform is None and sector is not None:
         transform = _declared_scene_transform(scene, role_id, sector)

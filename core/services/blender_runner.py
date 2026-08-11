@@ -288,6 +288,7 @@ class BlenderRunner:
                 "preview_closeup": str(output_dir / "preview_closeup.png"),
                 "metadata": str(output_dir / "scene_metadata.json"),
                 "component_proofs": str(output_dir / "component_proofs.json"),
+                "constraint_evidence": str(output_dir / "constraint_evidence.json"),
                 "build_lock": str(output_dir / "build.lock.json"),
             },
             error=error,
@@ -643,6 +644,9 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
     glb_report = GLBInspector().inspect(glb_path, scene, metadata_path)
     if not glb_report.structural_qa_passed:
         return "BLENDER_GLB_INVALID:" + ",".join(glb_report.critical_errors)
+    constraint_error = _write_assembly_constraint_evidence(output_dir, scene, glb_path)
+    if constraint_error:
+        return constraint_error
     preview_report = PreviewInspector().inspect(preview_path, scene)
     if not preview_report.preview_qa_passed:
         return "BLENDER_PREVIEW_INVALID:" + ",".join(preview_report.critical_errors)
@@ -655,6 +659,34 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
         )
         if preview_error:
             return preview_error
+    return None
+
+
+def _write_assembly_constraint_evidence(
+    output_dir: Path,
+    scene: SceneSpec,
+    glb_path: Path,
+) -> str | None:
+    evidence_path = output_dir / "constraint_evidence.json"
+    plan = scene.assembly_plan
+    if plan is None or plan.schema_version != "1.1.0":
+        evidence_path.unlink(missing_ok=True)
+        return None
+
+    # Imported lazily to keep the runner/contracts boundary acyclic.
+    from core.qa.assembly_constraint_inspector import AssemblyConstraintInspector
+
+    try:
+        report = AssemblyConstraintInspector().inspect(glb_path, plan)
+        _atomic_write_text(
+            evidence_path,
+            json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        evidence_path.unlink(missing_ok=True)
+        return f"BLENDER_ASSEMBLY_CONSTRAINT_INSPECTION_FAILED:{type(exc).__name__}"
+    if report.status != "passed":
+        return "BLENDER_ASSEMBLY_CONSTRAINT_EVIDENCE_FAILED"
     return None
 
 
@@ -703,6 +735,7 @@ def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
         *_ADDITIONAL_PREVIEW_FILES,
         "scene_metadata.json",
         "component_proofs.json",
+        "constraint_evidence.json",
         "design.blend",
     )
     for name in names:
@@ -720,6 +753,7 @@ def _clear_generated_artifacts(output_dir: Path) -> None:
         *_ADDITIONAL_PREVIEW_FILES,
         "scene_metadata.json",
         "component_proofs.json",
+        "constraint_evidence.json",
         "design.blend",
         "build.lock.json",
     ):
@@ -750,6 +784,8 @@ def _write_build_lock(
     )
     if (staging_dir / "component_proofs.json").is_file():
         artifact_names.append("component_proofs.json")
+    if (staging_dir / "constraint_evidence.json").is_file():
+        artifact_names.append("constraint_evidence.json")
     artifact_hashes = {
         name: {
             "sha256": _sha256(staging_dir / name),
@@ -847,6 +883,8 @@ def _validate_build_lock(
     )
     if (output_dir / "component_proofs.json").is_file():
         required_names.append("component_proofs.json")
+    if (output_dir / "constraint_evidence.json").is_file():
+        required_names.append("constraint_evidence.json")
     for name in required_names:
         evidence = artifacts.get(name)
         path = output_dir / name

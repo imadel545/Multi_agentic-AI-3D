@@ -309,7 +309,9 @@ export default function App({ apiClient = api }: AppProps) {
       "assembly_plan",
       "component_proofs",
       "qa_evidence",
-      "requirements_context"
+      "requirements_context",
+      "llm_provenance",
+      "rag_evidence"
     ]) {
       resourceRequestRef.current[resource] =
         (resourceRequestRef.current[resource] ?? 0) + 1;
@@ -368,6 +370,31 @@ export default function App({ apiClient = api }: AppProps) {
       ).catch(() => undefined);
     } else {
       dispatch({ type: "RESOURCE_RECOVERED", resource: "qa_evidence" });
+    }
+    if (bundle.llm_decision_provenance) {
+      setLlmProvenance(bundle.llm_decision_provenance);
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
+    } else if (bundle.llm_decision_provenance_url) {
+      void loadSurfaceResource(
+        "llm_provenance",
+        () => apiClient.llmDecisionProvenance(bundle.llm_decision_provenance_url!),
+        setLlmProvenance,
+        "resource",
+        () => setLlmProvenance(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
+    }
+    if (bundle.rag_evidence_url) {
+      void loadSurfaceResource(
+        "rag_evidence",
+        () => apiClient.artifactJson(bundle.rag_evidence_url!),
+        setRagEvidence,
+        "resource",
+        () => setRagEvidence(null)
+      ).catch(() => undefined);
+    } else {
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
     }
   }, [apiClient, loadSurfaceResource, state.viewerBundle]);
 

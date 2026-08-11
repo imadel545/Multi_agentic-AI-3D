@@ -314,6 +314,79 @@ describe("studio kernel components", () => {
     expect(screen.queryByText(/QA visuelle 100/i)).not.toBeInTheDocument();
   });
 
+  it("explains post-export assembly measurements without claiming professional validation", () => {
+    render(
+      <QaPanel
+        bundle={{
+          ...bundle,
+          assembly_constraint_summary: {
+            status: "passed",
+            measurement_scope: "exported_glb_anchor_frames",
+            required_connection_count: 8,
+            measured_instance_count: 14,
+            resolved_support_count: 3,
+            max_position_error_m: 0.012,
+            max_angular_error_deg: 0.45,
+            limitations: [
+              "Required non-mechanical connections are reported but are not geometrically evaluated by AssemblyConstraintEvidence v1."
+            ]
+          },
+          constraint_evidence_url: "/designs/wf_1/artifacts/constraint_evidence"
+        }}
+        toAbsoluteUrl={(url) => url ? `http://127.0.0.1:8000${url}` : null}
+      />
+    );
+
+    const assembly = screen.getByRole("region", { name: "Assemblage post-export" });
+    expect(assembly).toHaveTextContent("contrôle passé");
+    expect(assembly).toHaveTextContent("8");
+    expect(assembly).toHaveTextContent("14");
+    expect(assembly).toHaveTextContent("Supports d’adaptation observés");
+    expect(assembly).toHaveTextContent("3");
+    expect(assembly).toHaveTextContent("0,012 m");
+    expect(assembly).toHaveTextContent("0,45°");
+    expect(assembly).toHaveTextContent(
+      "Les connexions requises non mécaniques sont signalées, mais ne sont pas encore mesurées géométriquement."
+    );
+    expect(assembly).toHaveTextContent(/ne constitue ni une validation d.ingénierie ni une preuve professionnelle/i);
+    expect(screen.getByRole("link", { name: "Consulter la preuve de mesure" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8000/designs/wf_1/artifacts/constraint_evidence"
+    );
+  });
+
+  it("does not invent post-export assembly evidence when the backend omits it", () => {
+    render(<QaPanel bundle={bundle} />);
+
+    expect(screen.queryByRole("region", { name: "Assemblage post-export" })).not.toBeInTheDocument();
+  });
+
+  it("does not present placeholder counts as measurements when assembly evidence is unavailable", () => {
+    render(
+      <QaPanel
+        bundle={{
+          ...bundle,
+          assembly_constraint_summary: {
+            status: "not_available",
+            measurement_scope: "exported_glb_anchor_frames",
+            required_connection_count: 0,
+            measured_instance_count: 0,
+            resolved_support_count: 0,
+            max_position_error_m: 0,
+            max_angular_error_deg: 0,
+            limitations: ["Le rapport de mesure n’a pas été produit."]
+          }
+        }}
+      />
+    );
+
+    const assembly = screen.getByRole("region", { name: "Assemblage post-export" });
+    expect(assembly).toHaveTextContent("mesure indisponible");
+    expect(assembly).toHaveTextContent("Le rapport de mesure n’a pas été produit.");
+    expect(assembly).not.toHaveTextContent("Erreur de position max.");
+    expect(assembly).not.toHaveTextContent("Instances mesurées");
+  });
+
   it("requires real backend analysis before confirming the design", async () => {
     const onAnalyze = vi.fn();
     const onConfirm = vi.fn();
@@ -1244,6 +1317,23 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/reranker NVIDIA est indisponible/)).toBeInTheDocument();
   });
 
+  it("shows the real local lexical fallback when vector retrieval fails", () => {
+    render(
+      <RagEvidencePanel
+        bundle={{
+          ...bundle,
+          rag_retrieval_status: "degraded_local_lexical",
+          rag_retrieval_degraded_reason: "index_timeout"
+        }}
+        evidence={null}
+      />
+    );
+
+    expect(screen.getByText("disponible avec limites")).toBeInTheDocument();
+    expect(screen.getByText(/recherche vectorielle est indisponible/)).toBeInTheDocument();
+    expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
+  });
+
   it("does not present artifact URLs as usable when the workflow failed", () => {
     render(
       <SummaryPanel
@@ -1710,6 +1800,46 @@ describe("studio kernel components", () => {
     expect(screen.queryByRole("button", { name: "Bibliothèque" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("exposes contextual library and intelligence drawers when their real data exists", () => {
+    render(
+      <InspectorDock
+        assetInventory={{
+          status: "qualified_mixed_catalog",
+          asset_count: 0,
+          missing_file_count: 0,
+          real_glb_asset_count: 0,
+          import_qualified_glb_count: 0,
+          generation_eligible_asset_count: 0,
+          professional_evidence_asset_count: 0,
+          reference_only_asset_count: 0,
+          qualified_integrity_failure_count: 0,
+          entries: [],
+          missing_files: []
+        }}
+        bundle={{
+          ...bundle,
+          rag_evidence_url: "/designs/wf_1/artifacts/rag_evidence",
+          rag_retrieval_status: "degraded_local_lexical"
+        }}
+        canRollback={false}
+        events={[]}
+        issues={null}
+        summary={null}
+        timeline={null}
+        toAbsoluteUrl={(url) => url ?? null}
+        onRollbackVersion={vi.fn()}
+        rollbackBusyVersionId={null}
+        versionMessage={null}
+        versions={[]}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Bibliothèque" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Intelligence" }));
+    expect(screen.getByText("RAG et preuves")).toBeInTheDocument();
+    expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
   });
 
   it("keeps a repeated workflow failure out of the closed QA drawer and renders it once when opened", () => {

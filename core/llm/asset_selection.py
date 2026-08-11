@@ -29,7 +29,6 @@ class _Selection(BaseModel):
         "adapt_component",
         "compose_assets",
     ]
-    reason: str = Field(min_length=1, max_length=200)
 
 
 class _Decision(BaseModel):
@@ -38,17 +37,10 @@ class _Decision(BaseModel):
     selections: list[_Selection] = Field(min_length=1, max_length=16)
 
 
-class _ProviderSelection(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    choice_id: str = Field(min_length=1, max_length=32)
-    reason: str = Field(min_length=1, max_length=200)
-
-
 class _ProviderDecision(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    selections: dict[str, _ProviderSelection] = Field(min_length=1, max_length=16)
+    selections: dict[str, str] = Field(min_length=1, max_length=16)
 
 
 @dataclass(frozen=True)
@@ -109,86 +101,9 @@ class GroqAssetSelectionClient:
 
     def decide(self, *, slots: list[dict]) -> tuple[dict[str, str], dict]:
         started = time.monotonic()
-        attempts = 1
-        try:
-            if self._transport is not None:
-                result = self._transport.request_chat_completion(
-                    capability="asset_selection",
-                    payload=self._payload(slots),
-                    timeout_s=self.timeout_s,
-                )
-                body = result.body
-                attempts = result.attempts
-            else:
-                assert self._post is not None
-                response = self._post(
-                    f"{self.base_url}/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {self._api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=self._payload(slots),
-                    timeout=self.timeout_s,
-                )
-                response.raise_for_status()
-                body = response.json()
-            provider_decision = _ProviderDecision.model_validate(_response_content(body))
-            choices_by_id = {choice.choice_id: choice for choice in _selection_choices(slots)}
-            decision = _Decision(
-                selections=[
-                    _Selection(
-                        role_id=role_id,
-                        asset_id=choices_by_id[item.choice_id].asset_id,
-                        generation_strategy=choices_by_id[item.choice_id].generation_strategy,
-                        semantic_strategy=choices_by_id[item.choice_id].semantic_strategy,
-                        reason=item.reason,
-                    )
-                    for role_id, item in provider_decision.selections.items()
-                    if choices_by_id[item.choice_id].role_id == role_id
-                ]
-            )
-            selections = {item.role_id: item.asset_id for item in decision.selections}
-            allowed = {
-                slot["role_id"]: {
-                    (candidate["asset_id"], strategy, semantic_strategy)
-                    for candidate in slot["candidates"]
-                    for strategy in candidate["allowed_generation_strategies"]
-                    for semantic_strategy in candidate["allowed_semantic_strategies"]
-                    if _semantic_matches_generation(strategy, semantic_strategy)
-                }
-                for slot in slots
-            }
-            if (
-                len(selections) != len(slots)
-                or set(selections) != set(allowed)
-                or any(
-                    (item.asset_id, item.generation_strategy, item.semantic_strategy)
-                    not in allowed[item.role_id]
-                    for item in decision.selections
-                )
-            ):
-                raise ValueError(
-                    "model must select exactly one allowed asset and strategy for every role"
-                )
-            if self._transport is not None:
-                self._transport.mark_operational("asset_selection")
-            return selections, {
-                "provider": "groq",
-                "model_name": self.model,
-                "latency_ms": _elapsed_ms(started),
-                "attempts": attempts,
-                "selection_reasons": {item.asset_id: item.reason for item in decision.selections},
-                "selection_reasons_by_role": {
-                    item.role_id: item.reason for item in decision.selections
-                },
-                "generation_strategies": {
-                    item.role_id: item.generation_strategy for item in decision.selections
-                },
-                "semantic_strategies": {
-                    item.role_id: item.semantic_strategy for item in decision.selections
-                },
-            }
-        except (
+        total_attempts = 0
+        payload = self._payload(slots)
+        caught_errors = (
             httpx.HTTPError,
             KeyError,
             TypeError,
@@ -196,16 +111,98 @@ class GroqAssetSelectionClient:
             ValidationError,
             json.JSONDecodeError,
             GroqTransportError,
-        ) as exc:
-            if self._transport is not None and not isinstance(exc, GroqTransportError):
-                self._transport.mark_failed("asset_selection", "model_output_rejected")
-            return {}, {
-                "provider": "groq",
-                "model_name": self.model,
-                "latency_ms": _elapsed_ms(started),
-                "attempts": getattr(exc, "attempts", attempts),
-                "fallback_reason": groq_fallback_reason(exc),
-            }
+        )
+        for model_attempt in range(2):
+            request_attempts = 1
+            try:
+                if self._transport is not None:
+                    result = self._transport.request_chat_completion(
+                        capability="asset_selection",
+                        payload=payload,
+                        timeout_s=self.timeout_s,
+                    )
+                    body = result.body
+                    request_attempts = result.attempts
+                else:
+                    assert self._post is not None
+                    response = self._post(
+                        f"{self.base_url}/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {self._api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=self.timeout_s,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                provider_decision = _ProviderDecision.model_validate(_response_content(body))
+                choices_by_id = {choice.choice_id: choice for choice in _selection_choices(slots)}
+                decision = _Decision(
+                    selections=[
+                        _Selection(
+                            role_id=role_id,
+                            asset_id=choices_by_id[item].asset_id,
+                            generation_strategy=choices_by_id[item].generation_strategy,
+                            semantic_strategy=choices_by_id[item].semantic_strategy,
+                        )
+                        for role_id, item in provider_decision.selections.items()
+                        if choices_by_id[item].role_id == role_id
+                    ]
+                )
+                selections = {item.role_id: item.asset_id for item in decision.selections}
+                allowed = {
+                    slot["role_id"]: {
+                        (candidate["asset_id"], strategy, semantic_strategy)
+                        for candidate in slot["candidates"]
+                        for strategy in candidate["allowed_generation_strategies"]
+                        for semantic_strategy in candidate["allowed_semantic_strategies"]
+                        if _semantic_matches_generation(strategy, semantic_strategy)
+                    }
+                    for slot in slots
+                }
+                if (
+                    len(selections) != len(slots)
+                    or set(selections) != set(allowed)
+                    or any(
+                        (item.asset_id, item.generation_strategy, item.semantic_strategy)
+                        not in allowed[item.role_id]
+                        for item in decision.selections
+                    )
+                ):
+                    raise ValueError(
+                        "model must select exactly one allowed asset and strategy for every role"
+                    )
+                total_attempts += request_attempts
+                if self._transport is not None:
+                    self._transport.mark_operational("asset_selection")
+                return selections, {
+                    "provider": "groq",
+                    "model_name": self.model,
+                    "latency_ms": _elapsed_ms(started),
+                    "attempts": total_attempts,
+                    "generation_strategies": {
+                        item.role_id: item.generation_strategy for item in decision.selections
+                    },
+                    "semantic_strategies": {
+                        item.role_id: item.semantic_strategy for item in decision.selections
+                    },
+                }
+            except caught_errors as exc:
+                total_attempts += max(1, int(getattr(exc, "attempts", request_attempts)))
+                reason = groq_fallback_reason(exc)
+                if model_attempt == 0 and reason == "model_output_rejected":
+                    continue
+                if self._transport is not None and not isinstance(exc, GroqTransportError):
+                    self._transport.mark_failed("asset_selection", reason)
+                return {}, {
+                    "provider": "groq",
+                    "model_name": self.model,
+                    "latency_ms": _elapsed_ms(started),
+                    "attempts": total_attempts,
+                    "fallback_reason": reason,
+                }
+        raise AssertionError("bounded asset selection retry loop exhausted unexpectedly")
 
     def _payload(self, slots: list[dict]) -> dict[str, Any]:
         choices = _selection_choices(slots)
@@ -239,11 +236,12 @@ class GroqAssetSelectionClient:
                         "content": (
                             "Choose exactly one supplied choice_id for each supplied role. Each "
                             "choice_id is an indivisible, pre-authorized asset, generation, and "
-                            "semantic strategy tuple. Compare the "
+                            "semantic strategy tuple. Return selections as an object whose exact "
+                            "role keys map directly to one supplied choice_id string. Compare the "
                             "provided scores, dimensions, compatibility, permissions, and "
                             "qualification limitations. You may only use supplied values. Do not "
                             "create assets, transforms, connector names, parameters, strategies, "
-                            "or Blender code. Return strict JSON only."
+                            "explanations, or Blender code. Return strict JSON only."
                         ),
                     },
                     {
@@ -325,19 +323,8 @@ def _role_selection_schema(
     choices: list[_AllowedSelection],
 ) -> dict[str, Any]:
     return {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "choice_id": {
-                "type": "string",
-                "enum": [choice.choice_id for choice in choices],
-            },
-            "reason": {"type": "string", "minLength": 1, "maxLength": 200},
-        },
-        "required": [
-            "choice_id",
-            "reason",
-        ],
+        "type": "string",
+        "enum": [choice.choice_id for choice in choices],
     }
 
 

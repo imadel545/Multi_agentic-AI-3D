@@ -3,7 +3,7 @@
 Critères obligatoires pour accepter le futur frontend.  
 Si un critère échoue, le frontend n'est pas accepté.
 
-Dernière synchronisation ciblée: 2026-07-31. La baseline visuelle réelle est validée; les
+Dernière synchronisation ciblée: 2026-08-11. La baseline visuelle réelle est validée; les
 cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
@@ -71,12 +71,13 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 ## 9. Temps réel
 
-- [ ] La progression d'une opération active est visible en temps réel (SSE ou polling visible).
-- [ ] L'utilisateur voit clairement quand une génération est en cours.
+- [x] La progression d'une opération active est visible en temps réel par SSE,
+  avec fallback polling prévu par le contrat.
+- [x] L'utilisateur voit clairement quand une génération est en cours.
 
 ## 10. Fonctions testées
 
-- [ ] Generate design from prompt.
+- [x] Generate design from prompt.
 - [x] Upload document pack.
 - [ ] Generate from document pack.
 - [ ] Edit design by prompt.
@@ -95,6 +96,8 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] `npm run build` passe le 2026-07-31; tous les chunks JavaScript restent
   sous 371 kB non compressés.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
+- [x] Le 2026-08-11, `npm run test -- --run` passe avec 167 tests; typecheck et
+  build passent aussi sur le current tree.
 
 ## 12. Preuve visuelle
 

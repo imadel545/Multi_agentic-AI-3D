@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from core.agents.blueprint_composer import design_blueprint_hash
+from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.completion import CompletionCertificate
 from core.contracts.design_blueprint import DesignBlueprint
@@ -22,6 +23,10 @@ _CERTIFIED_ARTIFACTS = {"glb", "preview", "metadata", "build_lock"}
 _CERTIFIED_ARTIFACTS_M0 = {
     *_CERTIFIED_ARTIFACTS,
     "component_proofs",
+}
+_CERTIFIED_ARTIFACTS_ASSEMBLY_CONSTRAINTS = {
+    *_CERTIFIED_ARTIFACTS_M0,
+    "constraint_evidence",
 }
 _CRITICAL_REPORT_FILES = (
     ("qa_report", "qa_report.json"),
@@ -100,6 +105,10 @@ _REQUIRED_COMPLETION_CHECKS_V1_3 = {
     "post_blender_gate_passed",
     "no_critical_fallback",
     "component_proof_verified",
+}
+_REQUIRED_COMPLETION_CHECKS_V1_4 = {
+    *_REQUIRED_COMPLETION_CHECKS_V1_2,
+    "assembly_constraint_evidence_verified",
 }
 
 
@@ -445,7 +454,7 @@ def verify_persisted_version(
         certificate = CompletionCertificate.model_validate_json(
             certificate_path.read_text(encoding="utf-8")
         )
-    except (OSError, ValidationError) as exc:
+    except (OSError, UnicodeDecodeError, ValidationError) as exc:
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_INVALID") from exc
     if certificate.workflow_id != workflow_id:
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_WORKFLOW_MISMATCH")
@@ -460,6 +469,7 @@ def verify_persisted_version(
         "1.1.0": _REQUIRED_COMPLETION_CHECKS_V1_1,
         "1.2.0": _REQUIRED_COMPLETION_CHECKS_V1_2,
         "1.3.0": _REQUIRED_COMPLETION_CHECKS_V1_3,
+        "1.4.0": _REQUIRED_COMPLETION_CHECKS_V1_4,
     }[certificate.schema_version]
     if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
         raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
@@ -473,9 +483,15 @@ def verify_persisted_version(
         scene.geometry_programs
         or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
     )
-    if component_proof_required and certificate.schema_version != "1.2.0":
-        if certificate.schema_version != "1.3.0":
-            raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+    constraint_evidence_required = bool(
+        scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
+    )
+    if constraint_evidence_required and certificate.schema_version != "1.4.0":
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+    if component_proof_required and certificate.schema_version not in {"1.2.0", "1.3.0", "1.4.0"}:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+    if certificate.schema_version == "1.4.0" and not constraint_evidence_required:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_INVALID")
     cognitive_plan = None
     if certificate.schema_version == "1.3.0":
         cognitive_plan = _read_model(
@@ -502,7 +518,7 @@ def verify_persisted_version(
             DesignBlueprint,
             "ACTIVE_VERSION_DESIGN_BLUEPRINT_INVALID",
         )
-        if certificate.schema_version in {"1.1.0", "1.2.0"}
+        if certificate.schema_version in {"1.1.0", "1.2.0", "1.4.0"}
         else None
     )
     if certificate.schema_version != "1.3.0":
@@ -545,12 +561,19 @@ def verify_persisted_version(
             }
         )
     expected_artifacts = (
-        _CERTIFIED_ARTIFACTS_M0
+        _CERTIFIED_ARTIFACTS_ASSEMBLY_CONSTRAINTS
+        if certificate.schema_version == "1.4.0"
+        else _CERTIFIED_ARTIFACTS_M0
         if certificate.schema_version in {"1.2.0", "1.3.0"}
         else _CERTIFIED_ARTIFACTS
     )
     if logical_names != expected_artifacts:
         raise ValueError("ACTIVE_VERSION_CERTIFIED_ARTIFACT_SET_INCOMPLETE")
+    if certificate.schema_version == "1.4.0":
+        constraint_evidence_path = artifact_dir / "constraint_evidence.json"
+        if certificate.constraint_evidence_sha256 != _sha256(constraint_evidence_path):
+            raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_HASH_MISMATCH")
+        _verify_constraint_evidence(constraint_evidence_path, scene=scene)
     build_lock_schema = _verify_build_lock(artifact_dir, scene=scene)
     if component_proof_required and build_lock_schema != "1.2.0":
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_DOWNGRADE")
@@ -591,6 +614,23 @@ def _persisted_json_hash(path: Path, *, exclude: set[str] | None = None) -> str:
         ensure_ascii=True,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _verify_constraint_evidence(path: Path, *, scene: SceneSpec) -> None:
+    try:
+        evidence = AssemblyConstraintEvidence.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValidationError) as exc:
+        raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_INVALID") from exc
+    if evidence.status != "passed":
+        raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_NOT_PASSED")
+    if evidence.workflow_id != scene.scene_id:
+        raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_WORKFLOW_MISMATCH")
+    if evidence.glb_sha256 != _sha256(path.parent / "design.glb"):
+        raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_GLB_MISMATCH")
+    if scene.assembly_plan is None or evidence.assembly_plan_sha256 != _canonical_json_hash(
+        scene.assembly_plan.model_dump(mode="json")
+    ):
+        raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_PLAN_MISMATCH")
 
 
 def _canonical_json_hash(payload: object) -> str:

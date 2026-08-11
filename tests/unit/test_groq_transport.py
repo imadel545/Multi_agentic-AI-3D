@@ -530,6 +530,48 @@ def test_non_retryable_payload_error_is_not_hidden_by_another_credential() -> No
         client.close()
 
 
+def test_asset_selection_retries_one_provider_json_validation_rejection() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                400,
+                request=request,
+                json={"error": {"code": "json_validate_failed"}},
+            )
+        return _chat_response(request, {"selections": {"tower": "choice_0001"}})
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    transport = GroqTransport(api_keys=["account-a", "account-b"], client=http_client)
+    selector = GroqAssetSelectionClient(api_key="account-a", transport=transport)
+    try:
+        selections, diagnostics = selector.decide(
+            slots=[
+                {
+                    "role_id": "tower",
+                    "candidates": [
+                        {
+                            "asset_id": "TOWER_1",
+                            "allowed_generation_strategies": ["internal_project_generated"],
+                            "allowed_semantic_strategies": ["compose_assets"],
+                        }
+                    ],
+                }
+            ]
+        )
+
+        assert calls == 2
+        assert selections == {"tower": "TOWER_1"}
+        assert diagnostics["attempts"] == 2
+        assert "fallback_reason" not in diagnostics
+    finally:
+        transport.close()
+        http_client.close()
+
+
 @pytest.mark.parametrize(
     "error_type",
     [httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout, httpx.RemoteProtocolError],
@@ -658,14 +700,7 @@ def test_one_persistent_transport_is_injectable_into_existing_clients() -> None:
         if schema_name == "BoundedAssetSelection":
             return _chat_response(
                 request,
-                {
-                    "selections": {
-                        "tower": {
-                            "choice_id": "choice_0001",
-                            "reason": "Only qualified candidate.",
-                        }
-                    }
-                },
+                {"selections": {"tower": "choice_0001"}},
             )
         return _chat_response(request, {"accepted": True})
 

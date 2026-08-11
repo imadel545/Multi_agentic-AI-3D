@@ -20,10 +20,19 @@ If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` lacks a key, startup fails instead
 of silently degrading. Network reachability is established only by the first
 real index/search/write operation and its failure is exposed explicitly.
 
-The 2026-08-06 live probe proved the configured Nemotron route with the local
-NVIDIA key: query and passage requests both returned 200 and a
-1024-dimensional vector. Provider configuration alone remains insufficient;
-real retrieval evaluation on the controlled French telecom corpus is required.
+Static reindex embeds the full cross-collection corpus in one logical operation
+and sends it to NVIDIA in bounded batches of at most 32 passages. The
+synchronous product path sets SDK embedding retries to zero so an advisory
+RAG dependency cannot multiply the workflow latency. If index construction or
+query embedding fails, the backend ranks the real local documents lexically,
+then still offers those candidates to the configured reranker. This path is
+published as `rag_retrieval_status=degraded_local_lexical` with a sanitized
+reason; it is not vector retrieval and does not use hash embeddings.
+
+The 2026-08-11 current-tree browser smoke `wf_0843599873e7` retrieved five
+contexts with `primary_vector` and `primary_nvidia_reranker` in 1.620 s.
+Provider configuration and this point-in-time success remain insufficient;
+retrieval quality still requires a controlled French telecom evaluation set.
 
 Construction of the provider is network-free and therefore is not an
 operational health proof. `/studio/summary` reports `configured_unverified`
@@ -53,9 +62,10 @@ If the NVIDIA reranker is unavailable, retrieval falls back to vector order and
 the API exposes `degraded_passthrough` plus `rag_reranker_degraded_reason`.
 This is a visible degraded state, not a silent success.
 
-The backend exposes `rag_reranker_provider`, `rag_reranker_model`,
-`rag_reranker_status`, and `rag_reranker_degraded_reason` in `/studio/summary`
-and `/viewer-bundle`.
+The backend exposes `rag_retrieval_status`, `rag_retrieval_degraded_reason`,
+`rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`, and
+`rag_reranker_degraded_reason` in workflow/viewer evidence. The frontend loads
+`rag_evidence.json` automatically in the contextual Intelligence drawer.
 
 ## How RAG Enters The Pipeline
 
@@ -147,12 +157,12 @@ the design.
 - RAG does not yet run conflict resolution against document-pack evidence.
 - Out-of-catalog GeometryProgram nodes are not directly grounded in retrieved
   passages or vendor citations.
-- Reranker is fail-open: if NVIDIA reranking fails, retrieval still returns
-  vector-ranked results and the degraded status is visible.
+- Reranker is fail-open: if NVIDIA reranking fails, retrieval preserves the
+  incoming vector or lexical order and the degraded status is visible.
 - Embedding retrieval is not fail-open as a product-quality success: a provider
-  HTTP error is recorded as failed and RAG remains advisory/unavailable for that
-  operation.
-- No hybrid sparse/BM25 engine beyond the current lexical boost.
+  failure produces real local lexical candidates but remains visibly degraded.
+- The lexical continuity path is token overlap, not a trained sparse/BM25
+  engine and not equivalent to multilingual semantic retrieval.
 
 ## Quality Bar Before Calling RAG Advanced
 

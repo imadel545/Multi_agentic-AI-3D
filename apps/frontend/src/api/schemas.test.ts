@@ -123,6 +123,57 @@ describe("frontend contract schemas", () => {
     expect(inventory.professional_evidence_asset_count).toBe(0);
   });
 
+  it("accepts optional post-export assembly constraint evidence", () => {
+    const bundle = parseContract("ViewerBundle", ViewerBundleSchema, {
+      ...viewerBundlePayload,
+      assembly_constraint_summary: {
+        status: "passed",
+        measurement_scope: "exported_glb_anchor_frames",
+        required_connection_count: 8,
+        measured_instance_count: 14,
+        resolved_support_count: 3,
+        max_position_error_m: 0.012,
+        max_angular_error_deg: 0.45,
+        limitations: ["Mesure bornée aux connexions déclarées."]
+      },
+      constraint_evidence_url: "/designs/wf_123/artifacts/constraint_evidence"
+    });
+
+    expect(bundle.assembly_constraint_summary?.status).toBe("passed");
+    expect(bundle.assembly_constraint_summary?.max_position_error_m).toBe(0.012);
+    expect(bundle.assembly_constraint_summary?.resolved_support_count).toBe(3);
+    expect(bundle.constraint_evidence_url).toBe(
+      "/designs/wf_123/artifacts/constraint_evidence"
+    );
+  });
+
+  it("rejects invalid post-export assembly constraint measurements", () => {
+    expect(() => ViewerBundleSchema.parse({
+      ...viewerBundlePayload,
+      assembly_constraint_summary: {
+        status: "passed",
+        measurement_scope: "exported_glb_anchor_frames",
+        required_connection_count: -1,
+        measured_instance_count: 2,
+        max_position_error_m: -0.1,
+        max_angular_error_deg: 0.5,
+        limitations: []
+      }
+    })).toThrow();
+    expect(() => ViewerBundleSchema.parse({
+      ...viewerBundlePayload,
+      assembly_constraint_summary: {
+        status: "claimed_professional",
+        measurement_scope: "exported_glb_anchor_frames",
+        required_connection_count: 1,
+        measured_instance_count: 2,
+        max_position_error_m: 0.1,
+        max_angular_error_deg: 0.5,
+        limitations: []
+      }
+    })).toThrow();
+  });
+
   it("keeps legacy viewer and inventory payloads valid without M1 optional fields", () => {
     expect(() => ViewerBundleSchema.parse(viewerBundlePayload)).not.toThrow();
     expect(() => AssetInventorySchema.parse({

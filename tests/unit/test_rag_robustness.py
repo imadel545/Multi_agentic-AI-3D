@@ -685,6 +685,6 @@ def test_reranker_diagnostics_are_isolated_between_workflow_threads() -> None:
 
     assert observed["good"] == ("primary_nvidia_reranker", None)
     assert observed["bad"] == ("degraded_passthrough", "nvidia_reranker_http_503")
-    assert reranker.status == "primary_nvidia_reranker"
+    assert reranker.status == "configured_unverified"
     assert reranker.degraded_reason is None
     client.close()

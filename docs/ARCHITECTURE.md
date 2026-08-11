@@ -15,6 +15,7 @@ FastAPI
        -> opt-in Qwen visual evidence (advisory JSON + Pydantic)
      or visible deterministic/local-only path
   -> NVIDIA API Nemotron query/passage retrieval + NVIDIA reranker evidence
+     or visible lexical retrieval over the real local corpus
   -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
   -> asset registry + inventory
@@ -27,7 +28,9 @@ FastAPI
   -> SceneSpec validation + quality gates
   -> deterministic Blender builders / GeometryProgram compiler
   -> GLB/preview/metadata artifacts
+  -> post-export anchor + resolved-support constraint evidence for AssemblyPlan 1.1
   -> structural/proxy geometry/preview QA
+  -> completion certificate + atomic version activation
   -> memory writeback
   -> Product API summaries
 ```
@@ -63,8 +66,10 @@ active SceneSpec + prompt
   least-in-flight with round-robin ties; 401/403/429 failures are isolated and
   Groq's 413/`rate_limit_exceeded` variant is also treated as account quota;
   aggregated health never exposes credential identity. The transport owns
-  provider I/O; deterministic contracts still own units, permissions, QA and
-  certification.
+  provider I/O; deterministic contracts still own units, permissions, QA,
+  selection tuples and certification. Asset selection schema 1.2 exposes only
+  `role_id -> choice_id`; one immediate retry is permitted only after
+  `model_output_rejected`, never after auth/quota/timeout/transport failures.
 - `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
   degraded passthrough, deterministic test/bootstrap mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
@@ -189,6 +194,11 @@ active SceneSpec + prompt
 - RAG is not used for extraction in v1; only structured, whitelisted
   `payload.planning_hints` can influence planning, and `rag_planning_summary`
   plus `rag_evidence.json` expose whether that happened.
+- Static RAG reindex embeds the cross-collection corpus in one logical
+  operation, sent to NVIDIA in bounded batches of at most 32 passages with zero
+  SDK retry on the synchronous path. An NVIDIA index/query failure
+  falls back to deterministic lexical ranking of the real local documents and
+  publishes `degraded_local_lexical`; hashing remains test/bootstrap-only.
 - Document-pack locks are process-local. Atomic JSON replacements prevent
   partial files and concurrent readers cannot observe an in-flight correction,
   but a crash can still split a multi-file pack revision.

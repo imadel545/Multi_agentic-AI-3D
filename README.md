@@ -22,7 +22,7 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
   units, topology graph, transforms, requested envelope and aggregate resource
   budget before the fixed Blender compiler executes it.
 - Generates a real `design.glb`, `preview.png`, and reports via headless Blender.
-- Runs structural and geometry QA.
+- Runs GLB structural-integrity and geometry QA; this is not a structural-load calculation.
 - Current mesh QA reaches `mesh_level_spatial_basic` when semantic transforms and
   primary-equipment bounds are complete, `mesh_level_transform_basic` when only
   transforms are complete, otherwise `mesh_level_basic`. It screens real GLB
@@ -39,9 +39,10 @@ Local-first pipeline for transforming telecom requirements into a validated `Sce
 - It does not run without a local Blender install for real 3D output.
 - It does not provide a production-ready frontend today.
 - It is not an unrestricted arbitrary-shape generator: the current
-  `GeometryProgram` vocabulary is limited to validated primitives, polygonal
-  curves, instances, materials and transforms. It does not provide CSG,
-  triangle/BVH engineering QA or vendor certification.
+  `GeometryProgram` vocabulary is a bounded DSL with profiles/extrusion,
+  revolution, sweep, arrays, booleans, modifiers, terrain, hierarchy,
+  anchors and connectors. It does not provide CAD B-Rep, triangle/BVH
+  engineering QA, semantic intent certification or vendor certification.
 
 ---
 
@@ -165,7 +166,12 @@ Product RAG uses NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024
 dimensions. Product reranking uses the NVIDIA
 reranker configured by `TELECOM_STUDIO_RERANKER_MODEL`; if the reranker is not
 available, the API exposes a degraded passthrough status instead of pretending
-reranking happened.
+reranking happened. Static documents are embedded by one cross-collection
+operation, sent to NVIDIA in bounded batches of at most 32 passages, and the
+synchronous path performs no SDK retry. If NVIDIA indexing or
+query embedding times out, retrieval falls back to lexical ranking over the
+real local corpus and exposes `degraded_local_lexical`; it never substitutes a
+hash embedding and never labels that fallback as vector retrieval.
 
 ```bash
 NVIDIA_API_KEY=...
@@ -223,8 +229,9 @@ TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1 \
 
 The test harness rejects resolved Groq/NVIDIA credentials by default and fails
 immediately if an unmarked test attempts to launch a real Blender subprocess.
-`browser_smoke` is a separate real-API/browser release gate; jsdom tests do not
-count as WebGL evidence.
+`browser_smoke` is a reserved marker with zero automated pytest cases today.
+The current browser proof is a recorded interactive real-API/WebGL smoke;
+jsdom tests do not count as WebGL evidence.
 
 ---
 
@@ -235,6 +242,7 @@ requirements_text or document pack
 → LangGraph orchestrator
 → Groq structured RequirementSpec or deterministic fallback
 → NVIDIA Nemotron multilingual query/passage embeddings + Qdrant retrieval
+  or visible lexical retrieval over the real local corpus
 → NVIDIA reranking + bounded GPT-OSS planning decision
 → SQLite memory recall
 → scored qualified asset candidates + AssemblyPlan
@@ -246,6 +254,8 @@ requirements_text or document pack
 → deterministic Blender builders / GeometryProgram compiler
 → GLB structural + geometry validation
 → generation QA
+→ post-export AssemblyPlan constraint evidence
+→ completion certificate + atomic version activation
 → SQLite memory writeback
 → compliance report
 ```
@@ -276,7 +286,7 @@ requirements_text or document pack
   evidence asset after runtime byte verification; `qualified_mixed_catalog`,
   not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
-- E2E proof: `.venv/bin/python -m pytest -q -m blender_runtime tests/e2e/test_telecom_generation_proof.py`.
+- E2E assembly/edit/version proof: `.venv/bin/python -m pytest -q -m blender_runtime tests/e2e/test_m0_trusted_assembly_recovery.py`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
 - Frontend: `apps/frontend` contains a real-backend product rework in progress.
   The previous dashboard-like kernel is rejected; acceptance requires a
@@ -284,5 +294,7 @@ requirements_text or document pack
 - Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
   `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
   and preview. This proves that scenario only. The current frontend gate passes
-  157 tests, typecheck, production build and a 2026-08-10 real-API browser smoke
-  of the truthful 0/13 professional asset state.
+  167 tests, typecheck and production build. The 2026-08-11 connected browser
+  smoke `wf_0843599873e7` rendered the real certified GLB, loaded RAG evidence,
+  exposed the asset library/intelligence drawers and preserved the truthful
+  0/13 professional asset state.

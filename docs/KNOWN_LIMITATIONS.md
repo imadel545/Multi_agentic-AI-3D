@@ -158,8 +158,12 @@ frontend.
 - A configured provider is reported as `configured_unverified` until a real
   operation succeeds.
 - The product path does not silently load a local embedding model. Deterministic
-  hash retrieval is allowed only for tests/bootstrap or explicit degraded mode;
-  hash is not production quality.
+  hash retrieval is allowed only for tests/bootstrap. Static documents are
+  embedded by one cross-collection operation, sent in bounded batches of at
+  most 32 passages with no synchronous SDK retry. If
+  NVIDIA indexing/query embedding fails, the real local corpus is ranked
+  lexically and the API/UI expose `degraded_local_lexical`; this is useful
+  continuity, not equivalent semantic quality.
 - Static RAG docs/manifests are checked against a persisted index identity and
   reindexed automatically when they change. Runtime memory uses SQLite as its
   canonical store. `POST /memory/vector/reindex` rebuilds a compact Qdrant
@@ -212,9 +216,10 @@ frontend.
   could take tens of minutes depending on the host PATH. The small-cell and
   certificate/version fixture regressions are fixed. Tests are now split into a
   default fast gate and explicit `blender_runtime`, `provider_live`, and
-  `browser_smoke` gates. The final 2026-08-11 collection classifies 617 fast
-  tests, 48 real-Blender tests and 4 live-provider tests; the fast gate passed
-  in 23.52 seconds. Admission pressure, invalid input and terminal-persistence
+  `browser_smoke` gates. The final 2026-08-11 collection contains 702 tests:
+  650 fast, 48 real-Blender and 4 live-provider tests; the fast gate passed in
+  23.52 seconds. `browser_smoke` has zero automated pytest cases, so the current
+  visual proof is an interactive runtime smoke. Admission pressure, invalid input and terminal-persistence
   failure paths run in the fast gate because they never cross a Blender
   subprocess boundary. The harness rejects both an unmarked Blender generation
   and an unmarked Blender readiness probe. The Blender gate is intentionally not
@@ -298,9 +303,10 @@ frontend.
   engineering approval.
 - Schema `1.1.0` commits bind persisted QA, geometry-validation and
   GLB-inspection reports and compare `SceneVersion.scene` with the persisted
-  `scene_spec.json`. Schema `1.2.0` is required for `AssemblyPlan 1.1` or
-  GeometryProgram component evidence and additionally certifies
-  `component_proofs.json`. Historical `1.0.0` results remain legacy evidence.
+  `scene_spec.json`. Schema `1.4.0` is required for `AssemblyPlan 1.1` and
+  certifies `component_proofs.json` plus `constraint_evidence.json`; schema
+  `1.2.0` remains the component-proof schema for GeometryPrograms without a
+  trusted assembly plan. Historical `1.0.0` results remain legacy evidence.
 - New Blender builds copy the complete Python worker-source bundle into an
   immutable per-attempt snapshot, execute that copy, then hash it in the lock.
   Build lock `1.2.0` also binds current manifests/catalog, builder profiles,
@@ -349,13 +355,21 @@ frontend.
   semantically equivalent, that a component is manufacturer-authentic, or that
   connector intent satisfies electrical, RF, grounding, load, maintenance or
   regulatory rules.
+- `constraint_evidence.json` measures exported semantic anchor frames, not
+  triangle-level contact surfaces. It proves bounded position/orientation of
+  required mechanical endpoints after export; it does not prove physical
+  contact, collision clearance, fastener engagement, deformation, load
+  capacity, manufacturability or RF/electrical/routing continuity. Required
+  non-mechanical connections are listed as unevaluated. For a resolved endpoint,
+  the inspector additionally proves one identified support mesh exists in the
+  GLB; it does not prove surface contact, fixation or transfer of load.
 
 ## M1 professional asset qualification gate
 
 - Status is `MILESTONE 1 — PARTIEL`. The verified baseline is local commit
   `4829995130a43c09c5fb0c23d4216ed007e2d2c2` and tag
-  `cognitive-3d-m1-baseline-20260808` on branch
-  `codex/m1-asset-qualification`.
+  `cognitive-3d-m1-baseline-20260808`; current convergence continues directly
+  on the sole local branch `main`.
 - All 13 current runtime assets fail the stronger professional proof gate.
   They do not collectively provide a neutral master, qualified viewer lineage,
   explicit professional provenance/licence, five passed asset previews,
@@ -401,8 +415,10 @@ frontend.
   crowded summit annotations. Two GeometryPrograms used visible
   `json_object_repaired` mode. QA 1.0 certifies the implemented bounded checks,
   not manufacturer authenticity or semantic visual quality.
-- A green test suite, HTTP scenario or older browser capture does not close the
-  remaining browser gate. No global convergence is claimed.
+- The 2026-08-11 current-tree browser smoke covers one real creation flow,
+  streaming, GLB display and the post-export assembly drawer without console
+  errors. It does not close rollback, document-pack, upload, degraded-provider,
+  interruption or every edit/recovery branch. No global convergence is claimed.
 
 ## Can wait
 

@@ -73,12 +73,18 @@ memory_writeback
   `RequirementSpec` structuré. Le nœud peut fournir du contexte et des
   `payload.planning_hints`; il ne modifie pas directement la géométrie.
   `rag_evidence.json` expose les sources, champs candidats, scores et statut
-  reranker.
+  retrieval/reranker. NVIDIA+Qdrant est primaire; un échec index/query utilise
+  le vrai corpus local en lexical et publie `degraded_local_lexical`.
 - `decide_planning_context` demande à GPT-OSS d'arbitrer uniquement des
   candidats RAG typés et validés; le modèle ne peut ni écrire de géométrie
   libre dans ce nœud ni contourner les règles déterministes. L'écriture
   déclarative de géométrie, lorsqu'elle est requise, appartient exclusivement au
   nœud `plan_generated_geometry`.
+- `select_assets` envoie au provider seulement un mapping fermé
+  `role_id -> choice_id` (`bounded_asset_selection@1.2.0`) puis reconstruit et
+  valide localement le tuple asset/stratégies. Un rejet de sortie modèle permet
+  un unique second appel immédiat; auth, quota, timeout et transport ne sont pas
+  rejoués par ce client et tout fallback reste explicite.
 - Le checkpoint saver persiste des snapshots locaux sérialisables. Chaque
   création utilise `{workflow_id}:initial` et chaque révision
   `{workflow_id}:revision:{version_id}` afin qu'une révision ne reprenne jamais
@@ -111,9 +117,11 @@ memory_writeback
   budget agrégé de 1024 nœuds. Un adaptateur uniforme borné peut seulement
   corriger un dépassement de `maximum_dimensions_m`. Toute autre invalidité
   route vers `geometry_program_failure_handler` et bloque Blender.
-- Après le post-gate, `certify_completion` émet ou rejette une preuve terminale
-  liée aux hashes des exigences, de `SceneSpec`, du GLB, de la preview, des
-  métadonnées et du build lock. Sans certificat `issued`, le statut final reste `failed` et la
+- Après le post-gate, `certify_completion` émet ou rejette une preuve terminale.
+  Pour `AssemblyPlan 1.1`, le certificat 1.4 lie les hashes des exigences,
+  `SceneSpec`, AssemblyPlan, GLB, previews, métadonnées, build lock,
+  `component_proofs.json` et `constraint_evidence.json`. Sans certificat
+  `issued`, le statut final reste `failed` et la
   version n'est pas activée.
 - L'activation vérifiée est le commit canonique. Les projections compatibles
   (statut racine et événements produit/terminaux) sont best-effort après ce

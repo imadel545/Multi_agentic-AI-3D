@@ -270,7 +270,18 @@ class AssetAnchor(StrictModel):
     position_m: tuple[float, float, float]
     normal: tuple[float, float, float]
     up: tuple[float, float, float] = (0.0, 0.0, 1.0)
-    placement_policy: Literal["fixed", "sector_tower_surface", "ground_route"] = "fixed"
+    placement_policy: Literal[
+        "fixed",
+        "sector_tower_surface",
+        "ground_route",
+        "resolved_from_operation",
+    ] = "fixed"
+    resolved_support_anchor_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=96,
+        pattern=r"^[a-z][a-z0-9._-]*$",
+    )
     roles: list[str] = Field(min_length=1, max_length=12)
 
     @model_validator(mode="after")
@@ -290,6 +301,15 @@ class AssetAnchor(StrictModel):
             raise ValueError("asset anchor normal and up vectors must define a coherent frame")
         if len(self.roles) != len(set(self.roles)):
             raise ValueError("asset anchor roles must be unique")
+        if self.placement_policy == "resolved_from_operation":
+            if self.resolved_support_anchor_id is None:
+                raise ValueError(
+                    "resolved_from_operation anchor requires a fixed support anchor reference"
+                )
+        elif self.resolved_support_anchor_id is not None:
+            raise ValueError(
+                "only resolved_from_operation anchors may reference a fixed support anchor"
+            )
         return self
 
 
@@ -482,6 +502,18 @@ class AssetManifest(StrictModel):
         anchor_ids = {anchor.anchor_id for anchor in self.anchors}
         if len(anchor_ids) != len(self.anchors):
             raise ValueError("asset anchor IDs must be unique")
+        anchors_by_id = {anchor.anchor_id: anchor for anchor in self.anchors}
+        for anchor in self.anchors:
+            support_anchor_id = anchor.resolved_support_anchor_id
+            if support_anchor_id is None:
+                continue
+            support_anchor = anchors_by_id.get(support_anchor_id)
+            if support_anchor is None:
+                raise ValueError("resolved support anchor must reference a declared anchor")
+            if support_anchor.anchor_id == anchor.anchor_id:
+                raise ValueError("resolved support anchor cannot reference itself")
+            if support_anchor.placement_policy != "fixed":
+                raise ValueError("resolved support anchor must reference a fixed anchor")
         if any(connector.anchor_id not in anchor_ids for connector in self.connectors):
             raise ValueError("asset connectors must reference a declared anchor")
         connector_ids = [connector.connector_id for connector in self.connectors]

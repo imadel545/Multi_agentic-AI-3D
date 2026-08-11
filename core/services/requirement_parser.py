@@ -21,6 +21,7 @@ TOWER_SYNONYMS = {
 }
 
 POWER_CABINET_TERMS = (
+    "armoire",
     "armoire énergie",
     "armoire energie",
     "armoire d'énergie",
@@ -316,7 +317,10 @@ def _extract_tower_characteristics(
         warnings.append(
             WarningItem(
                 code="DEFAULT_TOWER_CHARACTERISTICS_USED",
-                message="Tower structural characteristics inferred from tower type and height.",
+                message=(
+                    "Les caractéristiques structurelles du pylône ont été déduites de son type "
+                    "et de sa hauteur."
+                ),
             )
         )
     has_platform = _contains_any(text, ["plateforme", "platform"])
@@ -479,4 +483,15 @@ def _extract_azimuths(text: str) -> list[float]:
 
 
 def _contains_negation_for(text: str, terms: list[str]) -> bool:
-    return any(f"sans {term}" in text or f"no {term}" in text for term in terms)
+    normalized = text.lower().replace("’", "'")
+    negation_prefix = (
+        r"(?:sans|without|no|aucun(?:e)?|"
+        r"(?:ne\s+)?pas\s+(?:(?:ajouter|inclure|prévoir|prevoir|installer|mettre|utiliser)\s+)?)"
+    )
+    for term in terms:
+        escaped = re.escape(term.lower().replace("’", "'"))
+        if re.search(rf"{negation_prefix}[^.!?;:]{{0,96}}{escaped}", normalized):
+            return True
+        if re.search(rf"\bni\s+(?:de\s+|d[' ]\s*)?{escaped}", normalized):
+            return True
+    return False

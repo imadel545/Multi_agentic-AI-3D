@@ -303,6 +303,7 @@ def _with_contract_defaults(kind: str, values: object) -> object:
         if kind == "anchors":
             entry.setdefault("up", [0.0, 0.0, 1.0])
             entry.setdefault("placement_policy", "fixed")
+            entry.setdefault("resolved_support_anchor_id", None)
         elif kind == "connectors":
             entry.setdefault("gender", "bidirectional")
             entry.setdefault("compatible_connector_kinds", [])
