@@ -44,15 +44,18 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   limited the call fails fast without sleeping a workflow thread. Ambiguous
   read/write/protocol failures are not replayed on another account. Aggregate
   pool health exposes counts only, never key identity or secret material.
-- A controlled live gate on 2026-08-11 resolved two distinct credentials from
+- A controlled live gate on 2026-08-11 resolved four distinct credentials from
   separate accounts and completed one locally validated strict JSON response
-  through each pool slot (`1 passed in 2.48s`). This proves both configured
-  accounts for that point-in-time text request only; it is not a permanent Groq
+  through every configured pool slot. This proves all four configured accounts
+  for that point-in-time text request only; it is not a permanent Groq
   availability guarantee and does not qualify the inaccessible Qwen path.
-- The same current-tree provider gate then passed all three scenarios in
-  31.65 seconds: both Groq pool slots, a no-fallback Groq/NVIDIA/real-Blender
-  product workflow with `llm_bounded` asset selection, and the bounded planning
-  contract. A prior run exposed Groq's account-specific HTTP 413
+- The final current-tree provider gate passed all four scenarios in 33.41
+  seconds: every Groq pool slot, a bounded asset-selection contract, a bounded
+  planning contract, and a no-fallback Groq/NVIDIA/real-Blender product workflow
+  with `llm_bounded` asset selection. Asset and planning decisions now expose
+  closed request-specific schemas whose choices map only to locally authorized
+  candidates; deterministic validation remains the final authority. An earlier
+  run exposed Groq's account-specific HTTP 413
   `rate_limit_exceeded` response for the larger asset-selection payload; the
   transport now treats that machine code as credential rate limiting and
   fails over instead of misclassifying it as invalid model output.

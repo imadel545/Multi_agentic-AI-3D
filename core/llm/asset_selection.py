@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
@@ -35,6 +36,37 @@ class _Decision(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     selections: list[_Selection] = Field(min_length=1, max_length=16)
+
+
+class _ProviderSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    choice_id: str = Field(min_length=1, max_length=32)
+    reason: str = Field(min_length=1, max_length=200)
+
+
+class _ProviderDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    selections: dict[str, _ProviderSelection] = Field(min_length=1, max_length=16)
+
+
+@dataclass(frozen=True)
+class _AllowedSelection:
+    choice_id: str
+    role_id: str
+    asset_id: str
+    generation_strategy: str
+    semantic_strategy: str
+
+    def prompt_payload(self) -> dict[str, str]:
+        return {
+            "choice_id": self.choice_id,
+            "role_id": self.role_id,
+            "asset_id": self.asset_id,
+            "generation_strategy": self.generation_strategy,
+            "semantic_strategy": self.semantic_strategy,
+        }
 
 
 PostCallable = Callable[..., httpx.Response]
@@ -100,7 +132,21 @@ class GroqAssetSelectionClient:
                 )
                 response.raise_for_status()
                 body = response.json()
-            decision = _Decision.model_validate(_response_content(body))
+            provider_decision = _ProviderDecision.model_validate(_response_content(body))
+            choices_by_id = {choice.choice_id: choice for choice in _selection_choices(slots)}
+            decision = _Decision(
+                selections=[
+                    _Selection(
+                        role_id=role_id,
+                        asset_id=choices_by_id[item.choice_id].asset_id,
+                        generation_strategy=choices_by_id[item.choice_id].generation_strategy,
+                        semantic_strategy=choices_by_id[item.choice_id].semantic_strategy,
+                        reason=item.reason,
+                    )
+                    for role_id, item in provider_decision.selections.items()
+                    if choices_by_id[item.choice_id].role_id == role_id
+                ]
+            )
             selections = {item.role_id: item.asset_id for item in decision.selections}
             allowed = {
                 slot["role_id"]: {
@@ -162,42 +208,23 @@ class GroqAssetSelectionClient:
             }
 
     def _payload(self, slots: list[dict]) -> dict[str, Any]:
+        choices = _selection_choices(slots)
+        choices_by_role = {
+            role_id: [choice for choice in choices if choice.role_id == role_id]
+            for role_id in dict.fromkeys(choice.role_id for choice in choices)
+        }
         schema = {
             "type": "object",
             "additionalProperties": False,
             "properties": {
                 "selections": {
-                    "type": "array",
-                    "minItems": len(slots),
-                    "maxItems": len(slots),
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "role_id": {"type": "string"},
-                            "asset_id": {"type": "string"},
-                            "generation_strategy": {
-                                "type": "string",
-                                "enum": ["imported_glb_exact", "internal_project_generated"],
-                            },
-                            "semantic_strategy": {
-                                "type": "string",
-                                "enum": [
-                                    "reuse_component",
-                                    "adapt_component",
-                                    "compose_assets",
-                                ],
-                            },
-                            "reason": {"type": "string"},
-                        },
-                        "required": [
-                            "role_id",
-                            "asset_id",
-                            "generation_strategy",
-                            "semantic_strategy",
-                            "reason",
-                        ],
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        role_id: _role_selection_schema(role_choices)
+                        for role_id, role_choices in choices_by_role.items()
                     },
+                    "required": list(choices_by_role),
                 }
             },
             "required": ["selections"],
@@ -210,9 +237,9 @@ class GroqAssetSelectionClient:
                     {
                         "role": "system",
                         "content": (
-                            "Choose exactly one candidate asset_id and one of that candidate's "
-                            "allowed_generation_strategies and allowed_semantic_strategies for "
-                            "each supplied role. Compare the "
+                            "Choose exactly one supplied choice_id for each supplied role. Each "
+                            "choice_id is an indivisible, pre-authorized asset, generation, and "
+                            "semantic strategy tuple. Compare the "
                             "provided scores, dimensions, compatibility, permissions, and "
                             "qualification limitations. You may only use supplied values. Do not "
                             "create assets, transforms, connector names, parameters, strategies, "
@@ -221,7 +248,13 @@ class GroqAssetSelectionClient:
                     },
                     {
                         "role": "user",
-                        "content": json.dumps({"slots": slots}, separators=(",", ":")),
+                        "content": json.dumps(
+                            {
+                                "slots": slots,
+                                "allowed_choices": [choice.prompt_payload() for choice in choices],
+                            },
+                            separators=(",", ":"),
+                        ),
                     },
                 ],
                 "response_format": {
@@ -234,6 +267,78 @@ class GroqAssetSelectionClient:
                 },
             }
         )
+
+
+def _selection_choices(slots: list[dict]) -> list[_AllowedSelection]:
+    if not 1 <= len(slots) <= 16:
+        raise ValueError("asset selection requires between 1 and 16 roles")
+
+    choices: list[_AllowedSelection] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    seen_roles: set[str] = set()
+    for slot in slots:
+        role_id = slot["role_id"]
+        if not isinstance(role_id, str) or not role_id.strip():
+            raise ValueError("every asset selection role_id must be a non-empty string")
+        if role_id in seen_roles:
+            raise ValueError("asset selection role_id values must be unique")
+        seen_roles.add(role_id)
+        role_alternative_count = 0
+        for candidate in slot["candidates"]:
+            asset_id = candidate["asset_id"]
+            if not isinstance(asset_id, str) or not asset_id.strip():
+                raise ValueError("every candidate asset_id must be a non-empty string")
+            for generation_strategy in candidate["allowed_generation_strategies"]:
+                for semantic_strategy in candidate["allowed_semantic_strategies"]:
+                    if not _semantic_matches_generation(
+                        generation_strategy,
+                        semantic_strategy,
+                    ):
+                        continue
+                    signature = (
+                        role_id,
+                        asset_id,
+                        generation_strategy,
+                        semantic_strategy,
+                    )
+                    role_alternative_count += 1
+                    if signature in seen:
+                        continue
+                    seen.add(signature)
+                    choices.append(
+                        _AllowedSelection(
+                            choice_id=f"choice_{len(choices) + 1:04d}",
+                            role_id=role_id,
+                            asset_id=asset_id,
+                            generation_strategy=generation_strategy,
+                            semantic_strategy=semantic_strategy,
+                        )
+                    )
+        if role_alternative_count == 0:
+            raise ValueError(
+                "every role must expose at least one compatible candidate strategy tuple"
+            )
+    return choices
+
+
+def _role_selection_schema(
+    choices: list[_AllowedSelection],
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "choice_id": {
+                "type": "string",
+                "enum": [choice.choice_id for choice in choices],
+            },
+            "reason": {"type": "string", "minLength": 1, "maxLength": 200},
+        },
+        "required": [
+            "choice_id",
+            "reason",
+        ],
+    }
 
 
 def _elapsed_ms(started: float) -> int:

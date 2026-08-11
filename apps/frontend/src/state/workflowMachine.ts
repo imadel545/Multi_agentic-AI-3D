@@ -70,9 +70,9 @@ export type WorkflowMachineAction =
   | { type: "VIEWER_BUNDLE_LOADED"; viewerBundle: ViewerBundle }
   | { type: "TIMELINE_LOADED"; timeline: TimelineSummary }
   | { type: "USER_ISSUES_LOADED"; userIssues: UserIssues }
-  | { type: "RESOURCE_LOADING"; resource: string }
-  | { type: "RESOURCE_FAILED"; resource: string; message: string }
-  | { type: "RESOURCE_RECOVERED"; resource: string }
+  | { type: "RESOURCE_LOADING"; resource: string; workflowId?: string }
+  | { type: "RESOURCE_FAILED"; resource: string; message: string; workflowId?: string }
+  | { type: "RESOURCE_RECOVERED"; resource: string; workflowId?: string }
   | { type: "REQUEST_FAILED"; message: string }
   | { type: "RESET" };
 
@@ -249,6 +249,7 @@ export function workflowReducer(
       if (!matchesActiveWorkflow(state, action.userIssues.workflow_id)) return state;
       return { ...state, userIssues: action.userIssues };
     case "RESOURCE_LOADING":
+      if (action.workflowId && !matchesActiveWorkflow(state, action.workflowId)) return state;
       return {
         ...state,
         resourceErrors: withoutResource(state.resourceErrors, action.resource),
@@ -258,6 +259,7 @@ export function workflowReducer(
         }
       };
     case "RESOURCE_FAILED":
+      if (action.workflowId && !matchesActiveWorkflow(state, action.workflowId)) return state;
       return {
         ...state,
         resourceErrors: { ...state.resourceErrors, [action.resource]: action.message },
@@ -267,6 +269,7 @@ export function workflowReducer(
         }
       };
     case "RESOURCE_RECOVERED":
+      if (action.workflowId && !matchesActiveWorkflow(state, action.workflowId)) return state;
       return {
         ...state,
         resourceErrors: withoutResource(state.resourceErrors, action.resource),

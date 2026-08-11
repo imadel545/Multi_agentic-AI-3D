@@ -116,7 +116,6 @@ def test_certified_status_advertises_only_verified_artifacts(tmp_path: Path) -> 
     assert payload["download_url"] == "/designs/wf_certified/download"
 
 
-@pytest.mark.blender_runtime
 def test_workflow_admission_is_bounded_and_rejected_work_has_no_orphan(tmp_path: Path) -> None:
     started = threading.Event()
     release = threading.Event()
@@ -1512,7 +1511,6 @@ def test_event_stream_fans_out_identical_live_events_to_two_subscribers(
         workflow_service.outputs_dir = original_outputs
 
 
-@pytest.mark.blender_runtime
 def test_failed_terminal_event_observes_persisted_failed_status(
     tmp_path: Path,
     monkeypatch,
@@ -1546,7 +1544,6 @@ def test_failed_terminal_event_observes_persisted_failed_status(
     assert terminal_statuses == ["failed"]
 
 
-@pytest.mark.blender_runtime
 def test_completed_terminal_event_cannot_bypass_persisted_completion_proof(
     tmp_path: Path,
     monkeypatch,

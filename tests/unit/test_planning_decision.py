@@ -56,12 +56,57 @@ def test_gpt_oss_selects_only_validated_candidates() -> None:
     assert calls[0]["json"]["stream"] is False
     assert "tools" not in calls[0]["json"]
     assert calls[0]["json"]["response_format"]["json_schema"]["strict"] is True
-    assert (
-        "value"
-        not in calls[0]["json"]["response_format"]["json_schema"]["schema"]["properties"][
-            "selections"
-        ]["items"]["properties"]
+    selection_schemas = calls[0]["json"]["response_format"]["json_schema"]["schema"]["properties"][
+        "selections"
+    ]["properties"]
+    assert all(
+        "value" not in field_schema["properties"] for field_schema in selection_schemas.values()
     )
+
+
+def test_provider_schema_excludes_protected_and_cross_field_candidate_actions() -> None:
+    captured = {}
+
+    def post(url, headers, json, timeout):
+        captured.update(json)
+        return _response(
+            url,
+            {
+                "selections": [
+                    _selection("antenna_install_height_m", "keep_current"),
+                    _selection("beamwidth_deg", "keep_current"),
+                    _selection("mechanical_tilt_deg", "keep_current"),
+                    _selection("electrical_tilt_deg", "keep_current"),
+                    _selection("include_cables", "keep_current"),
+                    _selection("include_sector_beams", "keep_current"),
+                ]
+            },
+        )
+
+    result = GroqPlanningDecisionClient(api_key="test-key", post=post).decide(_request())
+
+    assert result.diagnostics.status == "primary"
+    selections_schema = captured["response_format"]["json_schema"]["schema"]["properties"][
+        "selections"
+    ]
+    assert selections_schema["additionalProperties"] is False
+    assert set(selections_schema["required"]) == {
+        "antenna_install_height_m",
+        "beamwidth_deg",
+        "mechanical_tilt_deg",
+        "electrical_tilt_deg",
+        "include_cables",
+        "include_sector_beams",
+    }
+    field_schemas = selections_schema["properties"]
+    assert field_schemas["beamwidth_deg"]["properties"]["action"]["enum"] == ["keep_current"]
+    candidate_ids_by_field = {
+        field: set(field_schema["properties"]["candidate_id"]["enum"])
+        for field, field_schema in field_schemas.items()
+    }
+    assert candidate_ids_by_field["antenna_install_height_m"] == {"none", "rag:hba:1"}
+    assert candidate_ids_by_field["include_cables"] == {"none", "memory:cables:1"}
+    assert candidate_ids_by_field["beamwidth_deg"] == {"none"}
 
 
 def test_unknown_candidate_is_rejected_and_fallback_is_visible() -> None:

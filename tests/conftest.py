@@ -28,27 +28,42 @@ if not _LIVE_PROVIDERS:
     os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISION"] = "false"
     os.environ["TELECOM_STUDIO_ENABLE_GROQ_VISUAL_DESIGN_CRITIC"] = "false"
 
+from apps.api.telecom_studio_api import product as product_module  # noqa: E402
 from apps.api.telecom_studio_api.config import settings  # noqa: E402
 from core.services.blender_runner import BlenderRunner  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def reject_unmarked_real_blender(request: pytest.FixtureRequest, monkeypatch) -> None:
-    """Keep the fast gate honest when a test accidentally launches Blender."""
+    """Keep the fast gate honest at both real Blender subprocess boundaries."""
 
-    original = BlenderRunner._run_blender_command
+    original_generation = BlenderRunner._run_blender_command
+    original_probe = product_module._run_blender_probe
+
+    def runtime_is_explicit() -> bool:
+        return any(
+            request.node.get_closest_marker(marker) is not None
+            for marker in ("blender_runtime", "provider_live")
+        )
 
     def guarded(self: BlenderRunner, command: list[str]):
-        marked_runtime = request.node.get_closest_marker("blender_runtime") is not None
-        marked_live_provider = request.node.get_closest_marker("provider_live") is not None
-        if not (marked_runtime or marked_live_provider):
+        if not runtime_is_explicit():
             pytest.fail(
                 "real Blender subprocess requires a blender_runtime or provider_live marker",
                 pytrace=False,
             )
-        return original(self, command)
+        return original_generation(self, command)
+
+    def guarded_probe(command: list[str]):
+        if not runtime_is_explicit():
+            pytest.fail(
+                "real Blender readiness probe requires a blender_runtime or provider_live marker",
+                pytrace=False,
+            )
+        return original_probe(command)
 
     monkeypatch.setattr(BlenderRunner, "_run_blender_command", guarded)
+    monkeypatch.setattr(product_module, "_run_blender_probe", guarded_probe)
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:

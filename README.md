@@ -199,6 +199,14 @@ Backend fast gate (default, no Blender subprocess, provider, or browser):
 .venv/bin/python -m pytest -q
 ```
 
+Audit the collection without executing any runtime test:
+
+```bash
+.venv/bin/python -m pytest --collect-only -q
+.venv/bin/python -m pytest --collect-only -q -m blender_runtime
+.venv/bin/python -m pytest --collect-only -q -m provider_live
+```
+
 Real Blender gate (serialized and explicit):
 
 ```bash
@@ -268,7 +276,7 @@ requirements_text or document pack
   evidence asset after runtime byte verification; `qualified_mixed_catalog`,
   not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
-- E2E proof: `.venv/bin/python -m pytest tests/e2e/test_telecom_generation_proof.py -q`.
+- E2E proof: `.venv/bin/python -m pytest -q -m blender_runtime tests/e2e/test_telecom_generation_proof.py`.
 - Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
 - Frontend: `apps/frontend` contains a real-backend product rework in progress.
   The previous dashboard-like kernel is rejected; acceptance requires a

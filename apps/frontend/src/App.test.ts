@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement, StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClientError, TelecomStudioApi } from "./api/client";
@@ -90,6 +90,16 @@ function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi
   } as unknown as TelecomStudioApi;
 }
 
+function deferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
 describe("frontend runtime selection", () => {
   it("loads the governed asset inventory during bootstrap", async () => {
     const assetInventory = vi.fn().mockResolvedValue({
@@ -137,6 +147,129 @@ describe("frontend runtime selection", () => {
     expect(selectViewerBundleForDisplay("failed", failed, certified)).toBe(certified);
     expect(selectViewerBundleForDisplay("running", null, certified)).toBe(certified);
     expect(selectViewerBundleForDisplay("completed", certified, null)).toBe(certified);
+  });
+
+  it("ignores a superseded terminal bundle that resolves after the new workflow", async () => {
+    const workflowA = workflow("wf_a", "completed", "2026-07-15T08:00:00Z");
+    const workflowB = workflow("wf_b", "completed", "2026-07-15T09:00:00Z");
+    const lateVersionsA = deferredPromise<Array<{
+      version_id: string;
+      created_at: string;
+      active: boolean;
+      artifacts: Record<string, string>;
+      edit_description: string;
+    }>>();
+    let workflowAVersionsSignal: AbortSignal | undefined;
+    const terminalResource = (workflowId: string) => ({
+      workflow_id: workflowId,
+      status: "completed",
+      available_actions: [],
+      unsupported_actions: []
+    });
+    const versions = vi.fn((workflowId: string, options?: { signal?: AbortSignal }) => {
+      if (workflowId === "wf_a") {
+        workflowAVersionsSignal = options?.signal;
+        return lateVersionsA.promise;
+      }
+      return Promise.resolve([{
+        version_id: "v_b",
+        created_at: "2026-07-15T09:00:00Z",
+        active: true,
+        artifacts: {},
+        edit_description: "VERSION B ACTIVE"
+      }]);
+    });
+    const apiClient = bootstrapApi({
+      listDesigns: vi.fn().mockResolvedValue([workflowA]),
+      workflowStatus: vi.fn((workflowId: string) =>
+        Promise.resolve(workflowId === "wf_a" ? workflowA : workflowB)
+      ),
+      currentOperation: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        current_operation: "Design terminé",
+        is_running: false,
+        is_terminal: true
+      })),
+      viewerBundle: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        viewer_artifacts: [],
+        limitations: []
+      })),
+      timelineSummary: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        timeline_steps: []
+      })),
+      userIssues: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        human_readable_issues: []
+      })),
+      versions,
+      parseRequirements: vi.fn().mockResolvedValue({
+        requirements: {
+          network_type: "5G",
+          site_type: "telecom_site",
+          tower_type: "lattice_tower",
+          tower_height_m: 30,
+          tower_characteristics: { structure: "lattice" },
+          sector_count: 3,
+          antenna_type: "panel_5g",
+          antenna_install_height_m: 24,
+          azimuths_deg: [0, 120, 240],
+          mechanical_tilt_deg: 3,
+          electrical_tilt_deg: 0,
+          beamwidth_deg: 65,
+          include_rru: true,
+          include_cables: true,
+          include_beams: true,
+          include_labels: true,
+          include_power_cabinet: true,
+          include_gps_antenna: true,
+          geometry_requests: [],
+          detail_level: "high",
+          warnings: [],
+          repair_events: [],
+          field_evidence: {},
+          conflicts: [],
+          assumptions: [],
+          requires_confirmation: false,
+          confirmation_fields: []
+        },
+        requirements_hash: "b".repeat(64),
+        warnings: [],
+        errors: [],
+        provider: "deterministic",
+        extraction_provider: "deterministic",
+        fallback_used: true,
+        llm_fallback_reason: "provider_unavailable"
+      }),
+      createDesign: vi.fn().mockResolvedValue({ workflow_id: "wf_b", status: "completed" })
+    });
+
+    render(createElement(App, { apiClient }));
+
+    await waitFor(() => expect(versions).toHaveBeenCalledWith("wf_a", expect.anything()));
+    fireEvent.change(screen.getByRole("textbox", { name: "Design prompt" }), {
+      target: { value: "Créer le nouveau site B" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Analyser la demande" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmer et générer" }));
+
+    expect(await screen.findByText("VERSION B ACTIVE")).toBeInTheDocument();
+    expect(workflowAVersionsSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      lateVersionsA.resolve([{
+        version_id: "v_a",
+        created_at: "2026-07-15T08:00:00Z",
+        active: true,
+        artifacts: {},
+        edit_description: "VERSION A OBSOLÈTE"
+      }]);
+      await lateVersionsA.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByText("VERSION A OBSOLÈTE")).not.toBeInTheDocument());
+    expect(screen.getByText("VERSION B ACTIVE")).toBeInTheDocument();
   });
 
   it("does not auto-restore an uncertified completed design", () => {

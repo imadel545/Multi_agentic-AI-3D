@@ -338,13 +338,62 @@ def _response_content(body: dict[str, Any]) -> dict[str, Any]:
 
 def _decision_schema(request: PlanningDecisionRequest) -> dict[str, Any]:
     schema = json.loads(json.dumps(PLANNING_DECISION_SCHEMA))
-    candidate_schema = schema["properties"]["selections"]["items"]["properties"]["candidate_id"]
-    candidate_schema["enum"] = ["none", *[item.candidate_id for item in request.candidates]]
+    protected_fields = set(request.protected_fields)
+    schema["properties"]["selections"] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            field: _selection_schema_for_field(
+                candidate_ids=[
+                    candidate.candidate_id
+                    for candidate in request.candidates
+                    if candidate.field == field
+                ],
+                protected=field in protected_fields,
+            )
+            for field in PLANNING_FIELDS
+        },
+        "required": list(PLANNING_FIELDS),
+    }
     return schema
+
+
+def _selection_schema_for_field(
+    *,
+    candidate_ids: list[str],
+    protected: bool,
+) -> dict[str, Any]:
+    selectable_candidate_ids = [] if protected else candidate_ids
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": (
+                    ["keep_current", "select_candidate"]
+                    if selectable_candidate_ids
+                    else ["keep_current"]
+                ),
+            },
+            "candidate_id": {
+                "type": "string",
+                "enum": ["none", *selectable_candidate_ids],
+            },
+            "reason": {"type": "string"},
+        },
+        "required": ["action", "candidate_id", "reason"],
+    }
 
 
 def _normalize_model_content(payload: dict[str, Any]) -> dict[str, Any]:
     selections = payload.get("selections")
+    if isinstance(selections, dict):
+        selections = [
+            {"field": field, **selection}
+            for field, selection in selections.items()
+            if isinstance(selection, dict)
+        ]
     if not isinstance(selections, list):
         return payload
     normalized = dict(payload)

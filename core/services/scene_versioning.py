@@ -3,6 +3,7 @@ import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -100,6 +101,15 @@ _REQUIRED_COMPLETION_CHECKS_V1_3 = {
     "no_critical_fallback",
     "component_proof_verified",
 }
+
+
+@dataclass(frozen=True)
+class VerifiedActiveVersion:
+    """One fail-closed verification result for the currently published version."""
+
+    version: SceneVersion
+    artifact_dir: Path
+    status_path: Path
 
 
 class SceneVersioningService:
@@ -303,6 +313,11 @@ class SceneVersioningService:
     def verified_active_status_path(self, workflow_id: str) -> Path:
         """Resolve and fully revalidate the currently published design."""
 
+        return self.verified_active_version(workflow_id).status_path
+
+    def verified_active_version(self, workflow_id: str) -> VerifiedActiveVersion:
+        """Verify the active commit once and return its immutable request snapshot."""
+
         manifest = self.active_design_manifest(workflow_id)
         if manifest is None:
             raise ValueError("ACTIVE_DESIGN_MANIFEST_INVALID")
@@ -343,7 +358,11 @@ class SceneVersioningService:
                 raise ValueError("ACTIVE_DESIGN_CRITICAL_REPORTS_MISMATCH")
         elif schema_version != "1.0.0":
             raise ValueError("ACTIVE_DESIGN_SCHEMA_UNSUPPORTED")
-        return status_path
+        return VerifiedActiveVersion(
+            version=target,
+            artifact_dir=artifact_dir,
+            status_path=status_path,
+        )
 
     def active_design_manifest(self, workflow_id: str) -> dict | None:
         path = self._active_design_path(workflow_id)

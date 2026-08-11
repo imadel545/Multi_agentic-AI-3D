@@ -220,17 +220,24 @@ class ProductService:
         }
 
     def viewer_bundle(self, workflow_id: str) -> dict:
-        status = self._status_or_raise(workflow_id)
+        try:
+            status, verified_snapshot = self.workflow_service.get_viewer_status_snapshot(
+                workflow_id
+            )
+        except KeyError as exc:
+            raise ProductNotFound(workflow_id) from exc
         runtime = runtime_capabilities()
-        active_version = status.get("active_version_id")
+        active_version = (
+            verified_snapshot.version_id
+            if verified_snapshot is not None
+            else status.get("active_version_id")
+        )
         base_url = f"/designs/{workflow_id}/artifacts"
         viewer_artifacts = []
         issues = _collect_user_issues(status, self.workflow_service.get_events(workflow_id))
         llm = llm_truth(status, workflow_service=self.workflow_service)
         verified_artifacts = (
-            self.workflow_service.verified_version_artifact_paths(workflow_id, active_version)
-            if isinstance(active_version, str)
-            else {}
+            verified_snapshot.artifact_paths if verified_snapshot is not None else {}
         )
 
         def _artifact(name: str, content_type: str, filename: str) -> dict:
@@ -328,8 +335,16 @@ class ProductService:
         llm_decision_provenance = _artifact_by_name(
             viewer_artifacts, "llm_decision_provenance.json"
         )
-        scene_spec_path = verified_artifacts.get("scene_spec")
-        assembly_plan_path = verified_artifacts.get("assembly_plan")
+        verified_scene = (
+            verified_snapshot.scene
+            if verified_snapshot is not None and "scene_spec" in verified_artifacts
+            else None
+        )
+        verified_assembly_plan = (
+            verified_snapshot.assembly_plan
+            if verified_snapshot is not None and "assembly_plan" in verified_artifacts
+            else None
+        )
 
         return {
             "workflow_id": workflow_id,
@@ -337,7 +352,7 @@ class ProductService:
             "active_version": active_version,
             "multimodal_consent": status.get("multimodal_consent", "disabled"),
             "multimodal_intelligence": runtime["multimodal_intelligence"],
-            "asset_decision_summary": _asset_decision_summary_from_path(assembly_plan_path),
+            "asset_decision_summary": _asset_decision_summary(verified_assembly_plan),
             "visual_review": _visual_review_summary(
                 status,
                 runtime["multimodal_intelligence"],
@@ -349,8 +364,8 @@ class ProductService:
             "mesh_qa_passed": status.get("mesh_qa_passed"),
             "qa_score": status.get("qa_score"),
             "asset_import_summary": status.get("asset_import_summary"),
-            "geometry_fidelity_summary": _geometry_fidelity_summary_from_path(scene_spec_path),
-            "geometry_program_summary": _geometry_program_summary_from_path(scene_spec_path),
+            "geometry_fidelity_summary": _geometry_fidelity_summary(verified_scene),
+            "geometry_program_summary": _geometry_program_summary(verified_scene),
             "human_warnings_count": sum(1 for issue in issues if issue["severity"] == "warning"),
             "human_errors_count": sum(1 for issue in issues if issue["severity"] == "error"),
             "primary_glb_url": _available_artifact_url(primary_glb),
@@ -456,25 +471,32 @@ def _probe_blender_runtime(binary: str, _mtime_ns: int, _size: int) -> bool:
 
     marker = "TELECOM_STUDIO_BLENDER_READY"
     try:
-        completed = subprocess.run(
-            [
-                binary,
-                "--background",
-                "--factory-startup",
-                "--python-expr",
-                f'print("{marker}")',
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-            check=False,
+        completed = _run_blender_probe(
+            [binary, "--background", "--factory-startup", "--python-expr", f'print("{marker}")']
         )
     except (OSError, subprocess.TimeoutExpired):
         return False
     output = f"{completed.stdout}\n{completed.stderr}"
     return completed.returncode == 0 and marker in output
+
+
+def _run_blender_probe(command: list[str]) -> subprocess.CompletedProcess[str]:
+    """Single subprocess boundary for the Blender readiness probe.
+
+    Keeping this separate from resolution and caching lets the test harness
+    reject an accidental real Blender startup without patching subprocess
+    globally or weakening the production smoke.
+    """
+
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+        check=False,
+    )
 
 
 def _rag_summary(rag_service: Any | None) -> dict:
@@ -776,6 +798,16 @@ def _asset_decision_summary_from_path(path: Path | None) -> dict | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+    return _asset_decision_summary(payload)
+
+
+def _asset_decision_summary(assembly_plan: object) -> dict | None:
+    if hasattr(assembly_plan, "model_dump"):
+        payload = assembly_plan.model_dump(mode="json")
+    elif isinstance(assembly_plan, dict):
+        payload = assembly_plan
+    else:
+        return None
     raw_components = payload.get("components")
     if not isinstance(raw_components, list):
         return None
@@ -931,6 +963,14 @@ def _geometry_program_summary_from_path(path: Path | None) -> dict | None:
     try:
         scene = SceneSpec.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return _geometry_program_summary(scene)
+
+
+def _geometry_program_summary(scene_spec: object) -> dict | None:
+    try:
+        scene = SceneSpec.model_validate(scene_spec)
+    except (TypeError, ValueError):
         return None
     programs = [
         {

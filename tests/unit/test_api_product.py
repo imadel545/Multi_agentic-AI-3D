@@ -17,6 +17,7 @@ from apps.api.telecom_studio_api.product import (
     _studio_warnings,
 )
 from apps.api.telecom_studio_api.runtime_contract import memory_status
+from core.services import scene_versioning
 
 
 def test_blender_availability_requires_successful_headless_smoke(
@@ -30,9 +31,9 @@ def test_blender_availability_requires_successful_headless_smoke(
         lambda _configured: binary,
     )
     monkeypatch.setattr(
-        "apps.api.telecom_studio_api.product.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args[0],
+        "apps.api.telecom_studio_api.product._run_blender_probe",
+        lambda command: subprocess.CompletedProcess(
+            args=command,
             returncode=-11,
             stdout="Blender 4.5.12 LTS",
             stderr="Arch_ValidateAssumptions",
@@ -52,9 +53,9 @@ def test_blender_availability_accepts_verified_headless_smoke(tmp_path: Path, mo
         lambda _configured: binary,
     )
     monkeypatch.setattr(
-        "apps.api.telecom_studio_api.product.subprocess.run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            args=args[0],
+        "apps.api.telecom_studio_api.product._run_blender_probe",
+        lambda command: subprocess.CompletedProcess(
+            args=command,
             returncode=0,
             stdout="Blender 4.5.12 LTS\nTELECOM_STUDIO_BLENDER_READY",
             stderr="",
@@ -331,7 +332,8 @@ def test_memory_status_distinguishes_migration_from_index_failure() -> None:
     assert pending["memory_vector_errors"] == ["vector_projection_pending"]
 
 
-def test_studio_warnings_distinguish_unverified_and_failed_rag() -> None:
+def test_studio_warnings_distinguish_unverified_and_failed_rag(monkeypatch) -> None:
+    monkeypatch.setattr("apps.api.telecom_studio_api.product._blender_available", lambda: True)
     inventory = {"entries": [], "missing_file_count": 0}
     unverified = _studio_warnings(
         inventory,
@@ -456,6 +458,7 @@ def test_current_operation_for_completed_workflow(tmp_path: Path) -> None:
 @pytest.mark.blender_runtime
 def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path
@@ -484,6 +487,31 @@ def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
         assert operation["state_source"] == "persisted_active_operation"
         assert operation["is_running"] is True
         assert operation["is_terminal"] is False
+
+        manifest = workflow_service.versioning.active_design_manifest(workflow_id)
+        assert manifest is not None
+        canonical_version_id = manifest["version_id"]
+        status_path = tmp_path / workflow_id / "status.json"
+        divergent_status = json.loads(status_path.read_text(encoding="utf-8"))
+        divergent_status["active_version_id"] = "version_projection_diverged"
+        status_path.write_text(json.dumps(divergent_status), encoding="utf-8")
+        monkeypatch.setattr(workflow_service, "_is_workflow_active", lambda _workflow_id: True)
+        original_verify = scene_versioning.verify_persisted_version
+        verification_calls = 0
+
+        def counted_verify(*args, **kwargs):
+            nonlocal verification_calls
+            verification_calls += 1
+            return original_verify(*args, **kwargs)
+
+        monkeypatch.setattr(scene_versioning, "verify_persisted_version", counted_verify)
+        bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
+
+        assert verification_calls == 1
+        assert bundle["status"] == "running"
+        assert bundle["active_version"] == canonical_version_id
+        assert bundle["primary_glb_url"].endswith(f"?version_id={canonical_version_id}")
+        assert "version_projection_diverged" not in bundle["primary_glb_url"]
         workflow_service._restore_status_after_operation(
             workflow_id, previous, operation_id="edit_test"
         )
@@ -505,17 +533,17 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path, monkeypatch) -> Non
             _synchronous=True,
         )
         workflow_id = response["workflow_id"]
-        original_verify = workflow_service._verified_version_artifact_dir
+        original_verify = scene_versioning.verify_persisted_version
         verification_calls = 0
 
-        def counted_verify(workflow_id: str, version_id: str):
+        def counted_verify(*args, **kwargs):
             nonlocal verification_calls
             verification_calls += 1
-            return original_verify(workflow_id, version_id)
+            return original_verify(*args, **kwargs)
 
         monkeypatch.setattr(
-            workflow_service,
-            "_verified_version_artifact_dir",
+            scene_versioning,
+            "verify_persisted_version",
             counted_verify,
         )
         bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
@@ -628,6 +656,30 @@ def test_viewer_bundle_returns_artifact_urls(tmp_path: Path, monkeypatch) -> Non
             assert artifact["url"].startswith(f"/designs/{workflow_id}/artifacts/")
             assert "/Users/" not in artifact["url"]
             assert isinstance(artifact["available"], bool)
+
+        calls_before_rejection = verification_calls
+
+        def rejected_verify(*_args, **_kwargs):
+            nonlocal verification_calls
+            verification_calls += 1
+            raise ValueError("ACTIVE_VERSION_ARTIFACT_HASH_MISMATCH:glb")
+
+        monkeypatch.setattr(
+            scene_versioning,
+            "verify_persisted_version",
+            rejected_verify,
+        )
+        rejected_bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
+
+        assert verification_calls == calls_before_rejection + 1
+        assert rejected_bundle["status"] == "integrity_failed"
+        assert rejected_bundle["primary_glb_url"] is None
+        assert rejected_bundle["scene_spec_url"] is None
+        assert rejected_bundle["assembly_plan_url"] is None
+        assert rejected_bundle["asset_decision_summary"] is None
+        assert rejected_bundle["geometry_fidelity_summary"] is None
+        assert rejected_bundle["geometry_program_summary"] is None
+        assert not any(artifact["available"] for artifact in rejected_bundle["viewer_artifacts"])
     finally:
         workflow_service.outputs_dir = original_outputs
 
@@ -802,7 +854,6 @@ def test_user_issues_endpoint_returns_issues(tmp_path: Path) -> None:
         workflow_service.outputs_dir = original_outputs
 
 
-@pytest.mark.blender_runtime
 def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir
     workflow_service.outputs_dir = tmp_path

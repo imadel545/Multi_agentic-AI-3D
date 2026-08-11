@@ -331,8 +331,10 @@ class _StructuredAssetSelectionTransport:
     def __call__(self, url, *, headers, json, timeout):
         del headers, timeout
         self.payloads.append(json)
-        slots = __import__("json").loads(json["messages"][1]["content"])["slots"]
-        selections = []
+        prompt = __import__("json").loads(json["messages"][1]["content"])
+        slots = prompt["slots"]
+        allowed_choices = prompt["allowed_choices"]
+        selections = {}
         for slot in slots:
             candidates = slot["candidates"]
             if slot["role_id"] == "sector_antenna":
@@ -355,15 +357,18 @@ class _StructuredAssetSelectionTransport:
                     "internal_project_generated": {"compose_assets", "adapt_component"},
                 }[strategy]
             )
-            selections.append(
-                {
-                    "role_id": slot["role_id"],
-                    "asset_id": selected,
-                    "generation_strategy": strategy,
-                    "semantic_strategy": semantic_strategy,
-                    "reason": _BOUNDED_SELECTION_REASON,
-                }
+            choice = next(
+                choice
+                for choice in allowed_choices
+                if choice["role_id"] == slot["role_id"]
+                and choice["asset_id"] == selected
+                and choice["generation_strategy"] == strategy
+                and choice["semantic_strategy"] == semantic_strategy
             )
+            selections[slot["role_id"]] = {
+                "choice_id": choice["choice_id"],
+                "reason": _BOUNDED_SELECTION_REASON,
+            }
         request = httpx.Request("POST", url)
         return httpx.Response(
             200,

@@ -143,18 +143,29 @@ limitations and never advertises checks it cannot perform.
   HTTP failures cannot make the fast suite nondeterministic.
 - `pytest -q` is the fast gate and excludes `blender_runtime`, `provider_live`
   and `browser_smoke`. An autouse guard fails if an unmarked test reaches the
-  real Blender subprocess boundary. The 2026-08-10 gate completed 586 tests in
+  real Blender generation subprocess or the product readiness-probe subprocess.
+  Fake probe tests replace that explicit boundary; they never weaken the guard
+  globally. The 2026-08-10 gate completed 586 tests in
   24.29 seconds, with 52 Blender and 2 live-provider cases classified separately.
+- Collection can be audited without executing Blender or a provider with
+  `pytest --collect-only -q`, `pytest --collect-only -q -m blender_runtime` and
+  `pytest --collect-only -q -m provider_live`. Tests that stop before Blender,
+  including admission, invalid-input and terminal-persistence failure paths,
+  remain in the fast gate rather than inheriting a runtime marker.
+  The final 2026-08-11 collection contains 617 fast tests, 48
+  `blender_runtime` tests and 4 `provider_live` tests; the complete fast gate
+  passed in 23.52 seconds.
 - `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
   gate. The 2026-08-10 audit exercised the Blender suite in 14 minutes 43 seconds;
   the two non-Blender failure-path cases discovered during classification now run
   in the fast gate. It must never accept fallback artefacts as proof of a
   successful design.
 - `TELECOM_STUDIO_TEST_LIVE_PROVIDERS=1 pytest -m provider_live` is the explicit
-  external capability gate. On 2026-08-10 its full Groq + NVIDIA + Blender product
-  flow and bounded Groq planning contract both passed without fallback (2 tests in
-  31.79 seconds). The result is point-in-time runtime evidence, not a permanent
-  availability guarantee.
+  external capability gate. On 2026-08-11 it validated all four configured Groq
+  accounts, the bounded asset and planning contracts, and the complete Groq +
+  NVIDIA + Blender product flow without fallback (4 tests in 33.41 seconds).
+  The result is point-in-time runtime evidence, not a permanent availability
+  guarantee.
 - A real API/browser gate remains required for Canvas/WebGL, GLB loading,
   selection, SSE/polling, document upload, edit/version and rollback flows.
   Vitest/jsdom remains a fast contract gate, not visual runtime evidence.

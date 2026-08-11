@@ -15,6 +15,29 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}) {
 }
 
 describe("TelecomStudioApi", () => {
+  it("forwards an AbortSignal to terminal workflow reads", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({
+      workflow_id: "wf_1",
+      status: "completed",
+      created_at: "2026-07-15T10:00:00Z",
+      artifacts: {},
+      warnings: [],
+      errors: [],
+      available_actions: [],
+      unsupported_actions: [],
+      completion_certificate_status: "issued"
+    }));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const controller = new AbortController();
+
+    await client.workflowStatus("wf_1", { signal: controller.signal });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/designs/wf_1", "http://127.0.0.1:8000"),
+      { signal: controller.signal }
+    );
+  });
+
   it("loads and validates composition evidence from backend artifact URLs", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

@@ -135,6 +135,14 @@ describe("workflow reducer", () => {
         event: { ...normalizedEvent("evt_99"), workflow_id: "wf_superseded" }
       })
     ).toBe(state);
+    expect(
+      workflowReducer(state, {
+        type: "RESOURCE_FAILED",
+        resource: "terminal_bundle",
+        message: "late failure",
+        workflowId: "wf_superseded"
+      })
+    ).toBe(state);
   });
 
   it("starts without a demo prompt baked into state", () => {

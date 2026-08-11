@@ -659,15 +659,12 @@ def test_one_persistent_transport_is_injectable_into_existing_clients() -> None:
             return _chat_response(
                 request,
                 {
-                    "selections": [
-                        {
-                            "role_id": "tower",
-                            "asset_id": "TOWER_1",
-                            "generation_strategy": "internal_project_generated",
-                            "semantic_strategy": "compose_assets",
+                    "selections": {
+                        "tower": {
+                            "choice_id": "choice_0001",
                             "reason": "Only qualified candidate.",
                         }
-                    ]
+                    }
                 },
             )
         return _chat_response(request, {"accepted": True})

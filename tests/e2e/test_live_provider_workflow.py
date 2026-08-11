@@ -1,8 +1,9 @@
-"""Explicit live-provider proof for the complete telecom product path.
+"""Explicit live-provider proofs for the telecom product path.
 
-This module is excluded from every default gate. It consumes the configured
-Groq and NVIDIA services and a qualified local Blender runtime. A fallback is a
-test failure because this suite exists specifically to prove live capability.
+This module is excluded from every default gate. Individual probes consume the
+configured providers; the complete product-flow probe also requires a qualified
+local Blender runtime. A fallback is a test failure because this suite exists
+specifically to prove live capability.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.main import (
     app,
+    asset_selection_client,
     groq_client,
     groq_transport,
     workflow_service,
@@ -31,13 +33,14 @@ pytestmark = pytest.mark.provider_live
 
 
 def test_live_groq_pool_validates_every_configured_account() -> None:
-    assert len(settings.resolved_groq_api_keys) == 2, (
-        "this live gate requires exactly two explicitly authorized Groq accounts"
+    configured_credentials = len(settings.resolved_groq_api_keys)
+    assert configured_credentials >= 2, (
+        "this live gate requires at least two explicitly authorized Groq accounts"
     )
     assert groq_client is not None
     assert groq_transport is not None
 
-    for sequence in range(2):
+    for sequence in range(configured_credentials):
         result = groq_client.request_json(
             {
                 "model": settings.resolved_groq_text_model,
@@ -73,10 +76,57 @@ def test_live_groq_pool_validates_every_configured_account() -> None:
         assert result == {"ok": True, "sequence": sequence}
 
     pool = groq_transport.credential_pool_status()
-    assert pool["configured_credentials"] == 2
-    assert pool["credentials_with_provider_response"] == 2
-    assert pool["ready_credentials"] == 2
+    assert pool["configured_credentials"] == configured_credentials
+    assert pool["credentials_with_provider_response"] == configured_credentials
+    assert pool["ready_credentials"] == configured_credentials
     assert pool["status"] == "operational"
+
+
+def test_live_groq_bounded_asset_selection_contract_without_blender() -> None:
+    assert asset_selection_client is not None, (
+        "live provider gate requires the Groq asset-selection capability"
+    )
+    slots = [
+        {
+            "role_id": "tower",
+            "candidates": [
+                {
+                    "asset_id": "LIVE_TOWER_EXACT",
+                    "score": {"total_score": 91.0, "dimensional_score": 96.0},
+                    "dimensions_m": {"width": 4.0, "depth": 4.0, "height": 30.0},
+                    "allowed_generation_strategies": ["imported_glb_exact"],
+                    "allowed_semantic_strategies": ["reuse_component"],
+                },
+                {
+                    "asset_id": "LIVE_TOWER_PARAMETRIC",
+                    "score": {"total_score": 88.0, "dimensional_score": 93.0},
+                    "dimensions_m": {"width": 4.0, "depth": 4.0, "height": 30.0},
+                    "allowed_generation_strategies": ["internal_project_generated"],
+                    "allowed_semantic_strategies": ["compose_assets"],
+                },
+            ],
+        }
+    ]
+
+    selections, diagnostics = asset_selection_client.decide(slots=slots)
+
+    assert diagnostics["provider"] == "groq"
+    assert "fallback_reason" not in diagnostics, diagnostics
+    assert selections.keys() == {"tower"}
+    selected_asset = selections["tower"]
+    selected_tuple = (
+        selected_asset,
+        diagnostics["generation_strategies"]["tower"],
+        diagnostics["semantic_strategies"]["tower"],
+    )
+    assert selected_tuple in {
+        ("LIVE_TOWER_EXACT", "imported_glb_exact", "reuse_component"),
+        (
+            "LIVE_TOWER_PARAMETRIC",
+            "internal_project_generated",
+            "compose_assets",
+        ),
+    }
 
 
 def test_live_groq_nvidia_blender_product_flow(tmp_path: Path) -> None:

@@ -105,6 +105,7 @@ export type DocumentPackCorrectionPayload = {
 };
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type RequestOptions = Pick<RequestInit, "signal">;
 
 export class TelecomStudioApi {
   constructor(
@@ -116,8 +117,12 @@ export class TelecomStudioApi {
     return parseContract("Health", HealthSchema, await this.getJson("/health"));
   }
 
-  async studioSummary(): Promise<StudioSummary> {
-    return parseContract("StudioSummary", StudioSummarySchema, await this.getJson("/studio/summary"));
+  async studioSummary(options?: RequestOptions): Promise<StudioSummary> {
+    return parseContract(
+      "StudioSummary",
+      StudioSummarySchema,
+      await this.getJson("/studio/summary", options)
+    );
   }
 
   async assetInventory(): Promise<AssetInventory> {
@@ -318,11 +323,11 @@ export class TelecomStudioApi {
     );
   }
 
-  async workflowStatus(workflowId: string): Promise<WorkflowStatus> {
+  async workflowStatus(workflowId: string, options?: RequestOptions): Promise<WorkflowStatus> {
     return parseContract(
       "WorkflowStatus",
       WorkflowStatusSchema,
-      await this.getJson(`/designs/${workflowId}`)
+      await this.getJson(`/designs/${workflowId}`, options)
     );
   }
 
@@ -342,11 +347,11 @@ export class TelecomStudioApi {
     );
   }
 
-  async viewerBundle(workflowId: string): Promise<ViewerBundle> {
+  async viewerBundle(workflowId: string, options?: RequestOptions): Promise<ViewerBundle> {
     return parseContract(
       "ViewerBundle",
       ViewerBundleSchema,
-      await this.getJson(`/designs/${workflowId}/viewer-bundle`)
+      await this.getJson(`/designs/${workflowId}/viewer-bundle`, options)
     );
   }
 
@@ -375,32 +380,36 @@ export class TelecomStudioApi {
       : parseContract("RequirementSpec", RequirementSpecSchema, payload);
   }
 
-  async timelineSummary(workflowId: string): Promise<TimelineSummary> {
+  async timelineSummary(workflowId: string, options?: RequestOptions): Promise<TimelineSummary> {
     return parseContract(
       "TimelineSummary",
       TimelineSummarySchema,
-      await this.getJson(`/designs/${workflowId}/timeline-summary`)
+      await this.getJson(`/designs/${workflowId}/timeline-summary`, options)
     );
   }
 
-  async currentOperation(workflowId: string): Promise<CurrentOperation> {
+  async currentOperation(workflowId: string, options?: RequestOptions): Promise<CurrentOperation> {
     return parseContract(
       "CurrentOperation",
       CurrentOperationSchema,
-      await this.getJson(`/designs/${workflowId}/current-operation`)
+      await this.getJson(`/designs/${workflowId}/current-operation`, options)
     );
   }
 
-  async userIssues(workflowId: string): Promise<UserIssues> {
+  async userIssues(workflowId: string, options?: RequestOptions): Promise<UserIssues> {
     return parseContract(
       "UserIssues",
       UserIssuesSchema,
-      await this.getJson(`/designs/${workflowId}/user-issues`)
+      await this.getJson(`/designs/${workflowId}/user-issues`, options)
     );
   }
 
-  async versions(workflowId: string): Promise<PublicVersionInfo[]> {
-    return parseContract("Versions", VersionsSchema, await this.getJson(`/designs/${workflowId}/versions`));
+  async versions(workflowId: string, options?: RequestOptions): Promise<PublicVersionInfo[]> {
+    return parseContract(
+      "Versions",
+      VersionsSchema,
+      await this.getJson(`/designs/${workflowId}/versions`, options)
+    );
   }
 
   async editDesign(workflowId: string, payload: EditDesignPayload): Promise<EditDesignResponse> {
@@ -463,8 +472,9 @@ export class TelecomStudioApi {
     return url.toString();
   }
 
-  private async getJson(endpoint: string): Promise<unknown> {
-    const response = await this.fetcher(new URL(endpoint, this.baseUrl));
+  private async getJson(endpoint: string, options?: RequestOptions): Promise<unknown> {
+    const url = new URL(endpoint, this.baseUrl);
+    const response = options ? await this.fetcher(url, options) : await this.fetcher(url);
     return this.responseJson(response, endpoint);
   }
 

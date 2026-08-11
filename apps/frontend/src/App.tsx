@@ -121,6 +121,7 @@ export default function App({ apiClient = api }: AppProps) {
   const resourceRequestRef = useRef<Record<string, number>>({});
   const activeWorkflowRef = useRef<string | null>(null);
   const terminalBundleRequestRef = useRef(0);
+  const terminalBundleAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const lastAssetLibraryQueryRef = useRef<string | null>(null);
   const toArtifactUrl = useCallback(
@@ -137,6 +138,8 @@ export default function App({ apiClient = api }: AppProps) {
       multimodalIntelligence.status === "operational");
   const activateWorkflow = useCallback((workflowId: string) => {
     if (activeWorkflowRef.current !== workflowId) {
+      terminalBundleAbortRef.current?.abort();
+      terminalBundleAbortRef.current = null;
       activeWorkflowRef.current = workflowId;
       terminalBundleRequestRef.current += 1;
     }
@@ -178,6 +181,8 @@ export default function App({ apiClient = api }: AppProps) {
       for (const resource of Object.keys(resourceRequestRef.current)) {
         resourceRequestRef.current[resource] += 1;
       }
+      terminalBundleAbortRef.current?.abort();
+      terminalBundleAbortRef.current = null;
     };
   }, []);
 
@@ -438,33 +443,41 @@ export default function App({ apiClient = api }: AppProps) {
   const loadTerminalBundle = useCallback(
     async (workflowId: string) => {
       if (!isActiveWorkflow(workflowId)) return;
+      terminalBundleAbortRef.current?.abort();
+      const controller = new AbortController();
+      terminalBundleAbortRef.current = controller;
       const requestId = terminalBundleRequestRef.current + 1;
       terminalBundleRequestRef.current = requestId;
       const requestIsCurrent = () =>
-        isActiveWorkflow(workflowId) && terminalBundleRequestRef.current === requestId;
-      dispatch({ type: "RESOURCE_LOADING", resource: "terminal_bundle" });
-      dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status" });
+        !controller.signal.aborted &&
+        isActiveWorkflow(workflowId) &&
+        terminalBundleRequestRef.current === requestId;
+      dispatch({ type: "RESOURCE_LOADING", resource: "terminal_bundle", workflowId });
+      dispatch({ type: "RESOURCE_LOADING", resource: "workflow_status", workflowId });
       let status: WorkflowStatus;
       try {
-        status = await apiClient.workflowStatus(workflowId);
+        status = await apiClient.workflowStatus(workflowId, { signal: controller.signal });
       } catch (error) {
+        if (isAbortError(error)) return;
         if (requestIsCurrent()) {
           dispatch({
             type: "RESOURCE_FAILED",
             resource: "workflow_status",
-            message: userFacingError(error, "resource")
+            message: userFacingError(error, "resource"),
+            workflowId
           });
           dispatch({
             type: "RESOURCE_FAILED",
             resource: "terminal_bundle",
-            message: userFacingError(error, "resource")
+            message: userFacingError(error, "resource"),
+            workflowId
           });
         }
         throw error;
       }
       if (!requestIsCurrent() || status.workflow_id !== workflowId) return;
       dispatch({ type: "STATUS_LOADED", status });
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status" });
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "workflow_status", workflowId });
 
       for (const resource of [
         "current_operation",
@@ -474,7 +487,7 @@ export default function App({ apiClient = api }: AppProps) {
         "versions",
         "studio_summary"
       ]) {
-        dispatch({ type: "RESOURCE_LOADING", resource });
+        dispatch({ type: "RESOURCE_LOADING", resource, workflowId });
       }
       const [
         operationResult,
@@ -484,12 +497,12 @@ export default function App({ apiClient = api }: AppProps) {
         versionsResult,
         summaryResult
       ] = await Promise.allSettled([
-          apiClient.currentOperation(workflowId),
-          apiClient.viewerBundle(workflowId),
-          apiClient.timelineSummary(workflowId),
-          apiClient.userIssues(workflowId),
-          apiClient.versions(workflowId),
-          apiClient.studioSummary()
+          apiClient.currentOperation(workflowId, { signal: controller.signal }),
+          apiClient.viewerBundle(workflowId, { signal: controller.signal }),
+          apiClient.timelineSummary(workflowId, { signal: controller.signal }),
+          apiClient.userIssues(workflowId, { signal: controller.signal }),
+          apiClient.versions(workflowId, { signal: controller.signal }),
+          apiClient.studioSummary({ signal: controller.signal })
         ]);
 
       if (!requestIsCurrent()) return;
@@ -521,7 +534,9 @@ export default function App({ apiClient = api }: AppProps) {
       applyResourceResult(
         versionsResult,
         "versions",
-        (nextVersions) => setVersions(nextVersions),
+        (nextVersions) => {
+          if (requestIsCurrent()) setVersions(nextVersions);
+        },
         dispatch
       );
       applyResourceResult(
@@ -530,7 +545,10 @@ export default function App({ apiClient = api }: AppProps) {
         (summary) => dispatch({ type: "BOOTSTRAP_LOADED", summary }),
         dispatch
       );
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "terminal_bundle" });
+      dispatch({ type: "RESOURCE_RECOVERED", resource: "terminal_bundle", workflowId });
+      if (terminalBundleAbortRef.current === controller) {
+        terminalBundleAbortRef.current = null;
+      }
     },
     [apiClient, isActiveWorkflow]
   );
@@ -1594,6 +1612,10 @@ export function userFacingError(error: unknown, context: UserActionContext): str
     if (error.status >= 500) return `${action} a rencontré un problème interne. Réessayez.`;
   }
   return `${action} n’a pas abouti. Réessayez ou rechargez l’état vérifié.`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function isSafeCorrectionError(error: unknown): error is Error {

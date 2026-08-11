@@ -8,13 +8,15 @@ import tempfile
 import threading
 import uuid
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from core.agents.scene_edit_agent import SceneEditAgent
+from core.contracts.assembly import AssemblyPlan
 from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.llm_provenance import (
     LLMDecisionCandidate,
@@ -25,6 +27,7 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
 from core.contracts.validation import ValidationReport
+from core.contracts.versioning import SceneVersion
 from core.orchestration import DesignOrchestrator, OrchestratorResult
 from core.performance import requirements_confirmation_hash
 from core.rag.planning import SUPPORTED_PLANNING_HINT_FIELDS
@@ -59,6 +62,16 @@ class WorkflowStorageError(RuntimeError):
 
 class WorkflowMemoryPurgeError(RuntimeError):
     """Raised when a deleted design cannot be removed from agent memory safely."""
+
+
+@dataclass(frozen=True)
+class VerifiedViewerSnapshot:
+    """Verified version data reused throughout one viewer-bundle request."""
+
+    version_id: str
+    artifact_paths: Mapping[str, Path]
+    scene: SceneSpec
+    assembly_plan: AssemblyPlan | None
 
 
 class WorkflowService:
@@ -808,6 +821,29 @@ class WorkflowService:
         )
 
     def get_status(self, workflow_id: str) -> dict:
+        status, _ = self._get_status_and_viewer_snapshot(
+            workflow_id,
+            include_viewer_snapshot=False,
+        )
+        return status
+
+    def get_viewer_status_snapshot(
+        self,
+        workflow_id: str,
+    ) -> tuple[dict, VerifiedViewerSnapshot | None]:
+        """Return status and one request-local, fully verified viewer snapshot."""
+
+        return self._get_status_and_viewer_snapshot(
+            workflow_id,
+            include_viewer_snapshot=True,
+        )
+
+    def _get_status_and_viewer_snapshot(
+        self,
+        workflow_id: str,
+        *,
+        include_viewer_snapshot: bool,
+    ) -> tuple[dict, VerifiedViewerSnapshot | None]:
         self._sync_output_services()
         status_path = self.outputs_dir / workflow_id / "status.json"
         if not status_path.exists():
@@ -823,7 +859,18 @@ class WorkflowService:
                 or root_status.get("active_version_id") == manifest.get("version_id")
             )
         ):
-            return root_status
+            snapshot = None
+            if include_viewer_snapshot and manifest is not None:
+                try:
+                    verified_active = self.versioning.verified_active_version(workflow_id)
+                except ValueError:
+                    pass
+                else:
+                    snapshot = self._viewer_snapshot_from_verified_version(
+                        verified_active.version,
+                        verified_active.artifact_dir,
+                    )
+            return root_status, snapshot
         if manifest is None:
             if root_status.get("status") == "completed":
                 manifest_exists = self.versioning._active_design_path(workflow_id).exists()
@@ -832,23 +879,39 @@ class WorkflowService:
                     if manifest_exists
                     else "Ce résultat historique ne possède pas de certificat actif vérifiable."
                 )
-                return _quarantined_status(
-                    root_status,
-                    reason=reason,
-                    integrity_failure=manifest_exists,
+                return (
+                    _quarantined_status(
+                        root_status,
+                        reason=reason,
+                        integrity_failure=manifest_exists,
+                    ),
+                    None,
                 )
-            return root_status
+            return root_status, None
         try:
-            candidate_status = self.versioning.verified_active_status_path(workflow_id)
+            if include_viewer_snapshot:
+                verified_active = self.versioning.verified_active_version(workflow_id)
+                candidate_status = verified_active.status_path
+                snapshot = self._viewer_snapshot_from_verified_version(
+                    verified_active.version,
+                    verified_active.artifact_dir,
+                )
+            else:
+                candidate_status = self.versioning.verified_active_status_path(workflow_id)
+                snapshot = None
         except ValueError as exc:
-            return _quarantined_status(
-                root_status,
-                reason=(
-                    f"La preuve d'intégrité du résultat actif a échoué. Diagnostic interne: {exc}."
+            return (
+                _quarantined_status(
+                    root_status,
+                    reason=(
+                        "La preuve d'intégrité du résultat actif a échoué. "
+                        f"Diagnostic interne: {exc}."
+                    ),
+                    integrity_failure=True,
                 ),
-                integrity_failure=True,
+                None,
             )
-        return json.loads(candidate_status.read_text(encoding="utf-8"))
+        return json.loads(candidate_status.read_text(encoding="utf-8")), snapshot
 
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""
@@ -995,6 +1058,25 @@ class WorkflowService:
             for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
             if (artifact_dir / filename).is_file()
         }
+
+    @staticmethod
+    def _viewer_snapshot_from_verified_version(
+        version: SceneVersion,
+        artifact_dir: Path,
+    ) -> VerifiedViewerSnapshot:
+        artifact_paths = {
+            artifact_name: artifact_dir / filename
+            for artifact_name, filename in _ALLOWED_ARTIFACT_FILES.items()
+            if (artifact_dir / filename).is_file()
+        }
+        return VerifiedViewerSnapshot(
+            version_id=version.version_id,
+            artifact_paths=artifact_paths,
+            scene=version.scene,
+            assembly_plan=(
+                version.scene.assembly_plan if "assembly_plan" in artifact_paths else None
+            ),
+        )
 
     def _public_version_artifact_urls(
         self,
