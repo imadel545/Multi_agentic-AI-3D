@@ -3,6 +3,16 @@
 Active limitations that must remain visible in the API, reports, and future
 frontend.
 
+- The product has no user account, JWT or server session. Its supported threat
+  model is one user on loopback. Trusted hosts, bounded CORS, security headers
+  and a pre-service foreign-Origin rejection protect browser mutations, but do
+  not authenticate another local process. LAN/remote access requires TLS and a
+  separately designed owner/session model; a token in `localStorage` is not an
+  accepted shortcut.
+- Nginx security headers and the new host/origin boundary pass deterministic
+  tests and Compose validation, but the Docker daemon is unavailable in the
+  current audit, so their container/browser runtime smoke remains open.
+
 ## Visible during frontend build
 
 - `apps/frontend` has a visually verified historical real-backend product
@@ -216,9 +226,9 @@ frontend.
   could take tens of minutes depending on the host PATH. The small-cell and
   certificate/version fixture regressions are fixed. Tests are now split into a
   default fast gate and explicit `blender_runtime`, `provider_live`, and
-  `browser_smoke` gates. The final 2026-08-11 collection contains 702 tests:
-  650 fast, 48 real-Blender and 4 live-provider tests; the fast gate passed in
-  23.52 seconds. `browser_smoke` has zero automated pytest cases, so the current
+  `browser_smoke` gates. The final 2026-08-11 collection contains 712 tests:
+  660 fast, 48 real-Blender and 4 live-provider tests; the fast gate passed in
+  23.68 seconds. `browser_smoke` has zero automated pytest cases, so the current
   visual proof is an interactive runtime smoke. Admission pressure, invalid input and terminal-persistence
   failure paths run in the fast gate because they never cross a Blender
   subprocess boundary. The harness rejects both an unmarked Blender generation
@@ -259,6 +269,10 @@ frontend.
 - The catalog links 15 nearby source images to 7 CAD files for retrieval and
   human comparison. These links do not prove that an image matches the complete
   CAD geometry. No local preview is sent to a remote vision model by default.
+- A user-provided render from this corpus is a valid fidelity target, but an
+  image alone does not identify the exact DWG, prove rights, units, topology,
+  editable subcomponents or a deterministic conversion. It cannot bypass the
+  qualification gate.
 - Detecting `ODAFileConverter`, FreeCAD or `dwg2dxf` only reports
   `installed_import_only`; document-pack processing does not execute a silent
   DWG conversion. The installed ODA Drawings Explorer is an inspector, not an
@@ -415,7 +429,7 @@ frontend.
   crowded summit annotations. Two GeometryPrograms used visible
   `json_object_repaired` mode. QA 1.0 certifies the implemented bounded checks,
   not manufacturer authenticity or semantic visual quality.
-- The 2026-08-11 current-tree browser smoke covers one real creation flow,
+- The 2026-08-11 browser smoke on convergence commit `19791be` covers one real creation flow,
   streaming, GLB display and the post-export assembly drawer without console
   errors. It does not close rollback, document-pack, upload, degraded-provider,
   interruption or every edit/recovery branch. No global convergence is claimed.
@@ -458,3 +472,8 @@ frontend.
 - Le frontend expose les preuves cognitives réelles disponibles, mais le
   scénario utilisateur créant, sélectionnant et modifiant trois projets
   génériques réels n'est pas encore une acceptance validée.
+- La surface conversationnelle n'est pas encore un transcript de chat durable.
+  Elle restaure le prompt/exigences actifs et au plus trois descriptions de
+  versions, désormais correctement attribuées à l'utilisateur; il n'existe pas
+  encore de modèle canonique append-only des tours
+  utilisateur/assistant ni de sélecteur explicite de sessions.

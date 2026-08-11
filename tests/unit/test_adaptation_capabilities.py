@@ -132,6 +132,20 @@ def _geometry_program(*, body_width_m: float, prompt_hash_character: str) -> Geo
     )
 
 
+def _generic_scene(program: GeometryProgram) -> SceneSpec:
+    return SceneSpec(
+        schema_version="2.0.0",
+        scene_id="wf_generic_adaptation",
+        design_domain="architecture",
+        design_intent_id="wf_generic_adaptation:intent:v1",
+        component_graph_id="wf_generic_adaptation:components:v1",
+        asset_decision_plan_id="wf_generic_adaptation:asset-decisions:v1",
+        specialist_route_id="wf_generic_adaptation:specialists:v1",
+        cognitive_plan_sha256="a" * 64,
+        geometry_programs=[program],
+    )
+
+
 def test_capabilities_are_resolved_from_manifest_profiles() -> None:
     registry, service = _services()
     capabilities = service.resolve(_scene(accessory=True))
@@ -255,6 +269,35 @@ def test_llm_geometry_program_revision_uses_typed_patch_and_produces_new_scene()
         "validate_adaptation",
         "execute_adaptation",
     ]
+
+
+def test_generic_scene_resolves_and_executes_geometry_program_revision() -> None:
+    class RevisedGeometryPlanner:
+        def plan(self, **kwargs):
+            assert kwargs["design_context"]["design_domain"] == "architecture"
+            assert kwargs["design_context"]["scene_tower_height_m"] is None
+            return _geometry_program(body_width_m=4.2, prompt_hash_character="b")
+
+    original_program = _geometry_program(body_width_m=3.0, prompt_hash_character="a")
+    scene = _generic_scene(original_program)
+    _, service = _services()
+    agent = SceneEditAgent(
+        groq_client=None,
+        capability_service=service,
+        geometry_program_planner=RevisedGeometryPlanner(),  # type: ignore[arg-type]
+    )
+
+    decision = agent.create_adaptation(
+        "wf_generic_adaptation",
+        scene,
+        "agrandis equipment shelter a 4,2 m et conserve son role",
+    )
+
+    assert decision.validation_report.status == "passed"
+    assert decision.patched_scene.schema_version == "2.0.0"
+    assert decision.patched_scene.tower is None
+    assert decision.patched_scene.geometry_programs[0].nodes[0].size_m.x == 4.2  # type: ignore[union-attr]
+    assert [operation.path for operation in decision.patch.operations] == ["/geometry_programs/0"]
 
 
 def test_geometry_revision_preserves_original_intent_and_placement_provenance() -> None:

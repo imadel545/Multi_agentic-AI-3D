@@ -419,10 +419,15 @@ Le frontend doit rendre:
 Le frontend M0 ne doit conserver aucun succès obsolète après une erreur ou un
 changement de version. Les ressources GLB/WebGL, assets, QA, RAG, provenance,
 documents et versions ont des états de chargement/erreur/retry indépendants. La
-suite courante compte 167 tests Vitest et passe le typecheck/build. Un smoke
-connecté current-tree a confirmé la création, le flux SSE, le GLB/WebGL réel,
-le RAG et les drawers; les mutations navigateur exhaustives restent une gate
-distincte ouverte.
+frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
+mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
+ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
+La suite courante compte 170 tests Vitest et passe le typecheck/build. Un smoke
+layout current-tree en lecture seule a chargé le GLB certifié à 1440 x 1000 et
+1047 x 2748. Le smoke connecté de l'arbre de convergence immédiatement
+précédent a confirmé la création, le flux SSE, le GLB/WebGL réel, le RAG et les
+drawers; les mutations navigateur exhaustives restent une gate distincte
+ouverte.
 
 `/designs/{id}/edit` expose, en cas de succès:
 

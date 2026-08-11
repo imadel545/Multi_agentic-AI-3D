@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     reranker_base_url: str = "https://ai.api.nvidia.com/v1"
     allow_blender_fallback: bool = False
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+    trusted_hosts: str = "127.0.0.1,localhost,testserver"
 
     @field_validator("groq_model")
     @classmethod
@@ -183,6 +184,10 @@ class Settings(BaseSettings):
     @property
     def resolved_cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def resolved_trusted_hosts(self) -> list[str]:
+        return [host.strip() for host in self.trusted_hosts.split(",") if host.strip()]
 
 
 def _read_env_file_value(path: Path, names: list[str]) -> str | None:

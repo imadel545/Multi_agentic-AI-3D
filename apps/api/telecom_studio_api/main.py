@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.models import (
@@ -118,19 +119,52 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.resolved_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type", "X-Filename", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=settings.resolved_trusted_hosts,
+)
+
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_API_SECURITY_HEADERS = {
+    "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
+
+
+def _apply_api_security_headers(response):
+    for name, value in _API_SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
 
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     request.state.request_id = request_id
+    origin = request.headers.get("origin")
+    if (
+        request.method in _STATE_CHANGING_METHODS
+        and origin is not None
+        and origin not in settings.resolved_cors_origins
+    ):
+        response = JSONResponse(
+            status_code=403,
+            content={"detail": "Origin is not allowed for state-changing requests."},
+            headers={"Vary": "Origin"},
+        )
+        response.headers["x-request-id"] = request_id
+        return _apply_api_security_headers(response)
     response = await call_next(request)
     response.headers["x-request-id"] = request_id
-    return response
+    return _apply_api_security_headers(response)
 
 
 @app.exception_handler(Exception)

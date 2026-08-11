@@ -108,12 +108,17 @@ export function TelecomGlbViewer({
           </button>
           <button
             aria-pressed={showTechnicalAids}
+            aria-label={
+              showTechnicalAids
+                ? "Masquer les aides techniques"
+                : "Afficher les aides techniques"
+            }
             className={`viewer-aids-toggle${showTechnicalAids ? " active" : ""}`}
             disabled={source.kind !== "glb"}
             onClick={() => setShowTechnicalAids((value) => !value)}
             type="button"
           >
-            <Layers3 size={15} aria-hidden="true" /> Aides techniques
+            <Layers3 size={15} aria-hidden="true" /> <span>Aides techniques</span>
           </button>
           {badges.map((badge) => (
             <span className="status-badge" key={badge}>
@@ -194,7 +199,6 @@ export function TelecomGlbViewer({
                   scene.background = background;
                 }}
               >
-                <fog attach="fog" args={["#182329", 85, 190]} />
                 <ambientLight intensity={1.7} />
                 <hemisphereLight args={["#f5f9ff", "#4c5f64", 1.3]} />
                 <directionalLight position={[22, 42, 26]} intensity={2.4} />

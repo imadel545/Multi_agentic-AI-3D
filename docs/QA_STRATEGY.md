@@ -168,9 +168,9 @@ limitations and never advertises checks it cannot perform.
   `pytest --collect-only -q -m provider_live`. Tests that stop before Blender,
   including admission, invalid-input and terminal-persistence failure paths,
   remain in the fast gate rather than inheriting a runtime marker.
-  The final 2026-08-11 collection contains 702 tests: 650 fast tests, 48
+  The final 2026-08-11 collection contains 712 tests: 660 fast tests, 48
   `blender_runtime` tests and 4 `provider_live` tests; the complete fast gate
-  passed in 23.52 seconds. `browser_smoke` is registered but has zero automated
+  passed in 23.68 seconds. `browser_smoke` is registered but has zero automated
   pytest cases; the browser proof remains a recorded interactive runtime gate.
 - `pytest -q -m blender_runtime --durations=30` is the serialized real-Blender
   gate. The 2026-08-10 audit exercised the Blender suite in 14 minutes 43 seconds;
@@ -183,8 +183,9 @@ limitations and never advertises checks it cannot perform.
   NVIDIA + Blender product flow without fallback (4 tests in 34.69 seconds).
   The result is point-in-time runtime evidence, not a permanent availability
   guarantee.
-- A current-tree real API/browser creation gate has passed for Canvas/WebGL,
-  GLB loading, SSE progress, RAG evidence and contextual drawers. Document
+- The convergence commit `19791be` passed a real API/browser creation gate for
+  Canvas/WebGL, GLB loading, SSE progress, RAG evidence and contextual drawers.
+  The later current-tree layout smoke is read-only. Document
   upload, edit/version, rollback and degraded-provider branches still require
   exhaustive browser replay. Vitest/jsdom remains a fast contract gate, not
   visual runtime evidence.
@@ -203,11 +204,13 @@ limitations and never advertises checks it cannot perform.
 - M0 fault tests must reject changed exact assets, manifest/catalog tampering,
   invalid component proofs/build locks/certificates and Qdrant failure without
   losing the canonical SQLite mutation.
-- The current M0 tree passed the complete fast gate plus the isolated
+- The convergence commit `19791be` passed the complete fast gate plus the isolated
   real-Blender assembly/edit/version E2E (`1 passed in 44.39 s`) and the
   connected browser 4G creation scenario with QA 1.0 and an issued certificate.
-- The frontend has 167 passing Vitest tests plus green typecheck/build and a
-  connected smoke on the current tree. The real generic multi-project user
+- The frontend has 170 passing Vitest tests plus green typecheck/build. A
+  read-only current-tree layout smoke loaded the certified GLB at 1440 x 1000
+  and 1047 x 2748; the connected provider/generation smoke belongs to the
+  immediately preceding convergence tree. The real generic multi-project user
   scenario remains open; no global convergence is claimed.
 
 ## Generic cognitive QA V1

@@ -103,6 +103,11 @@ Open API docs at `http://127.0.0.1:8000/docs`.
 
 Default CORS is local only: `http://127.0.0.1:5173,http://localhost:5173`.
 Override with `TELECOM_STUDIO_CORS_ORIGINS` when a future frontend uses a different local origin.
+Trusted hosts default to `127.0.0.1`, `localhost`, and `testserver`; configure
+`TELECOM_STUDIO_TRUSTED_HOSTS` only for another explicit local hostname. A
+state-changing browser request with a foreign `Origin` is rejected before the
+service runs. This is a local browser boundary, not user authentication; the
+current mono-user loopback product has no JWT or account system.
 
 ### Optional: Blender
 
@@ -294,7 +299,10 @@ requirements_text or document pack
 - Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
   `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
   and preview. This proves that scenario only. The current frontend gate passes
-  167 tests, typecheck and production build. The 2026-08-11 connected browser
+  170 tests, typecheck and production build. The 2026-08-11 connected browser
   smoke `wf_0843599873e7` rendered the real certified GLB, loaded RAG evidence,
   exposed the asset library/intelligence drawers and preserved the truthful
-  0/13 professional asset state.
+  0/13 professional asset state. A later read-only current-tree layout smoke
+  loaded that certified GLB at 1440 x 1000 and 1047 x 2748 with external
+  providers disabled; it validates framing/scroll only, not provider health or
+  CAD fidelity.

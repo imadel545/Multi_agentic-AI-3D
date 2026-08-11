@@ -90,7 +90,8 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
   l'intent, l'enveloppe et la provenance. Le smoke navigateur a confirmé ce
   résumé et la distinction des sorties réparées; la mutation complète depuis
   le contrôle navigateur reste ouverte.
-- Le smoke current-tree du 2026-08-11 (`wf_0843599873e7`, version
+- Le smoke du commit de convergence `19791be` le 2026-08-11
+  (`wf_0843599873e7`, version
   `v8995acb1`) prouve depuis le frontend réel une création chat-first, la
   progression SSE, le chargement du GLB Blender réel et les drawers RAG,
   Bibliothèque, Intelligence et QA, sans warning/error console. La preuve

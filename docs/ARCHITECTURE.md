@@ -97,6 +97,11 @@ active SceneSpec + prompt
 - Nginx serves the compiled frontend on loopback and proxies the stable FastAPI
   routes same-origin. SSE buffering is disabled only for the design event
   stream and document uploads retain the backend 200 MB limit.
+- FastAPI allowlists local hosts, exposes only the required CORS methods/headers
+  and rejects a foreign browser `Origin` on mutations before business code.
+  FastAPI and Nginx add CSP/framing/MIME/referrer/permissions headers. This is a
+  local browser boundary, not an identity system; JWT/accounts remain outside
+  the mono-user loopback architecture.
 - The API runs as UID/GID `10001`, one Uvicorn worker and `linux/amd64` with an
   archive-hash-pinned Blender 4.5.12 LTS. Startup fails unless the Blender
   background/factory-startup smoke reports that release. Docker selects the

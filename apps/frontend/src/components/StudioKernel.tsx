@@ -483,18 +483,19 @@ export function conversationHistoryEntries({
       role: "system"
     });
   }
-  versions
+  [...versions]
     .filter((version) => {
       const description = version.edit_description?.trim() ?? "";
       return Boolean(description) && !/^initial from [a-z0-9._-]+$/i.test(description);
     })
+    .sort((left, right) => Date.parse(left.created_at) - Date.parse(right.created_at))
     .slice(-3)
     .forEach((version) => {
       entries.push({
         id: version.version_id,
-        label: version.active ? "Modification active" : "Version enregistrée",
+        label: version.active ? "Vous · modification active" : "Vous · modification enregistrée",
         message: version.edit_description!.trim(),
-        role: "assistant"
+        role: "user"
       });
     });
   return entries;

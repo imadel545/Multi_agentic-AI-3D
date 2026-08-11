@@ -60,6 +60,68 @@ describe("viewer math", () => {
     expect(fit?.box.getSize(new Vector3()).y).toBeGreaterThan(80);
   });
 
+  it("prioritizes the telecom assembly when remote civil geometry would shrink the tower", () => {
+    const scene = new Object3D();
+    const tower = new Mesh(new BoxGeometry(4, 50, 4), new MeshBasicMaterial());
+    tower.name = "tower_TOWER_LATTICE_50M";
+    tower.userData = { role: "tower", semantic_root: "tower_TOWER_LATTICE_50M" };
+    tower.position.set(0, 25, 0);
+    const antenna = new Mesh(new BoxGeometry(1, 3, 0.5), new MeshBasicMaterial());
+    antenna.name = "antenna_S1";
+    antenna.userData = { role: "antenna", semantic_root: "antenna_S1" };
+    antenna.position.set(3, 42, 0);
+    const foundation = new Mesh(new BoxGeometry(160, 1, 24), new MeshBasicMaterial());
+    foundation.name = "foundation_remote_civil_works";
+    foundation.userData = { role: "foundation", semantic_root: "foundation_site" };
+    foundation.position.set(55, -0.5, 0);
+    scene.add(tower, antenna, foundation);
+    const camera = new PerspectiveCamera(38, 1.6, 0.1, 1000);
+
+    const fit = fitCameraToObject(camera, scene, null);
+
+    expect(foundation.visible).toBe(true);
+    expect(fit?.box.getSize(new Vector3()).x).toBeLessThan(10);
+    expect(fit?.box.getSize(new Vector3()).y).toBeGreaterThan(49);
+    expect(fit?.target.x).toBeLessThan(3);
+  });
+
+  it("keeps a proportional foundation in the complete initial site framing", () => {
+    const scene = new Object3D();
+    const tower = new Mesh(new BoxGeometry(4, 30, 4), new MeshBasicMaterial());
+    tower.name = "tower_site";
+    tower.userData = { role: "tower", semantic_root: "tower_site" };
+    tower.position.set(0, 15, 0);
+    const foundation = new Mesh(new BoxGeometry(18, 0.8, 18), new MeshBasicMaterial());
+    foundation.name = "foundation_concrete_pad";
+    foundation.userData = { role: "foundation", semantic_root: "foundation_site" };
+    scene.add(tower, foundation);
+    const camera = new PerspectiveCamera(38, 1.6, 0.1, 1000);
+
+    const fit = fitCameraToObject(camera, scene, null);
+
+    expect(fit?.box.getSize(new Vector3()).x).toBeGreaterThan(17);
+  });
+
+  it("keeps a tall tower readable in the effective 1047 by 2748 portrait canvas", () => {
+    const scene = new Object3D();
+    const tower = new Mesh(new BoxGeometry(4, 30, 4), new MeshBasicMaterial());
+    tower.name = "tower_site";
+    tower.userData = { role: "tower", semantic_root: "tower_site" };
+    tower.position.set(0, 15, 0);
+    const foundation = new Mesh(new BoxGeometry(18, 0.8, 18), new MeshBasicMaterial());
+    foundation.name = "foundation_concrete_pad";
+    foundation.userData = { role: "foundation", semantic_root: "foundation_site" };
+    scene.add(tower, foundation);
+    // The fixed command rail leaves an effective viewer aspect close to 0.25.
+    const camera = new PerspectiveCamera(38, 0.25, 0.1, 1000);
+
+    const fit = fitCameraToObject(camera, scene, null);
+
+    expect(fit?.box.getSize(new Vector3()).x).toBeLessThan(5);
+    expect(fit?.box.getSize(new Vector3()).y).toBeGreaterThan(29);
+    expect(fit?.distance).toBeLessThan(80);
+  });
+
   it("keeps long visual aids out of the initial physical-site framing", () => {
     const scene = new Object3D();
     const tower = new Mesh(new BoxGeometry(4, 30, 4), new MeshBasicMaterial());

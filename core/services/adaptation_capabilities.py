@@ -42,22 +42,26 @@ class AdaptationCapabilityService:
             missing_profiles=missing_profiles,
         )
 
-        tower_manifest = self.registry.get(scene.tower.asset_id)
-        tower_profile = tower_manifest.adaptation_profile_id
-        if scene.tower.generation_strategy in {"parametric_generated", "procedural_fallback"}:
-            self._resolve_profile(
-                profile_id=tower_profile,
-                asset_id=tower_manifest.asset_id,
-                substitutions={},
-                output=resolved,
-                unsupported=unsupported,
-                missing_profiles=missing_profiles,
-            )
-        else:
-            unsupported.append(
-                "Le pylône actif est un GLB non paramétrique; sa géométrie interne ne peut "
-                "pas être remodelée sans profil Geometry Nodes vérifié."
-            )
+        if scene.tower is not None:
+            tower_manifest = self.registry.get(scene.tower.asset_id)
+            tower_profile = tower_manifest.adaptation_profile_id
+            if scene.tower.generation_strategy in {
+                "parametric_generated",
+                "procedural_fallback",
+            }:
+                self._resolve_profile(
+                    profile_id=tower_profile,
+                    asset_id=tower_manifest.asset_id,
+                    substitutions={},
+                    output=resolved,
+                    unsupported=unsupported,
+                    missing_profiles=missing_profiles,
+                )
+            else:
+                unsupported.append(
+                    "Le pylône actif est un GLB non paramétrique; sa géométrie interne ne peut "
+                    "pas être remodelée sans profil Geometry Nodes vérifié."
+                )
 
         for index, sector in enumerate(scene.sectors):
             manifest = self.registry.get(sector.antenna_asset_id)

@@ -153,15 +153,27 @@ const parsedRequirements = {
 afterEach(() => cleanup());
 
 describe("studio kernel components", () => {
-  it("restores a truthful structured conversation context and backend version edits", () => {
+  it("restores user-authored version instructions chronologically as user messages", () => {
     const entries = conversationHistoryEntries({
       activeRequirements: parsedRequirements.requirements,
       currentPrompt: "",
       versions: [{
+        version_id: "v3",
+        parent_version_id: "v2",
+        created_at: "2026-08-02T11:00:00Z",
+        active: true,
+        artifacts: {},
+        qa_score: 1,
+        generation_mode: "real_blender",
+        llm_decision_provenance: null,
+        edit_description: "Orienter le secteur nord à 15 degrés",
+        diff_summary: null,
+        status: "completed"
+      }, {
         version_id: "v2",
         parent_version_id: "v1",
         created_at: "2026-08-02T10:00:00Z",
-        active: true,
+        active: false,
         artifacts: {},
         qa_score: 1,
         generation_mode: "real_blender",
@@ -184,9 +196,22 @@ describe("studio kernel components", () => {
       }]
     });
 
-    expect(entries.map((entry) => entry.message)).toEqual([
-      "5G · pylône treillis · 30 m · 3 secteur(s)",
-      "Ajouter un cabinet au sol"
+    expect(entries).toMatchObject([
+      {
+        label: "Contexte actif restauré",
+        message: "5G · pylône treillis · 30 m · 3 secteur(s)",
+        role: "system"
+      },
+      {
+        label: "Vous · modification enregistrée",
+        message: "Ajouter un cabinet au sol",
+        role: "user"
+      },
+      {
+        label: "Vous · modification active",
+        message: "Orienter le secteur nord à 15 degrés",
+        role: "user"
+      }
     ]);
   });
   it("keeps component geometry fidelity visible independently from QA proof", () => {

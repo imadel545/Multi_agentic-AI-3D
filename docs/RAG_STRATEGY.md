@@ -29,7 +29,8 @@ then still offers those candidates to the configured reranker. This path is
 published as `rag_retrieval_status=degraded_local_lexical` with a sanitized
 reason; it is not vector retrieval and does not use hash embeddings.
 
-The 2026-08-11 current-tree browser smoke `wf_0843599873e7` retrieved five
+The 2026-08-11 browser smoke on convergence commit `19791be`, workflow
+`wf_0843599873e7`, retrieved five
 contexts with `primary_vector` and `primary_nvidia_reranker` in 1.620 s.
 Provider configuration and this point-in-time success remain insufficient;
 retrieval quality still requires a controlled French telecom evaluation set.

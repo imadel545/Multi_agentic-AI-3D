@@ -38,6 +38,16 @@ const CameraFitExcludedRoles = new Set([
   "label"
 ]);
 const CameraFitExcludedNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
+const CameraFitCivilRoles = new Set(["foundation", "ground", "terrain"]);
+const CameraFitCivilNameTokens = [
+  "foundation",
+  "concrete_pad",
+  "ground_slab",
+  "site_slab",
+  "terrain"
+];
+const CameraFitTowerRoles = new Set(["tower"]);
+const CameraFitTowerNameTokens = ["tower", "lattice", "monopole", "telecom_mast", "mast_"];
 const TechnicalAidRoles = new Set(["azimuth_arrow", "beam", "height_marker", "label"]);
 const TechnicalAidNameTokens = ["azimuth_arrow", "sector_beam", "height_marker", "label_"];
 const TelecomCameraFitPadding = 1.4;
@@ -79,7 +89,7 @@ export function fitCameraToObject(
   object: Object3D,
   controls: { target: Vector3; update: () => void } | null
 ): CameraFit | null {
-  const inspectableBox = inspectableObjectBox(object);
+  const inspectableBox = inspectableObjectBox(object, camera.aspect);
   const box = inspectableBox ?? new Box3().setFromObject(object);
   if (box.isEmpty()) {
     return null;
@@ -259,10 +269,13 @@ function canonicalSemanticRole(value: unknown): string | null {
   }[normalized] ?? normalized;
 }
 
-function inspectableObjectBox(scene: Object3D): Box3 | null {
+function inspectableObjectBox(scene: Object3D, cameraAspect: number): Box3 | null {
   scene.updateWorldMatrix(true, true);
   const box = new Box3();
+  const telecomFocusBox = new Box3();
   let hasInspectableMesh = false;
+  let hasTowerMesh = false;
+  let hasTelecomFocusMesh = false;
   scene.traverse((object) => {
     if (
       shouldHideTechnicalObject(object) ||
@@ -276,9 +289,68 @@ function inspectableObjectBox(scene: Object3D): Box3 | null {
     if (!meshBox.isEmpty()) {
       box.union(meshBox);
       hasInspectableMesh = true;
+      if (hasTowerIdentity(object)) {
+        hasTowerMesh = true;
+      }
+      if (!hasCivilIdentity(object)) {
+        telecomFocusBox.union(meshBox);
+        hasTelecomFocusMesh = true;
+      }
     }
   });
-  return hasInspectableMesh ? box : null;
+  if (!hasInspectableMesh) {
+    return null;
+  }
+  if (
+    hasTowerMesh &&
+    hasTelecomFocusMesh &&
+    civilGeometryDominatesFrame(box, telecomFocusBox, cameraAspect)
+  ) {
+    return telecomFocusBox;
+  }
+  return box;
+}
+
+function civilGeometryDominatesFrame(
+  fullBox: Box3,
+  telecomFocusBox: Box3,
+  cameraAspect: number
+): boolean {
+  const fullSize = fullBox.getSize(new Vector3());
+  const focusSize = telecomFocusBox.getSize(new Vector3());
+  const fullHorizontal = Math.max(fullSize.x, fullSize.z);
+  const focusHorizontal = Math.max(focusSize.x, focusSize.z, 2);
+  const focusHeight = Math.max(focusSize.y, 2);
+  const aspectAwareHeight = focusHeight * Math.max(cameraAspect, 0.25);
+  return fullHorizontal > Math.max(focusHorizontal * 1.75, aspectAwareHeight * 0.9);
+}
+
+function hasCivilIdentity(object: Object3D): boolean {
+  return lineageMatches(object, CameraFitCivilRoles, CameraFitCivilNameTokens);
+}
+
+function hasTowerIdentity(object: Object3D): boolean {
+  return lineageMatches(object, CameraFitTowerRoles, CameraFitTowerNameTokens);
+}
+
+function lineageMatches(
+  object: Object3D,
+  roles: Set<string>,
+  nameTokens: string[]
+): boolean {
+  let current: Object3D | null = object;
+  while (current) {
+    const role = canonicalSemanticRole(current.userData.role ?? current.userData.object_role);
+    if (role && roles.has(role)) {
+      return true;
+    }
+    const name = current.name.toLowerCase();
+    if (nameTokens.some((token) => name.includes(token))) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
 }
 
 function shouldExcludeFromCameraFit(object: Object3D): boolean {

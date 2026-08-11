@@ -95,3 +95,22 @@ def test_explicit_groq_pool_is_secret_in_settings_repr() -> None:
 def test_groq_remote_base_url_must_use_https() -> None:
     with pytest.raises(ValidationError, match="must use HTTPS"):
         Settings(_env_file=None, groq_base_url="http://api.groq.com/openai/v1")
+
+
+def test_local_http_boundary_defaults_are_explicit() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.resolved_cors_origins == [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+    assert settings.resolved_trusted_hosts == ["127.0.0.1", "localhost", "testserver"]
+
+
+def test_trusted_hosts_can_be_configured_for_a_local_dns_name() -> None:
+    settings = Settings(
+        _env_file=None,
+        trusted_hosts="127.0.0.1, studio.internal.test ",
+    )
+
+    assert settings.resolved_trusted_hosts == ["127.0.0.1", "studio.internal.test"]

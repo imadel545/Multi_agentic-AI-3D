@@ -207,6 +207,18 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   are hidden by default and explicitly toggleable. The viewer separates their
   count from physical component count so diagnostic geometry is not presented
   as telecom equipment.
+- The current camera fit keeps a real tall tower readable when a wide civil
+  foundation would otherwise dominate a portrait viewport. Only the fit box is
+  narrowed under a measured disproportion: no GLB node is hidden or removed.
+  The previous fixed-distance fog was removed because it could obscure tall or
+  extended certified scenes. Desktop page scroll is contained while the
+  conversation feed remains independently scrollable; mobile restores natural
+  page scroll.
+- A 2026-08-11 read-only current-tree browser smoke loaded the existing
+  certified `wf_0843599873e7` GLB at 1440 x 1000 and 1047 x 2748. It confirms
+  visible framing and scroll ownership only. Providers were disabled and no
+  design was generated, so this is not Groq/NVIDIA, conversion or CAD-fidelity
+  evidence.
 - Visual/runtime smoke on 2026-07-24 restored `wf_3c86a159cd7b`, loaded its real
   Blender GLB, proved visible rendering and camera fit, exercised the contextual
   agent, QA, issue, artifact, version, and CAD-library drawers against real
@@ -483,6 +495,13 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
   filesystem paths. `asset_imports[].resolved_path` remains internal only.
 - HTTP workflow/version identifiers are pattern-validated before path lookup,
   including percent-encoded inputs.
+- The local API now allowlists `Host`, uses an explicit no-credentials CORS
+  surface, and rejects every state-changing browser request whose present
+  `Origin` is not an allowed local frontend before calling the service. API and
+  Nginx responses carry framing, MIME, referrer, permissions and CSP headers;
+  HSTS is intentionally absent on HTTP loopback. This protects the local
+  browser boundary but is not user authentication: there is no account, JWT or
+  remote-access contract.
 - Frontend "scene plan" maps to the `scene_spec` artifact. `SceneSpec` remains
   the geometry source of truth.
 
@@ -731,10 +750,12 @@ certification, or acceptance of every generic 3D scenario.
   French instruction while the normalized LLM decision stays in provenance.
   Failed historical workflows now expose no artifact, download or trace URL;
   quarantined candidate files cannot be advertised as product deliverables.
-- The corresponding current-tree regression proof is 167/167 frontend tests,
-  frontend typecheck and production build, 650 fast backend tests in 23.52 s,
-  plus the focused real-Blender qualified 4G assembly/edit/version test (1/1 in
-  44.39 s) and the complete provider gate (4/4 in 34.69 s). That Blender test
+- The corresponding current-tree deterministic proof is 170/170 frontend tests,
+  frontend typecheck and production build, and 660 fast backend tests in 23.68 s.
+  The immediately preceding convergence tree also passed the focused real-Blender
+  qualified 4G assembly/edit/version test (1/1 in 44.39 s) and complete provider
+  gate (4/4 in 34.69 s); these runtime results were not rerun after the later
+  viewer-layout and tower-less generic-adaptation changes. That Blender test
   certifies 9/9 mechanical instances before and
   after the bounded RRU offset edit.
   This bounded run is not a claim that the entire Python or browser acceptance
@@ -755,7 +776,7 @@ certification, or acceptance of every generic 3D scenario.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 167 passing
+frontend now has a verified chat-first/3D-first product baseline and 170 passing
 component/contract tests. Current-tree connected creation has passed in the real
 browser. Edit/version is proved by the API and focused Blender E2E; its final
 browser replay, along with every degraded, document-pack, rollback and recovery
@@ -793,10 +814,15 @@ Statut autoritaire: `IMPLEMENTED_PARTIAL`.
   générique, provenance et certificat cognitif local. La révision d'un
   `SceneSpec` V2 repasse par validation de plan/capacités, Blender, QA,
   certification et versioning existant.
-- Le frontend reconstruit une conversation persistée, expose la scène, les
-  stratégies, la provenance, les composants sélectionnables dans le viewer et
-  la galerie des previews réelles. Il ne présente plus une erreur globale de
-  synchronisation lorsque le bundle certifié principal est déjà disponible.
+- Le frontend reconstruit le contexte actif depuis le prompt/exigences et les
+  trois dernières descriptions de versions, expose la scène, les stratégies,
+  la provenance, les composants sélectionnables dans le viewer et la galerie
+  des previews réelles. Les descriptions de révision sont triées et attribuées
+  honnêtement à l'utilisateur, jamais inventées comme réponses assistant. Il ne
+  dispose pas encore d'un journal conversationnel
+  complet et persistant de tours utilisateur/assistant. Il ne présente plus une
+  erreur globale de synchronisation lorsque le bundle certifié principal est
+  déjà disponible.
 
 Ce statut n'est pas `IMPLEMENTED`: le parcours télécom GPT-OSS réel du
 2026-08-03 passe après correction des contrats JSON, des bounds de sweep, des
