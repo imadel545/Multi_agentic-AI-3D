@@ -89,6 +89,11 @@ export default function App({ apiClient = api }: AppProps) {
   const [assemblyPlan, setAssemblyPlan] = useState<AssemblyPlanEvidence | null>(null);
   const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
   const [selectedSemanticRoot, setSelectedSemanticRoot] = useState<string | null>(null);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const selectSemanticRoot = useCallback((root: string | null) => {
+    setSelectedSemanticRoot(root);
+    setSelectedVersionId(root ? state.viewerBundle?.version_id ?? null : null);
+  }, [state.viewerBundle]);
   const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
@@ -324,6 +329,7 @@ export default function App({ apiClient = api }: AppProps) {
     setRagEvidence(null);
     setActiveRequirements(null);
     setSelectedSemanticRoot(null);
+    setSelectedVersionId(null);
     if (!bundle) {
       return;
     }
@@ -1052,6 +1058,14 @@ export default function App({ apiClient = api }: AppProps) {
     revisionInFlightRef.current = true;
     const workflowId = state.workflowId;
     const submittedRevisionPrompt = revisionPrompt.trim();
+    if (selectedSemanticRoot && !selectedVersionId) {
+      revisionInFlightRef.current = false;
+      setRevisionMessage("La version de cette sélection n’est pas vérifiée. Rechargez le design avant de modifier ce composant.");
+      return;
+    }
+    const target = selectedSemanticRoot && selectedVersionId
+      ? { target_semantic_root: selectedSemanticRoot, expected_version_id: selectedVersionId }
+      : {};
     setRevisionMessage(null);
     setRevisionBusy(true);
     let streamNotice: string | null = null;
@@ -1072,7 +1086,8 @@ export default function App({ apiClient = api }: AppProps) {
       }
       dispatch({ type: "REVISION_STARTED", runtimeMode });
       const result = await apiClient.editDesign(workflowId, {
-        edit_prompt: submittedRevisionPrompt
+        edit_prompt: submittedRevisionPrompt,
+        ...target
       });
       const outcome = revisionOutcomeMessage(result, submittedRevisionPrompt);
       setRevisionMessage([outcome, streamNotice].filter(Boolean).join(" · "));
@@ -1102,6 +1117,8 @@ export default function App({ apiClient = api }: AppProps) {
     rememberEventSequence,
     revisionBusy,
     revisionPrompt,
+    selectedSemanticRoot,
+    selectedVersionId,
     state.workflowId
   ]);
 
@@ -1461,6 +1478,10 @@ export default function App({ apiClient = api }: AppProps) {
               loading={viewerSurfaceLoading}
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
               selectedSemanticRoot={selectedSemanticRoot}
+              knownSemanticRoots={componentProofs?.components.flatMap((component) =>
+                component.instances.map((instance) => instance.semantic_root)
+              ) ?? []}
+              onSelectSemanticRoot={selectSemanticRoot}
               toAbsoluteUrl={toArtifactUrl}
             />
           </Suspense>
@@ -1539,7 +1560,7 @@ export default function App({ apiClient = api }: AppProps) {
             timeline={state.timeline}
             toAbsoluteUrl={toArtifactUrl}
             onRollbackVersion={rollbackVersion}
-            onSelectSceneComponent={setSelectedSemanticRoot}
+            onSelectSceneComponent={selectSemanticRoot}
             onRetryAdaptation={() => void retryAdaptationSurfaces()}
             onRetryAssets={() => void retryAssetSurfaces()}
             onRetryAssetSearch={() => void retryAssetSearch()}

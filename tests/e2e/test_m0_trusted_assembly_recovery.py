@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import time
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from core.contracts.requirements import GeometryRequest
 from core.llm.asset_selection import GroqAssetSelectionClient
 from core.orchestration import DesignOrchestrator
 from core.performance import requirements_confirmation_hash
+from core.qa.assembly_constraint_inspector import _world_matrices
 from core.services.asset_registry import AssetRegistry
 from core.services.requirement_parser import parse_requirements_text
 
@@ -361,6 +363,75 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         versions = client.get(f"/designs/{workflow_id}/versions").json()
         assert len(versions) == 2
         assert [item["version_id"] for item in versions if item["active"]] == [edited.version_id]
+
+        # Real Blender targeted edit; providers above are controlled transports,
+        # while this selected edit deliberately exercises the explicit parser fallback.
+        workflow_service.scene_edit_agent.groq = None
+        before_scene = edited.scene.model_dump(mode="json")
+        before_matrices = _glb_world_transforms(edited_dir / "design.glb")
+        root = next(
+            instance["semantic_root"]
+            for component in edited_proofs["components"]
+            if component["role_id"] == "sector_antenna"
+            for instance in component["instances"]
+            if instance["instance_id"] == "S2"
+        )
+        bundle = client.get(f"/designs/{workflow_id}/viewer-bundle").json()
+        assert bundle["version_id"] == edited.version_id
+        targeted = client.post(
+            f"/designs/{workflow_id}/edit",
+            json={
+                "edit_prompt": "Azimut à 80 degrés",
+                "target_semantic_root": root,
+                "expected_version_id": bundle["version_id"],
+            },
+        )
+        assert targeted.status_code == 200, targeted.text
+        assert targeted.json()["status"] == "applied", targeted.text
+        assert targeted.json()["llm_fallback_used"] is True
+        targeted_version = workflow_service.versioning.get_verified_active_version(workflow_id)
+        assert targeted_version is not None
+        assert targeted_version.version_id != edited.version_id
+        after_scene = targeted_version.scene.model_dump(mode="json")
+        assert before_scene["sectors"][1]["azimuth_deg"] == 120
+        assert after_scene["sectors"][1]["azimuth_deg"] == 80
+        assert after_scene["sectors"][0] == before_scene["sectors"][0]
+        assert after_scene["sectors"][2] == before_scene["sectors"][2]
+        assert after_scene["geometry_programs"] == before_scene["geometry_programs"]
+        assert after_scene["tower"] == before_scene["tower"]
+        target_dir = Path(targeted_version.artifact_dir or "")
+        after_matrices = _glb_world_transforms(target_dir / "design.glb")
+        for sector_id in ("S1", "S3"):
+            sector_roots = [
+                instance["semantic_root"]
+                for component in edited_proofs["components"]
+                for instance in component["instances"]
+                if instance["instance_id"] == sector_id
+            ]
+            assert sector_roots
+            for other_root in sector_roots:
+                assert after_matrices[other_root] == pytest.approx(before_matrices[other_root])
+        assert after_matrices[root] != pytest.approx(before_matrices[root])
+        targeted_certificate = json.loads((target_dir / "completion_certificate.json").read_text())
+        assert targeted_certificate["status"] == "issued"
+        assert targeted_certificate["generation_mode"] == "real_blender"
+        assert targeted_certificate["checks"]["component_proof_verified"] is True
+        stale = client.post(
+            f"/designs/{workflow_id}/edit",
+            json={
+                "edit_prompt": "Azimut à 90 degrés",
+                "target_semantic_root": root,
+                "expected_version_id": edited.version_id,
+            },
+        )
+        assert stale.status_code == 200, stale.text
+        assert stale.json()["status"] == "rejected"
+        assert stale.json()["errors"][0]["code"] == "EDIT_TARGET_REJECTED"
+        versions = client.get(f"/designs/{workflow_id}/versions").json()
+        assert len(versions) == 3
+        assert [item["version_id"] for item in versions if item["active"]] == [
+            targeted_version.version_id
+        ]
     finally:
         workflow_service.outputs_dir = original_outputs
         workflow_service.orchestrator = original_orchestrator
@@ -541,3 +612,18 @@ def _json_sha256(payload: object) -> str:
             "utf-8"
         )
     ).hexdigest()
+
+
+def _glb_world_transforms(path: Path) -> dict[str, list[float]]:
+    raw = path.read_bytes()
+    magic, version, total = struct.unpack_from("<4sII", raw)
+    assert magic == b"glTF" and version == 2 and total == len(raw)
+    json_size, chunk_type = struct.unpack_from("<II", raw, 12)
+    assert chunk_type == 0x4E4F534A
+    payload = json.loads(raw[20 : 20 + json_size])
+    matrices, _ = _world_matrices(payload)
+    return {
+        node["name"]: [value for row in matrices[index] for value in row]
+        for index, node in enumerate(payload["nodes"])
+        if "name" in node
+    }

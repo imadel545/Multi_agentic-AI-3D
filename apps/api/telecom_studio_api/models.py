@@ -206,6 +206,16 @@ class MemoryVectorReindexResponse(BaseModel):
 
 class EditDesignRequest(BaseModel):
     edit_prompt: str = Field(min_length=1, max_length=1000)
+    target_semantic_root: str | None = Field(default=None, min_length=1, max_length=240)
+    expected_version_id: str | None = Field(default=None, pattern=r"^v[a-f0-9]{8}$")
+
+    @model_validator(mode="after")
+    def validate_target_version_pair(self) -> "EditDesignRequest":
+        if (self.target_semantic_root is None) != (self.expected_version_id is None):
+            raise ValueError(
+                "target_semantic_root and expected_version_id must be provided together"
+            )
+        return self
 
 
 class EditDesignResponse(BaseModel):
@@ -640,6 +650,7 @@ class AssemblyConstraintSummary(BaseModel):
 
 
 class ViewerBundle(BaseModel):
+    version_id: str | None = None
     workflow_id: str
     status: str
     active_version: str | None = None

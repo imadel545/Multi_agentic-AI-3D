@@ -1,8 +1,8 @@
 import { Grid, Html, OrbitControls, useGLTF } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { AlertTriangle, Box, Image as ImageIcon, Layers3, Loader2, RotateCcw } from "lucide-react";
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { ACESFilmicToneMapping, BoxHelper, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
+import { ACESFilmicToneMapping, Box3, Box3Helper, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
 import type { Camera, Object3D, PerspectiveCamera, Scene, WebGLRenderer } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { ViewerBundle } from "../../api/schemas";
@@ -27,6 +27,8 @@ type TelecomGlbViewerProps = {
   onReloadBundle?: () => void | Promise<void>;
   probeWebGL?: () => boolean;
   selectedSemanticRoot?: string | null;
+  knownSemanticRoots?: readonly string[];
+  onSelectSemanticRoot?: (root: string | null) => void;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 };
 
@@ -46,6 +48,8 @@ export function TelecomGlbViewer({
   onReloadBundle,
   probeWebGL = hasUsableWebGL,
   selectedSemanticRoot = null,
+  knownSemanticRoots = [],
+  onSelectSemanticRoot,
   toAbsoluteUrl
 }: TelecomGlbViewerProps) {
   const source = resolveViewerSource(bundle, toAbsoluteUrl);
@@ -141,6 +145,7 @@ export function TelecomGlbViewer({
           {selectedSemanticRoot ? (
             <div className="viewer-selection" aria-live="polite">
               <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {humanizeSemanticRoot(selectedSemanticRoot)}
+              {onSelectSemanticRoot ? <button type="button" onClick={() => onSelectSemanticRoot(null)}>Désélectionner</button> : null}
             </div>
           ) : null}
           {loading ? (
@@ -207,6 +212,8 @@ export function TelecomGlbViewer({
                     controlsRef={controlsRef}
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
+                    knownSemanticRoots={knownSemanticRoots}
+                    onSelectSemanticRoot={onSelectSemanticRoot}
                     selectedSemanticRoot={selectedSemanticRoot}
                     showTechnicalAids={showTechnicalAids}
                     url={source.url}
@@ -276,6 +283,8 @@ function ModelScene({
   onHealth,
   onLoaded,
   selectedSemanticRoot,
+  knownSemanticRoots,
+  onSelectSemanticRoot,
   showTechnicalAids
 }: {
   url: string;
@@ -283,19 +292,21 @@ function ModelScene({
   onHealth: (health: ViewerHealth) => void;
   onLoaded: (summary: ModelObjectSummary) => void;
   selectedSemanticRoot: string | null;
+  knownSemanticRoots: readonly string[];
+  onSelectSemanticRoot?: (root: string | null) => void;
   showTechnicalAids: boolean;
 }) {
   const gltf = useGLTF(url);
   const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
   const { camera, invalidate, size } = useThree();
   const fitted = useRef(false);
-  const selectedObject = useMemo(
-    () => findSemanticObject(scene, selectedSemanticRoot),
+  const selectedBox = useMemo(
+    () => semanticSelectionBounds(scene, selectedSemanticRoot),
     [scene, selectedSemanticRoot]
   );
   const selectionHelper = useMemo(
-    () => selectedObject ? new BoxHelper(selectedObject, new Color("#70e1d2")) : null,
-    [selectedObject]
+    () => selectedBox ? new Box3Helper(selectedBox, new Color("#70e1d2")) : null,
+    [selectedBox]
   );
   useEffect(() => () => selectionHelper?.dispose(), [selectionHelper]);
   useEffect(() => {
@@ -307,7 +318,8 @@ function ModelScene({
   }, [invalidate, onHealth, onLoaded, scene, showTechnicalAids, size.height, size.width]);
   useEffect(() => {
     fitted.current = false;
-  }, [selectedSemanticRoot]);
+    invalidate();
+  }, [invalidate, selectedSemanticRoot]);
   useFrame(() => {
     if (fitted.current || !controlsRef.current) {
       return;
@@ -315,34 +327,68 @@ function ModelScene({
     fitted.current = true;
     const fit = fitCameraToObject(
       camera as PerspectiveCamera,
-      selectedObject ?? scene,
-      controlsRef.current
+      scene,
+      controlsRef.current,
+      selectedBox ?? undefined
     );
-    selectionHelper?.update();
     onHealth(fit ? "camera_fitted" : "glb_error");
   });
   return (
     <>
-      <primitive object={scene} />
+      <primitive object={scene} onClick={(event: ThreeEvent<MouseEvent>) => {
+        // Ignore an aid/unknown foreground hit without selecting equipment behind it.
+        event.stopPropagation();
+        const root = semanticRootForPick(event.object, knownSemanticRoots, event.delta, event.button);
+        if (root && onSelectSemanticRoot) {
+          onSelectSemanticRoot(root);
+        }
+      }} />
       {selectionHelper ? <primitive object={selectionHelper} /> : null}
     </>
   );
 }
 
-export function findSemanticObject(scene: Object3D, semanticRoot: string | null): Object3D | null {
-  if (!semanticRoot) return null;
-  let prefixMatch: Object3D | null = null;
-  let exactMatch: Object3D | null = null;
+/** Select only identities published by the backend for this scene. */
+export function semanticRootForPick(
+  hit: Object3D,
+  knownRoots: readonly string[],
+  pointerTravel: number,
+  button = 0
+): string | null {
+  if (button !== 0 || !Number.isFinite(pointerTravel) || pointerTravel > 4) return null;
+  const ancestors: Object3D[] = [];
+  for (let current: Object3D | null = hit; current; current = current.parent) {
+    if (!current.visible) return null;
+    const role = String(current.userData.role ?? current.userData.object_role ?? "").toLowerCase();
+    if (["azimuth_arrow", "beam", "height_marker", "label", "ground", "terrain"].includes(role) ||
+      /azimuth_arrow|sector_beam|height_marker|label_|technical_ground_plane/.test(current.name.toLowerCase())) return null;
+    ancestors.push(current);
+  }
+  for (const object of ancestors) {
+    const declared = object.userData.semantic_root ?? object.userData.semanticRoot;
+    if (typeof declared === "string" && knownRoots.includes(declared)) return declared;
+    if (knownRoots.includes(object.name)) return object.name;
+  }
+  for (const object of ancestors) {
+    const matches = knownRoots.filter((root) => root && object.name.startsWith(`${root}_`));
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return null;
+  }
+  return null;
+}
+
+/** Exported assemblies often carry one identity on many sibling meshes. */
+export function semanticSelectionBounds(scene: Object3D, root: string | null): Box3 | null {
+  if (!root) return null;
+  scene.updateWorldMatrix(true, true);
+  const bounds = new Box3();
   scene.traverse((object) => {
-    const declaredRoot = object.userData.semantic_root ?? object.userData.semanticRoot;
-    if (!exactMatch && (object.name === semanticRoot || declaredRoot === semanticRoot)) {
-      exactMatch = object;
-    }
-    if (!prefixMatch && object.name.startsWith(`${semanticRoot}_`)) {
-      prefixMatch = object;
+    if ((object as Object3D & { isMesh?: boolean }).isMesh &&
+      semanticRootForPick(object, [root], 0) === root) {
+      bounds.union(new Box3().setFromObject(object));
     }
   });
-  return exactMatch ?? prefixMatch;
+  return bounds.isEmpty() ? null : bounds;
 }
 
 function humanizeSemanticRoot(value: string): string {

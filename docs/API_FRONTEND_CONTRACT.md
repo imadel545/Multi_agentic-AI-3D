@@ -48,7 +48,7 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `GET` | `/designs/{id}/events` | Timeline des events bruts. |
 | `GET` | `/designs/{id}/events/stream` | `push_sse`: replay JSONL puis events live jusqu'au terminal. |
 | `GET` | `/designs/{id}/versions` | Historique des versions. |
-| `POST` | `/designs/{id}/edit` | Éditer par prompt. |
+| `POST` | `/designs/{id}/edit` | Éditer par prompt, globalement ou sur une identité certifiée liée à sa version. |
 | `POST` | `/designs/{id}/versions/{vid}/rollback` | Rollback vers une version. |
 | `GET` | `/designs/{id}/artifacts/{name}` | Télécharger GLB, PNG, metadata, rapports. |
 | `GET` | `/assets/inventory` | Inventaire des assets et leur état. |
@@ -443,6 +443,23 @@ ouverte.
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+La requête accepte `target_semantic_root` et `expected_version_id` ensemble
+(sinon HTTP 422). Sans ces champs, l'édition globale existante est conservée.
+Le viewer bundle publie `version_id` depuis son snapshot vérifié; l'UI capture
+cette version lors de la sélection et efface la sélection au changement de
+bundle. La cible est résolue dans `component_proofs.json`, dont le hash est
+lié au certificat de la version active, sous le verrou d'opération.
+Une version périmée ou une identité inconnue, ambiguë ou non prise en charge
+donne un résultat `rejected` et conserve la version active.
+
+Le périmètre filtre les capacités avant planification et contraint de nouveau
+le patch final, indépendamment du planificateur. Les cibles prises en charge
+sont les poses d'antennes, les décalages RRU et un GeometryProgram de quantité
+un. Les programmes répétés et les autres composants ne disposent pas encore
+d'édition ciblée. Déplacer une antenne peut déplacer ses dépendances de
+montage; ce n'est pas une modification libre de mesh. Le picking frontend
+utilise les identités d'instances publiées, pas des noms inventés depuis le clic.
 
 Pour un composant généré, les capacités résolues ajoutent un chemin
 `/geometry_programs/{index}`, un `value_type=geometry_program` et

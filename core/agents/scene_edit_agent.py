@@ -30,6 +30,7 @@ class AdaptationGraphState(TypedDict, total=False):
     scene: SceneSpec
     edit_prompt: str
     capabilities: SceneAdaptationCapabilities
+    allowed_paths: list[str]
     plan: AssetAdaptationPlan
     patch: ScenePatch
     patched_scene: SceneSpec
@@ -73,10 +74,23 @@ class SceneEditAgent:
         workflow_id: str,
         scene: SceneSpec,
         edit_prompt: str,
+        *,
+        allowed_paths: set[str] | None = None,
     ) -> AdaptationDecision:
         if self.graph is None or self.capability_service is None:
             raise RuntimeError("adaptation capability service is unavailable")
-        geometry_index = self._geometry_program_index_for_prompt(scene, edit_prompt)
+        geometry_index = (
+            next(
+                (
+                    int(path.split("/")[2])
+                    for path in allowed_paths
+                    if path.startswith("/geometry_programs/")
+                ),
+                None,
+            )
+            if allowed_paths is not None
+            else self._geometry_program_index_for_prompt(scene, edit_prompt)
+        )
         if geometry_index is not None:
             if self.geometry_program_planner is None:
                 raise RuntimeError(
@@ -87,6 +101,7 @@ class SceneEditAgent:
                 scene,
                 edit_prompt,
                 geometry_index,
+                allowed_paths=allowed_paths,
             )
         thread_id = f"{workflow_id}:adaptation:{uuid.uuid4().hex}"
         try:
@@ -96,6 +111,11 @@ class SceneEditAgent:
                     "scene": scene,
                     "edit_prompt": edit_prompt,
                     "graph_trace": [],
+                    **(
+                        {"allowed_paths": sorted(allowed_paths)}
+                        if allowed_paths is not None
+                        else {}
+                    ),
                 },
                 config={"configurable": {"thread_id": thread_id}},
             )
@@ -225,12 +245,22 @@ class SceneEditAgent:
         scene: SceneSpec,
         edit_prompt: str,
         geometry_index: int,
+        *,
+        allowed_paths: set[str] | None = None,
     ) -> AdaptationDecision:
         if self.capability_service is None or self.geometry_program_planner is None:
             raise RuntimeError("geometry-program adaptation is unavailable")
         current = scene.geometry_programs[geometry_index]
         path = f"/geometry_programs/{geometry_index}"
         capabilities = self.capability_service.resolve(scene)
+        if allowed_paths is not None:
+            capabilities = capabilities.model_copy(
+                update={
+                    "capabilities": [
+                        item for item in capabilities.capabilities if item.path in allowed_paths
+                    ]
+                }
+            )
         capability = next(
             (item for item in capabilities.capabilities if item.path == path),
             None,
@@ -363,6 +393,18 @@ class SceneEditAgent:
         if self.capability_service is None:
             raise RuntimeError("adaptation capability service is unavailable")
         capabilities = self.capability_service.resolve(state["scene"])
+        if "allowed_paths" in state:
+            capabilities = capabilities.model_copy(
+                update={
+                    "capabilities": [
+                        item
+                        for item in capabilities.capabilities
+                        if item.path in state["allowed_paths"]
+                    ]
+                }
+            )
+            if not capabilities.capabilities:
+                raise ValueError("La sélection ne dispose pas de modification prise en charge.")
         return {
             "capabilities": capabilities,
             "graph_trace": [
@@ -599,7 +641,15 @@ class SceneEditAgent:
             if any(term in text for term in tower_terms):
                 operations.append(PatchOperation(op="replace", path="/tower/height_m", value=val))
             elif antenna_height_requested:
-                for idx in range(len(scene.sectors)):
+                requested_sector = self._extract_sector_index(text)
+                indices = (
+                    [requested_sector]
+                    if requested_sector is not None
+                    else range(len(scene.sectors))
+                )
+                for idx in indices:
+                    if not 0 <= idx < len(scene.sectors):
+                        continue
                     operations.append(
                         PatchOperation(
                             op="replace", path=f"/sectors/{idx}/install_height_m", value=val

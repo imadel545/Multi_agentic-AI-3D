@@ -88,7 +88,10 @@ export type CreateDesignPayload = {
 
 export type EditDesignPayload = {
   edit_prompt: string;
-};
+} & (
+  | { target_semantic_root: string; expected_version_id: string }
+  | { target_semantic_root?: never; expected_version_id?: never }
+);
 
 export type ParseRequirementsPayload = {
   requirements_text: string;

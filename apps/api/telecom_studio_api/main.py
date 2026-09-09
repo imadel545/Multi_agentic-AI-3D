@@ -571,7 +571,18 @@ def parse_requirements(request: ParseRequirementsRequest) -> dict:
 @app.post("/designs/{workflow_id}/edit", response_model=EditDesignResponse)
 def edit_design(workflow_id: WorkflowId, request: EditDesignRequest) -> dict:
     try:
-        result = workflow_service.edit_design(workflow_id, request.edit_prompt)
+        result = workflow_service.edit_design(
+            workflow_id,
+            request.edit_prompt,
+            **(
+                {
+                    "target_semantic_root": request.target_semantic_root,
+                    "expected_version_id": request.expected_version_id,
+                }
+                if request.target_semantic_root is not None
+                else {}
+            ),
+        )
     except WorkflowBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except WorkflowStorageError as exc:

@@ -254,6 +254,12 @@ frontend.
 - The local CAD library is fully copied and catalogued, but remains quarantined:
   11,974 files, 11,531 unique contents, 443 duplicate contents and 0
   generation-eligible entry. No global licence file was found in the source.
+- The [2026-09-09 bounded CAD conversion benchmark](QA_STRATEGY.md#cad-conversion-benchmark--2026-09-09)
+  produced no admissible mesh from three real antenna/radio/support DWGs.
+  LibreDWG conversions returned exit code 0 while resulting SAT/SAB payloads
+  were empty; down-converting the radio to R2000 removed its solid entities.
+  Exit code alone cannot qualify conversion. ODA export remained unverified
+  after an interrupted UI experiment; no source or licence was promoted.
 - LibreDWG `dwgread` provides honest DWG metadata/entity probes. Sample telecom
   models contain `3DSOLID` ACIS/B-Rep entities, so converting them through DXF
   alone is not accepted as mesh proof. A real B-Rep conversion tool and

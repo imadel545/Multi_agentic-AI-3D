@@ -101,6 +101,50 @@ function deferredPromise<T>() {
 }
 
 describe("frontend runtime selection", () => {
+  it("sends the picked component and captured version, then clears targeting for the next revision", async () => {
+    const status = { ...workflow("wf_123456abcdef", "completed", "2026-09-09T10:00:00Z"),
+      generation_mode: "real_blender", mesh_qa_passed: true, requirement_coverage_passed: true,
+      artifacts: { glb: "/designs/wf_123456abcdef/artifacts/design.glb" } };
+    let versionId = "v12345678";
+    const bundle = () => ({ ...status, version_id: versionId, available_actions: ["edit_design"],
+      viewer_artifacts: [], limitations: [], component_proofs_url: "/designs/wf_123456abcdef/artifacts/component_proofs.json" });
+    const editDesign = vi.fn().mockImplementation(async () => {
+      versionId = "v87654321";
+      return { workflow_id: status.workflow_id, status: "applied", message: "Modification appliquée", warnings: [], unsupported_operations: [] };
+    });
+    const apiClient = bootstrapApi({
+      listDesigns: vi.fn().mockResolvedValue([status]),
+      workflowStatus: vi.fn().mockResolvedValue(status),
+      viewerBundle: vi.fn().mockImplementation(async () => bundle()),
+      currentOperation: vi.fn().mockResolvedValue({ ...status, is_running: false, is_terminal: true }),
+      timelineSummary: vi.fn().mockResolvedValue({ ...status, timeline_steps: [] }),
+      userIssues: vi.fn().mockResolvedValue({ ...status, human_readable_issues: [] }),
+      versions: vi.fn().mockResolvedValue([]),
+      workflowEvents: vi.fn().mockResolvedValue([]),
+      componentProofs: vi.fn().mockResolvedValue({ components: [{ component_id: "radio", role_id: "rru", origin: "asset", strategy: "adapt", generation_strategy: "parametric", quantity: 1,
+        instances: [{ instance_id: "radio1", semantic_root: "rru_S1_REAL_1", object_role: "rru", geometry_source: "parametric" }] }], geometry_programs: [] }),
+      editDesign
+    });
+    render(createElement(App, { apiClient }));
+    await waitFor(() => expect(screen.getByLabelText("Revision prompt")).toBeEnabled());
+    fireEvent.click(await screen.findByRole("button", { name: /Composition/ }));
+    fireEvent.click(await screen.findByRole("treeitem"));
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.change(screen.getByLabelText("Revision prompt"), { target: { value: "Monter de 20 cm" } });
+    fireEvent.click(screen.getByRole("button", { name: "Appliquer la révision" }));
+    await waitFor(() => expect(editDesign).toHaveBeenCalledWith(status.workflow_id, {
+      edit_prompt: "Monter de 20 cm", target_semantic_root: "rru_S1_REAL_1", expected_version_id: "v12345678"
+    }));
+    await waitFor(() => expect(screen.getByLabelText("Revision prompt")).toHaveValue(""));
+    await waitFor(() => expect(apiClient.viewerBundle).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText(/Composant sélectionné/)).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Revision prompt"), { target: { value: "Augmenter la hauteur du pylône" } });
+    fireEvent.click(screen.getByRole("button", { name: "Appliquer la révision" }));
+    await waitFor(() => expect(editDesign).toHaveBeenLastCalledWith(status.workflow_id, {
+      edit_prompt: "Augmenter la hauteur du pylône"
+    }));
+  });
+
   it("loads the governed asset inventory during bootstrap", async () => {
     const assetInventory = vi.fn().mockResolvedValue({
       status: "qualified_mixed_catalog",

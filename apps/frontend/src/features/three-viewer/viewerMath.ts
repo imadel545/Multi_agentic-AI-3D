@@ -87,9 +87,10 @@ export function computeTelecomCameraFit(box: Box3, fovDeg = 38, aspect = 1): Cam
 export function fitCameraToObject(
   camera: PerspectiveCamera,
   object: Object3D,
-  controls: { target: Vector3; update: () => void } | null
+  controls: { target: Vector3; update: () => void } | null,
+  bounds?: Box3
 ): CameraFit | null {
-  const inspectableBox = inspectableObjectBox(object, camera.aspect);
+  const inspectableBox = bounds ?? inspectableObjectBox(object, camera.aspect);
   const box = inspectableBox ?? new Box3().setFromObject(object);
   if (box.isEmpty()) {
     return null;

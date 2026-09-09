@@ -1429,6 +1429,9 @@ export function InspectorDock({
   selectedSemanticRoot?: string | null;
 }) {
   const [activeDrawer, setActiveDrawer] = useState<DrawerId | null>(null);
+  useEffect(() => {
+    if (selectedSemanticRoot) setActiveDrawer("scene");
+  }, [selectedSemanticRoot]);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const lastTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -1751,6 +1754,13 @@ export function SceneCompositionPanel({
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
       <PanelTitle icon={<Layers3 size={17} />} title="Composition vérifiable" />
+      {selectedSemanticRoot ? (
+        <div className="scene-plan-summary" role="status">
+          <strong>Composant sélectionné : {selectedSemanticRoot.replaceAll("_", " ")}</strong>
+          <small>La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre.</small>
+          <button className="secondary-action" type="button" onClick={() => onSelect?.(null)}>Désélectionner</button>
+        </div>
+      ) : null}
       {loading ? (
         <p className="resource-loading" aria-live="polite" role="status">
           <Loader2 className="spin" size={15} aria-hidden="true" /> Synchronisation du plan et des composants…

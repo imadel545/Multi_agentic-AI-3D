@@ -1525,6 +1525,15 @@ describe("studio kernel components", () => {
     expect(screen.queryByRole("img", { name: /missing/i })).not.toBeInTheDocument();
   });
 
+  it("explains selection scope and clears the inspection context", () => {
+    const onSelect = vi.fn();
+    render(<SceneCompositionPanel assemblyPlan={null} componentProofs={null}
+      selectedSemanticRoot="antenna_S1_REAL_1" onSelect={onSelect} />);
+    expect(screen.getByRole("status")).toHaveTextContent("limitée à ce composant");
+    fireEvent.click(screen.getByRole("button", { name: "Désélectionner" }));
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
   it("exposes the real assembly strategy and synchronizes a proof instance selection", () => {
     const onSelect = vi.fn();
     render(

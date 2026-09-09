@@ -8,7 +8,7 @@ const PublicApiRoots = [
 ] as const;
 
 function isPublicApiPath(value: string): boolean {
-  return PublicApiRoots.some(
+  return ["/rag/reindex", "/memory/vector/reindex"].includes(value) || PublicApiRoots.some(
     (root) =>
       value === root || value.startsWith(`${root}/`) || value.startsWith(`${root}?`)
   );

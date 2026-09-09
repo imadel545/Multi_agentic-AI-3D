@@ -561,6 +561,7 @@ export const AssemblyConstraintSummarySchema = publicSchema(
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
+    version_id: z.string().nullish(),
     status: WorkflowLifecycleStatusSchema,
     generation_mode: z.string().nullish(),
     generation_strategy: z.string().nullish(),

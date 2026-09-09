@@ -356,6 +356,7 @@ class ProductService:
             "workflow_id": workflow_id,
             "status": status.get("status", "unknown"),
             "active_version": active_version,
+            "version_id": verified_snapshot.version_id if verified_snapshot is not None else None,
             "multimodal_consent": status.get("multimodal_consent", "disabled"),
             "multimodal_intelligence": runtime["multimodal_intelligence"],
             "asset_decision_summary": _asset_decision_summary(verified_assembly_plan),

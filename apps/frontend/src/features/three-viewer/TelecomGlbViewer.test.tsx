@@ -1,28 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { Group, Object3D } from "three";
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D } from "three";
 import type { ViewerBundle } from "../../api/schemas";
 import {
   advanceRenderHealthProbe,
-  findSemanticObject,
+  semanticRootForPick,
+  semanticSelectionBounds,
   PreviewFallback,
   TelecomGlbViewer
 } from "./TelecomGlbViewer";
 
 describe("TelecomGlbViewer fallbacks", () => {
-  it("resolves a component from its real GLB semantic root before using a bounded name prefix", () => {
-    const scene = new Group();
-    const exact = new Object3D();
-    exact.name = "generated_mesh";
-    exact.userData.semantic_root = "antenna_S1_REAL_1";
-    const prefixed = new Object3D();
-    prefixed.name = "rru_S1_REAL_1_body";
-    scene.add(exact, prefixed);
-
-    expect(findSemanticObject(scene, "antenna_S1_REAL_1")).toBe(exact);
-    expect(findSemanticObject(scene, "rru_S1_REAL_1")).toBe(prefixed);
-    expect(findSemanticObject(scene, "unknown")).toBeNull();
-  });
   it("replaces a broken backend preview with an explicit product error", () => {
     const view = render(
       <PreviewFallback
@@ -127,5 +115,61 @@ describe("TelecomGlbViewer fallbacks", () => {
     advanceRenderHealthProbe(state, invalidate, sample, onResult);
     expect(sample).toHaveBeenCalledOnce();
     expect(onResult).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("verified scene picking", () => {
+  it("frames all exported sibling meshes of a selected assembly, excluding its labels", () => {
+    const scene = new Group();
+    for (const height of [1, 29]) {
+      const mesh = new Mesh(new BoxGeometry(2, 2, 2), new MeshBasicMaterial());
+      mesh.position.y = height;
+      mesh.userData.semantic_root = "tower_actual";
+      scene.add(mesh);
+    }
+    const label = new Mesh(new BoxGeometry(100, 100, 100), new MeshBasicMaterial());
+    label.userData = { semantic_root: "tower_actual", role: "label" };
+    scene.add(label);
+    const bounds = semanticSelectionBounds(scene, "tower_actual");
+    expect(bounds?.min.y).toBe(0);
+    expect(bounds?.max.y).toBe(30);
+    expect(bounds?.max.x).toBe(1);
+    expect(semanticSelectionBounds(scene, "unknown")).toBeNull();
+  });
+
+  it("maps a nested mesh to its backend-declared ancestor identity", () => {
+    const parent = new Group();
+    parent.userData.semantic_root = "rru_S1_REAL_1";
+    const mesh = new Object3D();
+    mesh.name = "body_mesh";
+    parent.add(mesh);
+    expect(semanticRootForPick(mesh, ["rru_S1_REAL_1"], 0)).toBe("rru_S1_REAL_1");
+    expect(semanticRootForPick(mesh, [], 0)).toBeNull();
+  });
+
+  it("supports only unambiguous bounded exported name prefixes", () => {
+    const mesh = new Object3D();
+    mesh.name = "rru_S1_REAL_1_body";
+    expect(semanticRootForPick(mesh, ["rru_S1_REAL_1"], 1)).toBe("rru_S1_REAL_1");
+    expect(semanticRootForPick(mesh, ["rru", "rru_S1_REAL_1"], 1)).toBeNull();
+    mesh.name = "rru_S1_REAL_10_body";
+    expect(semanticRootForPick(mesh, ["rru_S1_REAL_1"], 0)).toBeNull();
+  });
+
+  it("ignores drag gestures, secondary clicks, aids, invisible ancestors and unknown ground", () => {
+    const parent = new Group();
+    parent.name = "antenna_S1_REAL_1";
+    const mesh = new Object3D();
+    parent.add(mesh);
+    const roots = [parent.name];
+    expect(semanticRootForPick(mesh, roots, 5)).toBeNull();
+    expect(semanticRootForPick(mesh, roots, 0, 2)).toBeNull();
+    mesh.userData.object_role = "label";
+    expect(semanticRootForPick(mesh, roots, 0)).toBeNull();
+    mesh.userData.object_role = "antenna";
+    parent.visible = false;
+    expect(semanticRootForPick(mesh, roots, 0)).toBeNull();
+    expect(semanticRootForPick(new Object3D(), roots, 0)).toBeNull();
   });
 });

@@ -223,5 +223,14 @@ def _angle_deg(
     left: tuple[float, float, float],
     right: tuple[float, float, float],
 ) -> float:
-    cosine = max(-1.0, min(1.0, sum(left[index] * right[index] for index in range(3))))
+    # Measured unit vectors retain floating-point normalization residuals. Use
+    # the same normalized dot product as the inspector; do not relax QA tolerance.
+    left_length = math.sqrt(sum(component * component for component in left))
+    right_length = math.sqrt(sum(component * component for component in right))
+    normalized_left = tuple(component / left_length for component in left)
+    normalized_right = tuple(component / right_length for component in right)
+    cosine = max(
+        -1.0,
+        min(1.0, sum(normalized_left[index] * normalized_right[index] for index in range(3))),
+    )
     return math.degrees(math.acos(cosine))

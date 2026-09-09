@@ -21,7 +21,36 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not yet a complete vendor-grade asset library. A large local CAD corpus is
   catalogued, but remains quarantined until rights and geometry are qualified.
 
-## Current delivery checkpoint — 2026-08-11
+## Targeted editing checkpoint — 2026-09-09
+
+The local `codex/asset-assembly-convergence` slice connects certified component
+selection to bounded conversational editing. The backend verifies the selected
+version and component-proof hash, filters planner capabilities, then independently
+restricts the resulting patch. Antenna poses and RRU offsets are supported;
+single-quantity generated groups are supported by the API. Unsupported or stale
+selections are rejected. Whole-scene regeneration still runs through Blender/QA;
+this is not an incremental mesh editor.
+
+The real Blender M0 regression now builds a third version changing sector S2
+from 120 to 80 degrees, verifies unchanged S1/S3 exported world transforms,
+checks the new certificate and rejects a stale selection. It passed in 47.16 s
+on native Blender 4.5.12. Planning transports in this test are controlled;
+the targeted edit uses the explicit deterministic fallback, not a live LLM.
+This exposed and fixed inconsistent normalization in the assembly evidence
+angle recalculation without changing QA tolerances.
+
+The frontend supports picking known component identities and framing all meshes
+of a selected assembly. A local isolated browser smoke generated and displayed
+a certified GLB with explicit fallback and generic-fidelity notices; the full
+mouse-pick/edit browser sequence was not established. API/Blender and frontend
+integration tests provide the targeted-edit evidence separately.
+
+The three-source [CAD benchmark](QA_STRATEGY.md#cad-conversion-benchmark--2026-09-09)
+produced no admissible mesh. No professional asset was promoted. Library-first
+professional assembly remains open; this slice improves verified editability,
+not manufacturer fidelity, physical fastening or collision certification.
+
+## Previous delivery checkpoint — 2026-08-11
 
 `MILESTONE 1 — PARTIEL`
 

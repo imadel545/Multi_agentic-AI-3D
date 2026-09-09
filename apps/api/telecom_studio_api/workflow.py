@@ -37,6 +37,7 @@ from core.services.diff_engine import DiffEngine
 from core.services.event_log import EventLogService
 from core.services.patch_applier import PatchApplier
 from core.services.scene_versioning import SceneVersioningService, verify_persisted_version
+from core.services.targeted_edit import resolve_targeted_edit
 from core.validation import validate_scene_spec
 from core.validation.completion_certificate import verify_completion_certificate
 
@@ -1234,7 +1235,14 @@ class WorkflowService:
     def validate_scene(self, scene: SceneSpec) -> ValidationReport:
         return validate_scene_spec(scene, self.registry.list_assets())
 
-    def edit_design(self, workflow_id: str, edit_prompt: str) -> SceneEditResult:
+    def edit_design(
+        self,
+        workflow_id: str,
+        edit_prompt: str,
+        *,
+        target_semantic_root: str | None = None,
+        expected_version_id: str | None = None,
+    ) -> SceneEditResult:
         with self._workflow_operation(workflow_id):
             if self._is_workflow_active(workflow_id):
                 raise WorkflowBusyError("another operation is already active for this workflow")
@@ -1249,7 +1257,13 @@ class WorkflowService:
                 )
                 self._mark_workflow_active(workflow_id)
                 try:
-                    result = self._edit_design(workflow_id, edit_prompt, edit_id=edit_id)
+                    result = self._edit_design(
+                        workflow_id,
+                        edit_prompt,
+                        edit_id=edit_id,
+                        target_semantic_root=target_semantic_root,
+                        expected_version_id=expected_version_id,
+                    )
                     if result.status != "applied":
                         self._restore_status_after_operation(
                             workflow_id, previous_status, operation_id=edit_id
@@ -1264,7 +1278,13 @@ class WorkflowService:
                     self._mark_workflow_inactive(workflow_id)
 
     def _edit_design(
-        self, workflow_id: str, edit_prompt: str, *, edit_id: str | None = None
+        self,
+        workflow_id: str,
+        edit_prompt: str,
+        *,
+        edit_id: str | None = None,
+        target_semantic_root: str | None = None,
+        expected_version_id: str | None = None,
     ) -> SceneEditResult:
         self._sync_output_services()
         try:
@@ -1311,10 +1331,35 @@ class WorkflowService:
         )
 
         adaptation_decision = None
+        allowed_paths = None
+        planning_prompt = edit_prompt
+        if target_semantic_root is not None or expected_version_id is not None:
+            try:
+                allowed_paths, target_context = resolve_targeted_edit(
+                    active_version,
+                    target_semantic_root or "",
+                    expected_version_id,
+                    self.scene_edit_agent.capability_service,
+                )
+                if target_context:
+                    planning_prompt = f"{edit_prompt} (Sélection active : {target_context})"
+            except (ValueError, OSError, KeyError) as exc:
+                return SceneEditResult(
+                    workflow_id=workflow_id,
+                    edit_id=edit_id,
+                    status="rejected",
+                    original_scene=original_scene,
+                    errors=[
+                        {"code": "EDIT_TARGET_REJECTED", "message": str(exc), "severity": "error"}
+                    ],
+                )
         try:
             if self.scene_edit_agent.capability_service is not None:
                 adaptation_decision = self.scene_edit_agent.create_adaptation(
-                    workflow_id, original_scene, edit_prompt
+                    workflow_id,
+                    original_scene,
+                    planning_prompt,
+                    **({"allowed_paths": allowed_paths} if allowed_paths is not None else {}),
                 )
                 patch = adaptation_decision.patch
                 patched_scene = adaptation_decision.patched_scene
@@ -1322,6 +1367,17 @@ class WorkflowService:
             else:
                 patch = self.scene_edit_agent.create_patch(workflow_id, original_scene, edit_prompt)
                 patched_scene, validation_report = self.patch_applier.apply(original_scene, patch)
+            if allowed_paths is not None:
+                if any(
+                    op.path not in allowed_paths or op.op != "replace" for op in patch.operations
+                ):
+                    raise ValueError(
+                        "La modification dépasse les capacités du composant sélectionné."
+                    )
+                # Reapply against the original scene as a final independent boundary.
+                patched_scene, validation_report = self.patch_applier.apply(
+                    original_scene, patch, allowed_paths=allowed_paths
+                )
         except Exception as exc:
             self._emit_workflow_event(
                 workflow_id,

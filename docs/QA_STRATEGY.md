@@ -3,6 +3,20 @@
 QA must say what it actually checks. The current pipeline is honest about its
 limitations and never advertises checks it cannot perform.
 
+## Targeted-edit regression — 2026-09-09
+
+`tests/unit/test_targeted_edit.py` verifies stale selections, component-proof
+hashes, ambiguous identities, scoped fallback and an independent workflow check
+against a planner returning changes outside its allowed paths.
+`tests/e2e/test_m0_trusted_assembly_recovery.py` adds a third real Blender build:
+rotate S2 to 80 degrees, compare the unchanged SceneSpec fields and exported
+world transforms of S1/S3 components, verify the new certificate, then reject
+an edit tied to the older version. Controlled planning transports and the
+explicit deterministic editing fallback are not evidence of live LLM quality.
+The angular consistency regression renormalizes measured vectors before `acos`
+in the evidence contract, matching the inspector; the one-degree assembly
+tolerance and numerical consistency limits are unchanged.
+
 ## Levels
 
 - Contract QA: Pydantic validation of all API/runtime contracts.
@@ -227,3 +241,110 @@ limitations and never advertises checks it cannot perform.
 - Il manque une critique visuelle multimodale bornée, un solveur de relations
   spatiales et une boucle unique de réparation/régénération avant que les trois
   scénarios génériques puissent devenir une gate produit.
+
+## CAD conversion benchmark — 2026-09-09
+
+### Result and scope
+
+**No admissible mesh or neutral master was produced. No asset was promoted.**
+Three real antenna/radio/support DWGs were converted in a temporary directory.
+All default conversions returned exit code 0, but the resulting solid entities
+had empty SAT/SAB payloads and ezdxf extracted zero mesh bodies. This is a
+content-validation failure, not evidence that the entire source library is unusable.
+Original CAD files were only read; rights remain unverified.
+
+### Tools and sample
+
+Host tools: LibreDWG `dwg2dxf` 0.13.3, Python 3.12.7, ezdxf 1.4.4.
+ODA Drawings Explorer bundle 27.1.0.0 was inspected separately. FreeCAD and
+ODAFileConverter were not found in the installed applications/PATH checked.
+
+Paths below are relative to `assets/library/raw/maj_des_blocs/`:
+
+| Source | SHA-256 |
+|---|---|
+| `3D/Antenne/Kathrein/739 506/739506.dwg` | `7556068173c425106ad84f33cc62d90e9f1ff02c2eb23e849e153d3501f65bde` |
+| `3D/Baie/Ericsson/Outdoor/RRU/2203/Radio_2203.dwg` | `32f30bbb60477cadef0b17171a5d7297f53e70767395f28c1cbe4969a3887379` |
+| `3D/Antenne/_Support/Volx/Support RRU/DAL16RRUZ3R3BD.dwg` | `e718eb5743b2ee308d46e89416f8b3b38b01cbd3acdbfb6113fc36d1c97fa840` |
+
+| Sample | Single conversion wall time | DXF bytes | 3DSOLID entities in DXF | Extracted mesh bodies |
+|---|---:|---:|---:|---:|
+| Kathrein 739506 | 0.03 s | 240418 | 1 | 0 |
+| Ericsson Radio 2203 | 0.02 s | 306860 | 11 | 0 |
+| Volx DAL16RRUZ3R3BD | 0.01 s | 139454 | 5 | 0 |
+
+Times cover the subprocess only, rounded to hundredths; these are single local
+observations, not throughput guarantees. All three DXFs declare millimeters
+(`INSUNITS=4`). INSERT/block structure remains present, but solid completeness,
+world-space dimensions, hierarchy fidelity and attachment surfaces are unverified.
+Every inspected solid has `len(sat)==len(sab)==0`.
+
+A separate Radio 2203 conversion with `--as r2000` also returned 0, but retained
+no 3DSOLID entities. Direct `dwgread -O JSON` found 11 solid entities; the first
+reported `acis_empty=1` with no decoded ACIS payload. These observations do not
+prove the original DWG contains no recoverable geometry in another CAD kernel.
+
+### Reproduction
+
+Run from the repository root; outputs always use a fresh temporary directory.
+Repeat the source assignment for the other two paths above.
+
+```sh
+cad_probe_dir=$(mktemp -d /tmp/cad-conversion-XXXXXX)
+cad_probe_source='assets/library/raw/maj_des_blocs/3D/Baie/Ericsson/Outdoor/RRU/2203/Radio_2203.dwg'
+dwg2dxf -o "$cad_probe_dir/default.dxf" "$cad_probe_source"
+dwg2dxf --as r2000 -o "$cad_probe_dir/r2000.dxf" "$cad_probe_source"
+dwgread -O JSON -o "$cad_probe_dir/probe.json" "$cad_probe_source"
+.venv/bin/python - "$cad_probe_dir/default.dxf" <<'PYCODE'
+import sys
+import ezdxf
+from ezdxf.acis import api
+
+doc = ezdxf.readfile(sys.argv[1])
+solids = [e for e in doc.entitydb.values() if e.dxftype() == "3DSOLID"]
+print("units", doc.units, "solids", len(solids))
+for entity in solids:
+    print("payload", len(entity.sat), len(entity.sab))
+    for body in api.load_dxf(entity):
+        print("mesh sizes", [(len(m.vertices), len(m.faces))
+                             for m in api.mesh_from_body(body)])
+PYCODE
+```
+
+Original scratch evidence is local and ephemeral:
+`/var/folders/8w/vmnlvcp94ys003dwvn51llp00000gn/T/cad-source-slice-0js2cvz3/benchmark.json`.
+Sibling files `0.dxf`, `1.dxf`, `2.dxf`, `radio2000.dxf`, `radio.json` retain
+intermediates. This report preserves the material results if scratch is removed.
+
+### Existing DXF alternatives
+
+All 12 source DXFs were parsed. `3D/Pylone/Leclerc/1500/Plateforme.DXF`
+(SHA-256 `3fe4264eae977e6d0560531d14c9ac4cb7ee4827ddfc0b2644e1868e20e5222a`)
+has 4630 POLYLINE entities with flags 0, six SOLID entities, unspecified units,
+and no polyface meshes. A DXF SOLID entity is not proof of an ACIS 3DSOLID.
+The folder label does not qualify a solid platform.
+
+Five Camusat TC120 platform sheet drawings (150003A/H/I/J/K) contain 2D
+lines/circles/arcs and declare millimeters. They are candidates for a governed
+profile reconstruction only after thickness and technical intent are evidenced;
+no extrusion thickness was invented. The remaining signage/tree/ladder DXFs
+were not promoted as equipment meshes. Full source hashes and entity counts are
+in the scratch benchmark inventory.
+
+### Decisions and remaining route
+
+- Reject this tested LibreDWG-to-DXF-to-ezdxf route for exact promotion of these
+  three samples: subprocess success did not preserve usable solid payloads.
+- Reject R2000 down-conversion as a repair for Radio 2203: solids disappeared.
+- Reject inferred extrusion or dimensions as professional source evidence.
+- Keep LibreDWG for metadata/probing and raw candidates in quarantine.
+- ODA opened Radio 2203 and exposed Export with 3D DWF as its default format.
+  UI automation reported a user/app-state change before export; interaction was
+  stopped. No ODA export, tessellation quality or neutral conversion was proved.
+- A bounded next experiment must obtain a real neutral export or complete a
+  controlled ODA mesh export, then compare body counts, units, bounds, block
+  placements and visual completeness. Such a mesh would still require rights,
+  provenance, anchors and qualification QA before product use.
+
+No purchase, account creation, runtime conversion implementation, qualified
+manifest mutation or professional fidelity claim is part of this benchmark.

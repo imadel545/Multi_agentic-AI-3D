@@ -10,10 +10,21 @@ import {
   MultimodalIntelligenceSchema,
   ParseRequirementsResponseSchema,
   SceneAdaptationCapabilitiesSchema,
+  StudioSummarySchema,
   ViewerBundleSchema,
   WorkflowEventSchema,
   parseContract
 } from "./schemas";
+
+it("accepts the studio's public reindex routes while rejecting local storage paths", () => {
+  expect(StudioSummarySchema.safeParse({
+    rag_reindex_url: "/rag/reindex",
+    memory_vector_reindex_url: "/memory/vector/reindex"
+  }).success).toBe(true);
+  for (const path of ["/Users/imad/studio.db", "/memory/private/studio.db", "/rag/private.json"]) {
+    expect(StudioSummarySchema.safeParse({ memory_vector_reindex_url: path }).success).toBe(false);
+  }
+});
 
 const viewerBundlePayload = {
   workflow_id: "wf_123",
