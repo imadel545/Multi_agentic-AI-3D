@@ -58,6 +58,11 @@ indisponibles ou dégradés ont priorité sur les termes positifs dans leur trad
 Cette extraction reste partielle : le shell, le workflow API, l’orchestrateur et
 le script Blender contiennent encore des responsabilités à séparer progressivement.
 
+Dans l’API, `workflow_events.py` porte la normalisation publique des événements,
+leurs libellés et les règles de curseur de reprise. `WorkflowService` conserve
+la persistance, les abonnements et le cycle de génération; la présentation
+des événements ne dépend plus de ces services.
+
 - `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
 - `apps/blender_worker`: SceneSpec-driven Blender script, fixed parametric
   builders and deterministic GeometryProgram compiler.
