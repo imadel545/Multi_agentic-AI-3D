@@ -1,3 +1,5 @@
+import { AssetLibraryPanel } from "./AssetLibraryPanel";
+import { SceneCompositionPanel } from "./SceneCompositionPanel";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ViewerBundleSchema, type ViewerBundle } from "../api/schemas";
@@ -5,7 +7,6 @@ import {
   AgentStageRail,
   AgentTimeline,
   ArtifactsPanel,
-  AssetLibraryPanel,
   BackendStatusBar,
   ChatCommandPanel,
   LiveGenerationOverlay,
@@ -14,7 +15,6 @@ import {
   QaPanel,
   RagEvidencePanel,
   RuntimeCapabilitiesPanel,
-  SceneCompositionPanel,
   SummaryPanel,
   VersionSummary,
   conversationHistoryEntries,

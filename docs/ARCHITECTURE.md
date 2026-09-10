@@ -50,6 +50,14 @@ active SceneSpec + prompt
 
 ## Modules
 
+Le frontend sépare la bibliothèque (`AssetLibraryPanel`) et les preuves de composition
+avec sélection sémantique (`SceneCompositionPanel`) du shell `StudioKernel`.
+Les primitives de drawer et les libellés partagés résident dans `StudioPrimitives`
+et `StudioDisplayHelpers`; ces modules ne dépendent pas du shell. Les statuts
+indisponibles ou dégradés ont priorité sur les termes positifs dans leur traduction.
+Cette extraction reste partielle : le shell, le workflow API, l’orchestrateur et
+le script Blender contiennent encore des responsabilités à séparer progressivement.
+
 - `apps/api`: FastAPI gateway, Product API, workflow lifecycle.
 - `apps/blender_worker`: SceneSpec-driven Blender script, fixed parametric
   builders and deterministic GeometryProgram compiler.
