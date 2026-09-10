@@ -260,13 +260,40 @@ def _geometry_program_proof(bpy, program: dict) -> dict:
         and node_ids == expected_node_ids
         and root.get("geometry_program_requested_quantity") == program["requested_quantity"]
     )
+    exact_nodes = [node for node in program["nodes"] if node.get("kind") == "exact_asset"]
+    envelope = program.get("maximum_dimensions_m")
+    exact_dimensions_passed = (
+        not exact_nodes
+        or not envelope
+        or bool(
+            bbox
+            and all(
+                bbox["dimensions_m"][index] <= float(envelope[axis]) + 1e-6
+                for index, axis in enumerate("xyz")
+            )
+        )
+    )
+    passed = passed and exact_dimensions_passed
     return {
+        "exact_asset_sources": [
+            {
+                key: node[key]
+                for key in (
+                    "asset_id",
+                    "asset_file",
+                    "asset_sha256",
+                    "manifest_file_name",
+                    "manifest_sha256",
+                )
+            }
+            for node in exact_nodes
+        ],
         "component_id": f"geometry_program:{program_id}",
         "role_id": str(program["semantic_role"]),
-        "origin": "geometry_program",
-        "strategy": "procedural_generate",
-        "generation_strategy": geometry_program_profile,
-        "asset_id": None,
+        "origin": "catalog_asset" if exact_nodes else "geometry_program",
+        "strategy": "reuse" if exact_nodes else "procedural_generate",
+        "generation_strategy": "imported_glb_exact" if exact_nodes else geometry_program_profile,
+        "asset_id": exact_nodes[0]["asset_id"] if exact_nodes else None,
         "manifest": None,
         "geometry_program": {
             "program_id": program_id,
@@ -303,6 +330,7 @@ def _geometry_program_proof(bpy, program: dict) -> dict:
             "bounding_box_valid": bbox is not None,
             "geometry_fingerprint_recorded": bool(fingerprint),
             "node_set_matches_program": node_ids == expected_node_ids,
+            "exact_asset_requested_envelope_valid": exact_dimensions_passed,
             "passed": passed,
         },
     }

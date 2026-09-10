@@ -1023,6 +1023,29 @@ def _trusted_input_evidence(scene_payload: dict, project_root: Path) -> dict:
                 "units": snapshot.get("units"),
             }
         )
+    from apps.blender_worker.exact_asset import validate_exact_program
+
+    for program in scene_payload.get("geometry_programs", []):
+        for evidence in validate_exact_program(program, project_root):
+            role = f"geometry_program:{program['program_id']}"
+            manifests.append(
+                {
+                    "role_id": role,
+                    "asset_id": evidence["asset_id"],
+                    "file": f"assets/manifests/{evidence['manifest_file_name']}",
+                    "source_sha256": evidence["manifest_sha256"],
+                    "generation_mode": "imported_glb_exact",
+                }
+            )
+            exact_assets.append(
+                {
+                    "role_id": role,
+                    "asset_id": evidence["asset_id"],
+                    "file": evidence["asset_file"],
+                    "sha256": evidence["asset_sha256"],
+                    "units": "meters",
+                }
+            )
     operations = [
         {
             "operation_id": operation.get("operation_id"),

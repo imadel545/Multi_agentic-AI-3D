@@ -1,5 +1,7 @@
 {
   "asset_id": "ANT_PANEL_4G_001",
+  "cognitive_reuse_enabled": true,
+  "compatibility_rules": {"compatible_roles": ["antenna", "sector_antenna"]},
   "type": "antenna",
   "file": "assets/antennas/ant_panel_4g_001.glb",
   "height_m": 1.4,

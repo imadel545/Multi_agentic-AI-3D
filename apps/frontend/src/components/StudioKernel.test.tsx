@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ViewerBundle } from "../api/schemas";
+import { ViewerBundleSchema, type ViewerBundle } from "../api/schemas";
 import {
   AgentStageRail,
   AgentTimeline,
@@ -540,6 +540,29 @@ describe("studio kernel components", () => {
     expect(
       screen.getByText(/conçus par le spécialiste 3D, puis contrôlés avant la construction/)
     ).toBeInTheDocument();
+  });
+
+  it("counts exact reuse separately and does not attribute imported geometry to a generator", () => {
+    const raw = {
+      ...bundle,
+      geometry_program_summary: {
+        program_count: 1, generated_component_count: 0, reused_component_count: 1,
+        total_node_count: 1, repaired_program_count: 0,
+        programs: [{
+          program_id: "reuse.antenna", origin: "catalog_asset", semantic_role: "antenna",
+          requested_quantity: 1, node_count: 1, authorship: "deterministic_generated",
+          generator_provider: "catalog", generator_model: "exact_asset_import",
+          structured_output_mode: "strict_json_schema", source_prompt_sha256: "a".repeat(64)
+        }]
+      }
+    };
+    render(<SummaryPanel bundle={ViewerBundleSchema.parse(raw)} issues={null} summary={null} versions={[]} />);
+    expect(screen.getByText(/0 composant\(s\) créé\(s\) · 1 composant\(s\) réutilisé\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Géométrie source importée, placement contrôlé/)).toBeInTheDocument();
+    expect(screen.queryByText(/Géométrie déterministe/)).not.toBeInTheDocument();
+    expect(() => ViewerBundleSchema.parse({ ...raw, geometry_program_summary: {
+      ...raw.geometry_program_summary, generated_component_count: 1, reused_component_count: 0
+    } })).toThrow();
   });
 
   it("shows model, repair mode and prompt proof for generated geometry", () => {
@@ -1532,6 +1555,24 @@ describe("studio kernel components", () => {
     expect(screen.getByRole("status")).toHaveTextContent("limitée à ce composant");
     fireEvent.click(screen.getByRole("button", { name: "Désélectionner" }));
     expect(onSelect).toHaveBeenCalledWith(null);
+  });
+
+  it("identifies exact imports as reused source geometry without a constructor qualification claim", () => {
+    render(<SceneCompositionPanel assemblyPlan={null} componentProofs={{
+      schema_version: "1.0", workflow_id: "wf_reuse", components: [],
+      geometry_programs: [{
+        component_id: "geometry_program:reuse.antenna", role_id: "antenna",
+        origin: "catalog_asset", strategy: "reuse", generation_strategy: "imported_glb_exact",
+        quantity: 1, exact_asset_sources: [{
+          asset_id: "ANT_PANEL_4G_001", asset_file: "assets/processed/antenna.glb",
+          asset_sha256: "a".repeat(64), manifest_file_name: "ANT_PANEL_4G_001.json",
+          manifest_sha256: "b".repeat(64)
+        }]
+      }]
+    }} />);
+    expect(screen.getByText("Réutilisé · géométrie source importée")).toBeInTheDocument();
+    expect(screen.getByText(/Source : ANT_PANEL_4G_001/)).toHaveTextContent("ne constitue pas une qualification constructeur");
+    expect(screen.queryByText(/programme géométrique/)).not.toBeInTheDocument();
   });
 
   it("exposes the real assembly strategy and synchronizes a proof instance selection", () => {

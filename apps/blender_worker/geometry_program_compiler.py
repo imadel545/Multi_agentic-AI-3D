@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
+
+import exact_asset
 
 _SCHEMA_NODE_KINDS = {
     "1.0.0": {"primitive", "curve", "instance"},
     "2.0.0": {
+        "exact_asset",
         "primitive",
         "curve",
         "instance",
@@ -39,6 +43,7 @@ def compile_geometry_programs(bpy, programs: list[dict]) -> list[dict]:
 
 def _compile_program(bpy, program: dict) -> dict:
     _validate_closed_program(program)
+    exact_evidence = exact_asset.validate_exact_program(program, Path.cwd())
     program_id = str(program["program_id"])
     semantic_role = str(program["semantic_role"])
     root_name = f"program_{program_id}"
@@ -79,6 +84,11 @@ def _compile_program(bpy, program: dict) -> dict:
             material_id = spec.get("material_id")
             if material_id:
                 _assign_material(obj, materials[material_id])
+            if spec["kind"] == "exact_asset":
+                for descendant in obj.children_recursive:
+                    descendant["geometry_program_id"] = program_id
+                    descendant["exact_asset_id"] = spec["asset_id"]
+                    descendant["exact_asset_sha256"] = spec["asset_sha256"]
             obj["geometry_program_id"] = program_id
             obj["geometry_program_node_id"] = node_id
             groups = sorted(semantic_groups_by_node.get(node_id, []))
@@ -99,6 +109,7 @@ def _compile_program(bpy, program: dict) -> dict:
     anchor_names = _compile_anchors_and_connectors(bpy, program_id, program, objects)
 
     return {
+        "exact_asset_evidence": exact_evidence,
         "program_id": program_id,
         "semantic_role": semantic_role,
         "requested_quantity": int(program["requested_quantity"]),
@@ -128,6 +139,8 @@ def _compile_node(
 ):
     name = f"{program_id}_{spec['node_id']}"
     kind = spec["kind"]
+    if kind == "exact_asset":
+        return exact_asset.import_exact_node(bpy, name, spec)
     if kind == "primitive":
         return _compile_primitive(bpy, name, spec)
     if kind == "curve":
@@ -253,9 +266,7 @@ def _compile_extrude(bpy, name: str, spec: dict, profile: dict):
 
 
 def _compile_revolve(bpy, name: str, spec: dict, profile: dict):
-    profile_points = [
-        (float(point["x"]), float(point["y"])) for point in profile["points_m"]
-    ]
+    profile_points = [(float(point["x"]), float(point["y"])) for point in profile["points_m"]]
     segments = int(spec["segments"])
     angle_deg = float(spec["angle_deg"])
     full = math.isclose(angle_deg, 360.0, rel_tol=0.0, abs_tol=1e-9)
@@ -264,8 +275,7 @@ def _compile_revolve(bpy, name: str, spec: dict, profile: dict):
     for ring_index in range(ring_count):
         angle = math.radians(angle_deg * ring_index / segments)
         vertices.extend(
-            (radius * math.cos(angle), radius * math.sin(angle), z)
-            for radius, z in profile_points
+            (radius * math.cos(angle), radius * math.sin(angle), z) for radius, z in profile_points
         )
     profile_count = len(profile_points)
     profile_edge_count = profile_count if profile.get("closed", True) else profile_count - 1
@@ -296,18 +306,14 @@ def _compile_revolve(bpy, name: str, spec: dict, profile: dict):
 def _compile_sweep(bpy, name: str, spec: dict, profile: dict):
     from mathutils import Vector
 
-    profile_points = [
-        (float(point["x"]), float(point["y"])) for point in profile["points_m"]
-    ]
+    profile_points = [(float(point["x"]), float(point["y"])) for point in profile["points_m"]]
     path = [Vector(_vector_tuple(point)) for point in spec["path_points_m"]]
     cyclic = bool(spec.get("cyclic", False))
     vertices = []
     for index, center in enumerate(path):
         previous = path[index - 1] if index > 0 else (path[-1] if cyclic else path[index])
         following = (
-            path[(index + 1) % len(path)]
-            if index + 1 < len(path) or cyclic
-            else path[index]
+            path[(index + 1) % len(path)] if index + 1 < len(path) or cyclic else path[index]
         )
         tangent = (following - previous).normalized()
         reference = Vector((0.0, 0.0, 1.0))
@@ -588,9 +594,7 @@ def _validate_closed_program(program: object) -> None:
     if not profile_node_ids.issubset(construction_node_ids):
         raise RuntimeError("GEOMETRY_PROGRAM_PROFILE_NOT_CONSTRUCTION_ONLY")
     anchor_ids = {
-        anchor.get("anchor_id")
-        for anchor in program.get("anchors", [])
-        if isinstance(anchor, dict)
+        anchor.get("anchor_id") for anchor in program.get("anchors", []) if isinstance(anchor, dict)
     }
     if len(anchor_ids) != len(program.get("anchors", [])):
         raise RuntimeError("GEOMETRY_PROGRAM_ANCHOR_ID_INVALID")
@@ -661,8 +665,11 @@ def _vector_tuple(value: dict) -> tuple[float, float, float]:
 
 def _set_program_metadata(root, program: dict) -> None:
     root["geometry_program_group"] = True
-    root["geometry_generation_strategy"] = "internal_project_generated"
-    root["geometry_source"] = "internal_project_generated"
+    exact = any(node.get("kind") == "exact_asset" for node in program.get("nodes", []))
+    root["geometry_generation_strategy"] = (
+        "imported_glb_exact" if exact else "internal_project_generated"
+    )
+    root["geometry_source"] = "imported_glb_exact" if exact else "internal_project_generated"
     root["geometry_program_id"] = str(program["program_id"])
     root["geometry_program_requested_quantity"] = int(program["requested_quantity"])
     root["geometry_program_schema_version"] = str(program["schema_version"])

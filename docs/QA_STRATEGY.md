@@ -348,3 +348,29 @@ in the scratch benchmark inventory.
 
 No purchase, account creation, runtime conversion implementation, qualified
 manifest mutation or professional fidelity claim is part of this benchmark.
+
+### Generic exact-source runtime — 2026-09-10
+
+`tests/e2e/test_generic_exact_asset_reuse.py` uses a controlled cognitive planner,
+real catalog retrieval, the generic compiler and real Blender. Final execution:
+1 passed in 13.95 s. It checks certificate 1.3 issuance, independent GLB world
+transforms for the requested +1 m Z placement, every source/export POSITION
+vertex within 1e-6 m, PBR equality, exact-import provenance and build-lock pins.
+Artifacts: `/tmp/studio-generic-exact-reuse-20260910-final/test_generic_exact_reuse_reach0/`;
+log: `/tmp/studio-generic-exact-reuse-20260910-final.log`. The preview was inspected
+locally and shows the internal plain panel. This is source-preservation evidence,
+not manufacturer geometry, live LLM reliability or professional assembly proof.
+
+Admission tests reject altered source bytes/manifests, missing geometry
+qualification or transform permissions, fallback, scale changes, disallowed
+rotation, missing placement, excess quantity and exceeded envelopes. The
+admission observation explicitly states that Blender has not executed yet.
+Frontend visual acceptance for the new free-intent/provenance controls is pending.
+
+Final fast regression: **697 passed, 53 deselected in 23.02 s**
+(`/tmp/studio-reuse-fast-clean-20260910.log`). The excluded markers cover external
+provider, browser and Blender suites; the exact-source Blender test was executed
+separately as above. Frontend: **180 tests passed**, TypeScript check and production
+build passed. Ruff and whitespace checks passed on the changed implementation.
+The revision regression also verifies retained selected-asset metadata; historical
+cognitive plan hashes remain stable when optional placement is absent.

@@ -141,6 +141,8 @@ export function BackendStatusBar({
 }
 
 export function ChatCommandPanel({
+  creationPath = "telecom",
+  onCreationPathChange,
   activeRequirements,
   analysis,
   analysisBusy,
@@ -183,6 +185,8 @@ export function ChatCommandPanel({
   onRevisionSubmit,
   onRetryBootstrap
 }: {
+  creationPath?: "telecom" | "free";
+  onCreationPathChange?: (path: "telecom" | "free") => void;
   activeRequirements?: RequirementSpec | null;
   analysis: ParseRequirementsResponse | null;
   analysisBusy: boolean;
@@ -272,6 +276,7 @@ export function ChatCommandPanel({
         ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
         : phase === "failed"
           ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération vérifiée."
+          : creationPath === "free" ? "Décrivez l’objet et ses contraintes. Le moteur choisit le domaine et contrôle la construction avant de publier un résultat."
           : "Les contraintes sont extraites puis confirmées avant toute génération Blender.";
   const failedIssue = phase === "failed" && failureIssue
     ? humanizeUserIssue(failureIssue)
@@ -401,6 +406,13 @@ export function ChatCommandPanel({
       </div>
 
       <div className="command-dock">
+        {!revisionMode && onCreationPathChange ? (
+          <div className="command-mode" role="group" aria-label="Parcours de conception">
+            <button type="button" aria-pressed={creationPath === "telecom"} disabled={disabled || analysisBusy} onClick={() => onCreationPathChange("telecom")}>Télécom avec validation</button>
+            <button type="button" aria-pressed={creationPath === "free"} disabled={disabled || analysisBusy} onClick={() => onCreationPathChange("free")}>Intention libre</button>
+          </div>
+        ) : null}
+        {!revisionMode && creationPath === "free" ? <p className="composer-hint">Décrivez un objet ou un aménagement. La demande sera envoyée directement au moteur de conception, qui choisit le domaine. Ce parcours expérimental dépend des capacités disponibles et lance la génération sans revue télécom préalable.</p> : null}
         {canEdit ? (
           <div className="command-mode" role="group" aria-label="Type de commande">
             <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
@@ -429,11 +441,11 @@ export function ChatCommandPanel({
             rows={3}
           />
           <button
-            aria-label={revisionMode ? "Appliquer la révision" : "Analyser la demande"}
+            aria-label={revisionMode ? "Appliquer la révision" : creationPath === "free" ? "Concevoir depuis cette intention" : "Analyser la demande"}
             className="composer-submit"
             disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
             onClick={revisionMode ? onRevisionSubmit : onAnalyze}
-            title={revisionMode ? "Appliquer la modification" : "Analyser les contraintes"}
+            title={revisionMode ? "Appliquer la modification" : creationPath === "free" ? "Concevoir depuis cette intention" : "Analyser les contraintes"}
             type="button"
           >
             {revisionMode ? (
@@ -448,6 +460,7 @@ export function ChatCommandPanel({
         <p className="composer-hint">
           {revisionMode
             ? revisionBusy ? "Révision et validation en cours…" : "⌘ Entrée pour appliquer · la version actuelle reste protégée."
+            : creationPath === "free" ? "⌘ Entrée pour lancer la conception · le moteur publiera les contrôles et limites."
             : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "⌘ Entrée pour analyser · les paramètres seront confirmés avant génération."}
         </p>
       </div>
@@ -1909,14 +1922,22 @@ export function SceneCompositionPanel({
             );
           })}
           {componentProofs.geometry_programs.map((program) => (
-            <div className="scene-tree-group generated" key={program.component_id} role="group">
+            <div className={`scene-tree-group${program.origin === "geometry_program" ? " generated" : ""}`} key={program.component_id} role="group">
               <div className="scene-tree-heading">
                 <div>
                   <strong>{humanSemanticRole(program.role_id)}</strong>
-                  <small>{strategyLabel(program.strategy)} · programme géométrique validé</small>
+                  <small>{strategyLabel(program.strategy)} · {program.origin === "catalog_asset"
+                    ? "géométrie source importée"
+                    : "programme géométrique"}</small>
                 </div>
                 <span>{program.quantity}</span>
               </div>
+              {program.origin === "catalog_asset" ? (
+                <p>
+                  Source : {program.exact_asset_sources?.[0]?.asset_id ?? "non publiée"}.
+                  {" "}La réutilisation conserve la géométrie source ; elle ne constitue pas une qualification constructeur.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>
@@ -1957,7 +1978,7 @@ export function SummaryPanel({
         <div className="summary-card">
           <strong>
             {bundle.geometry_program_summary.generated_component_count} composant(s) créé(s)
-            par le spécialiste géométrie
+            {" · "}{bundle.geometry_program_summary.reused_component_count ?? 0} composant(s) réutilisé(s)
           </strong>
           <p>
             {bundle.geometry_program_summary.total_node_count} nœuds déclaratifs ·{" "}
@@ -1969,11 +1990,13 @@ export function SummaryPanel({
               <li key={program.program_id}>
                 <span>{humanSemanticRole(program.semantic_role)}</span>
                 <small>
-                  {program.authorship === "llm_generated" ? "Géométrie écrite par LLM" : "Géométrie déterministe"}
-                  {" · "}
-                  {program.generator_provider}:{program.generator_model}
-                  {" · "}
-                  {humanGeometryOutputMode(program.structured_output_mode)}
+                  {program.origin === "catalog_asset" ? "Géométrie source importée, placement contrôlé" : <>
+                    {program.authorship === "llm_generated" ? "Géométrie écrite par LLM" : "Géométrie déterministe"}
+                    {" · "}
+                    {program.generator_provider}:{program.generator_model}
+                    {" · "}
+                    {humanGeometryOutputMode(program.structured_output_mode)}
+                  </>}
                   {" · preuve "}
                   {program.source_prompt_sha256.slice(0, 10)}
                 </small>

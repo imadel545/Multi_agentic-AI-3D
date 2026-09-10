@@ -145,6 +145,23 @@ describe("frontend runtime selection", () => {
     }));
   });
 
+  it("submits free intent directly without manufacturing telecom requirements", async () => {
+    const createDesign = vi.fn().mockRejectedValue(new ApiClientError(503, "/designs", "unavailable"));
+    const parseRequirements = vi.fn();
+    render(createElement(App, { apiClient: bootstrapApi({ createDesign, parseRequirements }) }));
+    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
+    fireEvent.change(screen.getByLabelText("Design prompt"), { target: { value: "Un escalier avec deux paliers" } });
+    fireEvent.click(screen.getByRole("button", { name: "Concevoir depuis cette intention" }));
+    await waitFor(() => expect(createDesign).toHaveBeenCalledWith({
+      requirements_text: "Un escalier avec deux paliers",
+      options: { detail_level: "high", use_llm: true, multimodal_consent: "disabled" }
+    }));
+    expect(parseRequirements).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByLabelText("Design prompt")).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Télécom avec validation" }));
+    expect(screen.getByRole("button", { name: "Analyser la demande" })).toBeEnabled();
+  });
+
   it("loads the governed asset inventory during bootstrap", async () => {
     const assetInventory = vi.fn().mockResolvedValue({
       status: "qualified_mixed_catalog",

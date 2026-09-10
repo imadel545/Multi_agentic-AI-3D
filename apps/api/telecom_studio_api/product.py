@@ -1032,6 +1032,10 @@ def _geometry_program_summary(scene_spec: object) -> dict | None:
             "program_id": program.program_id,
             "semantic_role": program.semantic_role,
             "requested_quantity": program.requested_quantity,
+            "origin": (
+                "catalog_asset" if any(node.kind == "exact_asset" for node in program.nodes)
+                else "geometry_program"
+            ),
             "node_count": len(program.nodes),
             "authorship": program.authorship,
             "generator_provider": program.generator_provider,
@@ -1053,7 +1057,14 @@ def _geometry_program_summary(scene_spec: object) -> dict | None:
     ]
     return {
         "program_count": len(programs),
-        "generated_component_count": sum(program["requested_quantity"] for program in programs),
+        "generated_component_count": sum(
+            program["requested_quantity"] for program in programs
+            if program["origin"] == "geometry_program"
+        ),
+        "reused_component_count": sum(
+            program["requested_quantity"] for program in programs
+            if program["origin"] == "catalog_asset"
+        ),
         "total_node_count": sum(program["node_count"] for program in programs),
         "repaired_program_count": sum(
             program["structured_output_mode"] == "json_object_repaired" for program in programs

@@ -232,7 +232,9 @@ class DesignOrchestrator:
         self.geometry_program_planner = geometry_program_planner
         self.design_domain_router = design_domain_router
         self.cognitive_design_planner = cognitive_design_planner
-        self.cognitive_scene_compiler = cognitive_scene_compiler or CognitiveSceneCompiler()
+        self.cognitive_scene_compiler = cognitive_scene_compiler or CognitiveSceneCompiler(
+            registry=registry
+        )
         self.rule_engine = RuleEngine()
         self.tower_engineer = TowerEngineerAgent()
         self.rf_engineer = RfEngineerAgent()
@@ -803,9 +805,7 @@ class DesignOrchestrator:
                 warnings=["DOMAIN_ROUTING_FALLBACK"] if decision.fallback_used else [],
                 errors=["DESIGN_DOMAIN_ROUTING_BLOCKED"] if report else [],
                 actor_kind=(
-                    "llm_decision"
-                    if not decision.fallback_used
-                    else "deterministic_specialist"
+                    "llm_decision" if not decision.fallback_used else "deterministic_specialist"
                 ),
                 decision_authority="llm_bounded" if not decision.fallback_used else "deterministic",
             ),
@@ -888,7 +888,11 @@ class DesignOrchestrator:
 
     def _plan_cognitive_geometry(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
-        if self.geometry_program_planner is None:
+        needs_geometry = any(
+            decision.strategy in {"procedural_generate", "compose_and_generate"}
+            for decision in state["cognitive_plan"].asset_decision_plan.decisions
+        )
+        if self.geometry_program_planner is None and needs_geometry:
             report = _failed_report(
                 state["workflow_id"],
                 "GEOMETRY_PROGRAM_PLANNER_UNAVAILABLE",
@@ -995,7 +999,7 @@ class DesignOrchestrator:
             "scene": scene,
             "scene_spec_hash": scene_spec_hash(scene),
             "capability_observations": list(compilation.capability_observations),
-            "selected_assets": [],
+            "selected_assets": self._cognitive_assets_for_scene(scene),
             "trace": _trace(
                 state,
                 "compile_cognitive_scene",
@@ -1005,6 +1009,17 @@ class DesignOrchestrator:
                 decision_authority="deterministic",
             ),
         }
+
+    def _cognitive_assets_for_scene(self, scene: SceneSpec) -> list[AssetManifest]:
+        return [
+            self.registry.get(asset_id)
+            for asset_id in sorted({
+                node.asset_id
+                for program in scene.geometry_programs
+                for node in program.nodes
+                if node.kind == "exact_asset"
+            })
+        ]
 
     def _validate_cognitive_scene(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
@@ -1167,7 +1182,7 @@ class DesignOrchestrator:
                     "report": report,
                     "planning_decision": plan.asset_decision_plan.model_dump(mode="json"),
                     "capability_observations": list(compilation.capability_observations),
-                    "selected_assets": [],
+                    "selected_assets": self._cognitive_assets_for_scene(scene),
                     "trace": _trace(
                         state,
                         "edit_prepare_revision",
@@ -2552,9 +2567,7 @@ def _cognitive_validation_route(state: WorkflowState) -> str:
 
 def _component_placement_context(plan: CognitiveDesignPlan, component_id: str) -> str:
     relationships = [
-        (
-            f"{item.kind}:{item.source_component_id}->{item.target_component_id}"
-        )
+        (f"{item.kind}:{item.source_component_id}->{item.target_component_id}")
         for item in plan.component_graph.relationships
         if component_id in {item.source_component_id, item.target_component_id}
     ]

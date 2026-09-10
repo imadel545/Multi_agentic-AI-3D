@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
@@ -79,6 +80,38 @@ class GeometryProgramNodeBase(StrictModel):
     material_id: ProgramId | None = None
     semantic_role: ProgramId | None = None
     transform: GeometryProgramTransform = Field(default_factory=GeometryProgramTransform)
+
+
+class GeometryExactAssetNode(GeometryProgramNodeBase):
+    """Compiler-authored import reference; the worker revalidates the catalog."""
+
+    kind: Literal["exact_asset"] = "exact_asset"
+    asset_id: str = Field(min_length=1, max_length=120)
+    manifest_file_name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*\.json$")
+    manifest_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    asset_file: str = Field(min_length=1, max_length=400)
+    asset_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_dimensions_m: GeometryProgramVector3
+
+    @model_validator(mode="after")
+    def validate_exact_reference(self) -> GeometryExactAssetNode:
+        path = PurePosixPath(self.asset_file)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not self.asset_file.startswith("assets/")
+            or "\\" in self.asset_file
+        ):
+            raise ValueError("exact asset requires a confined catalog path")
+        if (
+            self.parent_id
+            or self.material_id
+            or any(value != 1 for value in self.transform.scale.model_dump().values())
+        ):
+            raise ValueError("exact asset cannot be parented, scaled or have materials replaced")
+        if any(value <= 0 for value in self.source_dimensions_m.model_dump().values()):
+            raise ValueError("exact asset requires positive verified dimensions")
+        return self
 
 
 class GeometryPrimitiveNode(GeometryProgramNodeBase):
@@ -296,7 +329,8 @@ GeometryProgramNode = Annotated[
     | GeometryArrayNode
     | GeometryBooleanNode
     | GeometryModifierNode
-    | GeometryTerrainNode,
+    | GeometryTerrainNode
+    | GeometryExactAssetNode,
     Field(discriminator="kind"),
 ]
 
@@ -418,6 +452,21 @@ class GeometryProgram(StrictModel):
 
     @model_validator(mode="after")
     def validate_program_graph(self) -> GeometryProgram:
+        if any(isinstance(node, GeometryExactAssetNode) for node in self.nodes):
+            if (
+                self.schema_version != "2.0.0"
+                or self.authorship != "deterministic_generated"
+                or len(self.nodes) != 1
+                or self.requested_quantity != 1
+                or self.materials
+                or self.anchors
+                or self.connectors
+                or self.semantic_groups
+                or self.construction_node_ids
+            ):
+                raise ValueError(
+                    "exact reuse requires an isolated compiler-authored singleton program"
+                )
         node_ids = [node.node_id for node in self.nodes]
         if len(node_ids) != len(set(node_ids)):
             raise ValueError("geometry-program node IDs must be unique")
@@ -803,6 +852,16 @@ def _geometry_corners(
             (-node.width_m / 2.0, -node.depth_m / 2.0, min(node.heights_m)),
             (node.width_m / 2.0, node.depth_m / 2.0, max(node.heights_m)),
         )
+    if isinstance(node, GeometryExactAssetNode):
+        half = tuple(
+            value / 2
+            for value in (
+                node.source_dimensions_m.x,
+                node.source_dimensions_m.y,
+                node.source_dimensions_m.z,
+            )
+        )
+        return _bounds_corners(tuple(-value for value in half), half)
     if not isinstance(node, GeometryPrimitiveNode):
         raise ValueError(f"unsupported geometry-program node kind: {node.kind}")
     if node.primitive == "box":

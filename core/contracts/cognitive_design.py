@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 
 from core.contracts.assets import AssetDecisionPacket
 from core.contracts.common import StrictModel
-from core.contracts.geometry_program import GeometryProgramVector3
+from core.contracts.geometry_program import GeometryProgramTransform, GeometryProgramVector3
 
 
 class DesignFunction(StrictModel):
@@ -192,6 +192,7 @@ class ComponentAssetDecision(StrictModel):
     candidates: list[AssetCandidateEvidence] = Field(default_factory=list, max_length=48)
     selected_candidate_ids: list[str] = Field(default_factory=list, max_length=16)
     selected_parameter_values: dict[str, Any] = Field(default_factory=dict, max_length=64)
+    placement: GeometryProgramTransform | None = None
     required_capability_ids: list[str] = Field(default_factory=list, max_length=64)
     rationale: str = Field(min_length=8, max_length=1000)
     decision_authority: Literal["llm_bounded"] = "llm_bounded"

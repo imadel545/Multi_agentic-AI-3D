@@ -139,6 +139,43 @@ def _create_geometry_programs(
         return
     records = geometry_program_compiler.compile_geometry_programs(bpy, programs)
     for program, record in zip(programs, records, strict=True):
+        if record.get("exact_asset_evidence"):
+            evidence = record["exact_asset_evidence"][0]
+            manifest = evidence["manifest"]
+            limitations = list((manifest.get("qualification") or {}).get("limitations", []))
+            asset_imports.append(
+                {
+                    "asset_id": evidence["asset_id"],
+                    "asset_file": evidence["asset_file"],
+                    "asset_source": manifest.get("source"),
+                    "object_role": record["semantic_role"],
+                    "object_name": record["object_name"],
+                    "asset_file_exists": True,
+                    "asset_import_success": True,
+                    "generation_success": True,
+                    "asset_import_attempted": True,
+                    "import_fallback_allowed": False,
+                    "import_mode": "imported_glb_exact",
+                    "effective_generation_mode": "imported_glb_exact",
+                    "effective_geometry_source": "imported_glb_exact",
+                    "scale_factors": [1.0, 1.0, 1.0],
+                    "asset_dimensions_checked": False,
+                    "warnings": limitations,
+                    "generated_object_names": record["generated_object_names"],
+                    "source_provenance": {
+                        key: value for key, value in evidence.items() if key != "manifest"
+                    },
+                    "geometry_fidelity": manifest.get("geometry_fidelity", "technical_generic"),
+                    "asset_metadata": {
+                        "qualification_status": "qualified_for_generation",
+                        "qualification_limitations": limitations,
+                        "license": manifest.get("license"),
+                        "attribution": manifest.get("attribution"),
+                    },
+                }
+            )
+            asset_warnings.extend(limitations)
+            continue
         geometry_program_profile = (
             "typed_geometry_program_v2"
             if str(program.get("schema_version")) == "2.0.0"
@@ -3359,6 +3396,11 @@ def _assets_used(scene: dict) -> list[str]:
         assets.append(accessory["asset_id"])
     for program in scene.get("geometry_programs", []):
         assets.append(f"GEOMETRY_PROGRAM_{str(program['program_id']).upper()}")
+        assets.extend(
+            node["asset_id"]
+            for node in program.get("nodes", [])
+            if node.get("kind") == "exact_asset"
+        )
     return sorted(set(assets))
 
 

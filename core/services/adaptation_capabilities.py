@@ -107,6 +107,12 @@ class AdaptationCapabilityService:
             )
 
         for index, program in enumerate(scene.geometry_programs):
+            if any(node.kind == "exact_asset" for node in program.nodes):
+                unsupported.append(
+                    f"L’asset réutilisé {program.semantic_role} conserve sa géométrie source ; "
+                    "sa modification n’est pas encore disponible."
+                )
+                continue
             resolved.append(
                 ResolvedAdaptationCapability(
                     capability_id=f"geometry_program_{index + 1}:rebuild",

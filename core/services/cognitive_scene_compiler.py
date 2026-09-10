@@ -9,7 +9,9 @@ from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.common import DetailLevel
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.scene import PreviewSpec, SceneSpec, VisualElements
+from core.services.asset_registry import AssetRegistry
 from core.services.capability_registry import CapabilityRegistry
+from core.services.cognitive_asset_reuse import compile_asset_reuse, observe_asset_admission
 from core.services.geometry_capabilities import (
     capability_id_for_geometry_node,
     geometry_capability_registry,
@@ -23,8 +25,13 @@ class CognitiveSceneCompilation:
 
 
 def cognitive_plan_hash(plan: CognitiveDesignPlan) -> str:
+    document = plan.model_dump(mode="json")
+    # Preserve hashes of persisted plans created before optional reuse placement.
+    for decision in document["asset_decision_plan"]["decisions"]:
+        if decision.get("placement") is None:
+            decision.pop("placement", None)
     payload = json.dumps(
-        plan.model_dump(mode="json"),
+        document,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -35,8 +42,14 @@ def cognitive_plan_hash(plan: CognitiveDesignPlan) -> str:
 class CognitiveSceneCompiler:
     """Compile a validated cognitive plan into the single authoritative SceneSpec."""
 
-    def __init__(self, capability_registry: CapabilityRegistry | None = None) -> None:
+    def __init__(
+        self,
+        capability_registry: CapabilityRegistry | None = None,
+        *,
+        registry: AssetRegistry | None = None,
+    ) -> None:
         self.capability_registry = capability_registry or geometry_capability_registry()
+        self.registry = registry
 
     def compile(
         self,
@@ -74,8 +87,17 @@ class CognitiveSceneCompiler:
         graph_components = {
             component.component_id: component for component in plan.component_graph.components
         }
-        program_by_role = {program.semantic_role: program for program in geometry_programs}
-        if len(program_by_role) != len(geometry_programs):
+        exact_supplied = [
+            program
+            for program in geometry_programs
+            if any(node.kind == "exact_asset" for node in program.nodes)
+        ]
+        supplied_programs = [
+            program for program in geometry_programs if program not in exact_supplied
+        ]
+        reused_programs = []
+        program_by_role = {program.semantic_role: program for program in supplied_programs}
+        if len(program_by_role) != len(supplied_programs):
             raise ValueError("COGNITIVE_GEOMETRY_PROGRAM_ROLES_DUPLICATED")
         generated_strategies = {"procedural_generate", "compose_and_generate"}
         for decision in plan.asset_decision_plan.decisions:
@@ -89,10 +111,13 @@ class CognitiveSceneCompiler:
                     )
                 if program.requested_quantity != component.quantity:
                     raise ValueError(
-                        "COGNITIVE_GEOMETRY_QUANTITY_MISMATCH:"
-                        f"{decision.component_id}"
+                        f"COGNITIVE_GEOMETRY_QUANTITY_MISMATCH:{decision.component_id}"
                     )
-            elif decision.strategy in {"reuse", "adapt", "compose"}:
+            elif decision.strategy == "reuse":
+                reused_programs.append(
+                    compile_asset_reuse(self.registry, plan, component, decision)
+                )
+            elif decision.strategy in {"adapt", "compose"}:
                 raise ValueError(
                     "COGNITIVE_GENERIC_ASSET_ASSEMBLY_NOT_COMPILED:"
                     f"{decision.component_id}:{decision.strategy}"
@@ -109,7 +134,15 @@ class CognitiveSceneCompiler:
         for decision in plan.asset_decision_plan.decisions:
             for capability_id in decision.required_capability_ids:
                 self.capability_registry.definition(capability_id)
-        observations = self._validate_program_capabilities(workflow_id, geometry_programs)
+        for program in exact_supplied:
+            if program not in reused_programs:
+                raise ValueError("COGNITIVE_REUSE_PROGRAM_DIFFERS_FROM_CATALOG_DECISION")
+        observations = self._validate_program_capabilities(workflow_id, supplied_programs)
+        for program in reused_programs:
+            observation = observe_asset_admission(self.registry, workflow_id, program)
+            if observation.status != "completed":
+                raise ValueError(f"COGNITIVE_REUSE_ADMISSION_FAILED:{observation.error_message}")
+            observations.append(observation)
         scene = SceneSpec(
             schema_version="2.0.0",
             scene_id=workflow_id,
@@ -120,7 +153,7 @@ class CognitiveSceneCompiler:
             specialist_route_id=plan.specialist_route.route_id,
             cognitive_plan_sha256=cognitive_plan_hash(plan),
             detail_level=detail_level,
-            geometry_programs=geometry_programs,
+            geometry_programs=[*supplied_programs, *reused_programs],
             visual_elements=VisualElements(
                 include_sector_beams=False,
                 include_azimuth_arrows=False,

@@ -1083,7 +1083,32 @@ def _validate_generic_program_mesh(
         connector_counts[program.program_id] >= len(program.connectors)
         for program in scene.geometry_programs
     )
-    pbr_declared = all(program.materials for program in scene.geometry_programs)
+    exact_programs = {
+        program.program_id
+        for program in scene.geometry_programs
+        if any(node.kind == "exact_asset" for node in program.nodes)
+    }
+    meshes = payload.get("meshes", [])
+    imported_material_bound = {
+        program_id: any(
+            isinstance(node, dict)
+            and (node.get("extras") or {}).get("geometry_program_id") == program_id
+            and isinstance(node.get("mesh"), int)
+            and node["mesh"] < len(meshes)
+            and any(
+                isinstance(primitive.get("material"), int)
+                for primitive in meshes[node["mesh"]].get("primitives", [])
+            )
+            for node in nodes
+        )
+        for program_id in exact_programs
+    }
+    pbr_declared = all(
+        imported_material_bound.get(program.program_id, False)
+        if program.program_id in exact_programs
+        else bool(program.materials)
+        for program in scene.geometry_programs
+    )
     non_primitive_detail = all(
         scene.detail_level != "high"
         or any(node.kind not in {"primitive", "instance"} for node in program.nodes)
@@ -1092,11 +1117,14 @@ def _validate_generic_program_mesh(
     dimensions_positive = (
         bounding_box.width > 0 and bounding_box.depth > 0 and bounding_box.height > 0
     )
-    scale_bounded = max(
-        bounding_box.width,
-        bounding_box.depth,
-        bounding_box.height,
-    ) <= 2000
+    scale_bounded = (
+        max(
+            bounding_box.width,
+            bounding_box.depth,
+            bounding_box.height,
+        )
+        <= 2000
+    )
     checks = [
         MeshCheckResult(name="glb_parse_ok", passed=True),
         MeshCheckResult(
@@ -1134,8 +1162,16 @@ def _validate_generic_program_mesh(
     failed = [check.name for check in checks if check.name in required and not check.passed]
     return MeshQAReport(
         level="mesh_level_basic",
-        geometry_source="internal_project_generated",
-        generation_strategy="internal_project_generated",
+        geometry_source=(
+            "imported_glb_exact"
+            if exact_programs == expected_program_ids
+            else "internal_project_generated"
+        ),
+        generation_strategy=(
+            "imported_glb_exact"
+            if exact_programs == expected_program_ids
+            else "internal_project_generated"
+        ),
         glb_parse_ok=True,
         bounding_box_m=bounding_box,
         checks=checks,

@@ -107,6 +107,7 @@ export default function App({ apiClient = api }: AppProps) {
   const [analyzedPrompt, setAnalyzedPrompt] = useState<string | null>(null);
   const [submittedRequirementsHash, setSubmittedRequirementsHash] = useState<string | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [creationPath, setCreationPath] = useState<"telecom" | "free">("telecom");
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [multimodalConsent, setMultimodalConsent] =
     useState<MultimodalConsent>("disabled");
@@ -818,6 +819,34 @@ export default function App({ apiClient = api }: AppProps) {
     }
   }, [documentPackReview?.packId, documentPackSummary?.pack_id, loadDocumentPackReview]);
 
+  const submitFreeIntent = useCallback(async () => {
+    if (submissionInFlightRef.current || !state.prompt.trim()) return;
+    submissionInFlightRef.current = true;
+    streamRef.current?.close();
+    dispatch({ type: "SUBMIT_STARTED" });
+    setRequirementsAnalysis(null);
+    setAnalyzedPrompt(null);
+    setAnalysisError(null);
+    try {
+      const created = await apiClient.createDesign({
+        requirements_text: state.prompt.trim(),
+        options: { detail_level: ActivePromptDetail, use_llm: true,
+          multimodal_consent: multimodalConsentAvailable ? multimodalConsent : "disabled" }
+      });
+      setVersions([]);
+      eventSequenceCursorRef.current = null;
+      activateWorkflow(created.workflow_id);
+      dispatch({ type: "DESIGN_CREATED", workflowId: created.workflow_id });
+      const status = await loadLiveStatus(created.workflow_id);
+      if (isTerminalStatus(status.status)) await loadTerminalBundle(created.workflow_id);
+    } catch (error) {
+      dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "generation") });
+    } finally {
+      submissionInFlightRef.current = false;
+    }
+  }, [activateWorkflow, apiClient, loadLiveStatus, loadTerminalBundle, multimodalConsent,
+    multimodalConsentAvailable, state.prompt]);
+
   const analyzePrompt = useCallback(async () => {
     if (!state.prompt.trim()) {
       return;
@@ -1440,7 +1469,14 @@ export default function App({ apiClient = api }: AppProps) {
               state.userIssues?.human_readable_issues[0] ??
               null
             }
-            onAnalyze={analyzePrompt}
+            creationPath={creationPath}
+            onCreationPathChange={(path) => {
+              setCreationPath(path);
+              setRequirementsAnalysis(null);
+              setAnalyzedPrompt(null);
+              setAnalysisError(null);
+            }}
+            onAnalyze={creationPath === "free" ? submitFreeIntent : analyzePrompt}
             onConfirm={submitPrompt}
             onDocumentPackCorrection={applyDocumentPackCorrection}
             onDocumentPackGenerate={generateFromDocumentPack}

@@ -463,11 +463,12 @@ frontend.
   n'ont pas tous été générés, révisés et certifiés de bout en bout avec le
   provider réel. Les tests d'intégration utilisent un client LLM contrôlé et
   Blender réel; ils prouvent le déterministe, pas la fiabilité externe.
-- L'Asset Intelligence générique sait désormais rechercher et exposer des
-  candidats qualifiés sous forme d'`AssetDecisionPacket`, mais elle n'est pas
-  encore opérationnelle jusqu'à Blender. Le compilateur générique ne sait pas
-  exécuter `reuse`/`adapt`/`compose`; la route publie donc zéro stratégie asset
-  autorisée et reste procédurale à l'exécution.
+- La réutilisation générique atteint désormais Blender pour un asset explicitement
+  autorisé par composant indépendant, quantité un, placement rigide explicite,
+  sans adaptation ni relation requise. Seul ANT_PANEL_4G_001 est activé dans cette
+  tranche : source interne, aucune qualification constructeur. `adapt`/`compose`,
+  modification de la source importée et assemblage relationnel restent bloqués.
+  Les manifests non activés ne publient toujours aucune stratégie générique.
 - Le compilateur génère chaque composant déclaré, mais il n'existe pas encore de
   solveur générique de placement/relations qui prouve la cohérence spatiale d'un
   assemblage arbitraire à partir d'ancres et connecteurs.

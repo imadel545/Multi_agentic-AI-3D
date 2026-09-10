@@ -395,6 +395,7 @@ const GeometryFidelityRolesSchema = UnknownRecord.extend({
 
 const GeometryProgramItemSchema = UnknownRecord.extend({
   program_id: z.string(),
+  origin: z.enum(["geometry_program", "catalog_asset"]).optional(),
   semantic_role: z.string(),
   requested_quantity: z.number().int().positive(),
   node_count: z.number().int().positive(),
@@ -422,6 +423,7 @@ const GeometryProgramItemSchema = UnknownRecord.extend({
 const GeometryProgramSummarySchema = UnknownRecord.extend({
   program_count: z.number().int().nonnegative(),
   generated_component_count: z.number().int().nonnegative(),
+  reused_component_count: z.number().int().nonnegative().optional(),
   total_node_count: z.number().int().nonnegative(),
   repaired_program_count: z.number().int().nonnegative(),
   programs: z.array(GeometryProgramItemSchema).default([])
@@ -429,7 +431,11 @@ const GeometryProgramSummarySchema = UnknownRecord.extend({
   const expected = {
     program_count: value.programs.length,
     generated_component_count: value.programs.reduce(
-      (total, program) => total + program.requested_quantity,
+      (total, program) => total + (program.origin === "catalog_asset" ? 0 : program.requested_quantity),
+      0
+    ),
+    reused_component_count: value.programs.reduce(
+      (total, program) => total + (program.origin === "catalog_asset" ? program.requested_quantity : 0),
       0
     ),
     total_node_count: value.programs.reduce(
@@ -441,7 +447,8 @@ const GeometryProgramSummarySchema = UnknownRecord.extend({
     ).length
   };
   for (const [field, expectedValue] of Object.entries(expected)) {
-    if (value[field as keyof typeof expected] !== expectedValue) {
+    const actual = value[field as keyof typeof expected] ?? (field === "reused_component_count" ? 0 : undefined);
+    if (actual !== expectedValue) {
       ctx.addIssue({
         code: "custom",
         message: `${field} does not match programs`,
@@ -650,12 +657,28 @@ const GeometryProgramProofSchema = publicSchema(
   UnknownRecord.extend({
     component_id: z.string(),
     role_id: z.string(),
-    origin: z.literal("geometry_program"),
-    strategy: z.literal("procedural_generate"),
+    origin: z.enum(["geometry_program", "catalog_asset"]),
+    strategy: z.enum(["procedural_generate", "reuse"]),
     generation_strategy: z.string(),
+    exact_asset_sources: z.array(UnknownRecord.extend({
+      asset_id: z.string().min(1),
+      asset_file: z.string().min(1),
+      asset_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+      manifest_file_name: z.string().min(1),
+      manifest_sha256: z.string().regex(/^[a-f0-9]{64}$/)
+    })).optional(),
     quantity: z.number().int().positive(),
     geometry_program: UnknownRecord.nullish(),
     qa: UnknownRecord.nullish()
+  }).superRefine((proof, ctx) => {
+    const exact = proof.origin === "catalog_asset";
+    if (exact
+      ? proof.strategy !== "reuse" || proof.generation_strategy !== "imported_glb_exact" ||
+        proof.quantity !== 1 || proof.exact_asset_sources?.length !== 1
+      : proof.strategy !== "procedural_generate" || proof.generation_strategy === "imported_glb_exact" ||
+        Boolean(proof.exact_asset_sources?.length)) {
+      ctx.addIssue({ code: "custom", message: "geometry proof origin and execution strategy are inconsistent" });
+    }
   })
 );
 

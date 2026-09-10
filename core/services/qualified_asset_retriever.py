@@ -103,8 +103,8 @@ class QualifiedAssetCandidateRetriever:
                     limitations=(
                         packet.rejection_risks
                         + [
-                            "Generic asset assembly is retrieved but not executable by the "
-                            "current cognitive SceneSpec compiler."
+                            "Reuse supports one rigid catalog component with explicit placement; "
+                            "required assembly relationships are not executable."
                         ]
                     )[:32],
                     decision_packet=packet,
@@ -199,11 +199,13 @@ def _decision_packet_strategies(manifest: AssetManifest) -> list[str]:
 
 
 def _cognitive_strategies(manifest: AssetManifest) -> list[str]:
-    del manifest
-    # CognitiveSceneCompiler still rejects generic reuse/adapt/compose. The
-    # candidate remains visible for retrieval evidence, but no semantic asset
-    # strategy is advertised until that compiler can execute it.
-    return []
+    return (
+        ["reuse"]
+        if manifest.cognitive_reuse_enabled
+        and manifest.is_generation_eligible
+        and manifest.allows_generation_mode("imported_glb_exact")
+        else []
+    )
 
 
 def _component_tokens(component: dict[str, Any]) -> set[str]:

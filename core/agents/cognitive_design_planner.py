@@ -146,7 +146,12 @@ class GroqCognitivePlanningClient:
                 "IDs, allowed strategies, allowed parameters and supplied capability IDs. Prefer "
                 "reuse or safe adaptation when quality and QA risk justify it; otherwise choose "
                 "compose, compose_and_generate or procedural_generate. Return exactly one JSON "
-                "object with top-level key decisions and no prose outside JSON."
+                "object with top-level key decisions and no prose outside JSON. "
+                "For reuse provide placement with translation_m and rotation_deg as x/y/z objects "
+                "in meters Z-up and degrees, and scale {x:1,y:1,z:1}. "
+                "Never stretch a reused asset. "
+                "Reuse currently supports one independent component only; required relationships "
+                "need clarification until executable assembly is available."
             ),
         )
 

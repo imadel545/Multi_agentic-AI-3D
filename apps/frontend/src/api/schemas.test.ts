@@ -269,6 +269,45 @@ describe("frontend contract schemas", () => {
       }]
     })).toThrow();
   });
+  it("accepts pinned exact imports and rejects contradictory geometry provenance", () => {
+    const program = {
+      component_id: "geometry_program:reuse.antenna",
+      role_id: "antenna",
+      origin: "catalog_asset",
+      strategy: "reuse",
+      generation_strategy: "imported_glb_exact",
+      quantity: 1,
+      exact_asset_sources: [{
+        asset_id: "ANT_PANEL_4G_001",
+        asset_file: "assets/processed/antenna.glb",
+        asset_sha256: "a".repeat(64),
+        manifest_file_name: "ANT_PANEL_4G_001.json",
+        manifest_sha256: "b".repeat(64)
+      }]
+    };
+    const proof = (overrides = {}) => ({
+      schema_version: "1.0",
+      workflow_id: "wf_1",
+      geometry_programs: [{ ...program, ...overrides }]
+    });
+    expect(ComponentProofsSchema.parse(proof()).geometry_programs[0]?.exact_asset_sources?.[0]?.asset_id)
+      .toBe("ANT_PANEL_4G_001");
+    for (const overrides of [
+      { origin: "geometry_program" },
+      { strategy: "procedural_generate" },
+      { generation_strategy: "geometry_program_v2" },
+      { exact_asset_sources: [] },
+      { quantity: 2 },
+      { exact_asset_sources: [{ ...program.exact_asset_sources[0], asset_sha256: "missing" }] }
+    ]) {
+      expect(() => ComponentProofsSchema.parse(proof(overrides))).toThrow();
+    }
+    expect(() => ComponentProofsSchema.parse(proof({
+      origin: "geometry_program", strategy: "procedural_generate",
+      generation_strategy: "geometry_program_v2", exact_asset_sources: undefined
+    }))).not.toThrow();
+  });
+
   it("validates quarantined library search results and preview links", () => {
     const parsed = parseContract("AssetLibrarySearch", AssetLibrarySearchSchema, {
       query: "pylone 30m",

@@ -290,8 +290,8 @@ def test_generic_retrieval_requires_explicit_cognitive_execution_authorization(
     assert results[0].candidate_id == "AUTHORIZED_GENERIC_PANEL"
     assert results[0].decision_packet is not None
     assert results[0].decision_packet.compatibility.compatible_roles == ["sector_antenna"]
-    assert results[0].allowed_strategies == []
-    assert any("not executable" in limitation for limitation in results[0].limitations)
+    assert results[0].allowed_strategies == ["reuse"]
+    assert any("one rigid" in limitation for limitation in results[0].limitations)
 
 
 def test_current_catalog_does_not_fake_generic_reuse_without_authorization() -> None:

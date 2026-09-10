@@ -21,6 +21,29 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not yet a complete vendor-grade asset library. A large local CAD corpus is
   catalogued, but remains quarantined until rights and geometry are qualified.
 
+## Exact catalog reuse checkpoint — 2026-09-10
+
+The generic cognitive compiler now executes a bounded `reuse` decision through
+one compiler-authored `exact_asset` node per independent component. The initial
+opted-in source is `ANT_PANEL_4G_001`, an internal project-generated panel; this
+is not a manufacturer-qualified asset. Each source has explicit rigid placement,
+quantity one, unchanged scale/materials and pinned manifest/GLB hashes. Required
+relationships, parameter adaptation and procedural rebuilding of imported
+sources are rejected. `adapt` and `compose` remain unsupported in this route.
+
+Admission executes catalog/file validation and explicitly reports
+`blender_executed: false`. Actual completion still requires Blender, exported
+mesh QA and certificate 1.3. The real runtime test passed in 13.95 s: source
+vertices and PBR materials are preserved, exported world transforms include the
+requested one-metre placement, source hashes enter the build lock, and the
+completion certificate is issued. Planning uses a controlled test client;
+this does not establish live-provider reliability.
+
+The existing chat adds an “Intention libre” entry, with backend routing and
+experimental wording. Component proofs distinguish catalog reuse from generated
+geometry. Frontend automated checks cover these changes; their visual acceptance
+is pending. No additional browser session was used in this slice.
+
 ## Targeted editing checkpoint — 2026-09-09
 
 The local `codex/asset-assembly-convergence` slice connects certified component

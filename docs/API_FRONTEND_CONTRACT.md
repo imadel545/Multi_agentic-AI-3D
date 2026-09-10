@@ -590,3 +590,20 @@ Le frontend ne construit jamais une URL depuis un chemin filesystem et ne
 présente aucune preuve absente comme vide ou réussie. Une erreur d'une ressource
 secondaire reste dans son drawer; elle ne masque ni ne contredit un viewer
 bundle principal déjà certifié et chargé.
+
+### Generic exact-source reuse — 2026-09-10
+
+`ComponentAssetDecision.placement` optionally carries a rigid transform in metres,
+Z-up. It is mandatory for `reuse`; non-unit scaling is rejected. A successful
+reuse appears in `component_proofs.geometry_programs` with `origin: catalog_asset`,
+`strategy: reuse`, `generation_strategy: imported_glb_exact`, and one
+`exact_asset_sources` entry pinning asset ID, source file/hash and manifest
+filename/hash. Historical generated proofs retain their existing origin/strategy.
+The source's fidelity and license are preserved; exact import does not imply
+manufacturer accuracy. Rebuilding these programs through the LLM is unavailable.
+
+`geometry_program_summary.programs[].origin` distinguishes these two origins;
+`generated_component_count` counts generated geometry and `reused_component_count`
+counts imported sources. The optional “Intention libre” creation path sends
+`requirements_text` and `use_llm: true` without telecom confirmation; the backend
+remains responsible for route selection and honest failure when unavailable.
