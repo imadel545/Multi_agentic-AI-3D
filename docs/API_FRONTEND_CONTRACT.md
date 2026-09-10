@@ -607,3 +607,16 @@ manufacturer accuracy. Rebuilding these programs through the LLM is unavailable.
 counts imported sources. The optional “Intention libre” creation path sends
 `requirements_text` and `use_llm: true` without telecom confirmation; the backend
 remains responsible for route selection and honest failure when unavailable.
+
+### Runtime origin and raw library retrieval — 2026-09-10
+
+Workflow status exposes `origin`: PRODUCT, TEST, EVALUATION, IMPORT, MIGRATION or
+UNKNOWN (historical default). `TELECOM_STUDIO_RUNTIME_ORIGIN` is service-side
+configuration, not a user-controlled request field. Memory records also persist
+`recall_eligible`; product recall requires both PRODUCT origin and eligibility.
+Non-product memory cannot be promoted by a normal write with the same identity.
+
+`/assets/library/search` preserves its metadata-only/quarantine contract. Each
+result adds `retrieval_evidence` with method, matched query/source terms, query
+coverage and `geometry_verified: false`. Scores rank metadata relevance only;
+duplicate content is collapsed and missing terms remain visible in coverage.

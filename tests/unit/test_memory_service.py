@@ -414,8 +414,8 @@ def test_vector_memory_skips_invalid_legacy_scene_without_stopping_projection(
             """
             INSERT INTO design_memory (
                 workflow_id, scene_id, network_type, tower_type, scene_spec_json,
-                validation_report_json, qa_score, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                validation_report_json, qa_score, created_at, origin, recall_eligible
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PRODUCT', 1)
             """,
             (
                 "wf_invalid_legacy",

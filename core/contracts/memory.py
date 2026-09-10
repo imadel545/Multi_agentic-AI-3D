@@ -1,6 +1,17 @@
+from enum import StrEnum
+
 from pydantic import Field
 
 from core.contracts.common import NetworkType, StrictModel
+
+
+class MemoryOrigin(StrEnum):
+    PRODUCT = "PRODUCT"
+    TEST = "TEST"
+    EVALUATION = "EVALUATION"
+    IMPORT = "IMPORT"
+    MIGRATION = "MIGRATION"
+    UNKNOWN = "UNKNOWN"
 
 
 class MemorySummary(StrictModel):
@@ -15,6 +26,8 @@ class MemorySummary(StrictModel):
     validation_report_path: str = Field(min_length=1)
     reusable_pattern: bool = False
     created_at: int = Field(ge=0)
+    origin: MemoryOrigin = MemoryOrigin.UNKNOWN
+    recall_eligible: bool = False
 
 
 class MemoryRecallResult(StrictModel):

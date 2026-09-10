@@ -17,6 +17,7 @@ os.environ["TELECOM_STUDIO_OUTPUTS_DIR"] = str(_TEST_RUNTIME_ROOT / "outputs")
 os.environ["TELECOM_STUDIO_QDRANT_PATH"] = str(_TEST_RUNTIME_ROOT / "qdrant")
 os.environ["TELECOM_STUDIO_SQLITE_PATH"] = str(_TEST_RUNTIME_ROOT / "sqlite" / "studio.db")
 os.environ["TELECOM_STUDIO_ASSET_LIBRARY_PATH"] = str(_TEST_RUNTIME_ROOT / "asset-library")
+os.environ["TELECOM_STUDIO_RUNTIME_ORIGIN"] = "TEST"
 if not _LIVE_PROVIDERS:
     os.environ["TELECOM_STUDIO_EMBEDDING_PROVIDER"] = "deterministic"
     os.environ["TELECOM_STUDIO_RERANKER_PROVIDER"] = "passthrough"

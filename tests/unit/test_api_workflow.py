@@ -22,6 +22,14 @@ from core.contracts.validation import ValidationReport
 from core.performance import requirements_confirmation_hash
 
 
+def test_runtime_origin_survives_pending_and_failed_status(tmp_path: Path) -> None:
+    assert workflow_service.runtime_origin == "TEST"
+    workflow_service._write_pending_status("wf_origin", tmp_path, "high", False)
+    assert json.loads((tmp_path / "status.json").read_text())["origin"] == "TEST"
+    workflow_service._write_failed_status("wf_origin", tmp_path, "A bounded test failure")
+    assert json.loads((tmp_path / "status.json").read_text())["origin"] == "TEST"
+
+
 def test_public_workflow_status_sanitizes_legacy_asset_file_paths() -> None:
     payload = _public_status_payload(
         "wf_public_paths",

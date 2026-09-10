@@ -107,6 +107,7 @@ class RuntimeCapabilities(BaseModel):
 class WorkflowStatus(BaseModel):
     workflow_id: str
     status: str
+    origin: Literal["PRODUCT", "TEST", "EVALUATION", "IMPORT", "MIGRATION", "UNKNOWN"] = "UNKNOWN"
     created_at: str | None = None
     version_id: str | None = None
     active_version_id: str | None = None

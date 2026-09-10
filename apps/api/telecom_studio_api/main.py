@@ -210,7 +210,9 @@ rag_service = RagService(
     reranker_api_key=settings.resolved_nvidia_api_key,
     reranker_base_url=settings.reranker_base_url,
 )
-memory_service = MemoryService(settings.local_sqlite_path, rag_service=rag_service)
+memory_service = MemoryService(
+    settings.local_sqlite_path, rag_service=rag_service, origin=settings.runtime_origin
+)
 groq_transport = (
     GroqTransport(
         api_key=settings.resolved_groq_api_key,
@@ -391,6 +393,7 @@ workflow_service = WorkflowService(
     max_concurrent_workflows=settings.max_concurrent_workflows,
     max_pending_workflows=settings.max_pending_workflows,
     min_free_disk_mb=settings.min_free_disk_mb,
+    runtime_origin=settings.runtime_origin,
 )
 product_service = ProductService(workflow_service, asset_inventory_service)
 

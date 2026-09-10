@@ -176,3 +176,21 @@ RAG can be called advanced only after:
 - Scene changes caused by RAG are explainable through structured hints.
 - Contradictions between documents, memory, and user prompt are surfaced as
   warnings or conflicts, not hidden.
+
+## Recovery and provider availability — 2026-09-10
+
+SQLite memory now persists origin/eligibility under an idempotent migration.
+Historical rows become UNKNOWN/ineligible. Product recall and runtime documents
+filter PRODUCT plus eligibility; the source fingerprint includes this policy and
+row provenance. An ID cannot cross origin through normal writeback. The host
+runtime memory projection has been rebuilt with zero eligible historic documents.
+
+Actual static rebuild failed with NVIDIA HTTP410 for
+`nvidia/llama-nemotron-embed-1b-v2`, retired on 2026-08-25 per the response. The
+[official retrieval API list](https://docs.api.nvidia.com/nim/re/reference/retrieval-apis)
+contains Nemotron 3 and VL alternatives, also returned by live model discovery.
+Both timed out on a 25-document/six-query bounded comparison; one separate
+Nemotron 3 query returned 2,048 dimensions in 19.58 seconds. No quality comparison
+completed, so default configuration has not been changed. Static vectors remain
+subject to compatibility checks and visible lexical degradation. This is an
+external availability limitation, not successful provider qualification.

@@ -87,7 +87,11 @@ class WorkflowService:
         max_concurrent_workflows: int = 2,
         max_pending_workflows: int = 4,
         min_free_disk_mb: int = 256,
+        runtime_origin: str = "PRODUCT",
     ) -> None:
+        if runtime_origin not in {"PRODUCT", "TEST", "EVALUATION", "IMPORT", "MIGRATION"}:
+            raise ValueError("Unknown runtime origin")
+        self.runtime_origin = runtime_origin
         self.registry = registry
         self.outputs_dir = outputs_dir
         self.orchestrator = orchestrator
@@ -2146,6 +2150,7 @@ class WorkflowService:
             "workflow_id": workflow_id,
             "status": status,
             "created_at": created_at,
+            "origin": previous_status.get("origin", self.runtime_origin),
             "multimodal_consent": effective_multimodal_consent,
             "version_id": version_id,
             "active_version_id": active_version_id,
@@ -2251,6 +2256,7 @@ class WorkflowService:
             "workflow_id": workflow_id,
             "status": "failed",
             "created_at": created_at,
+            "origin": previous_status.get("origin", self.runtime_origin),
             "multimodal_consent": previous_status.get("multimodal_consent", "disabled"),
             "artifacts": {},
             "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
@@ -2278,6 +2284,7 @@ class WorkflowService:
             "workflow_id": workflow_id,
             "status": "pending",
             "created_at": created_at,
+            "origin": self.runtime_origin,
             "version_id": None,
             "active_version_id": None,
             "multimodal_consent": multimodal_consent,

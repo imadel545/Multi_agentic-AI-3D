@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     qdrant_url: str | None = None
     qdrant_path: Path | None = None
     sqlite_path: Path | None = None
+    runtime_origin: Literal["PRODUCT", "TEST", "EVALUATION", "IMPORT", "MIGRATION"] = "PRODUCT"
     groq_api_key: str | None = Field(default=None, repr=False, exclude=True)
     groq_api_keys: str | None = Field(default=None, repr=False, exclude=True)
     external_providers_enabled: bool = True

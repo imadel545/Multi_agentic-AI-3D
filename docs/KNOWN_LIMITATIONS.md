@@ -13,6 +13,20 @@ frontend.
   tests and Compose validation, but the Docker daemon is unavailable in the
   current audit, so their container/browser runtime smoke remains open.
 
+## Runtime recovery checkpoint — 2026-09-10
+
+- The configured NVIDIA text embedding endpoint returns HTTP 410 (retired model).
+  Replacement retrieval quality and full static reindex are not validated;
+  local lexical fallback remains explicit. A successful single-vector response
+  from Nemotron 3 is not a benchmark result.
+- Unknown historical memory remains preserved but ineligible; existing designs
+  remain visible. Reusing their identity skips new memory writeback rather than
+  relabeling historical records as product experience.
+- Host runtime cleanup does not cover stopped Docker volumes. No global clean
+  Docker baseline is claimed.
+- Raw CAD search improves metadata discovery and publishes match evidence, but
+  has no semantic guarantee, geometry qualification or automatic compiler path.
+
 ## Visible during frontend build
 
 - `apps/frontend` has a visually verified historical real-backend product

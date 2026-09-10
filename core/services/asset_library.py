@@ -12,6 +12,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from core.services.library_search import LibraryMetadataSearch
+
 CATALOG_SCHEMA_VERSION = "1.1.0"
 CAD_EXTENSIONS = {"dwg", "dxf", "dwt", "dws"}
 IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "tif", "tiff", "gif"}
@@ -36,6 +38,7 @@ class AssetLibraryService:
         self._catalog_identity: tuple[int, int] | None = None
         self._entries: list[dict[str, Any]] = []
         self._by_id: dict[str, dict[str, Any]] = {}
+        self._search_index: LibraryMetadataSearch | None = None
 
     def summary(self) -> dict[str, Any]:
         if not self.summary_path.is_file():
@@ -63,28 +66,15 @@ class AssetLibraryService:
         extension: str | None = None,
         limit: int = 20,
     ) -> dict[str, Any]:
-        entries = self._load_catalog()
-        query_tokens = _tokens(query)
-        scored: list[tuple[float, dict[str, Any]]] = []
-        for entry in entries:
-            if claimed_dimension and entry["claimed_dimension"] != claimed_dimension:
-                continue
-            if extension and entry["extension"] != extension.lower().lstrip("."):
-                continue
-            entry_tokens = set(entry["search_tokens"])
-            overlap = len(query_tokens & entry_tokens)
-            phrase_bonus = 2.0 if query and _normalize(query) in entry["normalized_path"] else 0.0
-            if query_tokens and overlap == 0 and phrase_bonus == 0:
-                continue
-            score = overlap * 3.0 + phrase_bonus
-            if entry["duplicate_of"] is None:
-                score += 0.25
-            scored.append((score, entry))
-        scored.sort(key=lambda item: (-item[0], item[1]["relative_path"]))
+        self._load_catalog()
+        scored = self._search_index.rank(
+            query, claimed_dimension=claimed_dimension, extension=extension
+        )
         results = []
-        for score, entry in scored[: max(1, min(limit, 100))]:
+        for score, entry, evidence in scored[: max(1, min(limit, 100))]:
             public = _public_entry(entry)
             public["retrieval_score"] = round(score, 3)
+            public["retrieval_evidence"] = evidence
             results.append(public)
         return {
             "query": query,
@@ -217,6 +207,7 @@ class AssetLibraryService:
         ]
         self._entries = entries
         self._by_id = {entry["file_id"]: entry for entry in entries}
+        self._search_index = LibraryMetadataSearch(entries)
         self._catalog_identity = identity
         return entries
 

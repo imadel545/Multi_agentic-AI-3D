@@ -116,3 +116,17 @@ entités backend v1.
 | Generic QA and certificate | IMPLEMENTED_LIMITED | `generation_qa.py`, `completion_certificate.py` schema 1.3 | Couverture mesh des GeometryPrograms et intégrité GLB prouvées; pas de critique visuelle multimodale, collision triangle/BVH ou certification ingénierie. |
 | Generic revision/versioning | IMPLEMENTED_LIMITED | `run_scene_revision(cognitive_plan=...)`, `WorkflowService`, `SceneVersioningService` | Révision V2 testée avec plan LLM contrôlé et Blender réel; parcours HTTP/UI générique provider réel non encore accepté. |
 | Cognitive frontend evidence | IMPLEMENTED_LIMITED | `StudioKernel`, `TelecomGlbViewer`, contrats frontend | Conversation persistée, scène, provenance, sélection et galerie réelles; création/sélection de trois projets génériques réels non validée. |
+
+## Mainline follow-up — 2026-09-10
+
+- Memory provenance: IMPLEMENTED_LIMITED. All canonical memory tables persist
+  origin and eligibility, legacy UNKNOWN is preserved/excluded, SQL and vector
+  recall admit PRODUCT only, conflicting identity writes skip non-blockingly.
+- Host cleanup: applied after verified external snapshot; unknown outputs remain.
+  Docker-volume cleanup remains unverified.
+- Raw library search: cached IDF/token/bilingual ranking and duplicate-content
+  collapse replace substring overlap; per-result evidence is public. It remains
+  metadata-only, with no automatic CAD qualification or Blender selection.
+- Static embedding refresh: BLOCKED_EXTERNAL. Configured NVIDIA model is retired;
+  bounded replacement batch requests timed out. Runtime memory projection is
+  clean; a new static neural index is not claimed.

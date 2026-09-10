@@ -16,10 +16,16 @@ from core.contracts.document_pack import (
     DocumentPackSummary,
     ProjectDesignSpec,
 )
-from core.contracts.memory import MemoryIndexResult, MemoryRecallResult, MemorySummary
+from core.contracts.memory import MemoryIndexResult, MemoryOrigin, MemoryRecallResult, MemorySummary
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
+from core.memory.provenance import (
+    MemoryOriginConflict,
+    ensure_origin_ownership,
+    migrate_provenance,
+    provenance_snapshot,
+)
 from core.rag.models import RagDocument
 
 if TYPE_CHECKING:
@@ -42,6 +48,7 @@ class MemoryService:
         db_path: Path,
         rag_service: RagService | None = None,
         *,
+        origin: MemoryOrigin | str = MemoryOrigin.PRODUCT,
         auto_reconcile: bool = True,
         reconcile_retry_initial_s: float = 1.0,
         reconcile_retry_max_s: float = 30.0,
@@ -52,6 +59,8 @@ class MemoryService:
             raise ValueError(
                 "reconcile_retry_max_s must be greater than or equal to the initial delay"
             )
+        self.origin = MemoryOrigin(origin)
+        self.recall_eligible = self.origin == MemoryOrigin.PRODUCT
         self.db_path = db_path
         self.rag_service = rag_service
         self._auto_reconcile = auto_reconcile
@@ -120,13 +129,14 @@ class MemoryService:
                 """
                 SELECT workflow_id, network_type, tower_type, sector_count, generation_mode,
                        qa_score, warnings_json, scene_spec_path, validation_report_path,
-                       reusable_pattern, created_at
+                       reusable_pattern, created_at, origin, recall_eligible
                 FROM workflow_memory
                 WHERE network_type = ?
                   AND tower_type = ?
                   AND sector_count = ?
                   AND qa_score >= ?
                   AND reusable_pattern = 1
+                  AND origin = 'PRODUCT' AND recall_eligible = 1
                 ORDER BY qa_score DESC, created_at DESC
                 LIMIT ?
                 """,
@@ -141,9 +151,10 @@ class MemoryService:
             errors = conn.execute(
                 """
                 SELECT workflow_id, network_type, tower_type, issue_code, message, severity,
-                       created_at
+                       created_at, origin, recall_eligible
                 FROM error_memory
-                WHERE network_type = ? OR tower_type = ?
+                WHERE (network_type = ? OR tower_type = ?)
+                  AND origin = 'PRODUCT' AND recall_eligible = 1
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
@@ -171,15 +182,21 @@ class MemoryService:
         validation_report_path: Path,
     ) -> MemorySummary | None:
         with self._write_lock:
-            return self._write_workflow_summary(
-                workflow_id=workflow_id,
-                requirements=requirements,
-                scene=scene,
-                report=report,
-                generation=generation,
-                scene_spec_path=scene_spec_path,
-                validation_report_path=validation_report_path,
-            )
+            try:
+                return self._write_workflow_summary(
+                    workflow_id=workflow_id,
+                    requirements=requirements,
+                    scene=scene,
+                    report=report,
+                    generation=generation,
+                    scene_spec_path=scene_spec_path,
+                    validation_report_path=validation_report_path,
+                )
+            except MemoryOriginConflict:
+                self.last_index_result = MemoryIndexResult(
+                    status="skipped", errors=["memory_origin_conflict"]
+                )
+                return None
 
     def _write_workflow_summary(
         self,
@@ -216,16 +233,23 @@ class MemoryService:
             validation_report_path=portable_validation_path,
             reusable_pattern=reusable_pattern,
             created_at=created_at,
+            origin=self.origin,
+            recall_eligible=self.recall_eligible,
         )
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ensure_origin_ownership(
+                conn, ("workflow_memory", "design_memory", "error_memory"),
+                "workflow_id", workflow_id, self.origin,
+            )
             conn.execute("DELETE FROM error_memory WHERE workflow_id = ?", (workflow_id,))
             conn.execute(
                 """
                 INSERT OR REPLACE INTO workflow_memory (
                     workflow_id, network_type, tower_type, sector_count, generation_mode,
                     qa_score, warnings_json, scene_spec_path, validation_report_path,
-                    reusable_pattern, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reusable_pattern, created_at, origin, recall_eligible
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     summary.workflow_id,
@@ -239,6 +263,8 @@ class MemoryService:
                     summary.validation_report_path,
                     int(reusable_pattern),
                     created_at,
+                    self.origin.value,
+                    int(self.recall_eligible),
                 ),
             )
             if scene is not None and reusable_pattern:
@@ -246,8 +272,8 @@ class MemoryService:
                     """
                     INSERT OR REPLACE INTO design_memory (
                         workflow_id, scene_id, network_type, tower_type, scene_spec_json,
-                        validation_report_json, qa_score, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        validation_report_json, qa_score, created_at, origin, recall_eligible
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         workflow_id,
@@ -258,6 +284,8 @@ class MemoryService:
                         report.model_dump_json(),
                         qa_score,
                         created_at,
+                        self.origin.value,
+                        int(self.recall_eligible),
                     ),
                 )
             else:
@@ -270,6 +298,7 @@ class MemoryService:
                     tower_type=requirements.tower_type,
                     issue=issue,
                     created_at=created_at,
+                    origin=self.origin,
                 )
             _bump_vector_revision(conn)
             outbox_enqueued = self._enqueue_vector_projection(conn, created_at=created_at)
@@ -368,13 +397,20 @@ class MemoryService:
         generated_workflow_id: str | None,
     ) -> dict:
         with self._write_lock:
-            return self._write_document_pack_summary(
-                spec=spec,
-                summary=summary,
-                qa_report=qa_report,
-                corrections=corrections,
-                generated_workflow_id=generated_workflow_id,
-            )
+            try:
+                return self._write_document_pack_summary(
+                    spec=spec,
+                    summary=summary,
+                    qa_report=qa_report,
+                    corrections=corrections,
+                    generated_workflow_id=generated_workflow_id,
+                )
+            except MemoryOriginConflict:
+                self.last_index_result = MemoryIndexResult(
+                    status="skipped", errors=["memory_origin_conflict"]
+                )
+                return {"status": "skipped", "pack_id": spec.pack_id,
+                        "errors": ["memory_origin_conflict"]}
 
     def _write_document_pack_summary(
         self,
@@ -389,6 +425,11 @@ class MemoryService:
         fields = _document_pack_fields(spec)
         categories = _document_pack_categories(spec)
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            ensure_origin_ownership(
+                conn, ("document_pack_memory", "document_pack_issue_memory"),
+                "pack_id", spec.pack_id, self.origin,
+            )
             conn.execute(
                 "DELETE FROM document_pack_issue_memory WHERE pack_id = ?",
                 (spec.pack_id,),
@@ -399,8 +440,8 @@ class MemoryService:
                     pack_id, site_code, tower_type, tower_height_m, sector_count, qa_score,
                     ready_to_generate, source_mode, categories_json, fields_json,
                     corrections_json, conflicts_json, missing_fields_json,
-                    generated_workflow_id, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    generated_workflow_id, created_at, origin, recall_eligible
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     spec.pack_id,
@@ -418,6 +459,8 @@ class MemoryService:
                     json.dumps([field.model_dump() for field in spec.missing_fields]),
                     generated_workflow_id,
                     created_at,
+                    self.origin.value,
+                    int(self.recall_eligible),
                 ),
             )
             for check in qa_report.checks:
@@ -426,8 +469,9 @@ class MemoryService:
                 conn.execute(
                     """
                     INSERT INTO document_pack_issue_memory (
-                        pack_id, issue_code, message, severity, field, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        pack_id, issue_code, message, severity, field, created_at,
+                        origin, recall_eligible
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         spec.pack_id,
@@ -436,6 +480,8 @@ class MemoryService:
                         "warning",
                         check.name,
                         created_at,
+                        self.origin.value,
+                        int(self.recall_eligible),
                     ),
                 )
             _bump_vector_revision(conn)
@@ -942,6 +988,7 @@ class MemoryService:
                 """
                 SELECT workflow_id, tower_type, scene_spec_json, qa_score, created_at
                 FROM design_memory
+                WHERE origin = 'PRODUCT' AND recall_eligible = 1
                 ORDER BY created_at DESC, workflow_id DESC
                 """
             ).fetchall()
@@ -951,6 +998,7 @@ class MemoryService:
                        COUNT(*) AS occurrence_count, MAX(created_at) AS last_seen_at,
                        MAX(workflow_id) AS representative_workflow_id
                 FROM error_memory
+                WHERE origin = 'PRODUCT' AND recall_eligible = 1
                 GROUP BY network_type, tower_type, issue_code, message, severity
                 ORDER BY last_seen_at DESC, issue_code
                 """
@@ -961,6 +1009,7 @@ class MemoryService:
                        source_mode, categories_json, fields_json, generated_workflow_id,
                        created_at
                 FROM document_pack_memory
+                WHERE origin = 'PRODUCT' AND recall_eligible = 1
                 ORDER BY created_at DESC, pack_id DESC
                 """
             ).fetchall()
@@ -984,6 +1033,8 @@ class MemoryService:
             if signature in design_documents:
                 continue
             payload = {
+                "origin": MemoryOrigin.PRODUCT.value,
+                "recall_eligible": True,
                 "type": "design_memory_pattern",
                 "doc_type": "design_memory_pattern",
                 "technical_signature": signature,
@@ -1017,6 +1068,8 @@ class MemoryService:
             }
             signature = _stable_payload_hash(identity)
             payload = {
+                "origin": MemoryOrigin.PRODUCT.value,
+                "recall_eligible": True,
                 "type": "memory_issue_pattern",
                 "doc_type": "memory_issue_pattern",
                 **identity,
@@ -1038,6 +1091,8 @@ class MemoryService:
             fields = json.loads(row["fields_json"] or "{}")
             categories = json.loads(row["categories_json"] or "{}")
             payload = {
+                "origin": MemoryOrigin.PRODUCT.value,
+                "recall_eligible": True,
                 "type": "document_pack_memory",
                 "doc_type": "document_pack_memory",
                 "pack_id": row["pack_id"],
@@ -1242,6 +1297,8 @@ class MemoryService:
                 "ON memory_vector_outbox(status, updated_at)"
             )
 
+            migrate_provenance(conn)
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -1274,6 +1331,7 @@ def _insert_issue_memory(
     tower_type: str,
     issue: ValidationIssue,
     created_at: int,
+    origin: MemoryOrigin,
 ) -> None:
     columns = _table_columns(conn, "error_memory")
     if "warning_code" in columns:
@@ -1281,8 +1339,8 @@ def _insert_issue_memory(
             """
             INSERT INTO error_memory (
                 workflow_id, network_type, tower_type, warning_code, issue_code, message,
-                severity, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                severity, created_at, origin, recall_eligible
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 workflow_id,
@@ -1293,14 +1351,17 @@ def _insert_issue_memory(
                 issue.message,
                 issue.severity,
                 created_at,
+                origin.value,
+                int(origin == MemoryOrigin.PRODUCT),
             ),
         )
         return
     conn.execute(
         """
         INSERT INTO error_memory (
-            workflow_id, network_type, tower_type, issue_code, message, severity, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            workflow_id, network_type, tower_type, issue_code, message, severity, created_at,
+            origin, recall_eligible
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             workflow_id,
@@ -1310,6 +1371,8 @@ def _insert_issue_memory(
             issue.message,
             issue.severity,
             created_at,
+            origin.value,
+            int(origin == MemoryOrigin.PRODUCT),
         ),
     )
 
@@ -1517,6 +1580,7 @@ def _vector_source_fingerprint_conn(conn: sqlite3.Connection) -> str:
         for table in ("design_memory", "error_memory", "document_pack_memory")
     }
     snapshot["vector_revision"] = _vector_revision(conn)
+    snapshot["provenance"] = provenance_snapshot(conn)
     return _stable_payload_hash(snapshot)
 
 

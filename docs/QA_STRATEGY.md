@@ -374,3 +374,36 @@ separately as above. Frontend: **180 tests passed**, TypeScript check and produc
 build passed. Ruff and whitespace checks passed on the changed implementation.
 The revision regression also verifies retained selected-asset metadata; historical
 cognitive plan hashes remain stable when optional placement is absent.
+
+### Mainline recovery and raw discovery — 2026-09-10
+
+Final fast suite: **710 passed, 53 deselected in 23.74 s**, log
+`/tmp/studio-mainline-final-fast-20260910.log`; Ruff/whitespace passed. No Blender
+geometry or frontend rendering changed in this tranche. Origin tests cover all six
+origins on five tables, idempotent legacy migration, product-only recall/projection,
+forbidden identity reassignment and provenance fingerprint invalidation. Status
+origin is tested through pending/failure persistence. Both host databases passed
+SQLite integrity checks after selective deletion, compaction and migration.
+
+Recovery root: `/Users/imad/Desktop/Multi_agentic-AI-3D-recovery/20260910-mainline`.
+`snapshot-manifest.json` verifies 2,865 stable files; SQLite ephemeral sidecars
+are excluded after the Backup API destinations are closed. `inventory.json`
+contains schemas, original counts and exact pytest IDs. `cleanup-result.json`,
+`cleanup-applied.py`, `clean-memory-projection.json` and `retired-collections.json`
+record applied actions; `RESTORE.md` documents selective recovery.
+
+`library-search-before.json` and `library-search-after.json` compare 13 real
+queries across the raw catalog. Confirmed improvements include tree/StreetMacro
+false-positive removal, explicit 36m over 35m, Volx support over another maker,
+platform metadata and spiral-staircase discovery. The bench query remains empty;
+no aggregate semantic-accuracy or geometry-quality score is claimed. Warm queries
+complete in roughly 3–33 ms on this host; index initialization is about 120 ms.
+An isolated real Uvicorn HTTP smoke verifies four of these queries and public
+quarantine/evidence fields (`library-http-smoke.json`), without altering raw CAD.
+
+Static embedding rebuilding failed with HTTP410 for the configured retired model.
+The alternative benchmark sent only the existing 25 static documents and six
+queries, no raw CAD. Both batch trials timed out after about 90 s total each;
+`embedding-benchmark.json` records the failed attempts. One separate single-query
+Nemotron 3 response is insufficient to change the configured default. No static
+neural index replacement is declared successful.

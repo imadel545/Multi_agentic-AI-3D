@@ -21,6 +21,46 @@ rework exists under `apps/frontend`, but it is not an accepted product gate.
 - Not yet a complete vendor-grade asset library. A large local CAD corpus is
   catalogued, but remains quarantined until rights and geometry are qualified.
 
+## Mainline and runtime recovery — 2026-09-10
+
+`main` is the active development branch. The 29 local commits through `b5c5674`
+were pushed normally after fetch, ancestry and secret review. Remote `main` was
+verified at that SHA; the merged local development branch was deleted. A local
+`mainline-recovery-20260910` tag preserves this checkpoint.
+
+The host runtime was captured outside the repository at
+`/Users/imad/Desktop/Multi_agentic-AI-3D-recovery/20260910-mainline` using SQLite
+Backup API plus full output/vector copies and a verified SHA-256 manifest of
+2,865 stable files. Raw CAD was neither copied nor modified. Cleanup removed
+1,371 proven pytest workflows, 1,371 associated designs, 16,373 error rows,
+112 checkpoints, 314 checkpoint writes and one explicitly named test pack.
+The 32 unknown-origin workflow directories and remaining pack are preserved.
+182 workflow, 164 design, 2,182 error and 128 pack memory rows remain recoverable
+in SQLite as `UNKNOWN`, excluded from product recall and vector projection.
+
+New memory writes carry origin and eligibility. Only eligible `PRODUCT` rows
+feed product experience; tests run with `TEST`, and evaluation services can use
+`EVALUATION`. Existing identities cannot silently change origin; conflicting
+memory writes skip without failing geometry generation. SQL origin checks and
+writes share one immediate transaction. Workflow status persists its origin.
+The active memory projection is rebuilt empty, and six unconsumed historical
+collections are removed after backup. Static knowledge and qualified assets stay
+intact. Docker volumes were not inspected because its daemon was unavailable.
+
+Static vector rebuilding encountered a real external limitation: the configured
+NVIDIA embedding model returned HTTP 410, citing retirement on 2026-08-25.
+Two available alternatives timed out on the bounded 25-document benchmark;
+Nemotron 3 answered one single-query probe (2,048 dimensions), which is not
+retrieval-quality validation. No replacement model or hash-based product index
+was silently installed. The static vector rebuild remains pending; explicit local
+lexical degradation remains the supported retrieval path when the provider fails.
+
+Raw library search now uses a separate cached lexical ranking module with corpus
+IDF, bounded bilingual concepts, exact token/reference signals, unit-token
+normalization and content deduplication. It fixes substring false positives and
+returns matched-term evidence through the existing endpoint. Search remains
+metadata-only and cannot qualify or select raw CAD for Blender automatically.
+
 ## Exact catalog reuse checkpoint — 2026-09-10
 
 The generic cognitive compiler now executes a bounded `reuse` decision through
@@ -79,8 +119,7 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 - The recovered M1 and convergence work is now local on `main`. The verified
   pre-M1 baseline remains commit `4829995130a43c09c5fb0c23d4216ed007e2d2c2`,
-  tagged locally as `cognitive-3d-m1-baseline-20260808`; the local convergence
-  commits have not been pushed by this work.
+  tagged locally as `cognitive-3d-m1-baseline-20260808`; those commits were subsequently pushed during the 2026-09-10 mainline consolidation.
 - The existing Groq callers now share a governed transport and versioned
   capability profiles. `openai/gpt-oss-120b` remains the strict structured
   text-decision model. `qwen/qwen3.6-27b` is a separate opt-in advisory
