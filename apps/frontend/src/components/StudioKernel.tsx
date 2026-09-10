@@ -2365,6 +2365,9 @@ export function AssetLibraryPanel({
   const qualifiedAssets = (inventory?.entries ?? []).filter(
     (entry) => entry.generation_eligible
   );
+  const referenceAssets = (inventory?.entries ?? []).filter(
+    (entry) => entry.qualification_status === "reference_only"
+  );
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (query.trim() && onSearch) void onSearch(query.trim());
@@ -2417,6 +2420,39 @@ export function AssetLibraryPanel({
                 <p>{assetQualificationMessage(entry.allowed_generation_modes, entry.source)}</p>
               </article>
             ))}
+            {referenceAssets.length ? (
+              <>
+                <div className="library-results-heading">
+                  <strong>Références professionnelles en qualification</strong>
+                  <small>Identité et provenance visibles; aucune référence seule n’est envoyée à Blender.</small>
+                </div>
+                {referenceAssets.map((entry) => (
+                  <article className="library-result-card incomplete" key={entry.asset_id}>
+                    <div>
+                      <strong>{entry.manufacturer ?? "Fabricant à confirmer"}</strong>
+                      <span className="status-pill warn">Référence uniquement</span>
+                      <small>
+                        {entry.reference ?? entry.asset_id} · {entry.subtype ?? humanAssetType(entry.type)}
+                      </small>
+                      <small>
+                        {entry.source_format?.toUpperCase() ?? "Source constructeur"}
+                        {entry.attribution_required ? " · attribution requise" : ""}
+                      </small>
+                    </div>
+                    <p>
+                      {entry.dimensions_m
+                        ? `Boîtier déclaré : ${formatAssetDimensions(entry.dimensions_m)}.`
+                        : "Dimensions déclarées à confirmer."} {referenceAssetMessage(entry.qualification_limitations)}
+                    </p>
+                    {entry.original_url ? (
+                      <a href={entry.original_url} rel="noreferrer" target="_blank">
+                        Ouvrir la source fabricant
+                      </a>
+                    ) : null}
+                  </article>
+                ))}
+              </>
+            ) : null}
           </div>
         </>
       ) : null}
@@ -2550,6 +2586,23 @@ function assetQualificationMessage(modes: string[], source: string | null | unde
     return `Fichier, dimensions, pivot et orientation vérifiés. ${origin}`;
   }
   return `Dimensions pilotées par SceneSpec et générateur borné. ${origin}`;
+}
+
+function formatAssetDimensions(dimensions: unknown): string {
+  if (!dimensions || typeof dimensions !== "object") return "non publiées";
+  const value = dimensions as { width?: unknown; depth?: unknown; height?: unknown };
+  const numbers = [value.width, value.depth, value.height];
+  if (!numbers.every((item) => typeof item === "number" && Number.isFinite(item))) {
+    return "non publiées";
+  }
+  return numbers.map((item) => `${((item as number) * 1000).toFixed(0)} mm`).join(" × ");
+}
+
+function referenceAssetMessage(limitations: string[]): string {
+  if (limitations.some((item) => item.toLowerCase().includes("anchor"))) {
+    return "Ancrages et raccordement restent à qualifier avant réutilisation.";
+  }
+  return "Cette référence reste en revue locale avant réutilisation.";
 }
 
 export function RagEvidencePanel({

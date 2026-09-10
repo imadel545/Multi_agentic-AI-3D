@@ -36,6 +36,9 @@ document-layout = [
   "torch>=2.13.0",
   "torchvision>=0.28.0",
 ]
+cad = [
+  "cadquery-ocp==8.0.1.0.0",
+]
 agents = [
 ]
 

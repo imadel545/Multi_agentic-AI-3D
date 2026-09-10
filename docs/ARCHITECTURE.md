@@ -169,9 +169,11 @@ active SceneSpec + prompt
   specialists, services, quality gates and external tools. A routed specialist
   registry exists, but its domains and dependencies remain declared
   deterministically; it is not an autonomous supervisor.
-- The active inventory has 13 internal/technical runtime manifests. Exact
-  imports remain hash-pinned and every fallback is visible, but none of the 13
-  passes the stronger professional M1 evidence gate. The public flag is owned
+- The active inventory has 14 manifests: 13 internal/technical runtime
+  manifests and one manufacturer reference candidate. Exact imports remain
+  hash-pinned and every fallback is visible, but none of the 13 generation-
+  eligible internal/technical manifests passes the stronger professional M1
+  evidence gate. The public flag is owned
   by `ProfessionalAssetVerifier`, which re-hashes and inspects the evidence
   bytes at inventory/retrieval/provenance boundaries; manifest completeness is
   only a declaration precondition. Runtime eligibility must not be presented as

@@ -77,7 +77,13 @@ def resolve_proof_scope(
             if program.program_id == program_id and program.requested_quantity == 1
         ]
         if len(indices) == 1:
-            paths = {f"/geometry_programs/{indices[0]}"}
+            prefix = f"/geometry_programs/{indices[0]}"
+            paths = {
+                capability.path
+                for capability in service.resolve(scene).capabilities
+                if capability.path == prefix or capability.path.startswith(prefix + "/")
+            }
+            context = f"composant {scene.geometry_programs[indices[0]].semantic_role}"
     elif instance.get("qa", {}).get("passed") is True:
         for index, sector in enumerate(scene.sectors):
             if instance.get("instance_id") != sector.sector_id:

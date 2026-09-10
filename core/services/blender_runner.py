@@ -74,11 +74,25 @@ class BlenderRunner:
             build_id = f"build_{uuid.uuid4().hex}"
             attempt_id = f"{build_id}_attempt_{attempt}"
             staging_dir = Path(tempfile.mkdtemp(prefix=f".blender-{attempt_id}-", dir=output_dir))
-            snapshot_script, worker_bundle_snapshot = _snapshot_worker_sources(
-                self.worker_sources,
-                staging_dir,
-                entry_script_name=self.worker_script.name,
-            )
+            try:
+                snapshot_script, worker_bundle_snapshot = _snapshot_worker_sources(
+                    self.worker_sources,
+                    staging_dir,
+                    entry_script_name=self.worker_script.name,
+                )
+            except (OSError, ValueError) as exc:
+                # Worker sources are an execution input. If the source bundle
+                # disappears or cannot be copied between admission and launch,
+                # fail through the same bounded retry/fallback path as other
+                # Blender preparation errors instead of leaking a 500 and a
+                # leftover staging directory.
+                shutil.rmtree(staging_dir, ignore_errors=True)
+                attempt_errors.append(
+                    f"attempt_{attempt}: {_worker_snapshot_preparation_error(exc)}"
+                )
+                if attempt < 3:
+                    time.sleep(attempt)
+                continue
             try:
                 scene_input_dir = staging_dir / ".scene_input"
                 scene_input_dir.mkdir(parents=True, exist_ok=False)
@@ -925,6 +939,10 @@ def _build_lock_preparation_error(exc: OSError | TypeError | ValueError) -> str:
 
 def _scene_snapshot_preparation_error(exc: OSError) -> str:
     return f"BLENDER_SCENE_SPEC_SNAPSHOT_ERROR:{type(exc).__name__}:DETAILS_REDACTED"
+
+
+def _worker_snapshot_preparation_error(exc: OSError | ValueError) -> str:
+    return f"BLENDER_WORKER_SNAPSHOT_ERROR:{type(exc).__name__}:DETAILS_REDACTED"
 
 
 def _trusted_input_evidence(scene_payload: dict, project_root: Path) -> dict:

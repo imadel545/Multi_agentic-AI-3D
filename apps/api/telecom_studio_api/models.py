@@ -376,6 +376,16 @@ class AssetInventoryEntry(BaseModel):
     effective_generation_mode: str
     import_fallback_allowed: bool
     source: str | None = None
+    source_provenance: str | None = None
+    family: str | None = None
+    subtype: str | None = None
+    manufacturer: str | None = None
+    reference: str | None = None
+    original_url: str | None = None
+    source_format: str | None = None
+    geometry_status: str | None = None
+    fidelity_status: str | None = None
+    qualification_version: str | None = None
     license: str | None = None
     attribution_required: bool = False
     status: str | None = None

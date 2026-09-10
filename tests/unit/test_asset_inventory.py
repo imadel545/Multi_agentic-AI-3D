@@ -109,3 +109,23 @@ def test_asset_inventory_rejects_a_changed_qualified_glb(tmp_path: Path) -> None
     assert entry["generation_eligible"] is False
     assert entry["qualified_file_hash_matches"] is False
     assert "QUALIFIED_ASSET_HASH_MISMATCH" in entry["warnings"]
+
+
+def test_asset_inventory_does_not_publish_or_read_outside_root_paths(tmp_path: Path) -> None:
+    manifests_dir = tmp_path / "assets" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    manifest = json.loads(
+        Path("assets/manifests/ANT_PANEL_5G_DUALBAND_V1.json").read_text(encoding="utf-8")
+    )
+    manifest["asset_id"] = "OUTSIDE_PATH_ASSET"
+    manifest["file"] = "/private/catalog/hidden.glb"
+    manifest["qualification"] = {
+        "status": "quarantined_unverified",
+        "allowed_generation_modes": [],
+    }
+    (manifests_dir / "OUTSIDE_PATH_ASSET.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    entry = AssetInventoryService(tmp_path, AssetRegistry(manifests_dir)).inspect()["entries"][0]
+
+    assert entry["file"] == "hidden.glb"
+    assert entry["asset_file_exists"] is False

@@ -84,7 +84,7 @@ class SceneEditAgent:
                 (
                     int(path.split("/")[2])
                     for path in allowed_paths
-                    if path.startswith("/geometry_programs/")
+                    if re.fullmatch(r"/geometry_programs/\d+", path)
                 ),
                 None,
             )
@@ -148,12 +148,16 @@ class SceneEditAgent:
         scene: SceneSpec,
         edit_prompt: str,
     ) -> int | None:
-        if not scene.geometry_programs:
+        editable_indices = [
+            index for index, program in enumerate(scene.geometry_programs)
+            if not any(node.kind == "exact_asset" for node in program.nodes)
+        ]
+        if not editable_indices:
             return None
         semantic_match = _semantic_geometry_program_index(scene, edit_prompt)
-        if semantic_match is not None:
+        if semantic_match in editable_indices:
             return semantic_match
-        program_ids = [program.program_id for program in scene.geometry_programs]
+        program_ids = [scene.geometry_programs[index].program_id for index in editable_indices]
         if self.groq is not None:
             try:
                 raw = self.groq.request_json(
@@ -183,7 +187,10 @@ class SceneEditAgent:
                                                     node.node_id for node in program.nodes
                                                 ],
                                             }
-                                            for program in scene.geometry_programs
+                                            for program in (
+                                                scene.geometry_programs[index]
+                                                for index in editable_indices
+                                            )
                                         ],
                                     },
                                     ensure_ascii=False,
@@ -231,7 +238,11 @@ class SceneEditAgent:
                 if raw.get("action") != "regenerate_geometry_program":
                     return None
                 selected = raw.get("program_id")
-                return program_ids.index(selected) if selected in program_ids else None
+                return (
+                    editable_indices[program_ids.index(selected)]
+                    if selected in program_ids
+                    else None
+                )
             except Exception:
                 logger.warning(
                     "Geometry-program revision routing failed; using semantic matching.",
@@ -446,12 +457,14 @@ class SceneEditAgent:
                     exc_info=True,
                 )
                 patch = self._fallback_patch(
-                    state["scene"], state["edit_prompt"], fallback_reason=fallback_reason
+                    state["scene"], state["edit_prompt"], fallback_reason=fallback_reason,
+                    capabilities=state["capabilities"],
                 )
                 plan = _plan_from_patch(patch, state["capabilities"])
         else:
             patch = self._fallback_patch(
-                state["scene"], state["edit_prompt"], fallback_reason=fallback_reason
+                state["scene"], state["edit_prompt"], fallback_reason=fallback_reason,
+                capabilities=state["capabilities"],
             )
             plan = _plan_from_patch(patch, state["capabilities"])
         return {
@@ -623,7 +636,14 @@ class SceneEditAgent:
         edit_prompt: str,
         *,
         fallback_reason: str,
+        capabilities: SceneAdaptationCapabilities | None = None,
     ) -> ScenePatch:
+        if capabilities is not None:
+            from core.services.exact_asset_edit import fallback_rigid_patch
+
+            rigid_patch = fallback_rigid_patch(edit_prompt, capabilities, fallback_reason)
+            if rigid_patch is not None:
+                return rigid_patch
         text = edit_prompt.lower()
         operations: list[PatchOperation] = []
 
@@ -1114,6 +1134,26 @@ def _validate_patch_alignment(scene: SceneSpec, edit_prompt: str, patch: ScenePa
 
 
 def _terms_for_path(path: str) -> tuple[str, ...]:
+    if re.fullmatch(
+        r"/geometry_programs/\d+/nodes/0/transform/(translation_m|rotation_deg)/[xyz]",
+        path,
+    ):
+        return (
+            (
+                "position",
+                "positionne",
+                "positionner",
+                "placement",
+                "translation",
+                "translate",
+                "déplace",
+                "deplace",
+                "move",
+                "place",
+            )
+            if "/translation_m/" in path
+            else ("rotation", "tourne", "rotate", "orientation")
+        )
     if path.startswith("/sectors/"):
         field = path.rsplit("/", 1)[-1]
         return _SECTOR_FIELD_TERMS.get(field, ())
@@ -1166,6 +1206,13 @@ def _numeric_value_is_grounded(
 
 
 def _current_numeric_value(scene: SceneSpec, path: str) -> float | None:
+    if re.fullmatch(
+        r"/geometry_programs/\d+/nodes/0/transform/(translation_m|rotation_deg)/[xyz]",
+        path,
+    ):
+        parts = path.split("/")
+        transform = scene.geometry_programs[int(parts[2])].nodes[0].transform
+        return float(getattr(getattr(transform, parts[6]), parts[7]))
     if path == "/tower/height_m":
         return float(scene.tower.height_m)
     parts = path.split("/")

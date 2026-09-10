@@ -12,10 +12,12 @@ from apps.api.telecom_studio_api.main import app, workflow_service
 from apps.api.telecom_studio_api.product import (
     ProductService,
     _assembly_constraint_summary_from_path,
+    _asset_quality_summary,
     _blender_available,
     _events_to_timeline,
     _geometry_fidelity_summary,
     _geometry_program_summary_from_path,
+    _inventory_status,
     _probe_blender_runtime,
     _studio_warnings,
 )
@@ -1269,6 +1271,28 @@ def test_product_issues_humanize_real_asset_warning_codes() -> None:
     assert "chaîne de génération est vérifiée" in minimal_issue["impact"]
     assert "fidélité constructeur" in minimal_issue["impact"]
     assert "valide techniquement" not in minimal_issue["impact"]
+
+
+def test_product_asset_summaries_recognize_exact_glb_imports() -> None:
+    inventory = {
+        "entries": [
+            {"asset_import_mode": "imported_glb_exact"},
+        ]
+    }
+    assert _inventory_status(inventory) == "ready_for_import"
+
+    quality = _asset_quality_summary(
+        {
+            "asset_imports": [
+                {
+                    "asset_id": "ANT_PANEL_4G_001",
+                    "import_mode": "imported_glb_exact",
+                    "asset_file_exists": True,
+                }
+            ]
+        }
+    )
+    assert quality == "1 mesh(es) GLB importé(s), 0 composant(s) généré(s) par profil contrôlé."
 
 
 def test_product_issues_deduplicate_repeated_sector_warnings() -> None:

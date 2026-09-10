@@ -96,7 +96,7 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] `npm run build` passe le 2026-07-31; tous les chunks JavaScript restent
   sous 371 kB non compressés.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
-- [x] Le 2026-08-11, `npm run test -- --run` passe avec 170 tests; typecheck et
+- [x] Le 2026-08-11, `npm run test -- --run` passe avec 180 tests; typecheck et
   build passent aussi sur le current tree.
 - [x] Le smoke layout current-tree en lecture seule charge le GLB certifié à
   1440 x 1000 et 1047 x 2748 sans scroll desktop concurrent; ce contrôle ne

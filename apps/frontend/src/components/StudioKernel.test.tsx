@@ -1747,6 +1747,24 @@ describe("studio kernel components", () => {
             allowed_generation_modes: ["imported_glb_exact"],
             qualification_limitations: ["Géométrie interne générique."],
             qualified_file_hash_matches: true
+          }, {
+            asset_id: "ANT_SIERRA_6001124_REFERENCE",
+            type: "antenna",
+            family: "lte_mimo_panel",
+            subtype: "2-in-1 omnidirectional panel antenna",
+            manufacturer: "Sierra Wireless / Semtech",
+            reference: "6001124",
+            source: "vendor_supplied",
+            original_url: "https://source.sierrawireless.com/6001124.step",
+            source_format: "step",
+            attribution_required: true,
+            dimensions_m: { width: 0.15, depth: 0.045, height: 0.049 },
+            generation_eligible: false,
+            qualification_status: "reference_only",
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: ["Anchors are not qualified."],
+            allowed_generation_modes: [],
+            qualification_limitations: ["Stable anchors remain unverified."]
           }],
           missing_files: []
         }}
@@ -1770,6 +1788,14 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/11[\s ]974 fichiers catalogués/)).toBeInTheDocument();
     expect(screen.getByText(/10 composants exploitables/)).toBeInTheDocument();
     expect(screen.getByText(/ant panel 4g 001/)).toBeInTheDocument();
+    expect(screen.getByText("Sierra Wireless / Semtech")).toBeInTheDocument();
+    expect(screen.getByText(/6001124 · 2-in-1 omnidirectional panel antenna/)).toBeInTheDocument();
+    expect(screen.getByText("Référence uniquement")).toBeInTheDocument();
+    expect(screen.getByText(/STEP · attribution requise/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ouvrir la source fabricant" })).toHaveAttribute(
+      "href",
+      "https://source.sierrawireless.com/6001124.step"
+    );
     expect(screen.getByText(/mesh vérifié/)).toBeInTheDocument();
     expect(screen.getByText(/2\s834/)).toBeInTheDocument();
     expect(screen.getByText("Qualification requise")).toBeInTheDocument();

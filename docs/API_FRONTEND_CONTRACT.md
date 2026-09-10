@@ -195,9 +195,13 @@ Chaque entrée expose aussi `qualification_status`, `generation_eligible`,
 `allowed_generation_modes`, `qualification_method`, les limites de
 qualification et le résultat du contrôle du hash. La présence d'un `.glb` ne
 signifie donc plus qu'il est automatiquement utilisable par Blender.
+Les entrées qui ont une identité externe exposent également `family`, `subtype`,
+`manufacturer`, `reference`, `source_provenance`, `source_format`,
+`original_url`, `dimensions_m` et `qualification_version`; ces champs décrivent
+la preuve disponible et ne confèrent aucun droit de réutilisation.
 Les entrées M1 peuvent aussi exposer `preview_set`, `provenance_url`,
 `geometry_status`, `fidelity_status`, `milestone_evidence_eligible` et
-`milestone_evidence_failures`. Le catalogue courant contient 13 assets
+`milestone_evidence_failures`. Le catalogue courant contient 14 assets
 runtime mais 0 preuve professionnelle M1; le frontend ne doit donc pas les
 présenter comme composants constructeur qualifiés.
 
@@ -432,7 +436,7 @@ documents et versions ont des états de chargement/erreur/retry indépendants. L
 frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
 mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
 ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
-La suite courante compte 170 tests Vitest et passe le typecheck/build. Un smoke
+La suite courante compte 180 tests Vitest et passe le typecheck/build. Un smoke
 layout current-tree en lecture seule a chargé le GLB certifié à 1440 x 1000 et
 1047 x 2748. Le smoke connecté de l'arbre de convergence immédiatement
 précédent a confirmé la création, le flux SSE, le GLB/WebGL réel, le RAG et les

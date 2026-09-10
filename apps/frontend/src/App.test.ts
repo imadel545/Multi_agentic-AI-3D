@@ -165,13 +165,13 @@ describe("frontend runtime selection", () => {
   it("loads the governed asset inventory during bootstrap", async () => {
     const assetInventory = vi.fn().mockResolvedValue({
       status: "qualified_mixed_catalog",
-      asset_count: 13,
+      asset_count: 14,
       missing_file_count: 0,
       real_glb_asset_count: 12,
       import_qualified_glb_count: 3,
       generation_eligible_asset_count: 13,
       professional_evidence_asset_count: 0,
-      reference_only_asset_count: 0,
+      reference_only_asset_count: 1,
       qualified_integrity_failure_count: 0,
       entries: [],
       missing_files: []

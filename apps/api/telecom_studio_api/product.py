@@ -456,7 +456,11 @@ def _inventory_status(inventory: dict) -> str:
     if not entries:
         return "unknown"
     total = len(entries)
-    ready = sum(1 for entry in entries if entry.get("asset_import_mode") == "imported_glb")
+    ready = sum(
+        1
+        for entry in entries
+        if entry.get("asset_import_mode") in {"imported_glb", "imported_glb_exact"}
+    )
     fallback = sum(
         1 for entry in entries if entry.get("effective_generation_mode") == "procedural_fallback"
     )
@@ -1205,7 +1209,8 @@ def _asset_quality_summary(status: dict) -> str | None:
     imported_count = sum(
         1
         for asset in asset_imports
-        if asset.get("import_mode") in {"imported_glb", "stretched_imported_glb"}
+        if asset.get("import_mode")
+        in {"imported_glb", "imported_glb_exact", "stretched_imported_glb"}
     )
     parametric_count = sum(
         1

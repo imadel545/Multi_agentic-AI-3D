@@ -17,7 +17,8 @@ frontend.
 
 - Native CAD inspection is a separate quarantined CLI, not a product admission
   route. Its real chair proof has implausible declared millimetre units and
-  overlapping source meshes, all preserved. No telecom source is qualified.
+  overlapping source meshes, all preserved. No telecom source is generation-
+  qualified; the Sierra candidate remains reference-only.
   DWG source/DXF comparison currently accepts modelspace polyfaces only; the
   independent DXF extractor supports nested blocks but refuses ACIS, clipping,
   external/multiple inserts, subdivision and malformed faces. Wires/annotations
@@ -26,6 +27,13 @@ frontend.
 - Raw probe mesh detection no longer counts a `POLYLINE_3D` wire as mesh geometry;
   it now recognizes `POLYLINE_MESH`. A mixed mesh/ACIS file still requires a solid
   tessellation route and cannot become generation-eligible from probe results.
+- A real Sierra Wireless/Semtech 6001124 MIMO panel STEP now has a local
+  qualification report with explicit millimetre evidence, 18 preserved mesh
+  leaves, real Blender/GLB roundtrip, independent post-Blender measurement and
+  five structural preview checks. Its manifest is intentionally
+  `reference_only`: the restricted source terms, stable anchors, mating fit,
+  orientation, and engineering approval are still unverified, so retrieval
+  and Blender generation cannot use it.
 
 - The configured NVIDIA text embedding endpoint returns HTTP 410 (retired model).
   Replacement retrieval quality and full static reindex are not validated;
@@ -387,10 +395,10 @@ frontend.
 - Five scene-level Blender views now include a close-up. Only the primary view
   has the current framing gate; role-specific close-up visibility/contrast and
   per-asset previews remain future work.
-- The curated manifest catalog is intentionally small: all 13 manifests are
-  generation-eligible, with 3 GLBs qualified for exact import, 10
-  component/tower profiles qualified for controlled parametric generation and
-  0 reference-only entry. The 5G panel and RRU
+- The curated manifest catalog is intentionally small: it contains 14 manifests,
+  of which 13 are generation-eligible, with 3 GLBs qualified for exact import,
+  10 component/tower profiles qualified for controlled parametric generation and
+  one real STEP candidate kept `reference_only`. The 5G panel and RRU
   companion GLBs have not passed orientation qualification and are therefore
   never imported by the product path.
 - Asset qualification proves file identity, basic mesh integrity, declared
@@ -416,7 +424,7 @@ frontend.
   `4829995130a43c09c5fb0c23d4216ed007e2d2c2` and tag
   `cognitive-3d-m1-baseline-20260808`; current convergence continues directly
   on the sole local branch `main`.
-- All 13 current runtime assets fail the stronger professional proof gate.
+- All 14 current runtime manifests fail the stronger professional proof gate.
   They do not collectively provide a neutral master, qualified viewer lineage,
   explicit professional provenance/licence, five passed asset previews,
   typed anchors/connectors and the required qualification QA.
@@ -426,9 +434,11 @@ frontend.
   dimensions or out-of-bounds anchors fail closed. This verifier does not
   create the missing neutral CAD source, prove licensing rights or validate a
   B-Rep semantically.
-- No neutral STEP/B-Rep sample is currently admitted for the requested
-  professional structure, antenna, RRU, support, ground cabinet, GPS and
-  platform roles. DWG `3DSOLID`/ACIS remains `source_only`; metadata search or
+- No neutral STEP/B-Rep source is currently admitted for generation or
+  professional qualification. One Sierra Wireless/Semtech antenna candidate
+  is inspected and retained as `reference_only`; the requested professional
+  structure, RRU, support, ground cabinet, GPS and platform roles still have no
+  admitted source. DWG `3DSOLID`/ACIS remains `source_only`; metadata search or
   an LLM decision cannot convert it into exact geometry.
 - `QualifiedAssetCandidateRetriever` and `AssetDecisionPacket` improve the
   decision contract, not the underlying fidelity. Telecom persists and

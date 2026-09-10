@@ -34,7 +34,7 @@ class AssetInventoryService:
         real_glb_files = [
             entry
             for entry in entries
-            if entry["asset_file_exists"] and Path(entry["file"]).suffix.lower() == ".glb"
+            if entry["asset_file_exists"] and entry["file"].lower().endswith(".glb")
         ]
         fallback = [
             entry
@@ -80,8 +80,8 @@ def _entry(
     verifier: ProfessionalAssetVerifier,
 ) -> dict:
     file_required = not asset.file.startswith("procedural://")
-    path = project_root / asset.file if file_required else None
-    file_exists = bool(path and path.exists())
+    path = _safe_project_path(project_root, asset.file) if file_required else None
+    file_exists = bool(path and path.is_file())
     dimensions_checked = asset.dimensions_m is not None
     qualification = asset.qualification
     expected_sha256 = qualification.verified_file_sha256
@@ -150,7 +150,9 @@ def _entry(
     return {
         "asset_id": asset.asset_id,
         "type": asset.type,
-        "file": asset.file,
+        # Keep the technical response useful for display while never exposing
+        # a path that could reveal the local catalog layout.
+        "file": Path(asset.file).name if file_required else asset.file,
         "file_exists": file_exists,
         "asset_file_exists": file_exists,
         "asset_file_required": file_required,
@@ -159,6 +161,7 @@ def _entry(
         "effective_generation_mode": effective_generation_mode,
         "import_fallback_allowed": asset.import_fallback_allowed,
         "source": asset.source,
+        "source_provenance": asset.source_provenance,
         "license": asset.license,
         "attribution_required": asset.attribution_required,
         "attribution": asset.attribution,

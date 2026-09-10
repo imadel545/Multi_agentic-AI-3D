@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 from typing import Any
 
+from apps.blender_worker.exact_asset import validate_exact_program
 from core.contracts.adaptation import (
     AdaptationCapabilityCatalog,
     AdaptationOperation,
@@ -109,9 +110,48 @@ class AdaptationCapabilityService:
         for index, program in enumerate(scene.geometry_programs):
             if any(node.kind == "exact_asset" for node in program.nodes):
                 unsupported.append(
-                    f"L’asset réutilisé {program.semantic_role} conserve sa géométrie source ; "
-                    "sa modification n’est pas encore disponible."
+                    f"L’asset réutilisé {program.semantic_role} conserve sa géométrie, "
+                    "ses matériaux et son échelle source."
                 )
+                related = any(
+                    program.program_id in {relation.source_program_id, relation.target_program_id}
+                    for relation in scene.rigid_component_relations
+                )
+                if related:
+                    unsupported.append(
+                        f"Le placement de {program.semantic_role} appartient à une relation ; "
+                        "sa modification ciblée reste indisponible."
+                    )
+                    continue
+                try:
+                    records = validate_exact_program(
+                        program.model_dump(mode="json"), self.project_root
+                    )
+                except (OSError, ValueError, KeyError):
+                    unsupported.append(
+                        "La source du composant doit être requalifiée avant modification."
+                    )
+                    continue
+                permissions = records[0]["manifest"]["transform_permissions"]
+                for field, axes_key, maximum_key, label, unit in (
+                    ("translation_m", "translation_axes", "maximum_translation_m", "Position", "m"),
+                    ("rotation_deg", "rotation_axes", "maximum_rotation_deg", "Rotation", "deg"),
+                ):
+                    maximum = permissions[maximum_key]
+                    for axis in permissions[axes_key]:
+                        resolved.append(ResolvedAdaptationCapability(
+                            capability_id=f"geometry_program_{index + 1}:{field}_{axis}",
+                            asset_id=program.nodes[0].asset_id,
+                            profile_id="catalog_rigid_placement_v1",
+                            label=f"{label} {axis.upper()} de {program.semantic_role}",
+                            path=f"/geometry_programs/{index}/nodes/0/transform/{field}/{axis}",
+                            value_type="number",
+                            execution_tool="asset_transform",
+                            effect="placement",
+                            description=("Placement absolu dans le repère mondial Z vertical, "
+                                         "sans modifier la source. Relance Blender et la QA."),
+                            unit=unit, minimum=-maximum, maximum=maximum,
+                        ))
                 continue
             resolved.append(
                 ResolvedAdaptationCapability(

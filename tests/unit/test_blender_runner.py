@@ -739,6 +739,39 @@ def test_blender_runner_retries_build_lock_preparation_failure_then_falls_back(
     assert all(not path.exists() for path in attempt_directories)
 
 
+def test_blender_runner_retries_worker_snapshot_preparation_failure_then_falls_back(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    scene = _accessory_scene()
+    runner = BlenderRunner(project_root=Path.cwd())
+    attempts = 0
+    attempt_directories: list[Path] = []
+
+    def fail_snapshot(*_args, **_kwargs):
+        nonlocal attempts
+        attempts += 1
+        raise OSError("worker source disappeared")
+
+    monkeypatch.setattr(runner, "_resolve_blender_binary", lambda: Path("/fake/blender"))
+    monkeypatch.setattr(
+        "core.services.blender_runner._snapshot_worker_sources",
+        fail_snapshot,
+    )
+    monkeypatch.setattr("core.services.blender_runner.time.sleep", lambda *_: None)
+
+    result = runner.generate(scene, tmp_path)
+
+    assert attempts == 3
+    assert result.status == "fallback"
+    assert result.mode == "fallback_blender_error"
+    assert result.error is not None
+    assert result.error.count("BLENDER_WORKER_SNAPSHOT_ERROR") == 3
+    assert "OSError:DETAILS_REDACTED" in result.error
+    assert not Path(result.artifacts["build_lock"]).exists()
+    assert not attempt_directories
+
+
 def test_blender_runner_never_binds_output_to_concurrently_mutated_public_scene(
     tmp_path: Path,
     monkeypatch,

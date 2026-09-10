@@ -286,8 +286,8 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 13 manifests, 12 local GLBs, 13 generation-eligible, 3 exact imports,
-  10 parametric generation profiles, 0 reference-only, and 0 professional M1
+- Assets: 14 manifests, 12 local GLBs, 13 generation-eligible, 3 exact imports,
+  10 parametric generation profiles, 1 reference-only, and 0 professional M1
   evidence asset after runtime byte verification; `qualified_mixed_catalog`,
   not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
@@ -299,10 +299,10 @@ requirements_text or document pack
 - Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
   `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
   and preview. This proves that scenario only. The current frontend gate passes
-  170 tests, typecheck and production build. The 2026-08-11 connected browser
+  180 tests, typecheck and production build. The 2026-08-11 connected browser
   smoke `wf_0843599873e7` rendered the real certified GLB, loaded RAG evidence,
   exposed the asset library/intelligence drawers and preserved the truthful
-  0/13 professional asset state. A later read-only current-tree layout smoke
+  0/14 professional asset state. A later read-only current-tree layout smoke
   loaded that certified GLB at 1440 x 1000 and 1047 x 2748 with external
   providers disabled; it validates framing/scroll only, not provider health or
   CAD fidelity.

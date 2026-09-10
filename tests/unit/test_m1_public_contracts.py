@@ -150,6 +150,43 @@ def test_asset_inventory_exposes_only_public_preview_and_provenance_urls() -> No
     }
 
 
+def test_professional_step_candidate_identity_is_visible_but_not_executable() -> None:
+    client = TestClient(app)
+
+    inventory = client.get("/assets/inventory")
+    assert inventory.status_code == 200
+    entry = next(
+        item
+        for item in inventory.json()["entries"]
+        if item["asset_id"] == "ANT_SIERRA_6001124_REFERENCE"
+    )
+
+    assert entry["family"] == "lte_mimo_panel"
+    assert entry["manufacturer"] == "Sierra Wireless / Semtech"
+    assert entry["reference"] == "6001124"
+    assert entry["source_provenance"].startswith("Official Sierra Wireless STEP assembly")
+    assert entry["source_format"] == "step"
+    assert entry["asset_import_mode"] == "reference_only"
+    assert entry["generation_eligible"] is False
+    assert entry["milestone_evidence_eligible"] is False
+    assert entry["dimensions_m"] == {"width": 0.15, "depth": 0.045, "height": 0.049}
+    assert any(
+        "restrictive vendor source terms" in warning.lower()
+        for warning in entry["qualification_limitations"]
+    )
+
+    provenance = client.get(entry["provenance_url"])
+    assert provenance.status_code == 200
+    payload = provenance.json()
+    assert payload["asset_id"] == entry["asset_id"]
+    assert payload["manufacturer"] == "Sierra Wireless / Semtech"
+    assert payload["reference"] == "6001124"
+    assert payload["source_format"] == "step"
+    assert payload["geometry_status"] == "reference_only"
+    assert payload["milestone_evidence_eligible"] is False
+    assert payload["qualification"]["status"] == "reference_only"
+
+
 def test_asset_preview_endpoint_verifies_the_published_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -265,7 +265,7 @@ tolerance and numerical consistency limits are unchanged.
 - The convergence commit `19791be` passed the complete fast gate plus the isolated
   real-Blender assembly/edit/version E2E (`1 passed in 44.39 s`) and the
   connected browser 4G creation scenario with QA 1.0 and an issued certificate.
-- The frontend has 170 passing Vitest tests plus green typecheck/build. A
+- The frontend has 180 passing Vitest tests plus green typecheck/build. A
   read-only current-tree layout smoke loaded the certified GLB at 1440 x 1000
   and 1047 x 2748; the connected provider/generation smoke belongs to the
   immediately preceding convergence tree. The real generic multi-project user

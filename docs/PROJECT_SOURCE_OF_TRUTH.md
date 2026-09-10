@@ -80,9 +80,36 @@ The chair declares millimetres despite a raw height of 0.675 units. Its resultin
 0.675 mm height is retained, not silently corrected; physical scale is unqualified.
 Overlapping mesh pairs in the source are retained. CAD materials and missing
 design parts are not reconstructed. This proves native mesh transport, not a
-professional telecom asset or a complete usable chair. No new catalog asset is
-admitted. ACIS telecom conversion, professional assembly and frontend integration
-of this inspection remain open.
+professional telecom asset or a complete usable chair. No generated catalog asset is
+admitted from this path. ACIS telecom conversion, professional assembly and frontend
+integration of this inspection remain open.
+
+## Professional STEP candidate evidence — 2026-09-10
+
+The bounded `scripts.qualify_step_asset` command now records a local review for
+one real manufacturer source without promoting it into generation. The source
+is the official Sierra Wireless/Semtech `6001124` 2-in-1 MIMO panel antenna
+STEP. Its manifest is `ANT_SIERRA_6001124_REFERENCE` with
+`geometry_status=reference_only`; the STEP, derived GLB and previews remain in
+the quarantined workspace outside Git.
+
+The source declares millimetres in its STEP header. OCP XDE preserved one
+top-level assembly, 20 occurrences and 18 mesh leaves with stable definition
+entries. The complete extracted extents are 0.468118 × 0.093021 × 0.044536 m
+because the two cable runs are included; the housing leaf measures about
+150 × 49 × 45 mm and is kept distinct from the assembly extents. Real Blender
+4.5.12 produced and re-imported a GLB with 18 meshes and 49,478 triangles;
+the independent post-Blender measurement found 126,238 vertices, 18 component
+identities and a 0.0 m maximum roundtrip vertex error. Perspective, front, side,
+top and housing close-up PNGs passed the bounded framing/contrast evidence gate.
+
+The record captures the product role, source hash, hierarchy, dimensions,
+datasheet connector/mount summaries, and explicit adaptation limits. Two SMA
+plugs, two RG174 cable runs and the bolt mount are source/datasheet observations;
+their mating anchors, orientation and installation fit remain unverified. The
+candidate is visible in the studio asset drawer for provenance review, but it
+cannot be selected by the cognitive compiler or sent to Blender until rights,
+anchors and engineering qualification are completed.
 
 ## Exact catalog reuse checkpoint — 2026-09-10
 
@@ -209,15 +236,16 @@ not manufacturer fidelity, physical fastening or collision certification.
   deterministically. The generic cognitive route can expose qualified
   candidates. This earlier compiler limitation was superseded on 2026-09-10
   for opted-in exact `reuse` and bounded rigid `compose`; `adapt` remains open.
-- The current runtime catalog still contains 13 usable internal/technical
-  manifests, but **0 of 13 passes the new professional M1 proof gate**.
+- The current runtime catalog contains 14 manifests: 13 usable
+  internal/technical manifests and one real professional candidate kept as
+  `reference_only`. **0 of 14 passes the new professional M1 proof gate**.
   `ProfessionalAssetVerifier` is now the filesystem-aware authority for that
   flag: it recomputes master/viewer/preview/report hashes, validates GLB/PNG
   structure, path containment, viewer lineage, dimensions and anchors. Manifest
-  completeness alone can no longer publish an eligible result. No
-  neutral STEP/B-Rep vertical slice for the requested professional structure,
-  antenna, RRU, support, cabinet, GPS and platform families is available in the
-  qualified catalog. Raw DWG ACIS remains `source_only` and cannot be promoted
+  completeness alone can no longer publish an eligible result. No neutral
+  STEP/B-Rep source is admitted to the qualified catalog yet. One Sierra
+  Wireless/Semtech antenna candidate is inspected and visible as
+  `reference_only`; raw DWG ACIS remains `source_only` and cannot be promoted
   by retrieval or an LLM decision.
 - Consequently, no current-tree professional Blender/browser end-to-end run
   proves the required seven real assets, asset previews, reuse/adapt/compose,
@@ -387,14 +415,16 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current assets
 
-- 13 manifests, all generation-eligible in the current qualified catalog.
+- 14 manifests: 13 generation-eligible internal/technical assets and one
+  manufacturer candidate kept as `reference_only`.
 - 12 GLB files present.
 - The procedural-only dual-band panel intentionally has no companion file and
   is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
 - 13 manifests are generation-eligible: 3 authorize an exact GLB import and 10
-  authorize SceneSpec-driven parametric generation; 0 is `reference_only`.
+  authorize SceneSpec-driven parametric generation; one real STEP candidate is
+  `reference_only`.
   The cable-tray family is now qualified through its typed parametric route,
   not through an exact mesh import. The bracket companion GLB is not imported,
   but its typed procedural builder and connector contract are
@@ -404,7 +434,9 @@ not manufacturer fidelity, physical fastening or collision certification.
   rejected; it is not silently replaced by procedural geometry.
 - The three historically missing towers (monopole, rooftop, small-cell) are now
   internal project generated assets produced with Blender.
-- Current assets are internal/CC-BY and not vendor-grade.
+- The generation catalog remains internal/CC-BY and not vendor-grade. The
+  Sierra Wireless/Semtech candidate is visible for provenance review, but is
+  not part of the generation catalog.
 - Towers are generated parametrically by default. In the product planning path,
   GLB import happens only when the manifest authorizes and the planner selects
   `imported_glb_exact`.
@@ -887,8 +919,8 @@ certification, or acceptance of every generic 3D scenario.
   French instruction while the normalized LLM decision stays in provenance.
   Failed historical workflows now expose no artifact, download or trace URL;
   quarantined candidate files cannot be advertised as product deliverables.
-- The corresponding current-tree deterministic proof is 170/170 frontend tests,
-  frontend typecheck and production build, and 660 fast backend tests in 23.68 s.
+- The corresponding current-tree deterministic proof is 180/180 frontend tests,
+  frontend typecheck and production build, and 764 default backend tests in 30.46 s.
   The immediately preceding convergence tree also passed the focused real-Blender
   qualified 4G assembly/edit/version test (1/1 in 44.39 s) and complete provider
   gate (4/4 in 34.69 s); these runtime results were not rerun after the later
@@ -913,7 +945,7 @@ certification, or acceptance of every generic 3D scenario.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 170 passing
+frontend now has a verified chat-first/3D-first product baseline and 180 passing
 component/contract tests. Current-tree connected creation has passed in the real
 browser. Edit/version is proved by the API and focused Blender E2E; its final
 browser replay, along with every degraded, document-pack, rollback and recovery

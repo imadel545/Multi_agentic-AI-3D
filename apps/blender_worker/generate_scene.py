@@ -3519,7 +3519,8 @@ def _asset_import_summary(asset_imports: list[dict]) -> dict:
         modes[mode] = modes.get(mode, 0) + 1
     return {
         "asset_count": len(asset_imports),
-        "imported_glb_count": modes.get("imported_glb", 0),
+        "imported_glb_count": modes.get("imported_glb", 0) + modes.get("imported_glb_exact", 0),
+        "imported_glb_exact_count": modes.get("imported_glb_exact", 0),
         "stretched_imported_glb_count": modes.get("stretched_imported_glb", 0),
         "procedural_fallback_count": modes.get("procedural_fallback", 0),
         "not_generated_no_blender_count": modes.get("not_generated_no_blender", 0),
