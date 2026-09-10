@@ -15,6 +15,18 @@ frontend.
 
 ## Runtime recovery checkpoint — 2026-09-10
 
+- Native CAD inspection is a separate quarantined CLI, not a product admission
+  route. Its real chair proof has implausible declared millimetre units and
+  overlapping source meshes, all preserved. No telecom source is qualified.
+  DWG source/DXF comparison currently accepts modelspace polyfaces only; the
+  independent DXF extractor supports nested blocks but refuses ACIS, clipping,
+  external/multiple inserts, subdivision and malformed faces. Wires/annotations
+  are counted and omitted; materials are not reconstructed. GLB roundtrip checks
+  do not establish manifoldness, manufacturer fidelity or engineering fitness.
+- Raw probe mesh detection no longer counts a `POLYLINE_3D` wire as mesh geometry;
+  it now recognizes `POLYLINE_MESH`. A mixed mesh/ACIS file still requires a solid
+  tessellation route and cannot become generation-eligible from probe results.
+
 - The configured NVIDIA text embedding endpoint returns HTTP 410 (retired model).
   Replacement retrieval quality and full static reindex are not validated;
   local lexical fallback remains explicit. A successful single-vector response

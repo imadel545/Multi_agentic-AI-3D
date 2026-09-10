@@ -1,5 +1,35 @@
 # QA Strategy
 
+## Native CAD inspection proof — 2026-09-10
+
+`tests/e2e/test_native_cad_inspection.py` uses the original local
+`3D/Batiment/Mobilier/Chaise/ac3_billo2.dwg`, SHA-256
+`b5d422142d550efb3e7dd0aa0eab09efd500e1333f8a93bc9d1efa1956902903`.
+It skips when the real corpus or LibreDWG is absent, never substitutes a model.
+Source/DXF equality covers 7,952 vertices and 12,720 face-index records; the
+bounded hidden-edge int16 decoding normalizes 12,496 references. Four meshes,
+12,720 triangles, node identity/hierarchy and surface areas survive Blender
+4.5.12 export/reimport, with zero measured vertex displacement in the local run.
+The original file SHA remains unchanged. Two actual inspection renders are
+produced; materials are neutral and are not manufacturer material evidence.
+
+The source declares INSUNITS=4 (mm), retained as 0.001 metres per unit; its height
+is consequently 0.000675 m. Scale and two overlapping mesh pairs remain
+unqualified. No catalog promotion or professional asset claim follows.
+The initial billiard candidate was rejected for incomplete converted blocks.
+An approximately 1,800-file bounded infrastructure scan did not find a complete
+native telecom mesh candidate; that sampling does not prove none exists.
+
+Unit regressions separately exercise nested DXF transforms/basepoints, closed
+polymesh seams, reflections, signed face edges, units conflict, source coordinate
+and vertex-order changes, mixed solids, broken/clipped/cyclic/multiple blocks
+and corrupt indices. Synthetic fixtures are used only for these negative and
+transform tests. Reproduce the real smoke with:
+
+```bash
+.venv/bin/pytest tests/e2e/test_native_cad_inspection.py -m blender_runtime -q
+```
+
 QA must say what it actually checks. The current pipeline is honest about its
 limitations and never advertises checks it cannot perform.
 

@@ -132,6 +132,49 @@ def test_probe_accepts_real_dwgread_latin1_and_non_finite_json_dialect(
     assert result["sanitized_non_finite_values"] == 2
 
 
+@pytest.mark.parametrize(
+    ("entities", "contains_mesh", "contains_acis", "route"),
+    [
+        (["POLYLINE_3D", "VERTEX_3D", "VERTEX_3D"], False, False, "reference_or_2d_candidate"),
+        (["LINE", "LWPOLYLINE"], False, False, "reference_or_2d_candidate"),
+        (["POLYLINE_MESH", "VERTEX_MESH"], True, False, "libredwg_dxf_mesh_candidate"),
+        (["POLYLINE_PFACE", "VERTEX_PFACE_FACE"], True, False, "libredwg_dxf_mesh_candidate"),
+        (["3DFACE"], True, False, "libredwg_dxf_mesh_candidate"),
+        (["MESH"], True, False, "libredwg_dxf_mesh_candidate"),
+        (["3DSOLID", "POLYLINE_MESH"], True, True, "requires_acis_brep_bridge"),
+        (["BODY", "POLYLINE_PFACE"], True, True, "requires_acis_brep_bridge"),
+    ],
+)
+def test_probe_routes_native_faces_without_promoting_wires_or_partial_acis(
+    tmp_path: Path, monkeypatch, entities, contains_mesh, contains_acis, route
+) -> None:
+    root = tmp_path / "library"
+    raw = root / "raw" / "maj_des_blocs"
+    raw.mkdir(parents=True)
+    (raw / "Geometry.dwg").write_bytes(b"AC1018probe-fixture")
+    build_asset_library_catalog(raw, root / "index")
+    service = AssetLibraryService(root, dwgread_binary="dwgread")
+    file_id = service.search("geometry")["results"][0]["file_id"]
+
+    def completed_probe(args, **_kwargs):
+        output = Path(args[args.index("-o") + 1])
+        output.write_text(
+            json.dumps({"objects": [{"entity": entity} for entity in entities]}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("core.services.asset_library.subprocess.run", completed_probe)
+
+    result = service.probe(file_id)
+
+    assert result["contains_mesh_convertible_geometry"] is contains_mesh
+    assert result["contains_acis_3d_solids"] is contains_acis
+    assert result["conversion_route"] == route
+    assert result["blender_ready"] is False
+    assert result["generation_eligible"] is False
+
+
 def test_probe_maps_timeout_to_controlled_quarantine_error(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "library"
     raw = root / "raw" / "maj_des_blocs" / "3D" / "Pylone"

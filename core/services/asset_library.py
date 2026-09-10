@@ -155,8 +155,10 @@ class AssetLibraryService:
         file_header = payload.get("FILEHEADER") if isinstance(payload, dict) else {}
         unit_info = _dwg_unit_info(header if isinstance(header, dict) else {})
         contains_acis = entity_counts["3DSOLID"] > 0 or entity_counts["BODY"] > 0
+        # POLYLINE_3D carries a wire path; only polygon meshes/polyfaces supply faces.
         mesh_convertible = any(
-            entity_counts[name] > 0 for name in ("3DFACE", "MESH", "POLYLINE_3D", "POLYLINE_PFACE")
+            entity_counts[name] > 0
+            for name in ("3DFACE", "MESH", "POLYLINE_MESH", "POLYLINE_PFACE")
         )
         if contains_acis:
             conversion_route = "requires_acis_brep_bridge"

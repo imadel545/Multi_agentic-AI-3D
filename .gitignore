@@ -13,6 +13,7 @@ __pycache__/
 apps/frontend/node_modules/
 apps/frontend/dist/
 outputs/temp/*
+outputs/cad-inspections/
 !outputs/temp/.gitkeep
 data/sqlite/
 data/qdrant/

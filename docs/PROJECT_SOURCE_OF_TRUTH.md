@@ -61,6 +61,29 @@ normalization and content deduplication. It fixes substring false positives and
 returns matched-term evidence through the existing endpoint. Search remains
 metadata-only and cannot qualify or select raw CAD for Blender automatically.
 
+## Native CAD inspection boundary — 2026-09-10
+
+`python -m scripts.inspect_native_cad source.dwg --output /tmp/new-cad-proof`
+now runs a quarantined native-polyface inspection through LibreDWG, a source/DXF
+comparison, deterministic extraction, real Blender GLB export/reimport and two
+inspection renders. This CLI does not modify the catalog or create a completed
+design workflow. `generation_eligible` and `professional_qualified` remain false.
+
+The real `ac3_billo2.dwg` chair source preserves 7,952 source vertices and 12,720
+faces across four modelspace meshes. LibreDWG's unsigned hidden-edge face indices
+are decoded only after source-handle/index equality. Vertex ordering, declared
+units and mesh membership are checked; DWG meshes inside blocks are refused by
+this initial source-comparison bridge. Direct DXF extraction separately supports
+nested INSERT placement, with source handles and hierarchy retained.
+
+The chair declares millimetres despite a raw height of 0.675 units. Its resulting
+0.675 mm height is retained, not silently corrected; physical scale is unqualified.
+Overlapping mesh pairs in the source are retained. CAD materials and missing
+design parts are not reconstructed. This proves native mesh transport, not a
+professional telecom asset or a complete usable chair. No new catalog asset is
+admitted. ACIS telecom conversion, professional assembly and frontend integration
+of this inspection remain open.
+
 ## Exact catalog reuse checkpoint — 2026-09-10
 
 The generic cognitive compiler now executes a bounded `reuse` decision through
