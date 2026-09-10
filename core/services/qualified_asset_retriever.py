@@ -103,8 +103,11 @@ class QualifiedAssetCandidateRetriever:
                     limitations=(
                         packet.rejection_risks
                         + [
-                            "Reuse supports one rigid catalog component with explicit placement; "
-                            "required assembly relationships are not executable."
+                            "Reuse supports one rigid component with explicit placement. "
+                            "Compose supports one "
+                            "required aligned_with driver with offset_world_m "
+                            "and matched orientation; "
+                            "it does not certify contact, collision or fastening."
                         ]
                     )[:32],
                     decision_packet=packet,
@@ -200,7 +203,7 @@ def _decision_packet_strategies(manifest: AssetManifest) -> list[str]:
 
 def _cognitive_strategies(manifest: AssetManifest) -> list[str]:
     return (
-        ["reuse"]
+        ["reuse", "compose"]
         if manifest.cognitive_reuse_enabled
         and manifest.is_generation_eligible
         and manifest.allows_generation_mode("imported_glb_exact")

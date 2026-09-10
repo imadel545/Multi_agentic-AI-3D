@@ -433,8 +433,8 @@ frontend.
 - `QualifiedAssetCandidateRetriever` and `AssetDecisionPacket` improve the
   decision contract, not the underlying fidelity. Telecom persists and
   validates semantic strategies. Generic cognitive retrieval now exposes
-  candidates, but the generic compiler cannot yet execute asset
-  `reuse`/`adapt`/`compose`, so it publishes no allowed asset strategy.
+  candidates. The 2026-09-10 compiler supports opted-in exact `reuse` and bounded
+  rigid `compose`; parameter adaptation and arbitrary assembly remain unsupported.
 - No professional M1 Blender/browser E2E has passed with seven qualified real
   assets, five scene previews plus per-asset previews, reuse/adapt/compose,
   procedural complement, deterministic QA, provenance and targeted versioned
@@ -491,9 +491,13 @@ frontend.
   Blender réel; ils prouvent le déterministe, pas la fiabilité externe.
 - La réutilisation générique atteint désormais Blender pour un asset explicitement
   autorisé par composant indépendant, quantité un, placement rigide explicite,
-  sans adaptation ni relation requise. Seul ANT_PANEL_4G_001 est activé dans cette
-  tranche : source interne, aucune qualification constructeur. `adapt`/`compose`,
-  modification de la source importée et assemblage relationnel restent bloqués.
+  sans déformation. Seul ANT_PANEL_4G_001 est activé dans cette tranche : source
+  interne, aucune qualification constructeur. `compose` exécute désormais un
+  alignement rigide requis par composant, avec orientation copiée et décalage
+  mondial explicite. La QA du GLB mesure cette relation. `adapt`, modification
+  de la source, contact, fixation, collision et relations arbitraires restent
+  bloqués. Le test avant/après utilise deux générations et un planner contrôlé;
+  il ne prouve pas une édition frontend ni la fiabilité du provider réel.
   Les manifests non activés ne publient toujours aucune stratégie générique.
 - Le compilateur génère chaque composant déclaré, mais il n'existe pas encore de
   solveur générique de placement/relations qui prouve la cohérence spatiale d'un

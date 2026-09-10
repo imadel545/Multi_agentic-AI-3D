@@ -96,7 +96,7 @@ class GroqCognitivePlanningClient:
             },
             policy=self.decomposition_policy,
             system=(
-                "Decompose the supplied DesignIntent into the smallest sufficient set of 3 to "
+                "Decompose the supplied DesignIntent into the smallest sufficient set of 1 to "
                 "24 functional 3D components and subassemblies. Return exactly one JSON object "
                 "with one top-level key components. Follow the supplied response_schema. Include "
                 "dimensions, functions, material intent, parent relationships and honest detail "
@@ -107,6 +107,7 @@ class GroqCognitivePlanningClient:
             {
                 "contract": payload["contract"],
                 "domain": raw_intent.get("domain"),
+                "design_intent": decomposition_context,
                 "components": [
                     {
                         "component_id": item.get("component_id"),
@@ -125,7 +126,11 @@ class GroqCognitivePlanningClient:
                 "Describe only the required spatial and functional relationships among the "
                 "supplied component IDs. Return exactly one JSON object with one top-level key "
                 "relationships. Follow the supplied response_schema. Never invent a component, "
-                "asset, capability, Blender code or prose outside JSON."
+                "asset, capability, Blender code or prose outside JSON. "
+                "For an explicitly requested rigid alignment use kind aligned_with, source and "
+                "target component IDs, and parameters:{offset_world_m:{x,y,z}} in metres Z-up. "
+                "This copies orientation and offsets origins in world coordinates; it does not "
+                "mean surface contact, clearance or fastening. Do not invent missing distances."
             ),
         )
         return {
@@ -150,8 +155,13 @@ class GroqCognitivePlanningClient:
                 "For reuse provide placement with translation_m and rotation_deg as x/y/z objects "
                 "in meters Z-up and degrees, and scale {x:1,y:1,z:1}. "
                 "Never stretch a reused asset. "
-                "Reuse currently supports one independent component only; required relationships "
-                "need clarification until executable assembly is available."
+                "Catalog compose is limited to singleton rigid components with one required "
+                "aligned_with relationship per composed source, targeting a reused or composed "
+                "catalog component. Parameters must contain only offset_world_m:{x,y,z}; "
+                "the compiler derives world position and copies target orientation. Omit placement "
+                "for compose. Ports, parent hierarchy, contact and fastening are unsupported. "
+                "A reused singleton can anchor composed components. Other required relationships "
+                "need clarification until their execution is supported."
             ),
         )
 

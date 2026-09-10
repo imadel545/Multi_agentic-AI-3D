@@ -12,6 +12,7 @@ from core.contracts.scene import PreviewSpec, SceneSpec, VisualElements
 from core.services.asset_registry import AssetRegistry
 from core.services.capability_registry import CapabilityRegistry
 from core.services.cognitive_asset_reuse import compile_asset_reuse, observe_asset_admission
+from core.services.cognitive_composition import compile_catalog_composition
 from core.services.geometry_capabilities import (
     capability_id_for_geometry_node,
     geometry_capability_registry,
@@ -96,6 +97,7 @@ class CognitiveSceneCompiler:
             program for program in geometry_programs if program not in exact_supplied
         ]
         reused_programs = []
+        composition_programs, rigid_relations = compile_catalog_composition(self.registry, plan)
         program_by_role = {program.semantic_role: program for program in supplied_programs}
         if len(program_by_role) != len(supplied_programs):
             raise ValueError("COGNITIVE_GEOMETRY_PROGRAM_ROLES_DUPLICATED")
@@ -113,6 +115,8 @@ class CognitiveSceneCompiler:
                     raise ValueError(
                         f"COGNITIVE_GEOMETRY_QUANTITY_MISMATCH:{decision.component_id}"
                     )
+            elif decision.component_id in composition_programs:
+                reused_programs.append(composition_programs[decision.component_id])
             elif decision.strategy == "reuse":
                 reused_programs.append(
                     compile_asset_reuse(self.registry, plan, component, decision)
@@ -154,6 +158,7 @@ class CognitiveSceneCompiler:
             cognitive_plan_sha256=cognitive_plan_hash(plan),
             detail_level=detail_level,
             geometry_programs=[*supplied_programs, *reused_programs],
+            rigid_component_relations=rigid_relations,
             visual_elements=VisualElements(
                 include_sector_beams=False,
                 include_azimuth_arrows=False,

@@ -290,7 +290,7 @@ def test_generic_retrieval_requires_explicit_cognitive_execution_authorization(
     assert results[0].candidate_id == "AUTHORIZED_GENERIC_PANEL"
     assert results[0].decision_packet is not None
     assert results[0].decision_packet.compatibility.compatible_roles == ["sector_antenna"]
-    assert results[0].allowed_strategies == ["reuse"]
+    assert results[0].allowed_strategies == ["reuse", "compose"]
     assert any("one rigid" in limitation for limitation in results[0].limitations)
 
 

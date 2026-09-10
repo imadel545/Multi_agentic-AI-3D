@@ -24,6 +24,7 @@ from core.contracts.parametric import (
 )
 from core.contracts.scene import SceneSpec
 from core.qa.gltf_integrity import inspect_gltf_integrity
+from core.qa.rigid_relation_inspector import inspect_rigid_relations
 
 SemanticInspectionMode = Literal[
     "semantic_extras",
@@ -1159,6 +1160,9 @@ def _validate_generic_program_mesh(
         "scene_dimensions_positive",
         "scene_scale_bounded",
     }
+    relation_checks = inspect_rigid_relations(scene, payload)
+    checks.extend(relation_checks)
+    required.update(check.name for check in relation_checks)
     failed = [check.name for check in checks if check.name in required and not check.passed]
     return MeshQAReport(
         level="mesh_level_basic",

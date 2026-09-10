@@ -1,5 +1,19 @@
 # QA Strategy
 
+## Rigid catalog composition proof — 2026-09-10
+
+`tests/e2e/test_generic_rigid_composition.py` runs two actual Blender generations
+using the existing internal `ANT_PANEL_4G_001`, a controlled cognitive planner
+and a required `aligned_with` relation. Offsets of 0.80 m and 1.20 m change only
+the driven component placement, preserving both sets of source-local vertices.
+Both generated results receive certificates and persist real mesh-QA reports.
+The 1.20 m output has measured position error `4.76837159e-08` m and zero
+orientation-matrix error. Editing its exported placement by 0.05 m makes the
+full `MeshQA.validate` result fail. Meshes detached from their placement parent,
+missing/duplicate identities and mismatched orientation are rejected too.
+The final real regression passed in 32.31 s. These are separate generations,
+not a frontend/versioned-edit proof, and no professional source was admitted.
+
 ## Native CAD inspection proof — 2026-09-10
 
 `tests/e2e/test_native_cad_inspection.py` uses the original local

@@ -12,6 +12,7 @@ from core.contracts.assets import (
 from core.contracts.common import AssetType, DetailLevel, NetworkType, StrictModel
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.parametric import GenerationStrategy, GeometrySource
+from core.contracts.rigid_relations import RigidComponentRelation
 from core.contracts.tower import TowerCharacteristics
 
 
@@ -191,11 +192,32 @@ class SceneSpec(StrictModel):
     accessory_assets: list[SceneAccessoryPlacement] = Field(default_factory=list)
     assembly_plan: AssemblyPlan | None = None
     geometry_programs: list[GeometryProgram] = Field(default_factory=list, max_length=32)
+    rigid_component_relations: list[RigidComponentRelation] = Field(
+        default_factory=list, max_length=24, exclude_if=lambda value: not value
+    )
     preview: PreviewSpec = Field(default_factory=PreviewSpec)
     export: ExportSpec = Field(default_factory=ExportSpec)
 
     @model_validator(mode="after")
     def validate_scene_geometry(self) -> "SceneSpec":
+        program_ids = {program.program_id for program in self.geometry_programs}
+        exact_ids = {
+            program.program_id
+            for program in self.geometry_programs
+            if len(program.nodes) == 1 and program.nodes[0].kind == "exact_asset"
+        }
+        relation_ids = [relation.relationship_id for relation in self.rigid_component_relations]
+        driven_ids = [relation.source_program_id for relation in self.rigid_component_relations]
+        if len(set(relation_ids)) != len(relation_ids) or len(set(driven_ids)) != len(driven_ids):
+            raise ValueError("Rigid relation IDs and driven components must be unique.")
+        for relation in self.rigid_component_relations:
+            if (
+                self.schema_version != "2.0.0"
+                or relation.source_program_id == relation.target_program_id
+                or not {relation.source_program_id, relation.target_program_id} <= program_ids
+                or not {relation.source_program_id, relation.target_program_id} <= exact_ids
+            ):
+                raise ValueError("Rigid relation requires two distinct generic programs.")
         if self.schema_version == "1.0.0":
             if self.design_domain is not None:
                 raise ValueError("SceneSpec 1.0 does not accept a generic design domain")

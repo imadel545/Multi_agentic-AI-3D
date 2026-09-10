@@ -90,9 +90,9 @@ The generic cognitive compiler now executes a bounded `reuse` decision through
 one compiler-authored `exact_asset` node per independent component. The initial
 opted-in source is `ANT_PANEL_4G_001`, an internal project-generated panel; this
 is not a manufacturer-qualified asset. Each source has explicit rigid placement,
-quantity one, unchanged scale/materials and pinned manifest/GLB hashes. Required
-relationships, parameter adaptation and procedural rebuilding of imported
-sources are rejected. `adapt` and `compose` remain unsupported in this route.
+quantity one, unchanged scale/materials and pinned manifest/GLB hashes. Parameter
+adaptation and procedural rebuilding of imported sources are rejected. The rigid
+composition checkpoint below extends the original independent-reuse boundary.
 
 Admission executes catalog/file validation and explicitly reports
 `blender_executed: false`. Actual completion still requires Blender, exported
@@ -106,6 +106,29 @@ The existing chat adds an “Intention libre” entry, with backend routing and
 experimental wording. Component proofs distinguish catalog reuse from generated
 geometry. Frontend automated checks cover these changes; their visual acceptance
 is pending. No additional browser session was used in this slice.
+
+## Rigid catalog composition checkpoint — 2026-09-10
+
+`compose` now executes a bounded required `aligned_with` relationship between
+singleton exact catalog components. Each driven component has one target and an
+explicit `offset_world_m` vector. The compiler derives its position and copies
+target orientation; an explicitly placed `reuse` component roots the acyclic
+chain. Unsupported relations, ports, parents, cycles, multiple drivers, manual
+placement of driven components and unauthorized transforms are refused.
+
+The persisted SceneSpec carries `rigid_component_relations`, and exported GLB QA
+measures relative position and orientation while checking that component meshes
+remain descendants of their placement nodes. This is a required mesh QA check,
+not just planning metadata. Component proofs distinguish `compose` from `reuse`.
+Source geometry/materials remain unchanged; contact, fastening and collision
+are not inferred from aligned origins.
+
+The real Blender regression generated two internal panels at 0.80 m and 1.20 m
+relative X offsets in two separate runs. Both received completion certificates;
+the fixed component and source-local vertices remained unchanged. Deliberately
+displacing the exported driven node by 0.05 m fails mesh QA. The two runs use a
+controlled planner, not a live-provider or frontend edit/version acceptance.
+This does not add professional assets or generic parameter adaptation.
 
 ## Targeted editing checkpoint — 2026-09-09
 
@@ -184,8 +207,8 @@ not manufacturer fidelity, physical fastening or collision certification.
   now unify candidate exposure. The telecom assembly route persists the
   semantic strategy chosen from its authorized candidates and validates it
   deterministically. The generic cognitive route can expose qualified
-  candidates, but its compiler does not yet execute generic
-  `reuse`/`adapt`/`compose` strategies.
+  candidates. This earlier compiler limitation was superseded on 2026-09-10
+  for opted-in exact `reuse` and bounded rigid `compose`; `adapt` remains open.
 - The current runtime catalog still contains 13 usable internal/technical
   manifests, but **0 of 13 passes the new professional M1 proof gate**.
   `ProfessionalAssetVerifier` is now the filesystem-aware authority for that
@@ -941,8 +964,8 @@ Statut autoritaire: `IMPLEMENTED_PARTIAL`.
 Ce statut n'est pas `IMPLEMENTED`: le parcours télécom GPT-OSS réel du
 2026-08-03 passe après correction des contrats JSON, des bounds de sweep, des
 transformations booléennes et de l'ancrage au sol, mais les trois scénarios
-génériques réels ne sont pas tous passés et la sélection/réutilisation d'assets
-génériques hors domaine télécom n'est pas encore exécutable: le retriever expose
-des candidats qualifiés, mais le compilateur maintient
-`allowed_strategies=[]` pour `reuse`/`adapt`/`compose`. Aucune convergence
+génériques réels ne sont pas tous passés. La limitation initiale de réutilisation
+a été dépassée le 2026-09-10 pour les sources explicitement activées : `reuse`
+exact et `compose` par alignement rigide sont exécutables. `adapt`, assemblage
+arbitraire et qualification professionnelle restent ouverts. Aucune convergence
 globale n'est déclarée.

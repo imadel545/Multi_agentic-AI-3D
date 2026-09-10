@@ -291,7 +291,13 @@ def _geometry_program_proof(bpy, program: dict) -> dict:
         "component_id": f"geometry_program:{program_id}",
         "role_id": str(program["semantic_role"]),
         "origin": "catalog_asset" if exact_nodes else "geometry_program",
-        "strategy": "reuse" if exact_nodes else "procedural_generate",
+        "strategy": (
+            "compose"
+            if exact_nodes and program.get("generator_model") == "catalog_rigid_composition"
+            else "reuse"
+            if exact_nodes
+            else "procedural_generate"
+        ),
         "generation_strategy": "imported_glb_exact" if exact_nodes else geometry_program_profile,
         "asset_id": exact_nodes[0]["asset_id"] if exact_nodes else None,
         "manifest": None,

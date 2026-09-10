@@ -87,6 +87,16 @@ Groq et ne signifie pas qu'une sortie métier a passé sa validation Pydantic.
 
 ## Artifacts importants
 
+Pour les scènes génériques, `scene_spec` peut contenir une liste additive
+`rigid_component_relations`. Son absence signifie qu'aucune de ces relations
+bornées n'est déclarée. Le composant piloté par `aligned_with` expose
+`strategy=compose` dans `component_proofs`, tout en conservant
+`generation_strategy=imported_glb_exact`. Le résultat mesuré figure dans les
+checks `rigid_relation:*` de `geometry_validation.mesh_qa`; le code technique ne
+doit pas devenir le message principal de l'UI. Cette relation prouve position
+relative et orientation, sans preuve de contact ou fixation physique. Aucun
+endpoint d'inspection CAD ni nouvel état de workflow n'est ajouté.
+
 Noms d'artifact utilisés par le frontend :
 
 - `glb` → `design.glb`
