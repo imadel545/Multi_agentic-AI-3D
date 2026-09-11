@@ -41,6 +41,7 @@ import type {
 } from "./api/schemas";
 import {
   BackendStatusBar,
+  ActiveWorkflowContext,
   ChatCommandPanel,
   CurrentOperationStrip,
   InspectorDock,
@@ -1448,6 +1449,15 @@ export default function App({ apiClient = api }: AppProps) {
             conversation={
               state.workflowId ? (
                 <DurableConversation
+                  activeContext={
+                    <ActiveWorkflowContext
+                      activeRequirements={state.prompt.trim() ? null : activeRequirements}
+                      currentPrompt={
+                        analysisIsCurrent || analysisWasSubmitted ? state.prompt : ""
+                      }
+                      versions={versions}
+                    />
+                  }
                   apiClient={apiClient}
                   workflowId={state.workflowId}
                   busy={revisionBusy}

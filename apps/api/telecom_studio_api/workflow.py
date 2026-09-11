@@ -81,6 +81,22 @@ class VerifiedViewerSnapshot:
     assembly_plan: AssemblyPlan | None
 
 
+def _conversation_outcome_payload(result: SceneEditResult, edit_id: str) -> dict:
+    if result.status == "applied":
+        message = "La modification a été appliquée et vérifiée."
+    elif result.status == "rejected":
+        message = "La modification a été refusée. La version précédente est conservée."
+    else:
+        message = "La modification n’a pas abouti. Vérifiez la version active avant de réessayer."
+    return {
+        "status": "completed" if result.status == "applied" else "failed",
+        "edit_result_status": result.status,
+        "edit_id": edit_id,
+        "version_id": result.version_id,
+        "conversation_message": {"role": "system", "text": message},
+    }
+
+
 class WorkflowService:
     _SUBSCRIBER_QUEUE_MAX_SIZE = 1024
 
@@ -1304,20 +1320,7 @@ class WorkflowService:
                         lambda: self._emit_workflow_event(
                             workflow_id,
                             "edit_outcome",
-                            {
-                                "status": "completed" if result.status == "applied" else "failed",
-                                "edit_result_status": result.status,
-                                "edit_id": edit_id,
-                                "conversation_message": {
-                                    "role": "system",
-                                    "text": "La modification a été appliquée et vérifiée."
-                                    if result.status == "applied"
-                                    else (
-                                        "La modification n’a pas été appliquée. "
-                                        "La version précédente est conservée."
-                                    ),
-                                },
-                            },
+                            _conversation_outcome_payload(result, edit_id),
                         ),
                     )
                     return result

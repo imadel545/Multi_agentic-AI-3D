@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { TelecomStudioApi } from "../api/client";
 import type { Conversation } from "../api/schemas";
 import { ResourceRecovery } from "./StudioPrimitives";
 
 export function DurableConversation({
-  apiClient, workflowId, revision, busy
+  activeContext, apiClient, workflowId, revision, busy
 }: {
+  activeContext?: ReactNode;
   apiClient: TelecomStudioApi;
   workflowId: string;
   revision: string;
@@ -29,6 +30,7 @@ export function DurableConversation({
     return () => { current = false; };
   }, [apiClient, workflowId, revision, busy, retry]);
   const conversation = snapshot?.workflow_id === workflowId ? snapshot : null;
+  const shouldShowActiveContext = failed || conversation?.history_status !== "recorded";
   return <div className="conversation-history" aria-label="Conversation enregistrée">
     <span className="conversation-history-label">Conversation enregistrée</span>
     {loading ? <p className="muted" role="status">Chargement de la conversation…</p> : null}
@@ -51,5 +53,6 @@ export function DurableConversation({
         </article>
       )}
     </div>
+    {shouldShowActiveContext ? activeContext : null}
   </div>;
 }

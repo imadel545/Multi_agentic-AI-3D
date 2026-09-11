@@ -39,9 +39,38 @@ it("keeps loaded messages visible when synchronization fails", async () => {
   const conversation = vi.fn().mockResolvedValueOnce(history("wf_a", "Demande conservée"))
     .mockRejectedValueOnce(new Error("offline"));
   const apiClient = { conversation } as unknown as TelecomStudioApi;
-  const view = render(<DurableConversation apiClient={apiClient} workflowId="wf_a" revision="one" busy={false} />);
+  const view = render(<DurableConversation
+    activeContext={<p>Contexte actif hors journal</p>}
+    apiClient={apiClient}
+    workflowId="wf_a"
+    revision="one"
+    busy={false}
+  />);
   await screen.findByText("Demande conservée");
-  view.rerender(<DurableConversation apiClient={apiClient} workflowId="wf_a" revision="two" busy={false} />);
+  view.rerender(<DurableConversation
+    activeContext={<p>Contexte actif hors journal</p>}
+    apiClient={apiClient}
+    workflowId="wf_a"
+    revision="two"
+    busy={false}
+  />);
   expect(await screen.findByRole("alert")).toHaveTextContent("n’a pas pu être synchronisée");
   expect(screen.getByText("Demande conservée")).toBeInTheDocument();
+  expect(screen.getByText("Contexte actif hors journal")).toBeInTheDocument();
+});
+
+it("keeps real active context distinct from a partial legacy journal", async () => {
+  const apiClient = {
+    conversation: vi.fn().mockResolvedValue({ ...history("wf_a", "Ancienne modification"), history_status: "legacy_partial" })
+  } as unknown as TelecomStudioApi;
+  render(<DurableConversation
+    activeContext={<p>Version active connue</p>}
+    apiClient={apiClient}
+    workflowId="wf_a"
+    revision="one"
+    busy={false}
+  />);
+  expect(await screen.findByText("Ancienne modification")).toBeInTheDocument();
+  expect(screen.getByText("Version active connue")).toBeInTheDocument();
+  expect(screen.getByText("Historique ancien partiel", { exact: false })).toBeInTheDocument();
 });

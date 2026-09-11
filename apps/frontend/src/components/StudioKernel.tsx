@@ -560,6 +560,41 @@ function ConversationHistory({
   );
 }
 
+export function ActiveWorkflowContext({
+  activeRequirements,
+  currentPrompt,
+  versions
+}: {
+  activeRequirements: RequirementSpec | null;
+  currentPrompt: string;
+  versions: PublicVersionInfo[];
+}) {
+  const entries = conversationHistoryEntries({ activeRequirements, currentPrompt, versions });
+  if (!entries.length) return null;
+  return (
+    <section className="conversation-history" aria-label="Contexte actif non archivé">
+      <span className="conversation-history-label">Contexte actif non archivé</span>
+      <p className="muted">
+        Ces informations sont le contexte courant du design, pas des messages retrouvés dans le journal.
+      </p>
+      <div className="conversation-history-list">
+        {entries.map((entry) => (
+          <article className="conversation-entry system" key={entry.id}>
+            <strong>{activeContextLabel(entry)}</strong>
+            <p>{entry.message}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function activeContextLabel(entry: ConversationEntry): string {
+  if (entry.id === "current-prompt") return "Demande active";
+  if (entry.id === "restored-requirements") return "Exigences actives";
+  return entry.label.includes("active") ? "Version active" : "Version enregistrée";
+}
+
 function RequirementsUnderstanding({
   analysis,
   failedWorkflow,
