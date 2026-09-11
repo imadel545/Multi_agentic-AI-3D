@@ -913,6 +913,29 @@ export const AssetLibrarySearchSchema = publicSchema(
   })
 );
 
+export const AssetLibraryProbeSchema = publicSchema(
+  UnknownRecord.extend({
+    file: AssetLibraryEntrySchema,
+    probe_status: z.string(),
+    tool: z.string(),
+    parser_mode: z.string().nullish(),
+    sanitized_non_finite_values: z.number().int().nonnegative().nullish(),
+    dwg_version: z.string().nullish(),
+    declared_unit: z.string().nullish(),
+    unit_scale_to_meters: z.number().positive().nullish(),
+    insunits_code: z.number().int().nullish(),
+    display_unit_name: z.string().nullish(),
+    unit_metadata_conflict: z.boolean().default(false),
+    entity_counts: z.record(z.string(), z.number().int().nonnegative()).default({}),
+    contains_acis_3d_solids: z.boolean(),
+    contains_mesh_convertible_geometry: z.boolean(),
+    conversion_route: z.string(),
+    blender_ready: z.boolean(),
+    generation_eligible: z.boolean(),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
 export const ResolvedAdaptationCapabilitySchema = publicSchema(
   UnknownRecord.extend({
     capability_id: z.string(),
@@ -1225,6 +1248,7 @@ export type QualifiedAssetInventoryEntry = z.infer<typeof QualifiedAssetInventor
 export type AssetLibrarySummary = z.infer<typeof AssetLibrarySummarySchema>;
 export type AssetLibraryEntry = z.infer<typeof AssetLibraryEntrySchema>;
 export type AssetLibrarySearch = z.infer<typeof AssetLibrarySearchSchema>;
+export type AssetLibraryProbe = z.infer<typeof AssetLibraryProbeSchema>;
 export type AdaptationCapabilityCatalog = z.infer<typeof AdaptationCapabilityCatalogSchema>;
 export type SceneAdaptationCapabilities = z.infer<typeof SceneAdaptationCapabilitiesSchema>;
 export type ResolvedAdaptationCapability = z.infer<typeof ResolvedAdaptationCapabilitySchema>;

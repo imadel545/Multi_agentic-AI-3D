@@ -1884,6 +1884,84 @@ describe("studio kernel components", () => {
     expect(screen.queryByRole("button", { name: /Blender|utiliser/i })).not.toBeInTheDocument();
   });
 
+  it("shows a real CAD probe without promoting the raw source to Blender", () => {
+    const onProbe = vi.fn();
+    render(
+      <AssetLibraryPanel
+        onProbe={onProbe}
+        probe={{
+          file: {
+            file_id: "lib_rfs_mount",
+            relative_path: "3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg",
+            extension: "dwg",
+            size_bytes: 8192,
+            claimed_dimension: "3d",
+            category: "Antenne",
+            license_status: "unknown_requires_review",
+            qualification_status: "quarantined_unverified",
+            conversion_status: "not_attempted",
+            generation_eligible: false,
+            reference_preview_file_ids: [],
+            related_cad_file_ids: []
+          },
+          probe_status: "completed",
+          tool: "dwgread",
+          declared_unit: "millimeters",
+          unit_metadata_conflict: true,
+          entity_counts: { "3DSOLID": 4 },
+          contains_acis_3d_solids: true,
+          contains_mesh_convertible_geometry: false,
+          conversion_route: "requires_acis_brep_bridge",
+          blender_ready: false,
+          generation_eligible: false,
+          limitations: ["La licence et les unités doivent être confirmées avant validation."]
+        }}
+        search={{
+          query: "APM40 fixation",
+          filters: {},
+          result_count: 1,
+          results: [{
+            file_id: "lib_rfs_mount",
+            relative_path: "3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg",
+            extension: "dwg",
+            size_bytes: 8192,
+            claimed_dimension: "3d",
+            category: "Antenne",
+            duplicate_of: null,
+            license_status: "unknown_requires_review",
+            qualification_status: "quarantined_unverified",
+            conversion_status: "not_attempted",
+            generation_eligible: false,
+            reference_preview_file_ids: [],
+            related_cad_file_ids: []
+          }],
+          selection_policy: "metadata_retrieval_only",
+          generation_eligible: false,
+          next_action: "Qualifier avant usage."
+        }}
+        summary={{
+          status: "catalogued_quarantined",
+          schema_version: "1.1.0",
+          catalog_available: true,
+          generation_eligible_count: 0,
+          cad_with_reference_preview_count: 0,
+          reference_preview_link_count: 0,
+          dwg_probe_available: true,
+          limitations: []
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Analyser la géométrie locale" }));
+
+    expect(onProbe).toHaveBeenCalledWith("lib_rfs_mount");
+    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(
+      "Une passerelle CAD B-Rep vérifiée est requise"
+    );
+    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(/Prêt pour Blender\s*non/);
+    expect(screen.queryByRole("button", { name: /utiliser.*blender|générer/i })).not.toBeInTheDocument();
+  });
+
   it("keeps inspector content behind contextual drawers", () => {
     render(
       <InspectorDock

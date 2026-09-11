@@ -28,6 +28,7 @@ import type {
   LLMDecisionProvenance,
   MultimodalConsent,
   AssetInventory,
+  AssetLibraryProbe,
   AssetLibrarySearch,
   AssetLibrarySummary,
   ParseRequirementsResponse,
@@ -83,6 +84,9 @@ export default function App({ apiClient = api }: AppProps) {
     useState<AssetLibrarySearch | null>(null);
   const [assetLibrarySearchBusy, setAssetLibrarySearchBusy] = useState(false);
   const [assetLibrarySearchError, setAssetLibrarySearchError] = useState<string | null>(null);
+  const [assetLibraryProbe, setAssetLibraryProbe] = useState<AssetLibraryProbe | null>(null);
+  const [assetLibraryProbeBusy, setAssetLibraryProbeBusy] = useState(false);
+  const [assetLibraryProbeError, setAssetLibraryProbeError] = useState<string | null>(null);
   const [adaptationCatalog, setAdaptationCatalog] =
     useState<AdaptationCapabilityCatalog | null>(null);
   const [adaptationCapabilities, setAdaptationCapabilities] =
@@ -138,6 +142,7 @@ export default function App({ apiClient = api }: AppProps) {
   const terminalBundleAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
   const lastAssetLibraryQueryRef = useRef<string | null>(null);
+  const lastAssetLibraryProbeRef = useRef<string | null>(null);
   const toArtifactUrl = useCallback(
     (url: string | null | undefined) => apiClient.artifactUrl(url),
     [apiClient]
@@ -309,9 +314,11 @@ export default function App({ apiClient = api }: AppProps) {
     void loadHealth().catch(() => undefined);
     void loadStudioSummary().catch(() => undefined);
     void loadAssetInventory().catch(() => undefined);
+    void loadAssetLibrarySummary().catch(() => undefined);
     void loadDocumentCapabilities().catch(() => undefined);
   }, [
     loadAssetInventory,
+    loadAssetLibrarySummary,
     loadDocumentCapabilities,
     loadHealth,
     loadStudioSummary
@@ -418,6 +425,9 @@ export default function App({ apiClient = api }: AppProps) {
       const normalizedQuery = query.trim();
       if (!normalizedQuery) return;
       lastAssetLibraryQueryRef.current = normalizedQuery;
+      lastAssetLibraryProbeRef.current = null;
+      setAssetLibraryProbe(null);
+      setAssetLibraryProbeError(null);
       setAssetLibrarySearchBusy(true);
       setAssetLibrarySearchError(null);
       try {
@@ -432,6 +442,28 @@ export default function App({ apiClient = api }: AppProps) {
         setAssetLibrarySearchError(userFacingError(error, "assets"));
       } finally {
         setAssetLibrarySearchBusy(false);
+      }
+    },
+    [apiClient, loadSurfaceResource]
+  );
+
+  const probeAssetLibrary = useCallback(
+    async (fileId: string) => {
+      lastAssetLibraryProbeRef.current = fileId;
+      setAssetLibraryProbeBusy(true);
+      setAssetLibraryProbeError(null);
+      try {
+        await loadSurfaceResource(
+          "asset_library_probe",
+          () => apiClient.probeAssetLibrary(fileId),
+          setAssetLibraryProbe,
+          "assets",
+          () => setAssetLibraryProbe(null)
+        );
+      } catch (error) {
+        setAssetLibraryProbeError(userFacingError(error, "assets"));
+      } finally {
+        setAssetLibraryProbeBusy(false);
       }
     },
     [apiClient, loadSurfaceResource]
@@ -1289,6 +1321,11 @@ export default function App({ apiClient = api }: AppProps) {
       await searchAssetLibrary(lastAssetLibraryQueryRef.current);
     }
   }, [searchAssetLibrary]);
+  const retryAssetProbe = useCallback(async () => {
+    if (lastAssetLibraryProbeRef.current) {
+      await probeAssetLibrary(lastAssetLibraryProbeRef.current);
+    }
+  }, [probeAssetLibrary]);
   const retryQaEvidence = useCallback(async () => {
     const url = state.viewerBundle?.qa_report_url;
     if (!url) return;
@@ -1601,6 +1638,9 @@ export default function App({ apiClient = api }: AppProps) {
             assetLibrarySearch={assetLibrarySearch}
             assetLibrarySearchBusy={assetLibrarySearchBusy}
             assetLibrarySearchError={assetLibrarySearchError}
+            assetLibraryProbe={assetLibraryProbe}
+            assetLibraryProbeBusy={assetLibraryProbeBusy}
+            assetLibraryProbeError={assetLibraryProbeError}
             assetLibrarySummary={assetLibrarySummary}
             assetLibrarySummaryError={state.resourceErrors.asset_library ?? null}
             bundle={state.viewerBundle}
@@ -1639,12 +1679,14 @@ export default function App({ apiClient = api }: AppProps) {
             onRetryAdaptation={() => void retryAdaptationSurfaces()}
             onRetryAssets={() => void retryAssetSurfaces()}
             onRetryAssetSearch={() => void retryAssetSearch()}
+            onRetryAssetProbe={() => void retryAssetProbe()}
             onRetryLlmProvenance={() => void retryLlmProvenance().catch(() => undefined)}
             onRetryQaEvidence={() => void retryQaEvidence().catch(() => undefined)}
             onRetryRagEvidence={() => void retryRagEvidence().catch(() => undefined)}
             onRetryCognitiveEvidence={() => void retryCognitiveEvidence()}
             onRetryViewerBundle={() => void reloadViewerBundle().catch(() => undefined)}
             onSearchAssetLibrary={searchAssetLibrary}
+            onProbeAssetLibrary={probeAssetLibrary}
             rollbackBusyVersionId={rollbackBusyVersionId}
             selectedSemanticRoot={selectedSemanticRoot}
             versionMessage={versionMessage}

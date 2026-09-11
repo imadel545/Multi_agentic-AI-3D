@@ -3,6 +3,7 @@ import {
   AssemblyPlanEvidenceSchema,
   AssetInventorySchema,
   ContractValidationError,
+  AssetLibraryProbeSchema,
   AssetLibrarySearchSchema,
   ComponentProofsSchema,
   DocumentPackFieldSchema,
@@ -332,6 +333,41 @@ describe("frontend contract schemas", () => {
 
     expect(parsed.results[0]?.generation_eligible).toBe(false);
     expect(parsed.results[0]?.reference_preview_file_ids).toEqual(["lib_image"]);
+  });
+
+  it("preserves a real DWG probe as quarantined evidence", () => {
+    const parsed = parseContract("AssetLibraryProbe", AssetLibraryProbeSchema, {
+      file: {
+        file_id: "lib_rfs_mount",
+        relative_path: "3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg",
+        extension: "dwg",
+        size_bytes: 8192,
+        claimed_dimension: "3d",
+        category: "Antenne",
+        license_status: "unknown_requires_review",
+        qualification_status: "quarantined_unverified",
+        conversion_status: "not_attempted",
+        generation_eligible: false,
+        reference_preview_file_ids: []
+      },
+      probe_status: "completed",
+      tool: "dwgread",
+      parser_mode: "latin1_non_finite_normalized",
+      sanitized_non_finite_values: 2,
+      declared_unit: "millimeters",
+      unit_metadata_conflict: true,
+      entity_counts: { "3DSOLID": 4 },
+      contains_acis_3d_solids: true,
+      contains_mesh_convertible_geometry: false,
+      conversion_route: "requires_acis_brep_bridge",
+      blender_ready: false,
+      generation_eligible: false,
+      limitations: ["Les solides ACIS exigent une passerelle CAD B-Rep avant Blender."]
+    });
+
+    expect(parsed.file.generation_eligible).toBe(false);
+    expect(parsed.blender_ready).toBe(false);
+    expect(parsed.unit_metadata_conflict).toBe(true);
   });
 
   it("accepts real backend style viewer payloads", () => {

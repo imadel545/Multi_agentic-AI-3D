@@ -174,6 +174,51 @@ describe("TelecomStudioApi", () => {
     );
   });
 
+  it("requests a local geometry probe through the existing asset-library endpoint", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        file: {
+          file_id: "lib_rfs_mount",
+          relative_path: "3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg",
+          extension: "dwg",
+          size_bytes: 8192,
+          claimed_dimension: "3d",
+          category: "Antenne",
+          license_status: "unknown_requires_review",
+          qualification_status: "quarantined_unverified",
+          conversion_status: "not_attempted",
+          generation_eligible: false,
+          reference_preview_file_ids: []
+        },
+        probe_status: "completed",
+        tool: "dwgread",
+        declared_unit: "millimeters",
+        unit_metadata_conflict: true,
+        entity_counts: { "3DSOLID": 4 },
+        contains_acis_3d_solids: true,
+        contains_mesh_convertible_geometry: false,
+        conversion_route: "requires_acis_brep_bridge",
+        blender_ready: false,
+        generation_eligible: false,
+        limitations: ["Une conversion et une QA géométrique restent obligatoires."]
+      })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const result = await client.probeAssetLibrary("lib_rfs_mount");
+
+    expect(result.contains_acis_3d_solids).toBe(true);
+    expect(result.conversion_route).toBe("requires_acis_brep_bridge");
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/assets/library/lib_rfs_mount/probe", "http://127.0.0.1:8000"),
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}"
+      }
+    );
+  });
+
   it("posts designs to the existing /designs contract", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ workflow_id: "wf_1", status: "pending" }));
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);

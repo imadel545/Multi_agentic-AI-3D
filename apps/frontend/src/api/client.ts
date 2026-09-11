@@ -2,6 +2,7 @@ import {
   AdaptationCapabilityCatalogSchema,
   AssemblyPlanEvidenceSchema,
   AssetInventorySchema,
+  AssetLibraryProbeSchema,
   AssetLibrarySearchSchema,
   AssetLibrarySummarySchema,
   CreateDesignResponseSchema,
@@ -36,6 +37,7 @@ import {
   type AdaptationCapabilityCatalog,
   type AssemblyPlanEvidence,
   type AssetInventory,
+  type AssetLibraryProbe,
   type AssetLibrarySearch,
   type AssetLibrarySummary,
   type CreateDesignResponse,
@@ -148,6 +150,14 @@ export class TelecomStudioApi {
       "AssetLibrarySearch",
       AssetLibrarySearchSchema,
       await this.getJson(`/assets/library/search?${params.toString()}`)
+    );
+  }
+
+  async probeAssetLibrary(fileId: string): Promise<AssetLibraryProbe> {
+    return parseContract(
+      "AssetLibraryProbe",
+      AssetLibraryProbeSchema,
+      await this.postJson(`/assets/library/${encodeURIComponent(fileId)}/probe`, {})
     );
   }
 

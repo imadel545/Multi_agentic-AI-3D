@@ -23,6 +23,7 @@ import type {
   AdaptationCapabilityCatalog,
   AssemblyPlanEvidence,
   AssetDecisionSummary,
+  AssetLibraryProbe,
   AssetLibrarySearch,
   AssetLibrarySummary,
   AssetInventory,
@@ -1390,6 +1391,9 @@ export function InspectorDock({
   assetLibrarySearch = null,
   assetLibrarySearchBusy = false,
   assetLibrarySearchError = null,
+  assetLibraryProbe = null,
+  assetLibraryProbeBusy = false,
+  assetLibraryProbeError = null,
   assetLibrarySummary = null,
   assetLibrarySummaryError = null,
   assetLibraryLoading = false,
@@ -1418,18 +1422,20 @@ export function InspectorDock({
   onRollbackVersion,
   onRetryAdaptation,
   onRetryAssets,
+  onRetryAssetProbe,
   onRetryAssetSearch,
   onRetryLlmProvenance,
   onRetryQaEvidence,
   onRetryRagEvidence,
   onRetryCognitiveEvidence,
   onRetryViewerBundle,
+  onProbeAssetLibrary,
   onSearchAssetLibrary,
   onSelectSceneComponent,
   rollbackBusyVersionId,
   versionMessage,
-  versions
-  , selectedSemanticRoot = null
+  versions,
+  selectedSemanticRoot = null
 }: {
   assemblyPlan?: AssemblyPlanEvidence | null;
   adaptationCapabilities?: SceneAdaptationCapabilities | null;
@@ -1442,6 +1448,9 @@ export function InspectorDock({
   assetLibrarySearch?: AssetLibrarySearch | null;
   assetLibrarySearchBusy?: boolean;
   assetLibrarySearchError?: string | null;
+  assetLibraryProbe?: AssetLibraryProbe | null;
+  assetLibraryProbeBusy?: boolean;
+  assetLibraryProbeError?: string | null;
   assetLibrarySummary?: AssetLibrarySummary | null;
   assetLibrarySummaryError?: string | null;
   assetLibraryLoading?: boolean;
@@ -1470,12 +1479,14 @@ export function InspectorDock({
   onRollbackVersion: (versionId: string) => void;
   onRetryAdaptation?: () => void;
   onRetryAssets?: () => void;
+  onRetryAssetProbe?: () => void;
   onRetryAssetSearch?: () => void;
   onRetryLlmProvenance?: () => void;
   onRetryQaEvidence?: () => void;
   onRetryRagEvidence?: () => void;
   onRetryCognitiveEvidence?: () => void;
   onRetryViewerBundle?: () => void;
+  onProbeAssetLibrary?: (fileId: string) => void | Promise<void>;
   onSearchAssetLibrary?: (query: string) => void | Promise<void>;
   onSelectSceneComponent?: (semanticRoot: string | null) => void;
   rollbackBusyVersionId: string | null;
@@ -1640,8 +1651,13 @@ export function InspectorDock({
               inventoryError={assetInventoryError}
               loading={assetLibraryLoading}
               onRetry={onRetryAssets}
+              onRetryProbe={onRetryAssetProbe}
               onRetrySearch={onRetryAssetSearch}
+              onProbe={onProbeAssetLibrary}
               onSearch={onSearchAssetLibrary}
+              probe={assetLibraryProbe}
+              probeBusy={assetLibraryProbeBusy}
+              probeError={assetLibraryProbeError}
               search={assetLibrarySearch}
               summary={assetLibrarySummary}
               summaryError={assetLibrarySummaryError}

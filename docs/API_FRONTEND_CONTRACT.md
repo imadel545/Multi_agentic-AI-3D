@@ -57,9 +57,9 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `GET` | `/assets/{asset_id}/previews/{view}` | Preview qualifiée publiée par le manifest; existence et hash sont vérifiés avant service. |
 | `GET` | `/assets/adaptation-capabilities` | Catalogue versionné des profils d'adaptation. |
 | `GET` | `/designs/{id}/adaptation-capabilities` | Paramètres réellement modifiables dans la version active. |
-| `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles. |
+| `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles; chargé au démarrage pour le drawer Bibliothèque. |
 | `GET` | `/assets/library/search?q=...` | Recherche metadata-only consommée par le drawer Bibliothèque; expose quarantaine et liens d'aperçus, sans bouton de sélection Blender tant que `generation_eligible=false`. |
-| `POST` | `/assets/library/{file_id}/probe` | Probe isolé du format/entités et route de conversion requise; ne promeut pas le fichier. |
+| `POST` | `/assets/library/{file_id}/probe` | Action explicite du drawer Bibliothèque. Retourne unités, entités, présence ACIS/maillage et route de conversion; ne promeut pas le fichier. |
 | `POST` | `/document-packs` | Uploader un ZIP brut ou plusieurs fichiers via `multipart/form-data`. |
 | `GET` | `/document-packs/{pack_id}` | Résumé du pack. |
 | `GET` | `/document-packs/{pack_id}/consolidated-spec` | Spec consolidée. |
@@ -95,8 +95,9 @@ bornées n'est déclarée. Le composant piloté par `aligned_with` expose
 `generation_strategy=imported_glb_exact`. Le résultat mesuré figure dans les
 checks `rigid_relation:*` de `geometry_validation.mesh_qa`; le code technique ne
 doit pas devenir le message principal de l'UI. Cette relation prouve position
-relative et orientation, sans preuve de contact ou fixation physique. Aucun
-endpoint d'inspection CAD ni nouvel état de workflow n'est ajouté.
+relative et orientation, sans preuve de contact ou fixation physique. Elle
+n'ajoute aucun endpoint ni état de workflow; le probe CAD existant reste un
+diagnostic de bibliothèque explicitement demandé par l'utilisateur.
 
 Noms d'artifact utilisés par le frontend :
 
@@ -423,18 +424,19 @@ comme une sortie strictement décodée.
 1. `GET /health`.
 2. `GET /studio/summary` pour backend, Blender, Groq, RAG NVIDIA, assets et warnings.
 3. `GET /assets/inventory` pour le drawer assets.
-4. `GET /assets/adaptation-capabilities` pour le catalogue déclaré.
-5. `GET /document-packs/capabilities` pour configurer l'upload.
-6. `GET /designs` pour restaurer les designs locaux.
-7. `POST /designs` quand l'utilisateur envoie un prompt.
-8. Ouvrir `/designs/{workflow_id}/events/stream`.
+4. `GET /assets/library/summary` pour le catalogue CAD local et le statut du probe.
+5. `GET /assets/adaptation-capabilities` pour le catalogue déclaré.
+6. `GET /document-packs/capabilities` pour configurer l'upload.
+7. `GET /designs` pour restaurer les designs locaux.
+8. `POST /designs` quand l'utilisateur envoie un prompt.
+9. Ouvrir `/designs/{workflow_id}/events/stream`.
    Après fallback polling, appeler `/designs/{workflow_id}/events?after_sequence=N`
    et traiter le lot delta au lieu de relire l'historique complet.
-9. Charger `/designs/{id}/conversation` pour le workflow restauré, puis le
+10. Charger `/designs/{id}/conversation` pour le workflow restauré, puis le
    relire après les événements de création, d’édition ou de résultat.
-10. À l’événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
+11. À l’événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
     `/user-issues` et `/versions`.
-11. Charger `/designs/{id}/adaptation-capabilities` avant d’afficher les
+12. Charger `/designs/{id}/adaptation-capabilities` avant d’afficher les
     possibilités d’édition du design actif.
 
 Le frontend doit rendre:

@@ -1,6 +1,11 @@
 import { Boxes } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import type { AssetLibrarySearch, AssetLibrarySummary, AssetInventory } from "../api/schemas";
+import type {
+  AssetInventory,
+  AssetLibraryProbe,
+  AssetLibrarySearch,
+  AssetLibrarySummary
+} from "../api/schemas";
 import { List, Metric, PanelTitle, ResourceRecovery, formatInteger } from "./StudioPrimitives";
 
 export function AssetLibraryPanel({
@@ -11,7 +16,12 @@ export function AssetLibraryPanel({
   loading = false,
   onSearch,
   onRetry,
+  onRetryProbe,
   onRetrySearch,
+  onProbe,
+  probe = null,
+  probeBusy = false,
+  probeError = null,
   search = null,
   summary,
   summaryError = null
@@ -23,7 +33,12 @@ export function AssetLibraryPanel({
   loading?: boolean;
   onSearch?: (query: string) => void | Promise<void>;
   onRetry?: () => void;
+  onRetryProbe?: () => void;
   onRetrySearch?: () => void;
+  onProbe?: (fileId: string) => void | Promise<void>;
+  probe?: AssetLibraryProbe | null;
+  probeBusy?: boolean;
+  probeError?: string | null;
   search?: AssetLibrarySearch | null;
   summary: AssetLibrarySummary | null;
   summaryError?: string | null;
@@ -36,6 +51,7 @@ export function AssetLibraryPanel({
   const referenceAssets = (inventory?.entries ?? []).filter(
     (entry) => entry.qualification_status === "reference_only"
   );
+  const probeAvailable = summary?.dwg_probe_available !== false;
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (query.trim() && onSearch) void onSearch(query.trim());
@@ -180,9 +196,30 @@ export function AssetLibraryPanel({
                     <span>{entry.generation_eligible ? "Qualifié pour génération" : "En quarantaine"}</span>
                     <span>{entry.reference_preview_file_ids.length} aperçu{entry.reference_preview_file_ids.length > 1 ? "s" : ""}</span>
                   </div>
+                  {onProbe ? (
+                    <button
+                      disabled={busy || probeBusy || !probeAvailable}
+                      onClick={() => void onProbe(entry.file_id)}
+                      type="button"
+                    >
+                      {probeBusy ? "Analyse géométrique…" : "Analyser la géométrie locale"}
+                    </button>
+                  ) : null}
+                  {probe?.file.file_id === entry.file_id ? <CadProbeEvidence probe={probe} /> : null}
                 </article>
               )) : <p className="muted">Aucun fichier du catalogue ne correspond à cette recherche.</p>}
               <p className="library-next-action">{search.next_action}</p>
+              {probeError ? (
+                <ResourceRecovery
+                  busy={probeBusy}
+                  label="Le probe géométrique n’a pas abouti; le fichier reste en quarantaine."
+                  message={probeError}
+                  onRetry={onRetryProbe}
+                />
+              ) : null}
+              {!probeAvailable ? (
+                <p className="muted">Le probe DWG local est indisponible; aucun diagnostic n’est inventé.</p>
+              ) : null}
             </div>
           ) : null}
           <div className="summary-card warning-card">
@@ -206,6 +243,47 @@ export function AssetLibraryPanel({
       )}
     </section>
   );
+}
+
+function CadProbeEvidence({ probe }: { probe: AssetLibraryProbe }) {
+  return (
+    <section className="summary-card warning-card" aria-label="Résultat du probe géométrique">
+      <strong>Résultat du probe géométrique</strong>
+      <p>{cadProbeVerdict(probe)}</p>
+      <div className="metric-grid">
+        <Metric label="Unités source" value={probeUnitLabel(probe)} />
+        <Metric label="Solides ACIS" value={probe.contains_acis_3d_solids ? "détectés" : "absents"} />
+        <Metric label="Maillage natif" value={probe.contains_mesh_convertible_geometry ? "détecté" : "absent"} />
+        <Metric label="Prêt pour Blender" value={probe.blender_ready ? "oui" : "non"} />
+      </div>
+      <p className="muted">Entités détectées : {formatEntityCounts(probe.entity_counts)}</p>
+      <List title="Limites de qualification" items={probe.limitations} empty="Aucune limite publiée." />
+    </section>
+  );
+}
+
+function cadProbeVerdict(probe: AssetLibraryProbe): string {
+  if (probe.conversion_route === "requires_acis_brep_bridge") {
+    return "Des solides ACIS sont présents. Une passerelle CAD B-Rep vérifiée est requise avant toute conversion Blender.";
+  }
+  if (probe.contains_mesh_convertible_geometry) {
+    return "Un maillage natif est détecté. La conversion, les unités, les droits et la QA restent obligatoires avant toute admission.";
+  }
+  return "Le probe ne trouve pas de maillage natif exploitable. Ce fichier reste une référence ou un dessin 2D en quarantaine.";
+}
+
+function probeUnitLabel(probe: AssetLibraryProbe): string {
+  const unit = probe.declared_unit ?? "inconnues";
+  return probe.unit_metadata_conflict ? `${unit} · à confirmer` : unit;
+}
+
+function formatEntityCounts(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).filter(([, count]) => count > 0);
+  if (!entries.length) return "aucune entité exploitable";
+  return entries
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, count]) => `${kind} : ${count}`)
+    .join(" · ");
 }
 
 function libraryFileName(relativePath: string): string {
