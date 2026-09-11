@@ -446,10 +446,39 @@ class AssetLibrarySearchResponse(BaseModel):
     query: str
     filters: dict[str, Any] = Field(default_factory=dict)
     result_count: int
-    results: list[dict[str, Any]] = Field(default_factory=list)
+    results: list["AssetLibrarySearchEntry"] = Field(default_factory=list)
     selection_policy: str
     generation_eligible: bool
     next_action: str
+
+
+class AssetLibraryRetrievalEvidence(BaseModel):
+    """Explain the bounded catalogue lookup without implying mesh inspection."""
+
+    method: Literal["corpus_idf_metadata"]
+    matched_terms: dict[str, list[str]] = Field(default_factory=dict)
+    query_coverage: float = Field(ge=0.0, le=1.0)
+    geometry_verified: Literal[False] = False
+
+
+class AssetLibrarySearchEntry(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    file_id: str
+    relative_path: str
+    extension: str
+    size_bytes: int = Field(ge=0)
+    claimed_dimension: str
+    category: str
+    duplicate_of: str | None = None
+    license_status: str
+    qualification_status: str
+    conversion_status: str
+    generation_eligible: bool = False
+    reference_preview_file_ids: list[str] = Field(default_factory=list)
+    related_cad_file_ids: list[str] = Field(default_factory=list)
+    retrieval_score: float | None = None
+    retrieval_evidence: AssetLibraryRetrievalEvidence | None = None
 
 
 class AssetLibraryProbeResponse(BaseModel):

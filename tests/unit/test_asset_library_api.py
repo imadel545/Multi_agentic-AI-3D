@@ -28,6 +28,12 @@ def test_asset_library_endpoints_expose_quarantine_truth(tmp_path: Path, monkeyp
     assert search.status_code == 200
     assert search.json()["result_count"] == 1
     assert search.json()["results"][0]["qualification_status"] == "quarantined_unverified"
+    assert search.json()["results"][0]["retrieval_evidence"] == {
+        "method": "corpus_idf_metadata",
+        "matched_terms": {"30m": ["30m"], "pylone": ["pylone"]},
+        "query_coverage": 1.0,
+        "geometry_verified": False,
+    }
     assert search.json()["generation_eligible"] is False
 
 

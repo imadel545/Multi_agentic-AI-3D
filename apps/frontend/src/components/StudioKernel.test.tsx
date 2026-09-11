@@ -1860,7 +1860,13 @@ describe("studio kernel components", () => {
             conversion_status: "not_attempted",
             generation_eligible: false,
             reference_preview_file_ids: ["lib_preview_1", "lib_preview_2"],
-            related_cad_file_ids: []
+            related_cad_file_ids: [],
+            retrieval_evidence: {
+              method: "corpus_idf_metadata",
+              matched_terms: { pylone: ["pylone"], "30m": ["30m"] },
+              query_coverage: 1,
+              geometry_verified: false
+            }
           }],
           selection_policy: "metadata_retrieval_only",
           generation_eligible: false,
@@ -1881,6 +1887,12 @@ describe("studio kernel components", () => {
     expect(screen.getByText("Orange_Pylone_30m_Galva.dwg")).toBeInTheDocument();
     expect(screen.getByText("En quarantaine")).toBeInTheDocument();
     expect(screen.getByText("2 aperçus")).toBeInTheDocument();
+    expect(screen.getByLabelText("Preuve de recherche catalogue")).toHaveTextContent(
+      "Recherche lexicale dans le catalogue"
+    );
+    expect(screen.getByLabelText("Preuve de recherche catalogue")).toHaveTextContent(
+      "Géométrie non vérifiée"
+    );
     expect(screen.queryByRole("button", { name: /Blender|utiliser/i })).not.toBeInTheDocument();
   });
 

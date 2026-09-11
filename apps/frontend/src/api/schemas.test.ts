@@ -324,7 +324,13 @@ describe("frontend contract schemas", () => {
         qualification_status: "quarantined_unverified",
         conversion_status: "not_attempted",
         generation_eligible: false,
-        reference_preview_file_ids: ["lib_image"]
+        reference_preview_file_ids: ["lib_image"],
+        retrieval_evidence: {
+          method: "corpus_idf_metadata",
+          matched_terms: { pylone: ["pylone"], "30m": ["30m"] },
+          query_coverage: 1,
+          geometry_verified: false
+        }
       }],
       selection_policy: "metadata_retrieval_only",
       generation_eligible: false,
@@ -333,6 +339,7 @@ describe("frontend contract schemas", () => {
 
     expect(parsed.results[0]?.generation_eligible).toBe(false);
     expect(parsed.results[0]?.reference_preview_file_ids).toEqual(["lib_image"]);
+    expect(parsed.results[0]?.retrieval_evidence?.geometry_verified).toBe(false);
   });
 
   it("preserves a real DWG probe as quarantined evidence", () => {

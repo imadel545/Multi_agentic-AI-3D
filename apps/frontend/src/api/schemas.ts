@@ -897,7 +897,15 @@ export const AssetLibraryEntrySchema = publicSchema(
     generation_eligible: z.boolean().default(false),
     reference_preview_file_ids: z.array(z.string()).default([]),
     related_cad_file_ids: z.array(z.string()).default([]),
-    retrieval_score: z.number().optional()
+    retrieval_score: z.number().optional(),
+    retrieval_evidence: publicSchema(
+      UnknownRecord.extend({
+        method: z.literal("corpus_idf_metadata"),
+        matched_terms: z.record(z.string(), z.array(z.string())).default({}),
+        query_coverage: z.number().min(0).max(1),
+        geometry_verified: z.literal(false)
+      })
+    ).nullish()
   })
 );
 

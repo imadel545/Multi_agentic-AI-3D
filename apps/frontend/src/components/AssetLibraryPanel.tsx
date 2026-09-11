@@ -145,8 +145,8 @@ export function AssetLibraryPanel({
           <div className="summary-card">
             <strong>{formatInteger(summary.file_count ?? 0)} fichiers catalogués</strong>
             <p>
-              Chaque fichier est recherché par contenu et provenance. Aucun brut n'est utilisé
-              dans Blender avant qualification et conversion contrôlée.
+              La recherche exploite les noms et chemins catalogués. Aucun fichier brut n'est
+              analysé comme géométrie ni utilisé dans Blender avant qualification et conversion contrôlée.
             </p>
           </div>
           <div className="metric-grid">
@@ -196,6 +196,7 @@ export function AssetLibraryPanel({
                     <span>{entry.generation_eligible ? "Qualifié pour génération" : "En quarantaine"}</span>
                     <span>{entry.reference_preview_file_ids.length} aperçu{entry.reference_preview_file_ids.length > 1 ? "s" : ""}</span>
                   </div>
+                  {entry.retrieval_evidence ? <LibraryRetrievalEvidence entry={entry} /> : null}
                   {onProbe ? (
                     <button
                       disabled={busy || probeBusy || !probeAvailable}
@@ -242,6 +243,20 @@ export function AssetLibraryPanel({
         <p className="muted">Aucun catalogue n’a encore été publié par le backend.</p>
       )}
     </section>
+  );
+}
+
+function LibraryRetrievalEvidence({ entry }: { entry: AssetLibrarySearch["results"][number] }) {
+  const evidence = entry.retrieval_evidence;
+  if (!evidence) return null;
+  const matched = Object.entries(evidence.matched_terms)
+    .map(([requested, terms]) => `${requested} → ${terms.join(", ")}`)
+    .join(" · ");
+  return (
+    <p className="muted" aria-label="Preuve de recherche catalogue">
+      Recherche lexicale dans le catalogue · couverture {Math.round(evidence.query_coverage * 100)} %
+      {matched ? ` · termes trouvés : ${matched}` : ""}. Géométrie non vérifiée.
+    </p>
   );
 }
 
