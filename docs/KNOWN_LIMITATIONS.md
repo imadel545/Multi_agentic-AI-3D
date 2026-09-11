@@ -319,6 +319,22 @@ frontend.
   models contain `3DSOLID` ACIS/B-Rep entities, so converting them through DXF
   alone is not accepted as mesh proof. A real B-Rep conversion tool and
   post-conversion unit, mesh, semantic-role and visual QA are still required.
+- The focused 2026-09-11 candidate `APM40_Fixation.dwg` from the local
+  `MAJ des Blocs` corpus is a real ACIS source candidate, not an admitted
+  component: its catalog hash is
+  `3c4b69804d39b6bd793594c16cefde7b5bd272f437cb54120e5323f1771ce262`, its
+  DWG header is `AC1018`, and the local probe finds four `3DSOLID`, five
+  blocks and three inserts with millimetre `INSUNITS`, but no native mesh.
+  The project-owner authorization permits local derivative qualification work;
+  it does not establish manufacturer identity, engineering fit, scale, anchors
+  or a faithful tessellation. The source remains quarantined until all of those
+  checks are recorded.
+- ODA Drawings Explorer 27.1.0.0 is installed locally, but this installation
+  exposes only its interactive viewer executable. It does not include
+  `ODAFileConverter`, a supported batch exporter, or a documented SAT/STEP/mesh
+  conversion command. Bundled B-Rep libraries are not treated as a callable
+  conversion API. A product bridge requires a tool and licence that explicitly
+  export a neutral B-Rep or controlled tessellation for a bounded benchmark.
 - A focused probe of `Axians_Nedea_36m.dwg` found 99 `3DSOLID`, 440 block
   inserts and no mesh-convertible entity. `INSUNITS` says millimeters while the
   display-unit label conflicts. The candidate is not Blender-ready and cannot

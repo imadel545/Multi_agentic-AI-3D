@@ -513,6 +513,20 @@ not manufacturer fidelity, physical fastening or collision certification.
   but it is not accepted as a B-Rep tessellator. A controlled ACIS/OpenCascade,
   ODA or vendor-CAD conversion path plus unit/material/geometry QA is required
   before any entry can become a production manifest.
+- The bounded professional subassembly candidate is now
+  `3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg` from the local corpus
+  (catalog `lib_44c738f8639aff42ee3b`). Its source hash, DWG header, units and
+  four ACIS solids are observable through the library probe. It is not a
+  manufacturer-qualified or Blender-ready asset: the source has no native mesh,
+  the block hierarchy/axes/extents have not crossed a B-Rep bridge, and no
+  anchors or installation fit have been verified. Owner authorization allows
+  the qualification work, but does not turn those missing proofs into facts.
+- The installed ODA Drawings Explorer 27.1.0.0 remains an interactive inspector,
+  not a governed conversion service. No supported local batch exporter for
+  SAT, STEP or a mesh is present, so its internal B-Rep libraries are never
+  called directly. The next legitimate admission test needs a documented export
+  capability and a one-source quarantine benchmark before any RFS geometry can
+  enter Blender.
 - The targeted 2026-08-06 probe of catalog file
   `lib_590cb8d275d2c900a36c` (`Axians_Nedea_36m.dwg`) found 99 `3DSOLID`,
   440 `INSERT`, millimeter `INSUNITS`, a conflicting display-unit label and no
