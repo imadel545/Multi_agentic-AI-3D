@@ -121,9 +121,14 @@ newer executable as qualified. The runner searches:
 - `/Applications/Blender 4.5 LTS.app/Contents/MacOS/Blender`
 - `/Applications/Blender.app/Contents/MacOS/Blender` as a last generic macOS candidate
 
-Executable presence is not runtime proof. Validate the chosen binary with a
-background/factory-startup smoke; a Blender crash remains a failed workflow and
-is never converted into a completed placeholder.
+Executable presence is not runtime proof. The certifiable local runtime is
+exactly **Blender 4.5.12 LTS** with a successful background/factory-startup
+probe; a newer installed executable such as Blender 5.1.2 is rejected rather
+than silently creating a version. A Blender crash remains a failed workflow and
+is never converted into a completed placeholder. The Docker service fixes both
+`BLENDER_BINARY` and `TELECOM_STUDIO_BLENDER_BINARY` to
+`/opt/blender/blender`, so a host `.env` path cannot override its governed
+runtime.
 
 ### Optional: Qdrant
 

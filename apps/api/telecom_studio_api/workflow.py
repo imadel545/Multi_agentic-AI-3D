@@ -26,6 +26,7 @@ from core.contracts.llm_provenance import (
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
+from core.contracts.sector_preview import SectorPreviewEvidence
 from core.contracts.validation import ValidationReport
 from core.contracts.versioning import SceneVersion
 from core.orchestration import DesignOrchestrator, OrchestratorResult
@@ -1070,6 +1071,50 @@ class WorkflowService:
             path.relative_to(workflow_dir)
         except ValueError as exc:
             raise KeyError(artifact_name) from exc
+        return path
+
+    def sector_preview_path(
+        self,
+        workflow_id: str,
+        preview_id: str,
+        version_id: str | None = None,
+    ) -> Path:
+        """Serve only a persisted, version-verified sector preview image.
+
+        ``preview_id`` is a bounded hash-derived identifier from the evidence;
+        callers never provide an artifact file name or local path.
+        """
+
+        self._sync_output_services()
+        if len(preview_id) != 16 or any(char not in "0123456789abcdef" for char in preview_id):
+            raise KeyError(preview_id)
+        workflow_dir = (self.outputs_dir / workflow_id).resolve()
+        if not workflow_dir.is_dir():
+            raise KeyError(workflow_id)
+        if version_id is None:
+            manifest = self.versioning.active_design_manifest(workflow_id)
+            if manifest is None or not isinstance(manifest.get("version_id"), str):
+                raise KeyError(workflow_id)
+            version_id = manifest["version_id"]
+        version, artifact_dir = self._verified_version_artifact_dir(workflow_id, version_id)
+        try:
+            evidence = SectorPreviewEvidence.model_validate_json(
+                (artifact_dir / "sector_preview_evidence.json").read_text(encoding="utf-8")
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise KeyError(preview_id) from exc
+        if evidence.status != "passed" or evidence.scene_id != version.scene.scene_id:
+            raise KeyError(preview_id)
+        preview = next((item for item in evidence.previews if item.preview_id == preview_id), None)
+        if preview is None:
+            raise KeyError(preview_id)
+        path = (artifact_dir / preview.file_name).resolve()
+        try:
+            path.relative_to(workflow_dir)
+        except ValueError as exc:
+            raise KeyError(preview_id) from exc
+        if not path.is_file():
+            raise KeyError(preview_id)
         return path
 
     def _verified_version_artifact_dir(self, workflow_id: str, version_id: str):
@@ -3408,6 +3453,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "scene_spec": "scene_spec.json",
     "assembly_plan": "assembly_plan.json",
     "constraint_evidence": "constraint_evidence.json",
+    "sector_preview_evidence": "sector_preview_evidence.json",
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
     "requirement_coverage": "requirement_coverage.json",
@@ -3448,10 +3494,14 @@ _ALLOWED_ARTIFACT_FILES = {
 def _artifact_authorized_for_scene(artifact_name: str, scene: SceneSpec) -> bool:
     """Keep conditional evidence private unless the verified scene requires it."""
 
-    if artifact_name != "constraint_evidence":
-        return True
-    plan = scene.assembly_plan
-    return plan is not None and plan.schema_version == "1.1.0"
+    if artifact_name == "constraint_evidence":
+        plan = scene.assembly_plan
+        return plan is not None and plan.schema_version == "1.1.0"
+    if artifact_name == "sector_preview_evidence":
+        from core.qa.sector_preview_inspector import sector_preview_required
+
+        return sector_preview_required(scene)
+    return True
 
 
 def _unauthorized_artifact_filenames(scene: SceneSpec) -> frozenset[str]:

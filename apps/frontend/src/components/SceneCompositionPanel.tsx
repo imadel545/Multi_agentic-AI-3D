@@ -3,7 +3,8 @@ import type {
   AssemblyPlanEvidence,
   AssetDecisionSummary,
   AssetInventory,
-  ComponentProofs
+  ComponentProofs,
+  SectorPreviewSummary
 } from "../api/schemas";
 import { compactFidelityLabel, humanSemanticRole, visualReviewStatusLabel } from "./StudioDisplayHelpers";
 import { PanelTitle, ResourceRecovery } from "./StudioPrimitives";
@@ -87,6 +88,7 @@ export function SceneCompositionPanel({
   onRetry,
   onSelect,
   selectedSemanticRoot = null,
+  sectorPreviews = [],
   toAbsoluteUrl = (url) => url ?? null
 }: {
   assemblyPlan: AssemblyPlanEvidence | null;
@@ -98,6 +100,7 @@ export function SceneCompositionPanel({
   onRetry?: () => void;
   onSelect?: (semanticRoot: string | null) => void;
   selectedSemanticRoot?: string | null;
+  sectorPreviews?: SectorPreviewSummary[];
   toAbsoluteUrl?: (url: string | null | undefined) => string | null;
 }) {
   const strategyCounts = new Map<string, number>();
@@ -113,15 +116,43 @@ export function SceneCompositionPanel({
   const inventoryByAssetId = new Map(
     (assetInventory?.entries ?? []).map((asset) => [asset.asset_id, asset])
   );
+  const selectedSectorPreview = selectedSemanticRoot
+    ? sectorPreviews.find((preview) => preview.semantic_roots.includes(selectedSemanticRoot))
+    : undefined;
+  const selectedSectorPreviewUrl = toAbsoluteUrl(selectedSectorPreview?.preview_url);
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
       <PanelTitle icon={<Layers3 size={17} />} title="Composition vérifiable" />
       {selectedSemanticRoot ? (
-        <div className="scene-plan-summary" role="status">
-          <strong>Composant sélectionné : {selectedSemanticRoot.replaceAll("_", " ")}</strong>
-          <small>La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre.</small>
-          <button className="secondary-action" type="button" onClick={() => onSelect?.(null)}>Désélectionner</button>
-        </div>
+        <>
+          <div className="scene-plan-summary" role="status">
+            <strong>Composant sélectionné : {selectedSemanticRoot.replaceAll("_", " ")}</strong>
+            <small>La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre.</small>
+            <button className="secondary-action" type="button" onClick={() => onSelect?.(null)}>Désélectionner</button>
+          </div>
+          {selectedSectorPreview && selectedSectorPreviewUrl ? (
+            <article className="asset-evidence-card verified sector-preview-card" aria-label={`Aperçu Blender du secteur ${selectedSectorPreview.sector_id}`}>
+              <img
+                alt={`Rendu Blender d’inspection du secteur ${selectedSectorPreview.sector_id}`}
+                src={selectedSectorPreviewUrl}
+              />
+              <div>
+                <strong>Rendu Blender du secteur {selectedSectorPreview.sector_id}</strong>
+                <small>
+                  Identité réexportée par le GLB : {selectedSectorPreview.post_blender_identity_verified ? "vérifiée" : "non vérifiée"}
+                </small>
+                <small>
+                  Cadrage et contraste : {selectedSectorPreview.visual_framing_verified ? "vérifiés" : "à examiner"}
+                  {selectedSectorPreview.subject_bbox_height_ratio != null
+                    ? ` · sujet ${Math.round(selectedSectorPreview.subject_bbox_height_ratio * 100)} % de la hauteur`
+                    : ""}
+                </small>
+                <small>Sous-assemblage cadré : {selectedSectorPreview.framed_roles.join(", ")}</small>
+                <p>Les rôles exportés du secteur incluent aussi {selectedSectorPreview.exported_roles.join(", ")}. Ce rendu cadre la pose ; il ne constitue pas une qualification constructeur ni une validation de pose.</p>
+              </div>
+            </article>
+          ) : null}
+        </>
       ) : null}
       {loading ? (
         <p className="resource-loading" aria-live="polite" role="status">

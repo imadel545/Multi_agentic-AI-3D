@@ -17,6 +17,8 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.versioning import SceneVersion
 from core.performance import scene_spec_hash
+from core.qa.sector_preview_inspector import sector_preview_required, verify_sector_preview_evidence
+from core.services.blender_runtime import has_qualified_blender_runtime
 from core.services.cognitive_scene_compiler import cognitive_plan_hash
 
 _CERTIFIED_ARTIFACTS = {"glb", "preview", "metadata", "build_lock"}
@@ -289,7 +291,7 @@ class SceneVersioningService:
         )
         build_lock_schema = _build_lock_schema(artifact_dir)
         report_proof = None
-        if build_lock_schema in {"1.1.0", "1.2.0"}:
+        if build_lock_schema in {"1.1.0", "1.2.0", "1.3.0"}:
             report_proof = _write_critical_report_proof(artifact_dir)
         status_path = artifact_dir / "status.json"
         manifest = {
@@ -575,9 +577,11 @@ def verify_persisted_version(
             raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_HASH_MISMATCH")
         _verify_constraint_evidence(constraint_evidence_path, scene=scene)
     build_lock_schema = _verify_build_lock(artifact_dir, scene=scene)
-    if component_proof_required and build_lock_schema != "1.2.0":
+    if component_proof_required and build_lock_schema not in {"1.2.0", "1.3.0"}:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_DOWNGRADE")
-    if require_report_proof and build_lock_schema in {"1.1.0", "1.2.0"}:
+    if build_lock_schema == "1.3.0" and sector_preview_required(scene):
+        verify_sector_preview_evidence(artifact_dir, scene)
+    if require_report_proof and build_lock_schema in {"1.1.0", "1.2.0", "1.3.0"}:
         _verify_critical_report_proof(artifact_dir)
     _verify_terminal_status(artifact_dir / "status.json", workflow_id=workflow_id)
     return sorted(evidence, key=lambda item: item["logical_name"])
@@ -649,7 +653,7 @@ def _build_lock_schema(artifact_dir: Path) -> str:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_INVALID") from exc
     schema_version = payload.get("schema_version")
-    if schema_version not in {"1.0.0", "1.1.0", "1.2.0"}:
+    if schema_version not in {"1.0.0", "1.1.0", "1.2.0", "1.3.0"}:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_UNSUPPORTED")
     return schema_version
 
@@ -748,12 +752,21 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     worker_hash = payload.get("worker_script_sha256")
     if not isinstance(worker_hash, str) or len(worker_hash) != 64:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_WORKER_IDENTITY_INVALID")
-    if schema_version in {"1.1.0", "1.2.0"}:
+    if schema_version in {"1.1.0", "1.2.0", "1.3.0"}:
         bundle = payload.get("worker_bundle")
         if not _valid_worker_bundle(bundle):
             raise ValueError("ACTIVE_VERSION_BUILD_LOCK_WORKER_BUNDLE_INVALID")
-    if schema_version == "1.2.0" and not _valid_trusted_inputs(payload, scene):
+    if schema_version in {"1.2.0", "1.3.0"} and not _valid_trusted_inputs(payload, scene):
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TRUSTED_INPUTS_INVALID")
+    if schema_version == "1.3.0":
+        expected_sector_preview_profile = {
+            "required": sector_preview_required(scene),
+            "evidence_file": "sector_preview_evidence.json"
+            if sector_preview_required(scene)
+            else None,
+        }
+        if payload.get("sector_preview_profile") != expected_sector_preview_profile:
+            raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID")
     if payload.get("command_profile") != {
         "background": True,
         "factory_startup": True,
@@ -769,6 +782,8 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
         or runtime.get("factory_startup") is not True
     ):
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_RUNTIME_INVALID")
+    if schema_version == "1.3.0" and not has_qualified_blender_runtime(runtime):
+        raise ValueError("ACTIVE_VERSION_BUILD_LOCK_RUNTIME_VERSION_UNQUALIFIED")
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_ARTIFACTS_INVALID")

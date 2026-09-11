@@ -660,6 +660,22 @@ class AssemblyConstraintSummary(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class SectorPreviewSummary(BaseModel):
+    """Public, selection-safe description of one post-Blender sector preview."""
+
+    sector_id: str = Field(min_length=1)
+    preview_url: str = Field(min_length=1)
+    semantic_roots: list[str] = Field(min_length=1)
+    expected_roles: list[str] = Field(min_length=1)
+    exported_roles: list[str] = Field(min_length=1)
+    framed_roles: list[str] = Field(min_length=1)
+    post_blender_identity_verified: bool
+    visual_framing_verified: bool
+    subject_bbox_height_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    subject_contrast_mean: float | None = Field(default=None, ge=0.0)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class ViewerBundle(BaseModel):
     version_id: str | None = None
     workflow_id: str
@@ -679,6 +695,7 @@ class ViewerBundle(BaseModel):
     geometry_fidelity_summary: GeometryFidelitySummary | None = None
     geometry_program_summary: GeometryProgramSummary | None = None
     assembly_constraint_summary: AssemblyConstraintSummary | None = None
+    sector_previews: list[SectorPreviewSummary] = Field(default_factory=list)
     human_warnings_count: int = 0
     human_errors_count: int = 0
     primary_glb_url: str | None = None

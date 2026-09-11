@@ -239,7 +239,11 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert "/Users/" not in json.dumps(proofs, ensure_ascii=False)
 
         build_lock = json.loads((initial_dir / "build.lock.json").read_text(encoding="utf-8"))
-        assert build_lock["schema_version"] == "1.2.0"
+        assert build_lock["schema_version"] == "1.3.0"
+        assert build_lock["sector_preview_profile"] == {
+            "required": True,
+            "evidence_file": "sector_preview_evidence.json",
+        }
         assert build_lock["blender_runtime"]["version"] == "4.5.12 LTS"
         assert build_lock["blender_runtime"]["version_tuple"] == [4, 5, 12]
         assert build_lock["blender_runtime"]["background"] is True
@@ -254,6 +258,72 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
             lock_evidence = build_lock["artifacts"][artifact_name]
             assert lock_evidence["size_bytes"] == artifact_path.stat().st_size
             assert lock_evidence["sha256"] == _sha256(artifact_path)
+        sector_preview_evidence = client.get(
+            f"/designs/{workflow_id}/artifacts/sector_preview_evidence"
+        )
+        assert sector_preview_evidence.status_code == 200
+        sector_preview_payload = sector_preview_evidence.json()
+        assert sector_preview_payload["schema_version"] == "1.0.0"
+        assert sector_preview_payload["status"] == "passed"
+        assert (
+            sector_preview_payload["measurement_scope"]
+            == "exported_glb_semantics_and_rendered_sector_preview"
+        )
+        assert {preview["sector_id"] for preview in sector_preview_payload["previews"]} == {
+            "S1",
+            "S2",
+            "S3",
+        }
+        for preview in sector_preview_payload["previews"]:
+            assert preview["post_blender_identity_verified"] is True
+            assert preview["visual_inspection"]["visual_quality_passed"] is True
+            assert preview["visual_inspection"]["checks"] == {
+                "file_exists": True,
+                "format_valid": True,
+                "minimum_resolution_valid": True,
+                "subject_present": True,
+                "subject_width_valid": True,
+                "subject_height_valid": True,
+                "subject_contrast_valid": True,
+                "subject_centered": True,
+                "subject_not_clipped": True,
+            }
+            preview_path = initial_dir / preview["file_name"]
+            assert preview_path.is_file()
+            assert build_lock["artifacts"][preview["file_name"]] == {
+                "sha256": _sha256(preview_path),
+                "size_bytes": preview_path.stat().st_size,
+            }
+            response = client.get(
+                f"/designs/{workflow_id}/sector-previews/{preview['preview_id']}"
+                f"?version_id={active.version_id}"
+            )
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "image/png"
+            assert response.content == preview_path.read_bytes()
+        initial_bundle = client.get(f"/designs/{workflow_id}/viewer-bundle")
+        assert initial_bundle.status_code == 200
+        assert initial_bundle.json()["sector_previews"] == [
+            {
+                "sector_id": preview["sector_id"],
+                "preview_url": (
+                    f"/designs/{workflow_id}/sector-previews/{preview['preview_id']}"
+                    f"?version_id={active.version_id}"
+                ),
+                "semantic_roots": preview["semantic_roots"],
+                "expected_roles": preview["expected_roles"],
+                "exported_roles": preview["exported_roles"],
+                "framed_roles": preview["framed_roles"],
+                "post_blender_identity_verified": True,
+                "visual_framing_verified": True,
+                "subject_bbox_height_ratio": preview["visual_inspection"][
+                    "subject_bbox_height_ratio"
+                ],
+                "subject_contrast_mean": preview["visual_inspection"]["subject_contrast_mean"],
+                "limitations": sector_preview_payload["limitations"],
+            }
+            for preview in sector_preview_payload["previews"]
+        ]
         trusted_inputs = build_lock["trusted_inputs"]
         assert build_lock["trusted_inputs_sha256"] == _json_sha256(trusted_inputs)
         assert trusted_inputs["manifest_catalog_sha256"] == plan["manifest_catalog_sha256"]

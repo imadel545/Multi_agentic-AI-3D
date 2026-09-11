@@ -157,6 +157,43 @@ displacing the exported driven node by 0.05 m fails mesh QA. The two runs use a
 controlled planner, not a live-provider or frontend edit/version acceptance.
 This does not add professional assets or generic parameter adaptation.
 
+## Sector subassembly evidence and usable 3D focus — 2026-09-11
+
+The first user-facing telecom-quality correction is bounded to a real, certified
+three-sector assembly. Its `ANT_PANEL_4G_001` panel is an internal project
+asset imported exactly with a manifest/file hash; its mounts and RRUs are
+contract-generated. It is not a manufacturer-qualified installation assembly.
+The reference-only Sierra/Semtech STEP candidate remains excluded from planning
+and generation.
+
+After Blender exports the actual `design.glb`, the worker renders one close-up
+for each sector and writes render-byte metadata. An independent process then
+checks the exported GLB semantic extras, stable sector roots, expected roles,
+PNG hash, resolution, subject coverage, contrast, centring and clipping. The
+versioned build lock binds this `sector_preview_evidence.json`; it is rechecked
+before the corresponding product URL can serve an image. The 2026-09-11 native
+Blender 4.5.12 LTS run generated and revalidated all three sector images.
+
+The inspection image frames the mechanical panel/support/radio group. Where a
+cable route exists, it is required in the exported GLB but not framed because
+its real descent to the tower base would make the close-up unreadable. This
+makes no claim about cable termination, RF continuity, fastening, load or
+manufacturer fidelity.
+
+The Studio viewer retains the exact selected semantic root for picking and
+editing, but derives camera focus only from the published `component_proofs`
+sharing its stable `instance_id`. It includes proven antenna, mount and radio
+roots and excludes a full-height cable route. Thus selecting a cable now frames
+the sector it belongs to rather than shrinking the antenna to fit the complete
+tower. The toolbar returns to the complete design by clearing selection. No
+name parsing, synthetic sector or universal constraint solver is introduced;
+legacy workflows retain their existing single-root/global focus behaviour.
+
+The exported overall preview remains a technical view and is not yet a
+professional presentation. A browser end-user visual acceptance run remains
+open, and no vendor-grade asset or installation quality is claimed by this
+checkpoint.
+
 ## Targeted editing checkpoint — 2026-09-09
 
 The local `codex/asset-assembly-convergence` slice connects certified component

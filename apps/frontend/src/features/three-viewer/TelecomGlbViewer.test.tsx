@@ -1,10 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D } from "three";
+import { BoxGeometry, Group, Mesh, MeshBasicMaterial, Object3D, Vector3 } from "three";
 import type { ViewerBundle } from "../../api/schemas";
 import {
   advanceRenderHealthProbe,
   semanticRootForPick,
+  semanticRootsBounds,
   semanticSelectionBounds,
   PreviewFallback,
   TelecomGlbViewer
@@ -93,6 +94,51 @@ describe("TelecomGlbViewer fallbacks", () => {
     expect(screen.getByText(/WebGL indisponible/)).toBeInTheDocument();
   });
 
+  it("returns to the complete design when the toolbar is used after a selection", () => {
+    const onSelectSemanticRoot = vi.fn();
+    const bundle = {
+      workflow_id: "wf_1",
+      status: "completed",
+      human_warnings_count: 0,
+      human_errors_count: 0,
+      primary_glb_url: "/designs/wf_1/artifacts/design.glb",
+      preview_url: "/designs/wf_1/artifacts/preview.png",
+      viewer_artifacts: [],
+      available_actions: [],
+      unsupported_actions: [],
+      mesh_qa_passed: true,
+      qa_summary: {
+        qa_status: "passed",
+        qa_executed: true,
+        blocked_before_qa: false,
+        checks_passed: ["glb_structure"],
+        checks_failed: [],
+        warnings: [],
+        errors: [],
+        upstream_errors: [],
+        limitations: []
+      },
+      limitations: []
+    } as ViewerBundle;
+    const view = render(
+      <TelecomGlbViewer
+        bundle={bundle}
+        onSelectSemanticRoot={onSelectSemanticRoot}
+        probeWebGL={() => false}
+        selectedSemanticRoot="antenna_S2"
+        toAbsoluteUrl={(url) => url ?? null}
+      />
+    );
+
+    const wholeSiteButton = view.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Afficher tout le site et recentrer la caméra 3D"]'
+    );
+    expect(wholeSiteButton).not.toBeNull();
+    fireEvent.click(wholeSiteButton!);
+
+    expect(onSelectSemanticRoot).toHaveBeenCalledWith(null);
+  });
+
   it("invalidates demand rendering until the visibility sample is ready", () => {
     const invalidate = vi.fn();
     const sample = vi.fn(() => true);
@@ -136,6 +182,29 @@ describe("verified scene picking", () => {
     expect(bounds?.max.y).toBe(30);
     expect(bounds?.max.x).toBe(1);
     expect(semanticSelectionBounds(scene, "unknown")).toBeNull();
+  });
+
+  it("uses published sector roots for focus without pulling the cable descent into the camera box", () => {
+    const scene = new Group();
+    const antenna = new Mesh(new BoxGeometry(1, 3, 1), new MeshBasicMaterial());
+    antenna.position.set(0, 24, 0);
+    antenna.userData.semantic_root = "antenna_S2";
+    const mount = new Mesh(new BoxGeometry(2, 1, 1), new MeshBasicMaterial());
+    mount.position.set(0, 23, 0);
+    mount.userData.semantic_root = "mount_S2";
+    const radio = new Mesh(new BoxGeometry(1, 2, 1), new MeshBasicMaterial());
+    radio.position.set(1, 22, 0);
+    radio.userData.semantic_root = "radio_S2";
+    const cable = new Mesh(new BoxGeometry(0.2, 24, 0.2), new MeshBasicMaterial());
+    cable.position.set(0, 12, 0);
+    cable.userData.semantic_root = "cable_S2_to_base";
+    scene.add(antenna, mount, radio, cable);
+
+    const bounds = semanticRootsBounds(scene, ["antenna_S2", "mount_S2", "radio_S2"]);
+
+    expect(bounds?.min.y).toBeGreaterThanOrEqual(21);
+    expect(bounds?.max.y).toBeLessThan(26);
+    expect(bounds?.getSize(new Vector3()).y).toBeLessThan(5);
   });
 
   it("maps a nested mesh to its backend-declared ancestor identity", () => {

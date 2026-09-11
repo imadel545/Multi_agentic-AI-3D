@@ -9,9 +9,10 @@ frontend.
   not authenticate another local process. LAN/remote access requires TLS and a
   separately designed owner/session model; a token in `localStorage` is not an
   accepted shortcut.
-- Nginx security headers and the new host/origin boundary pass deterministic
-  tests and Compose validation, but the Docker daemon is unavailable in the
-  current audit, so their container/browser runtime smoke remains open.
+- Nginx security headers and the host/origin boundary pass deterministic tests.
+  Compose configuration was revalidated on 2026-09-11, including its fixed
+  loopback ports and container Blender path, but this checkpoint did not start
+  or build the complete stack. Container and browser runtime smoke remain open.
 
 ## Runtime recovery checkpoint — 2026-09-10
 
@@ -46,6 +47,26 @@ frontend.
   Docker baseline is claimed.
 - Raw CAD search improves metadata discovery and publishes match evidence, but
   has no semantic guarantee, geometry qualification or automatic compiler path.
+
+## Sector inspection and viewer focus — 2026-09-11
+
+- A required telecom `AssemblyPlan 1.1` now produces one actual Blender close-up
+  per sector after `design.glb` export. The image is accepted only when an
+  independent inspector re-reads exported semantic roots, checks the renderer
+  bytes and measures PNG framing, contrast and subject presence. The viewer
+  serves it only from a verified active version.
+- This is inspection evidence for the local panel/support/radio subassembly.
+  The cable route is verified in the GLB but intentionally excluded from the
+  close-up because its descent to the tower base destroys useful scale. It does
+  not certify connector mating, RF continuity, fixing, structural load or
+  manufacturer fidelity.
+- The current viewer derives a local camera subject from published
+  `component_proofs` and their stable `instance_id`. Clicking a panel or its
+  cable route frames the proven panel/support/radio group; the raw selected root
+  remains available for outline and targeted edit. Legacy or unproven scenes
+  receive no inferred sector focus. A full overview remains visually weaker than
+  a professional presentation and needs a qualified production asset set plus a
+  recorded end-user visual acceptance pass.
 
 ## Visible during frontend build
 
@@ -325,14 +346,16 @@ frontend.
 
 - Real Blender is required for a real GLB.
 - The macOS host has Blender 4.5.12 LTS arm64 at
-  `/Applications/Blender 4.5 LTS.app`, but the 2026-08-05
-  background/factory-startup smoke exits by `SIGSEGV` in USD
-  `Arch_ValidateAssumptions`; eight focused Blender-runner tests therefore fail
-  before the worker script executes. Blender 5.1.2 fails the same smoke. The
-  Product API now reports Blender unavailable when this runtime smoke fails;
-  executable presence is no longer treated as readiness proof. The Docker
-  `linux/amd64` Blender runtime is a separate path and must pass its own health
-  smoke.
+  `/Applications/Blender 4.5 LTS.app`. On 2026-09-11, its
+  `--background --factory-startup` path and a real BlenderRunner generation
+  passed. A certified current build lock accepts only the exact 4.5.12 LTS
+  runtime metadata, not merely an executable that starts. Blender 5.1.2 is also
+  installed locally but is rejected as unqualified by the Product API and build
+  lock validation; it cannot silently generate a certifiable version. Compose
+  fixes both Blender environment variables to `/opt/blender/blender`, preventing
+  a host path from overriding the container worker. The Docker `linux/amd64`
+  runtime remains a separate path whose image build and health smoke are still
+  open.
 - Blender fallback is rejected by default, but missing assets can still become
   visible procedural geometry during a real Blender generation.
 - Geometry source of truth is `SceneSpec`, including selected manifests,

@@ -565,6 +565,22 @@ export const AssemblyConstraintSummarySchema = publicSchema(
   })
 );
 
+export const SectorPreviewSummarySchema = publicSchema(
+  UnknownRecord.extend({
+    sector_id: z.string().min(1),
+    preview_url: z.string().min(1),
+    semantic_roots: z.array(z.string().min(1)).min(1),
+    expected_roles: z.array(z.string().min(1)).min(1),
+    exported_roles: z.array(z.string().min(1)).min(1),
+    framed_roles: z.array(z.string().min(1)).min(1),
+    post_blender_identity_verified: z.boolean(),
+    visual_framing_verified: z.boolean(),
+    subject_bbox_height_ratio: z.number().min(0).max(1).nullish(),
+    subject_contrast_mean: z.number().nonnegative().nullish(),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
@@ -580,6 +596,7 @@ export const ViewerBundleSchema = publicSchema(
     geometry_fidelity_summary: GeometryFidelitySummarySchema.nullish(),
     geometry_program_summary: GeometryProgramSummarySchema.nullish(),
     assembly_constraint_summary: AssemblyConstraintSummarySchema.nullish(),
+    sector_previews: z.array(SectorPreviewSummarySchema).optional(),
     human_warnings_count: z.number().default(0),
     human_errors_count: z.number().default(0),
     primary_glb_url: z.string().nullish(),
@@ -1191,6 +1208,7 @@ export type MultimodalConsent = z.infer<typeof MultimodalConsentSchema>;
 export type MultimodalIntelligence = z.infer<typeof MultimodalIntelligenceSchema>;
 export type VisualReview = z.infer<typeof VisualReviewSchema>;
 export type AssetDecisionSummary = z.infer<typeof AssetDecisionSummarySchema>;
+export type SectorPreviewSummary = z.infer<typeof SectorPreviewSummarySchema>;
 export type ComponentProofs = z.infer<typeof ComponentProofsSchema>;
 export type ComponentProof = z.infer<typeof ComponentProofSchema>;
 export type ComponentProofInstance = z.infer<typeof ComponentProofInstanceSchema>;

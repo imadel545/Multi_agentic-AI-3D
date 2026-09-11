@@ -30,7 +30,8 @@ services:
     restart: unless-stopped
     init: true
     env_file:
-      - ../.env
+      - path: .env
+        required: false
     environment:
       TELECOM_STUDIO_PROJECT_ROOT: /app
       TELECOM_STUDIO_ASSET_MANIFESTS_DIR: /app/assets/manifests
@@ -40,6 +41,7 @@ services:
       TELECOM_STUDIO_QDRANT_URL: http://qdrant:6333
       TELECOM_STUDIO_QDRANT_PATH: /var/lib/telecom/sqlite/qdrant-client-state
       TELECOM_STUDIO_BLENDER_BINARY: /opt/blender/blender
+      BLENDER_BINARY: /opt/blender/blender
       TELECOM_STUDIO_BLENDER_EEVEE_RENDER_SAMPLES: "8"
       TELECOM_STUDIO_BLENDER_TIMEOUT_S: "600"
       TELECOM_STUDIO_MAX_CONCURRENT_WORKFLOWS: "1"

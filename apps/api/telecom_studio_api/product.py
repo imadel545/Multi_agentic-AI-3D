@@ -26,7 +26,9 @@ from apps.api.telecom_studio_api.runtime_contract import (
 from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
+from core.contracts.sector_preview import SectorPreviewEvidence
 from core.services.asset_inventory import AssetInventoryService
+from core.services.blender_runtime import output_reports_qualified_blender
 
 
 class ProductService:
@@ -276,6 +278,13 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("constraint_evidence.json", "application/json", "constraint_evidence")
         )
+        viewer_artifacts.append(
+            _artifact(
+                "sector_preview_evidence.json",
+                "application/json",
+                "sector_preview_evidence",
+            )
+        )
         viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
         viewer_artifacts.append(
             _artifact("generation_report.json", "application/json", "generation_report")
@@ -351,6 +360,7 @@ class ProductService:
             else None
         )
         constraint_evidence_path = verified_artifacts.get("constraint_evidence")
+        sector_preview_evidence_path = verified_artifacts.get("sector_preview_evidence")
 
         return {
             "workflow_id": workflow_id,
@@ -362,6 +372,11 @@ class ProductService:
             "asset_decision_summary": _asset_decision_summary(verified_assembly_plan),
             "assembly_constraint_summary": _assembly_constraint_summary_from_path(
                 constraint_evidence_path
+            ),
+            "sector_previews": _sector_preview_summaries_from_path(
+                sector_preview_evidence_path,
+                workflow_id=workflow_id,
+                version_id=active_version,
             ),
             "visual_review": _visual_review_summary(
                 status,
@@ -494,7 +509,9 @@ def _probe_blender_runtime(binary: str, _mtime_ns: int, _size: int) -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     output = f"{completed.stdout}\n{completed.stderr}"
-    return completed.returncode == 0 and marker in output
+    return (
+        completed.returncode == 0 and marker in output and output_reports_qualified_blender(output)
+    )
 
 
 def _run_blender_probe(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -850,6 +867,44 @@ def _assembly_constraint_summary_from_path(path: Path | None) -> dict | None:
     }
 
 
+def _sector_preview_summaries_from_path(
+    path: Path | None,
+    *,
+    workflow_id: str,
+    version_id: str | None,
+) -> list[dict]:
+    if path is None or not path.is_file():
+        return []
+    try:
+        evidence = SectorPreviewEvidence.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return []
+    if evidence.status != "passed":
+        return []
+    result: list[dict] = []
+    for preview in evidence.previews:
+        url = f"/designs/{workflow_id}/sector-previews/{preview.preview_id}"
+        if version_id:
+            url = f"{url}?version_id={version_id}"
+        inspection = preview.visual_inspection
+        result.append(
+            {
+                "sector_id": preview.sector_id,
+                "preview_url": url,
+                "semantic_roots": preview.semantic_roots,
+                "expected_roles": preview.expected_roles,
+                "exported_roles": preview.exported_roles,
+                "framed_roles": preview.framed_roles,
+                "post_blender_identity_verified": preview.post_blender_identity_verified,
+                "visual_framing_verified": inspection.visual_quality_passed,
+                "subject_bbox_height_ratio": inspection.subject_bbox_height_ratio,
+                "subject_contrast_mean": inspection.subject_contrast_mean,
+                "limitations": evidence.limitations,
+            }
+        )
+    return result
+
+
 def _asset_decision_summary_from_path(path: Path | None) -> dict | None:
     if path is None or not path.exists():
         return None
@@ -1037,7 +1092,8 @@ def _geometry_program_summary(scene_spec: object) -> dict | None:
             "semantic_role": program.semantic_role,
             "requested_quantity": program.requested_quantity,
             "origin": (
-                "catalog_asset" if any(node.kind == "exact_asset" for node in program.nodes)
+                "catalog_asset"
+                if any(node.kind == "exact_asset" for node in program.nodes)
                 else "geometry_program"
             ),
             "node_count": len(program.nodes),
@@ -1062,11 +1118,13 @@ def _geometry_program_summary(scene_spec: object) -> dict | None:
     return {
         "program_count": len(programs),
         "generated_component_count": sum(
-            program["requested_quantity"] for program in programs
+            program["requested_quantity"]
+            for program in programs
             if program["origin"] == "geometry_program"
         ),
         "reused_component_count": sum(
-            program["requested_quantity"] for program in programs
+            program["requested_quantity"]
+            for program in programs
             if program["origin"] == "catalog_asset"
         ),
         "total_node_count": sum(program["node_count"] for program in programs),

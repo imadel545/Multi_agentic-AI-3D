@@ -1557,6 +1557,38 @@ describe("studio kernel components", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
+  it("shows a version-bound Blender sector inspection only for the selected exported component", () => {
+    render(
+      <SceneCompositionPanel
+        assemblyPlan={null}
+        componentProofs={null}
+        selectedSemanticRoot="antenna_S1_ANT_PANEL_5G_001"
+        sectorPreviews={[{
+          sector_id: "S1",
+          preview_url: "/designs/wf_1/sector-previews/3696ad59777e09d5?version_id=v12345678",
+          semantic_roots: ["antenna_S1_ANT_PANEL_5G_001", "radio_S1_RRU_SMALL_001"],
+          expected_roles: ["antenna", "rru", "cable"],
+          exported_roles: ["antenna", "cable", "radio"],
+          framed_roles: ["antenna", "mount_bracket", "radio"],
+          post_blender_identity_verified: true,
+          visual_framing_verified: true,
+          subject_bbox_height_ratio: 0.82,
+          subject_contrast_mean: 144,
+          limitations: ["Le rendu ne certifie pas la géométrie constructeur."]
+        }]}
+        toAbsoluteUrl={(url) => url ? `http://127.0.0.1:8000${url}` : null}
+      />
+    );
+
+    expect(screen.getByRole("img", { name: "Rendu Blender d’inspection du secteur S1" }))
+      .toHaveAttribute(
+        "src",
+        "http://127.0.0.1:8000/designs/wf_1/sector-previews/3696ad59777e09d5?version_id=v12345678"
+      );
+    expect(screen.getByText("Identité réexportée par le GLB : vérifiée")).toBeInTheDocument();
+    expect(screen.getByText(/qualification constructeur ni une validation de pose/)).toBeInTheDocument();
+  });
+
   it("identifies exact imports as reused source geometry without a constructor qualification claim", () => {
     render(<SceneCompositionPanel assemblyPlan={null} componentProofs={{
       schema_version: "1.0", workflow_id: "wf_reuse", components: [],

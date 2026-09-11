@@ -536,6 +536,19 @@ def get_design_artifact(
     return FileResponse(path=path, filename=path.name)
 
 
+@app.get("/designs/{workflow_id}/sector-previews/{preview_id}")
+def get_sector_preview(
+    workflow_id: WorkflowId,
+    preview_id: str,
+    version_id: OptionalVersionId = None,
+) -> FileResponse:
+    try:
+        path = workflow_service.sector_preview_path(workflow_id, preview_id, version_id=version_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="sector preview not found") from exc
+    return FileResponse(path=path, filename=path.name)
+
+
 @app.post("/scene-spec/validate", response_model=ValidationReport)
 def validate_scene_spec_endpoint(scene: SceneSpec) -> ValidationReport:
     return workflow_service.validate_scene(scene)

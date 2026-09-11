@@ -53,6 +53,30 @@ def test_blender_availability_requires_successful_headless_smoke(
     assert _blender_available() is False
 
 
+def test_blender_availability_rejects_a_successful_unqualified_runtime(
+    tmp_path: Path, monkeypatch
+) -> None:
+    binary = tmp_path / "blender"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._resolve_blender_binary",
+        lambda _configured: binary,
+    )
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._run_blender_probe",
+        lambda command: subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="Blender 5.1.2\nTELECOM_STUDIO_BLENDER_READY",
+            stderr="",
+        ),
+    )
+    _probe_blender_runtime.cache_clear()
+
+    assert _blender_available() is False
+
+
 def test_constraint_summary_is_derived_from_valid_hashed_evidence(tmp_path: Path) -> None:
     evidence_path = tmp_path / "constraint_evidence.json"
     payload = _constraint_evidence_payload()

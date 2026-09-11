@@ -110,6 +110,11 @@ def main() -> int:
         scene,
         output_dir,
     )
+    camera_metadata["sector_preview_views"] = _render_sector_preview_views(
+        bpy,
+        scene,
+        output_dir,
+    )
     _write_metadata(
         scene,
         output_dir,
@@ -2857,6 +2862,98 @@ def _render_preview_views(bpy, scene: dict, output_dir: Path) -> list[dict]:
             }
         )
     return rendered
+
+
+def _render_sector_preview_views(bpy, scene: dict, output_dir: Path) -> list[dict]:
+    """Render one inspection image per real telecom sector.
+
+    The images are deliberately narrow: they show local mechanical equipment
+    associated with a sector (panel, bracket and radio). They are not a second
+    scene, nor an illustration assembled outside Blender. The full cable route
+    is verified from the exported GLB but excluded from the close-up because
+    its descent to the tower base would destroy the local mechanical framing.
+    """
+
+    assembly = scene.get("assembly_plan") or {}
+    if assembly.get("schema_version") != "1.1.0" or not scene.get("sectors"):
+        return []
+    camera = bpy.context.scene.camera
+    rendered: list[dict] = []
+    for sector in scene["sectors"]:
+        sector_id = str(sector["sector_id"])
+        framed_roles = ["antenna", "mount_bracket"]
+        if sector.get("radio_asset_id"):
+            framed_roles.append("radio")
+        # The previous overview view leaves a temporary backdrop in the
+        # scene. Remove it before snapshotting visibility so restoration never
+        # holds a reference to a Blender object that this loop deletes.
+        _remove_preview_backdrops(bpy)
+        visible_states = _set_sector_preview_visibility(bpy, sector_id, set(framed_roles))
+        try:
+            subject_corners = _subject_world_corners(bpy)
+            if not subject_corners:
+                raise RuntimeError(f"SECTOR_PREVIEW_SUBJECT_MISSING:{sector_id}")
+            framing = _position_preview_camera(
+                bpy,
+                camera,
+                subject_corners,
+                scene,
+                camera_mode="isometric",
+            )
+            _create_preview_backdrop(bpy, scene)
+            preview_id = _sector_preview_id(sector_id)
+            file_name = f"preview_sector_{preview_id}.png"
+            preview_path = output_dir / file_name
+            bpy.context.scene.render.filepath = str(preview_path)
+            bpy.ops.render.render(write_still=True)
+            rendered.append(
+                {
+                    "preview_id": preview_id,
+                    "sector_id": sector_id,
+                    "file_name": file_name,
+                    "camera_mode": "isometric",
+                    "focus": "sector_equipment",
+                    "framed_roles": framed_roles,
+                    "inspection_only": True,
+                    "camera_location": [round(float(value), 3) for value in camera.location],
+                    "target": [round(float(value), 3) for value in framing["target"]],
+                    "ortho_scale": round(float(camera.data.ortho_scale), 3),
+                    "subject_bounds_m": framing["subject_bounds_m"],
+                    "sha256": _sha256_file(preview_path),
+                    "size_bytes": preview_path.stat().st_size,
+                }
+            )
+        finally:
+            _remove_preview_backdrops(bpy)
+            _restore_preview_visibility(visible_states)
+    return rendered
+
+
+def _sector_preview_id(sector_id: str) -> str:
+    return hashlib.sha256(sector_id.encode("utf-8")).hexdigest()[:16]
+
+
+def _set_sector_preview_visibility(
+    bpy,
+    sector_id: str,
+    framed_roles: set[str],
+) -> list[tuple[object, bool]]:
+    """Show only sector-owned equipment while preserving the export scene."""
+
+    visible_states = []
+    for obj in bpy.context.scene.objects:
+        if obj.type not in {"MESH", "CURVE", "FONT", "SURFACE"}:
+            continue
+        visible_states.append((obj, bool(obj.hide_render)))
+        role = str(obj.get("role") or obj.get("object_role") or "").strip().lower()
+        obj_sector_id = str(obj.get("sector_id") or "")
+        obj.hide_render = not (role in framed_roles and obj_sector_id == sector_id)
+    return visible_states
+
+
+def _restore_preview_visibility(states: list[tuple[object, bool]]) -> None:
+    for obj, hide_render in states:
+        obj.hide_render = hide_render
 
 
 def _position_preview_camera(

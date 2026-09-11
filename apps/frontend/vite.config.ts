@@ -25,6 +25,7 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    strictPort: true,
     proxy: Object.fromEntries(
       ["/health", "/studio", "/assets", "/document-packs", "/requirements", "/designs"].map(
         (path) => [

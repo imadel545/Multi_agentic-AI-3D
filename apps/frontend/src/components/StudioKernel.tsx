@@ -1614,6 +1614,7 @@ export function InspectorDock({
               onRetry={onRetryCognitiveEvidence}
               onSelect={onSelectSceneComponent}
               selectedSemanticRoot={selectedSemanticRoot}
+              sectorPreviews={bundle?.sector_previews}
               toAbsoluteUrl={toAbsoluteUrl}
             />
           ) : null}

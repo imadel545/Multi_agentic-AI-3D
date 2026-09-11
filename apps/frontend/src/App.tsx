@@ -4,6 +4,7 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
@@ -59,6 +60,7 @@ import {
   readDocumentPackSession,
   writeDocumentPackSession
 } from "./state/documentPackSession";
+import { sectorMechanicalFocusRoots } from "./features/three-viewer/sectorFocus";
 
 const ActivePromptDetail = "high" as const;
 const TelecomGlbViewer = lazy(() =>
@@ -92,6 +94,10 @@ export default function App({ apiClient = api }: AppProps) {
   const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
   const [selectedSemanticRoot, setSelectedSemanticRoot] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const sectorFocusSemanticRoots = useMemo(
+    () => sectorMechanicalFocusRoots(componentProofs, selectedSemanticRoot),
+    [componentProofs, selectedSemanticRoot]
+  );
   const selectSemanticRoot = useCallback((root: string | null) => {
     setSelectedSemanticRoot(root);
     setSelectedVersionId(root ? state.viewerBundle?.version_id ?? null : null);
@@ -1546,6 +1552,7 @@ export default function App({ apiClient = api }: AppProps) {
               loading={viewerSurfaceLoading}
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
               selectedSemanticRoot={selectedSemanticRoot}
+              focusSemanticRoots={sectorFocusSemanticRoots}
               knownSemanticRoots={componentProofs?.components.flatMap((component) =>
                 component.instances.map((instance) => instance.semantic_root)
               ) ?? []}

@@ -590,7 +590,11 @@ def test_blender_runner_honors_operational_scene_switches_and_build_lock(
     assert metadata["blender_runtime"]["background"] is True
     assert not any(record["object_role"] == "gps" for record in metadata["asset_imports"])
     build_lock = json.loads(Path(result.artifacts["build_lock"]).read_text(encoding="utf-8"))
-    assert build_lock["schema_version"] == "1.2.0"
+    assert build_lock["schema_version"] == "1.3.0"
+    assert build_lock["sector_preview_profile"] == {
+        "required": False,
+        "evidence_file": None,
+    }
     assert build_lock["scene_id"] == scene.scene_id
     assert "generate_scene.py" in build_lock["worker_bundle"]["files"]
     assert "parametric_builder.py" in build_lock["worker_bundle"]["files"]
@@ -647,7 +651,8 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
                     "scene_id": scene.scene_id,
                     "generation_mode": "real_blender",
                     "blender_runtime": {
-                        "version": "test",
+                        "version": "4.5.12 LTS",
+                        "version_tuple": [4, 5, 12],
                         "background": True,
                         "factory_startup": True,
                     },
@@ -708,7 +713,8 @@ def test_blender_runner_retries_build_lock_preparation_failure_then_falls_back(
                     "scene_id": scene.scene_id,
                     "generation_mode": "real_blender",
                     "blender_runtime": {
-                        "version": "test",
+                        "version": "4.5.12 LTS",
+                        "version_tuple": [4, 5, 12],
                         "background": True,
                         "factory_startup": True,
                     },
@@ -801,7 +807,8 @@ def test_blender_runner_never_binds_output_to_concurrently_mutated_public_scene(
                     "scene_id": scene.scene_id,
                     "generation_mode": "real_blender",
                     "blender_runtime": {
-                        "version": "test",
+                        "version": "4.5.12 LTS",
+                        "version_tuple": [4, 5, 12],
                         "background": True,
                         "factory_startup": True,
                     },
@@ -901,7 +908,8 @@ def test_blender_runner_executes_immutable_worker_snapshot(
                     "scene_id": scene.scene_id,
                     "generation_mode": "real_blender",
                     "blender_runtime": {
-                        "version": "test",
+                        "version": "4.5.12 LTS",
+                        "version_tuple": [4, 5, 12],
                         "background": True,
                         "factory_startup": True,
                     },

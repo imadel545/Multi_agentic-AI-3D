@@ -20,6 +20,8 @@ import {
   type RenderSample
 } from "./viewerMath";
 
+const EMPTY_FOCUS_SEMANTIC_ROOTS: readonly string[] = [];
+
 type TelecomGlbViewerProps = {
   bundle: ViewerBundle | null;
   loadError?: string | null;
@@ -27,6 +29,7 @@ type TelecomGlbViewerProps = {
   onReloadBundle?: () => void | Promise<void>;
   probeWebGL?: () => boolean;
   selectedSemanticRoot?: string | null;
+  focusSemanticRoots?: readonly string[];
   knownSemanticRoots?: readonly string[];
   onSelectSemanticRoot?: (root: string | null) => void;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
@@ -48,6 +51,7 @@ export function TelecomGlbViewer({
   onReloadBundle,
   probeWebGL = hasUsableWebGL,
   selectedSemanticRoot = null,
+  focusSemanticRoots = EMPTY_FOCUS_SEMANTIC_ROOTS,
   knownSemanticRoots = [],
   onSelectSemanticRoot,
   toAbsoluteUrl
@@ -85,6 +89,10 @@ export function TelecomGlbViewer({
     }
     void onReloadBundle?.();
   };
+  const showWholeDesign = () => {
+    onSelectSemanticRoot?.(null);
+    setResetKey((value) => value + 1);
+  };
 
   useEffect(() => {
     setObjectSummary(null);
@@ -103,9 +111,9 @@ export function TelecomGlbViewer({
           <button
             className="icon-action"
             disabled={source.kind !== "glb"}
-            onClick={() => setResetKey((value) => value + 1)}
-            aria-label="Recentrer la caméra 3D"
-            title="Recentrer la caméra"
+            onClick={showWholeDesign}
+            aria-label="Afficher tout le site et recentrer la caméra 3D"
+            title="Afficher tout le site"
             type="button"
           >
             <RotateCcw size={15} aria-hidden="true" />
@@ -145,6 +153,7 @@ export function TelecomGlbViewer({
           {selectedSemanticRoot ? (
             <div className="viewer-selection" aria-live="polite">
               <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {humanizeSemanticRoot(selectedSemanticRoot)}
+              {focusSemanticRoots.length > 1 ? <span> · Cadrage du sous-assemblage mécanique vérifié</span> : null}
               {onSelectSemanticRoot ? <button type="button" onClick={() => onSelectSemanticRoot(null)}>Désélectionner</button> : null}
             </div>
           ) : null}
@@ -212,6 +221,7 @@ export function TelecomGlbViewer({
                     controlsRef={controlsRef}
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
+                    focusSemanticRoots={focusSemanticRoots}
                     knownSemanticRoots={knownSemanticRoots}
                     onSelectSemanticRoot={onSelectSemanticRoot}
                     selectedSemanticRoot={selectedSemanticRoot}
@@ -282,6 +292,7 @@ function ModelScene({
   controlsRef,
   onHealth,
   onLoaded,
+  focusSemanticRoots,
   selectedSemanticRoot,
   knownSemanticRoots,
   onSelectSemanticRoot,
@@ -291,6 +302,7 @@ function ModelScene({
   controlsRef: MutableRefObject<OrbitControlsImpl | null>;
   onHealth: (health: ViewerHealth) => void;
   onLoaded: (summary: ModelObjectSummary) => void;
+  focusSemanticRoots: readonly string[];
   selectedSemanticRoot: string | null;
   knownSemanticRoots: readonly string[];
   onSelectSemanticRoot?: (root: string | null) => void;
@@ -303,6 +315,10 @@ function ModelScene({
   const selectedBox = useMemo(
     () => semanticSelectionBounds(scene, selectedSemanticRoot),
     [scene, selectedSemanticRoot]
+  );
+  const focusBox = useMemo(
+    () => semanticRootsBounds(scene, focusSemanticRoots),
+    [scene, focusSemanticRoots]
   );
   const selectionHelper = useMemo(
     () => selectedBox ? new Box3Helper(selectedBox, new Color("#70e1d2")) : null,
@@ -319,7 +335,7 @@ function ModelScene({
   useEffect(() => {
     fitted.current = false;
     invalidate();
-  }, [invalidate, selectedSemanticRoot]);
+  }, [focusSemanticRoots, invalidate, selectedSemanticRoot]);
   useFrame(() => {
     if (fitted.current || !controlsRef.current) {
       return;
@@ -329,7 +345,7 @@ function ModelScene({
       camera as PerspectiveCamera,
       scene,
       controlsRef.current,
-      selectedBox ?? undefined
+      focusBox ?? selectedBox ?? undefined
     );
     onHealth(fit ? "camera_fitted" : "glb_error");
   });
@@ -379,12 +395,17 @@ export function semanticRootForPick(
 
 /** Exported assemblies often carry one identity on many sibling meshes. */
 export function semanticSelectionBounds(scene: Object3D, root: string | null): Box3 | null {
-  if (!root) return null;
+  return root ? semanticRootsBounds(scene, [root]) : null;
+}
+
+/** Return one camera box for real, published semantic identities only. */
+export function semanticRootsBounds(scene: Object3D, roots: readonly string[]): Box3 | null {
+  if (!roots.length) return null;
   scene.updateWorldMatrix(true, true);
   const bounds = new Box3();
   scene.traverse((object) => {
     if ((object as Object3D & { isMesh?: boolean }).isMesh &&
-      semanticRootForPick(object, [root], 0) === root) {
+      semanticRootForPick(object, roots, 0) !== null) {
       bounds.union(new Box3().setFromObject(object));
     }
   });

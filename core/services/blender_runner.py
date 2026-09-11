@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -13,6 +14,9 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from core.contracts.scene import SceneSpec
+from core.services.blender_runtime import has_qualified_blender_runtime
+
+_SECTOR_PREVIEW_FILE_NAME = re.compile(r"^preview_sector_[a-f0-9]{16}\.png$")
 
 _ADDITIONAL_PREVIEW_FILES = (
     "preview_front.png",
@@ -169,6 +173,7 @@ class BlenderRunner:
             try:
                 _write_build_lock(
                     staging_dir=staging_dir,
+                    scene=scene,
                     scene_spec_path=attempt_scene_spec_path,
                     project_root=self.project_root,
                     worker_script_sha256=worker_script_sha256,
@@ -180,6 +185,7 @@ class BlenderRunner:
                 )
                 lock_error = _validate_build_lock(
                     staging_dir,
+                    scene,
                     attempt_scene_spec_path,
                     worker_script_sha256,
                     worker_bundle_snapshot,
@@ -303,6 +309,7 @@ class BlenderRunner:
                 "metadata": str(output_dir / "scene_metadata.json"),
                 "component_proofs": str(output_dir / "component_proofs.json"),
                 "constraint_evidence": str(output_dir / "constraint_evidence.json"),
+                "sector_preview_evidence": str(output_dir / "sector_preview_evidence.json"),
                 "build_lock": str(output_dir / "build.lock.json"),
             },
             error=error,
@@ -643,6 +650,8 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
         return "BLENDER_METADATA_SCENE_ID_MISMATCH"
     if metadata.get("generation_mode") != "real_blender":
         return "BLENDER_METADATA_MODE_INVALID"
+    if not has_qualified_blender_runtime(metadata.get("blender_runtime")):
+        return "BLENDER_RUNTIME_VERSION_UNQUALIFIED"
     proof_required = bool(
         scene.geometry_programs
         or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
@@ -673,7 +682,56 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
         )
         if preview_error:
             return preview_error
+    sector_preview_error = _write_sector_preview_evidence(output_dir, scene)
+    if sector_preview_error:
+        return sector_preview_error
     return None
+
+
+def _write_sector_preview_evidence(output_dir: Path, scene: SceneSpec) -> str | None:
+    """Bind rendered sector close-ups to post-export GLB semantic evidence."""
+
+    from core.qa.sector_preview_inspector import SectorPreviewInspector, sector_preview_required
+
+    evidence_path = output_dir / "sector_preview_evidence.json"
+    if not sector_preview_required(scene):
+        evidence_path.unlink(missing_ok=True)
+        return None
+    try:
+        evidence = SectorPreviewInspector().inspect(output_dir, scene)
+        _atomic_write_text(
+            evidence_path,
+            json.dumps(evidence.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        evidence_path.unlink(missing_ok=True)
+        return f"BLENDER_SECTOR_PREVIEW_EVIDENCE_INSPECTION_FAILED:{type(exc).__name__}"
+    if evidence.status != "passed":
+        return "BLENDER_SECTOR_PREVIEW_EVIDENCE_FAILED"
+    return None
+
+
+def _sector_preview_required(scene: SceneSpec) -> bool:
+    from core.qa.sector_preview_inspector import sector_preview_required
+
+    return sector_preview_required(scene)
+
+
+def _sector_preview_file_names(output_dir: Path) -> tuple[str, ...]:
+    """Return only evidence-declared, basename-only sector preview files."""
+
+    evidence_path = output_dir / "sector_preview_evidence.json"
+    if not evidence_path.is_file():
+        return ()
+    from core.contracts.sector_preview import SectorPreviewEvidence
+
+    evidence = SectorPreviewEvidence.model_validate_json(evidence_path.read_text(encoding="utf-8"))
+    if evidence.status != "passed":
+        raise ValueError("BLENDER_SECTOR_PREVIEW_EVIDENCE_NOT_PASSED")
+    names = tuple(item.file_name for item in evidence.previews)
+    if len(names) != len(set(names)) or any(Path(name).name != name for name in names):
+        raise ValueError("BLENDER_SECTOR_PREVIEW_FILE_NAMES_INVALID")
+    return names
 
 
 def _write_assembly_constraint_evidence(
@@ -750,8 +808,10 @@ def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
         "scene_metadata.json",
         "component_proofs.json",
         "constraint_evidence.json",
+        "sector_preview_evidence.json",
         "design.blend",
     )
+    names = (*names, *_sector_preview_file_names(staging_dir))
     for name in names:
         source = staging_dir / name
         if source.exists():
@@ -768,17 +828,22 @@ def _clear_generated_artifacts(output_dir: Path) -> None:
         "scene_metadata.json",
         "component_proofs.json",
         "constraint_evidence.json",
+        "sector_preview_evidence.json",
         "design.blend",
         "build.lock.json",
     ):
         path = output_dir / name
         if path.exists():
             path.unlink()
+    for path in output_dir.glob("preview_sector_*.png"):
+        if path.is_file() and _SECTOR_PREVIEW_FILE_NAME.fullmatch(path.name):
+            path.unlink()
 
 
 def _write_build_lock(
     *,
     staging_dir: Path,
+    scene: SceneSpec,
     scene_spec_path: Path,
     project_root: Path,
     worker_script_sha256: str,
@@ -800,6 +865,9 @@ def _write_build_lock(
         artifact_names.append("component_proofs.json")
     if (staging_dir / "constraint_evidence.json").is_file():
         artifact_names.append("constraint_evidence.json")
+    if (staging_dir / "sector_preview_evidence.json").is_file():
+        artifact_names.append("sector_preview_evidence.json")
+        artifact_names.extend(_sector_preview_file_names(staging_dir))
     artifact_hashes = {
         name: {
             "sha256": _sha256(staging_dir / name),
@@ -808,7 +876,7 @@ def _write_build_lock(
         for name in artifact_names
     }
     payload = {
-        "schema_version": "1.2.0",
+        "schema_version": "1.3.0",
         "build_id": build_id,
         "attempt_id": attempt_id,
         "attempt_number": attempt_number,
@@ -826,6 +894,12 @@ def _write_build_lock(
         },
         "trusted_inputs": trusted_inputs,
         "trusted_inputs_sha256": _canonical_json_sha256(trusted_inputs),
+        "sector_preview_profile": {
+            "required": _sector_preview_required(scene),
+            "evidence_file": (
+                "sector_preview_evidence.json" if _sector_preview_required(scene) else None
+            ),
+        },
         "artifacts": artifact_hashes,
     }
     _atomic_write_text(
@@ -836,6 +910,7 @@ def _write_build_lock(
 
 def _validate_build_lock(
     output_dir: Path,
+    scene: SceneSpec,
     scene_spec_path: Path,
     worker_script_sha256: str,
     worker_bundle_snapshot: dict,
@@ -850,7 +925,7 @@ def _validate_build_lock(
         scene_payload = json.loads(scene_spec_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return "BLENDER_BUILD_LOCK_SCENE_INVALID"
-    if payload.get("schema_version") != "1.2.0":
+    if payload.get("schema_version") != "1.3.0":
         return "BLENDER_BUILD_LOCK_SCHEMA_INVALID"
     if payload.get("scene_id") != scene_payload.get("scene_id"):
         return "BLENDER_BUILD_LOCK_SCENE_ID_MISMATCH"
@@ -872,6 +947,14 @@ def _validate_build_lock(
         "trusted_inputs_sha256"
     ) != _canonical_json_sha256(trusted_inputs):
         return "BLENDER_BUILD_LOCK_TRUSTED_INPUTS_MISMATCH"
+    expected_sector_preview_profile = {
+        "required": _sector_preview_required(scene),
+        "evidence_file": (
+            "sector_preview_evidence.json" if _sector_preview_required(scene) else None
+        ),
+    }
+    if payload.get("sector_preview_profile") != expected_sector_preview_profile:
+        return "BLENDER_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID"
     command_profile = payload.get("command_profile")
     if command_profile != {
         "background": True,
@@ -880,13 +963,7 @@ def _validate_build_lock(
     }:
         return "BLENDER_BUILD_LOCK_COMMAND_PROFILE_INVALID"
     blender_runtime = payload.get("blender_runtime")
-    if (
-        not isinstance(blender_runtime, dict)
-        or not isinstance(blender_runtime.get("version"), str)
-        or not blender_runtime["version"]
-        or blender_runtime.get("background") is not True
-        or blender_runtime.get("factory_startup") is not True
-    ):
+    if not has_qualified_blender_runtime(blender_runtime):
         return "BLENDER_BUILD_LOCK_RUNTIME_INVALID"
     artifacts = payload.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -899,6 +976,9 @@ def _validate_build_lock(
         required_names.append("component_proofs.json")
     if (output_dir / "constraint_evidence.json").is_file():
         required_names.append("constraint_evidence.json")
+    if (output_dir / "sector_preview_evidence.json").is_file():
+        required_names.append("sector_preview_evidence.json")
+        required_names.extend(_sector_preview_file_names(output_dir))
     for name in required_names:
         evidence = artifacts.get(name)
         path = output_dir / name
