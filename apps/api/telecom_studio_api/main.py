@@ -78,7 +78,11 @@ from core.llm.asset_selection import GroqAssetSelectionClient
 from core.llm.planning_decision import GroqPlanningDecisionClient
 from core.memory import MemoryService
 from core.orchestration import DesignOrchestrator
-from core.performance import confirmation_tokens_match, requirements_confirmation_hash
+from core.performance import (
+    analysis_receipt_matches_confirmation,
+    confirmation_tokens_match,
+    requirements_confirmation_hash,
+)
 from core.rag import RagService
 from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
@@ -433,10 +437,22 @@ def get_studio_summary() -> dict:
 def create_design(request: CreateDesignRequest) -> dict:
     try:
         if request.confirmed_requirements is not None:
+            receipt = request.confirmed_analysis_receipt
+            if receipt is not None and not analysis_receipt_matches_confirmation(
+                receipt,
+                request.confirmed_requirements,
+                requirements_text=request.requirements_text,
+                detail_level=request.options.detail_level,
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="confirmed input analysis receipt does not match its payload",
+                )
             actual_hash = requirements_confirmation_hash(
                 request.confirmed_requirements,
                 requirements_text=request.requirements_text,
                 detail_level=request.options.detail_level,
+                analysis_receipt=receipt,
             )
             if not confirmation_tokens_match(actual_hash, request.confirmed_requirements_hash):
                 raise HTTPException(
@@ -449,6 +465,7 @@ def create_design(request: CreateDesignRequest) -> dict:
                 source_label="confirmed_requirement_spec",
                 source_text=request.requirements_text,
                 multimodal_consent=request.options.multimodal_consent,
+                input_analysis_receipt=receipt,
             )
         return workflow_service.create_design(
             requirements_text=request.requirements_text,

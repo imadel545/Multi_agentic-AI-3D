@@ -34,11 +34,13 @@ import type {
   DocumentPackReview,
   DocumentPackSummary,
   Health,
+  InputAnalysisStatus,
   LLMDecisionProvenance,
   MultimodalConsent,
   MultimodalIntelligence,
   ParseRequirementsResponse,
   PublicVersionInfo,
+  RequirementAnalysisReceipt,
   RequirementSpec,
   SceneAdaptationCapabilities,
   StudioSummary,
@@ -625,6 +627,7 @@ function RequirementsUnderstanding({
   );
   const confirmationBlocked =
     Boolean(requirements.requires_confirmation) || unresolvedConflicts.length > 0;
+  const receiptMissing = !analysis.analysis_receipt;
   return (
     <div className="understanding-card" aria-label="Compréhension de la demande">
       <span className="eyebrow">
@@ -696,6 +699,12 @@ function RequirementsUnderstanding({
           empty="Aucun incident."
         />
       ) : null}
+      {receiptMissing ? (
+        <p className="inline-alert" role="alert">
+          <AlertTriangle size={15} aria-hidden="true" /> La provenance vérifiée de cette analyse
+          n’est pas disponible. Réanalysez la demande avant de générer le design.
+        </p>
+      ) : null}
       {confirmationBlocked ? (
         <div className="inline-alert" role="alert">
           <AlertTriangle size={15} aria-hidden="true" />
@@ -727,7 +736,7 @@ function RequirementsUnderstanding({
       ) : (
         <button
           className="primary-action"
-          disabled={submitting || confirmationBlocked}
+          disabled={submitting || confirmationBlocked || receiptMissing}
           onClick={onConfirm}
           type="button"
         >
@@ -1414,6 +1423,8 @@ export function InspectorDock({
   llmProvenance = null,
   llmProvenanceError = null,
   llmProvenanceLoading = false,
+  inputAnalysis = null,
+  inputAnalysisStatus = "unavailable",
   viewerBundleError = null,
   viewerBundleLoading = false,
   summary,
@@ -1471,6 +1482,8 @@ export function InspectorDock({
   llmProvenance?: LLMDecisionProvenance | null;
   llmProvenanceError?: string | null;
   llmProvenanceLoading?: boolean;
+  inputAnalysis?: RequirementAnalysisReceipt | null;
+  inputAnalysisStatus?: InputAnalysisStatus;
   viewerBundleError?: string | null;
   viewerBundleLoading?: boolean;
   summary: StudioSummary | null;
@@ -1610,7 +1623,14 @@ export function InspectorDock({
           {activeDrawer === "summary" ? (
             <>
               {viewerBundleError ? <ResourceRecovery busy={viewerBundleLoading} label="Le résumé vérifié du design n’a pas été resynchronisé." message={viewerBundleError} onRetry={onRetryViewerBundle} /> : null}
-              <SummaryPanel bundle={bundle} issues={issues} summary={summary} versions={versions} />
+              <SummaryPanel
+                bundle={bundle}
+                inputAnalysis={inputAnalysis}
+                inputAnalysisStatus={inputAnalysisStatus}
+                issues={issues}
+                summary={summary}
+                versions={versions}
+              />
             </>
           ) : null}
           {activeDrawer === "agents" ? <AgentTimeline events={events} timeline={timeline} /> : null}
@@ -1710,17 +1730,24 @@ export function InspectorDock({
 
 export function SummaryPanel({
   bundle,
+  inputAnalysis = null,
+  inputAnalysisStatus,
   issues,
   summary,
   versions
 }: {
   bundle: ViewerBundle | null;
+  inputAnalysis?: RequirementAnalysisReceipt | null;
+  inputAnalysisStatus?: InputAnalysisStatus;
   issues: UserIssues | null;
   summary: StudioSummary | null;
   versions: PublicVersionInfo[];
 }) {
   const activeVersion = versions.find((version) => version.active)?.version_id ?? versions[0]?.version_id ?? "aucune";
   const issueCount = displayIssueCount(issues, bundle);
+  const persistedInputAnalysis = inputAnalysis ?? bundle?.input_analysis ?? null;
+  const persistedInputAnalysisStatus =
+    inputAnalysisStatus ?? bundle?.input_analysis_status ?? "unavailable";
   return (
     <section className="drawer-section" aria-label="Résumé produit">
       <PanelTitle icon={<CheckCircle2 size={17} />} title="Résumé du design" />
@@ -1728,6 +1755,10 @@ export function SummaryPanel({
         <strong>{summaryHeadline(bundle)}</strong>
         <p>{nextUserAction(bundle, issueCount)}</p>
       </div>
+      <InputAnalysisPanel
+        analysis={persistedInputAnalysis}
+        status={persistedInputAnalysisStatus}
+      />
       <div className="metric-grid">
         <Metric label="Conception" value={workflowStatusLabel(bundle?.status)} />
         <Metric label="Génération" value={generationTruth(bundle)} />
@@ -1797,6 +1828,64 @@ export function SummaryPanel({
         ]}
         empty="État des services indisponible."
       />
+    </section>
+  );
+}
+
+export function InputAnalysisPanel({
+  analysis,
+  status
+}: {
+  analysis: RequirementAnalysisReceipt | null;
+  status: InputAnalysisStatus;
+}) {
+  if (status === "verified" && analysis) {
+    return (
+      <section className="summary-card" aria-label="Compréhension initiale">
+        <strong>Compréhension initiale vérifiée</strong>
+        <p>
+          Cette version conserve l’origine de l’analyse confirmée avant sa génération.
+        </p>
+        <div className="metric-grid">
+          <Metric label="Service d’analyse" value={analysis.provider} />
+          <Metric label="Modèle" value={analysis.model ?? "non communiqué"} />
+          <Metric
+            label="Mode de secours"
+            value={analysis.fallback_used ? "signalé" : "non utilisé"}
+          />
+        </div>
+        {analysis.fallback_used ? (
+          <p className="inline-alert" role="status">
+            <AlertTriangle size={15} aria-hidden="true" /> {humanExtractionFallback(analysis.fallback_reason)}
+          </p>
+        ) : (
+          <p className="resource-proof" role="status">
+            <CheckCircle2 size={15} aria-hidden="true" /> L’analyse confirmée est liée à cette version.
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  if (status === "legacy_unattested") {
+    return (
+      <section className="summary-card" aria-label="Compréhension initiale">
+        <strong>Compréhension initiale non attestée</strong>
+        <p>
+          Cette version conserve ses exigences, mais l’origine de leur analyse n’était pas
+          enregistrée avec la version. Aucun fournisseur ni modèle n’est revendiqué.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="summary-card" aria-label="Compréhension initiale">
+      <strong>Origine de la compréhension indisponible</strong>
+      <p>
+        Cette version ne publie aucun reçu de son analyse initiale. La source de la
+        compréhension ne peut pas être confirmée.
+      </p>
     </section>
   );
 }

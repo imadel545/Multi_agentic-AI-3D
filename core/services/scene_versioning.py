@@ -13,6 +13,7 @@ from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.cognitive_design import CognitiveDesignPlan
 from core.contracts.completion import CompletionCertificate
 from core.contracts.design_blueprint import DesignBlueprint
+from core.contracts.requirement_analysis import RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.versioning import SceneVersion
@@ -940,6 +941,37 @@ def _verify_terminal_status(status_path: Path, *, workflow_id: str) -> None:
         or payload.get("generation_mode") != "real_blender"
     ):
         raise ValueError("ACTIVE_VERSION_STATUS_NOT_CERTIFIED")
+    _verify_terminal_input_analysis_receipt(status_path, payload)
+
+
+def _verify_terminal_input_analysis_receipt(status_path: Path, payload: dict) -> None:
+    """Bind a public analysis receipt to the status hash of an active version.
+
+    Completion evidence does not need the receipt to construct a mesh, but the
+    product exposes that receipt as a durable claim about the user's confirmed
+    input.  The active-design manifest already hashes ``status.json``.  This
+    check makes the separately downloadable JSON file prove the exact same
+    typed payload, so neither source can silently diverge after activation.
+    """
+
+    raw_status = payload.get("input_analysis_status", "unavailable")
+    raw_receipt = payload.get("input_analysis")
+    receipt_path = status_path.parent / "input_analysis_receipt.json"
+    if raw_status in {None, "unavailable", "legacy_unattested"}:
+        if raw_receipt is not None or receipt_path.exists():
+            raise ValueError("ACTIVE_VERSION_INPUT_ANALYSIS_RECEIPT_UNEXPECTED")
+        return
+    if raw_status != "verified" or not isinstance(raw_receipt, dict):
+        raise ValueError("ACTIVE_VERSION_INPUT_ANALYSIS_RECEIPT_INVALID")
+    try:
+        status_receipt = RequirementAnalysisReceipt.model_validate(raw_receipt)
+        artifact_receipt = RequirementAnalysisReceipt.model_validate_json(
+            receipt_path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, ValidationError) as exc:
+        raise ValueError("ACTIVE_VERSION_INPUT_ANALYSIS_RECEIPT_INVALID") from exc
+    if status_receipt.model_dump(mode="json") != artifact_receipt.model_dump(mode="json"):
+        raise ValueError("ACTIVE_VERSION_INPUT_ANALYSIS_RECEIPT_MISMATCH")
 
 
 def _sha256(path: Path) -> str:

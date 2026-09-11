@@ -287,6 +287,19 @@ describe("TelecomStudioApi", () => {
   it("posts the exact confirmed RequirementSpec and its backend hash", async () => {
     const fetcher = vi.fn().mockResolvedValue(jsonResponse({ workflow_id: "wf_2", status: "pending" }));
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const confirmedAnalysisReceipt = {
+      schema_version: "1.0.0" as const,
+      receipt_id: `ira_${"d".repeat(32)}`,
+      issued_at: "2026-09-11T10:00:00+00:00",
+      confirmed_prompt_sha256: "e".repeat(64),
+      confirmed_requirements_sha256: "f".repeat(64),
+      detail_level: "high" as const,
+      provider: "groq:openai/gpt-oss-120b",
+      model: "openai/gpt-oss-120b",
+      extraction_provider: "llm",
+      fallback_used: false,
+      fallback_reason: null
+    };
     const confirmedRequirements = {
       network_type: "5G",
       site_type: "telecom_site",
@@ -321,6 +334,7 @@ describe("TelecomStudioApi", () => {
       requirements_text: "site 5G confirmé",
       confirmed_requirements: confirmedRequirements,
       confirmed_requirements_hash: "b".repeat(64),
+      confirmed_analysis_receipt: confirmedAnalysisReceipt,
       options: { detail_level: "high", multimodal_consent: "allow_input_analysis" }
     });
 
@@ -329,6 +343,7 @@ describe("TelecomStudioApi", () => {
         requirements_text: "site 5G confirmé",
         confirmed_requirements: confirmedRequirements,
         confirmed_requirements_hash: "b".repeat(64),
+        confirmed_analysis_receipt: confirmedAnalysisReceipt,
         options: { detail_level: "high", multimodal_consent: "allow_input_analysis" }
       }),
       headers: { "content-type": "application/json" },

@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.contracts.requirement_analysis import InputAnalysisStatus, RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 
 MultimodalConsent = Literal[
@@ -25,6 +26,7 @@ class CreateDesignRequest(BaseModel):
         default=None,
         pattern=r"^[a-f0-9]{64}$",
     )
+    confirmed_analysis_receipt: RequirementAnalysisReceipt | None = None
 
     @model_validator(mode="after")
     def validate_confirmed_requirements_pair(self) -> "CreateDesignRequest":
@@ -33,6 +35,10 @@ class CreateDesignRequest(BaseModel):
                 "confirmed_requirements and confirmed_requirements_hash must be provided together"
             )
         confirmed = self.confirmed_requirements
+        if self.confirmed_analysis_receipt is not None and confirmed is None:
+            raise ValueError(
+                "confirmed_analysis_receipt requires confirmed_requirements and its hash"
+            )
         if confirmed is not None and self.options.detail_level != confirmed.detail_level:
             raise ValueError("options.detail_level must match confirmed_requirements.detail_level")
         if confirmed is not None and _has_unresolved_confirmation_state(confirmed):
@@ -104,6 +110,25 @@ class RuntimeCapabilities(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+def _validate_input_analysis_envelope(
+    *,
+    status: InputAnalysisStatus,
+    receipt: RequirementAnalysisReceipt | None,
+) -> None:
+    """Keep the public analysis claim inseparable from its server receipt.
+
+    A persisted workflow can be older or locally damaged.  The read boundary
+    normalizes those records before these models are constructed, while this
+    invariant prevents a future projection from accidentally publishing a
+    stronger claim than its evidence supports.
+    """
+
+    if status == "verified" and receipt is None:
+        raise ValueError("verified input analysis status requires a receipt")
+    if status != "verified" and receipt is not None:
+        raise ValueError("input analysis receipt requires verified status")
+
+
 class WorkflowStatus(BaseModel):
     workflow_id: str
     status: str
@@ -123,6 +148,8 @@ class WorkflowStatus(BaseModel):
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
     llm_decision_provenance: dict[str, Any] | None = None
+    input_analysis: RequirementAnalysisReceipt | None = None
+    input_analysis_status: InputAnalysisStatus = "unavailable"
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
     rag_reranker_provider: str | None = None
@@ -167,6 +194,14 @@ class WorkflowStatus(BaseModel):
     tower_validation: dict | None = None
     rf_validation: dict | None = None
 
+    @model_validator(mode="after")
+    def validate_input_analysis_envelope(self) -> "WorkflowStatus":
+        _validate_input_analysis_envelope(
+            status=self.input_analysis_status,
+            receipt=self.input_analysis,
+        )
+        return self
+
 
 class ParseRequirementsRequest(BaseModel):
     requirements_text: str = Field(min_length=1, max_length=5000)
@@ -183,6 +218,7 @@ class ParseRequirementsResponse(BaseModel):
     extraction_provider: str | None = None
     fallback_used: bool | None
     llm_fallback_reason: str | None = None
+    analysis_receipt: RequirementAnalysisReceipt | None = None
 
 
 class RagSearchResponse(BaseModel):
@@ -529,6 +565,7 @@ class UserSummary(BaseModel):
     llm_available: bool | None = None
     llm_fallback_used: bool | None = None
     llm_fallback_reason: str | None = None
+    input_analysis_status: InputAnalysisStatus = "unavailable"
     asset_quality_summary: str | None = None
     limitations: list[str] = Field(default_factory=list)
     runtime_capabilities: RuntimeCapabilities | None = None
@@ -734,6 +771,7 @@ class ViewerBundle(BaseModel):
     component_proofs_url: str | None = None
     requirements_spec_url: str | None = None
     extraction_report_url: str | None = None
+    input_analysis_receipt_url: str | None = None
     scene_spec_url: str | None = None
     assembly_plan_url: str | None = None
     constraint_evidence_url: str | None = None
@@ -757,6 +795,8 @@ class ViewerBundle(BaseModel):
     llm_fallback_reason: str | None = None
     llm_decision_provenance: dict[str, Any] | None = None
     llm_decision_provenance_url: str | None = None
+    input_analysis: RequirementAnalysisReceipt | None = None
+    input_analysis_status: InputAnalysisStatus = "unavailable"
     rag_context_count: int | None = None
     rag_planning_summary: dict | None = None
     rag_reranker_provider: str | None = None
@@ -772,6 +812,14 @@ class ViewerBundle(BaseModel):
     runtime_capabilities: RuntimeCapabilities | None = None
     unsupported_actions: list[UnsupportedAction] = Field(default_factory=list)
     available_actions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_input_analysis_envelope(self) -> "ViewerBundle":
+        _validate_input_analysis_envelope(
+            status=self.input_analysis_status,
+            receipt=self.input_analysis,
+        )
+        return self
 
 
 class TimelineStep(BaseModel):

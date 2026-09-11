@@ -528,12 +528,58 @@ describe("frontend contract schemas", () => {
       errors: [],
       provider: "groq:openai/gpt-oss-120b",
       extraction_provider: "llm",
-      fallback_used: false
+      fallback_used: false,
+      analysis_receipt: {
+        schema_version: "1.0.0",
+        receipt_id: `ira_${"a".repeat(32)}`,
+        issued_at: "2026-09-11T10:00:00+00:00",
+        confirmed_prompt_sha256: "b".repeat(64),
+        confirmed_requirements_sha256: "c".repeat(64),
+        detail_level: "high",
+        provider: "groq:openai/gpt-oss-120b",
+        model: "openai/gpt-oss-120b",
+        extraction_provider: "llm",
+        fallback_used: false,
+        fallback_reason: null
+      }
     });
 
     expect(parsed.requirements?.include_gps_antenna).toBe(true);
     expect(parsed.requirements_hash).toBe("a".repeat(64));
     expect(parsed.requirements?.warnings[0]?.code).toBe("DEFAULT_BEAMWIDTH_USED");
+    expect(parsed.analysis_receipt?.provider).toBe("groq:openai/gpt-oss-120b");
+  });
+
+  it("requires a persisted analysis receipt for a verified workflow or viewer bundle", () => {
+    const receipt = {
+      schema_version: "1.0.0",
+      receipt_id: `ira_${"d".repeat(32)}`,
+      issued_at: "2026-09-11T10:00:00+00:00",
+      confirmed_prompt_sha256: "e".repeat(64),
+      confirmed_requirements_sha256: "f".repeat(64),
+      detail_level: "high",
+      provider: "groq:openai/gpt-oss-120b",
+      model: "openai/gpt-oss-120b",
+      extraction_provider: "llm",
+      fallback_used: false,
+      fallback_reason: null
+    };
+    const verified = parseContract("ViewerBundle", ViewerBundleSchema, {
+      ...viewerBundlePayload,
+      input_analysis: receipt,
+      input_analysis_status: "verified"
+    });
+
+    expect(verified.input_analysis?.model).toBe("openai/gpt-oss-120b");
+    expect(() => ViewerBundleSchema.parse({
+      ...viewerBundlePayload,
+      input_analysis_status: "verified"
+    })).toThrow();
+    expect(() => ViewerBundleSchema.parse({
+      ...viewerBundlePayload,
+      input_analysis: receipt,
+      input_analysis_status: "legacy_unattested"
+    })).toThrow();
   });
 
   it("validates document-pack review fields and QA without requiring raw specs", () => {

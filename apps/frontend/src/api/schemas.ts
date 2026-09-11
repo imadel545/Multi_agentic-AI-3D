@@ -211,6 +211,66 @@ export const RequirementSpecSchema = publicSchema(
   })
 );
 
+export const InputAnalysisStatusSchema = z.enum([
+  "verified",
+  "legacy_unattested",
+  "unavailable"
+]);
+
+export const RequirementAnalysisReceiptSchema = publicSchema(
+  UnknownRecord.extend({
+    schema_version: z.literal("1.0.0"),
+    receipt_id: z.string().regex(/^ira_[a-f0-9]{32}$/),
+    issued_at: z.string().min(20).max(40),
+    confirmed_prompt_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    confirmed_requirements_sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    detail_level: z.enum(["low", "medium", "high"]),
+    provider: z.string().min(1).max(160),
+    model: z.string().min(1).max(160).nullable(),
+    extraction_provider: z.string().min(1).max(40),
+    fallback_used: z.boolean(),
+    fallback_reason: z.string().min(1).max(240).nullable()
+  }).superRefine((receipt, ctx) => {
+    if (receipt.fallback_used && !receipt.fallback_reason) {
+      ctx.addIssue({
+        code: "custom",
+        message: "fallback analysis receipt requires a fallback reason",
+        path: ["fallback_reason"]
+      });
+    }
+    if (!receipt.fallback_used && receipt.fallback_reason !== null) {
+      ctx.addIssue({
+        code: "custom",
+        message: "primary analysis receipt cannot contain a fallback reason",
+        path: ["fallback_reason"]
+      });
+    }
+  })
+);
+
+function validateInputAnalysisEnvelope(
+  value: {
+    input_analysis?: z.infer<typeof RequirementAnalysisReceiptSchema> | null;
+    input_analysis_status?: z.infer<typeof InputAnalysisStatusSchema>;
+  },
+  ctx: z.RefinementCtx
+) {
+  if (value.input_analysis_status === "verified" && !value.input_analysis) {
+    ctx.addIssue({
+      code: "custom",
+      message: "verified input analysis requires a receipt",
+      path: ["input_analysis"]
+    });
+  }
+  if (value.input_analysis && value.input_analysis_status !== "verified") {
+    ctx.addIssue({
+      code: "custom",
+      message: "an input analysis receipt requires verified status",
+      path: ["input_analysis_status"]
+    });
+  }
+}
+
 export const ParseRequirementsResponseSchema = publicSchema(
   UnknownRecord.extend({
     requirements: RequirementSpecSchema.nullable(),
@@ -220,7 +280,8 @@ export const ParseRequirementsResponseSchema = publicSchema(
     provider: z.string().nullish(),
     extraction_provider: z.string().nullish(),
     fallback_used: z.boolean().nullish(),
-    llm_fallback_reason: z.string().nullish()
+    llm_fallback_reason: z.string().nullish(),
+    analysis_receipt: RequirementAnalysisReceiptSchema.nullish()
   })
 );
 
@@ -332,6 +393,8 @@ export const WorkflowStatusSchema = publicSchema(
     llm_fallback_used: z.boolean().nullish(),
     llm_fallback_reason: z.string().nullish(),
     llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
+    input_analysis: RequirementAnalysisReceiptSchema.nullish(),
+    input_analysis_status: InputAnalysisStatusSchema.optional(),
     rag_context_count: z.number().nullish(),
     rag_planning_summary: UnknownRecord.nullish(),
     rag_reranker_provider: z.string().nullish(),
@@ -345,7 +408,7 @@ export const WorkflowStatusSchema = publicSchema(
     runtime_capabilities: RuntimeCapabilitiesSchema.nullish(),
     unsupported_actions: z.array(UnsupportedActionSchema).default([]),
     available_actions: z.array(z.string()).default([])
-  })
+  }).superRefine((status, ctx) => validateInputAnalysisEnvelope(status, ctx))
 );
 
 const EventPayloadSchema = UnknownRecord.extend({
@@ -624,6 +687,8 @@ export const ViewerBundleSchema = publicSchema(
     llm_fallback_reason: z.string().nullish(),
     llm_decision_provenance: LLMDecisionProvenanceSchema.nullish(),
     llm_decision_provenance_url: z.string().nullish(),
+    input_analysis: RequirementAnalysisReceiptSchema.nullish(),
+    input_analysis_status: InputAnalysisStatusSchema.optional(),
     rag_context_count: z.number().nullish(),
     rag_planning_summary: UnknownRecord.nullish(),
     rag_reranker_provider: z.string().nullish(),
@@ -643,7 +708,7 @@ export const ViewerBundleSchema = publicSchema(
     runtime_capabilities: RuntimeCapabilitiesSchema.nullish(),
     unsupported_actions: z.array(UnsupportedActionSchema).default([]),
     available_actions: z.array(z.string()).default([])
-  })
+  }).superRefine((bundle, ctx) => validateInputAnalysisEnvelope(bundle, ctx))
 );
 
 const ComponentProofInstanceSchema = publicSchema(
@@ -1231,6 +1296,8 @@ export type Health = z.infer<typeof HealthSchema>;
 export type StudioSummary = z.infer<typeof StudioSummarySchema>;
 export type RequirementSpec = z.infer<typeof RequirementSpecSchema>;
 export type ParseRequirementsResponse = z.infer<typeof ParseRequirementsResponseSchema>;
+export type RequirementAnalysisReceipt = z.infer<typeof RequirementAnalysisReceiptSchema>;
+export type InputAnalysisStatus = z.infer<typeof InputAnalysisStatusSchema>;
 export type CreateDesignResponse = z.infer<typeof CreateDesignResponseSchema>;
 export type WorkflowStatus = z.infer<typeof WorkflowStatusSchema>;
 export type WorkflowEvent = z.infer<typeof WorkflowEventSchema>;

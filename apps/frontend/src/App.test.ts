@@ -42,6 +42,20 @@ function workflow(
   };
 }
 
+const confirmedAnalysisReceipt = {
+  schema_version: "1.0.0" as const,
+  receipt_id: `ira_${"a".repeat(32)}`,
+  issued_at: "2026-09-11T10:00:00+00:00",
+  confirmed_prompt_sha256: "b".repeat(64),
+  confirmed_requirements_sha256: "c".repeat(64),
+  detail_level: "high" as const,
+  provider: "deterministic",
+  model: null,
+  extraction_provider: "fallback",
+  fallback_used: true,
+  fallback_reason: "provider_unavailable"
+};
+
 function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi {
   return {
     health: vi.fn().mockResolvedValue({
@@ -333,6 +347,7 @@ describe("frontend runtime selection", () => {
         edit_description: "VERSION B ACTIVE"
       }]);
     });
+    const createDesign = vi.fn().mockResolvedValue({ workflow_id: "wf_b", status: "completed" });
     const apiClient = bootstrapApi({
       listDesigns: vi.fn().mockResolvedValue([workflowA]),
       conversation: vi.fn((workflowId: string) => Promise.resolve({
@@ -407,9 +422,10 @@ describe("frontend runtime selection", () => {
         provider: "deterministic",
         extraction_provider: "deterministic",
         fallback_used: true,
-        llm_fallback_reason: "provider_unavailable"
+        llm_fallback_reason: "provider_unavailable",
+        analysis_receipt: confirmedAnalysisReceipt
       }),
-      createDesign: vi.fn().mockResolvedValue({ workflow_id: "wf_b", status: "completed" })
+      createDesign
     });
 
     render(createElement(App, { apiClient }));
@@ -421,6 +437,11 @@ describe("frontend runtime selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Analyser la demande" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirmer et générer" }));
 
+    await waitFor(() =>
+      expect(createDesign).toHaveBeenCalledWith(
+        expect.objectContaining({ confirmed_analysis_receipt: confirmedAnalysisReceipt })
+      )
+    );
     expect(await screen.findByText("DEMANDE B ACTIVE")).toBeInTheDocument();
     expect(workflowAVersionsSignal?.aborted).toBe(true);
 

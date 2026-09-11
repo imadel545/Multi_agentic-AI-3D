@@ -23,6 +23,7 @@ from core.contracts.llm_provenance import (
     LLMDecisionLinks,
     LLMDecisionProvenance,
 )
+from core.contracts.requirement_analysis import InputAnalysisStatus, RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import SceneEditResult
@@ -30,7 +31,7 @@ from core.contracts.sector_preview import SectorPreviewEvidence
 from core.contracts.validation import ValidationReport
 from core.contracts.versioning import SceneVersion
 from core.orchestration import DesignOrchestrator, OrchestratorResult
-from core.performance import requirements_confirmation_hash
+from core.performance import issue_requirement_analysis_receipt, requirements_confirmation_hash
 from core.rag.planning import SUPPORTED_PLANNING_HINT_FIELDS
 from core.services.asset_registry import AssetRegistry
 from core.services.cleanup_service import CleanupService
@@ -587,6 +588,7 @@ class WorkflowService:
         source_label: str = "project_design_spec",
         source_text: str | None = None,
         multimodal_consent: str = "disabled",
+        input_analysis_receipt: RequirementAnalysisReceipt | None = None,
         _synchronous: bool = False,
     ) -> dict:
         self._sync_output_services()
@@ -596,12 +598,21 @@ class WorkflowService:
         output_dir = self.outputs_dir / workflow_id
         output_dir.mkdir(parents=True, exist_ok=False)
         context_text = source_text or _requirements_context_text(requirements, source_label)
+        input_analysis_status: InputAnalysisStatus = (
+            "verified"
+            if input_analysis_receipt is not None
+            else "legacy_unattested"
+            if source_label == "confirmed_requirement_spec"
+            else "unavailable"
+        )
         self._write_pending_status(
             workflow_id,
             output_dir,
             detail_level,
             use_llm=False,
             multimodal_consent=multimodal_consent,
+            input_analysis_receipt=input_analysis_receipt,
+            input_analysis_status=input_analysis_status,
         )
         self._mark_workflow_active(workflow_id)
         self._emit_workflow_event(
@@ -885,7 +896,9 @@ class WorkflowService:
         status_path = self.outputs_dir / workflow_id / "status.json"
         if not status_path.exists():
             raise KeyError(workflow_id)
-        root_status = json.loads(status_path.read_text(encoding="utf-8"))
+        root_status = _normalized_input_analysis_status(
+            json.loads(status_path.read_text(encoding="utf-8"))
+        )
         manifest = self.versioning.active_design_manifest(workflow_id)
         if (
             root_status.get("status") in {"pending", "running"}
@@ -948,7 +961,9 @@ class WorkflowService:
                 ),
                 None,
             )
-        return json.loads(candidate_status.read_text(encoding="utf-8")), snapshot
+        return _normalized_input_analysis_status(
+            json.loads(candidate_status.read_text(encoding="utf-8"))
+        ), snapshot
 
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""
@@ -1285,6 +1300,22 @@ class WorkflowService:
             error=extraction.error,
             llm_available=llm_available,
         )
+        extraction_provider = extraction_provider_label(
+            extraction.provider, extraction.fallback_used, fallback_reason
+        )
+        analysis_receipt = (
+            issue_requirement_analysis_receipt(
+                extraction.requirements,
+                requirements_text=requirements_text,
+                detail_level=detail_level,
+                provider=extraction.provider,
+                extraction_provider=extraction_provider or "unavailable",
+                fallback_used=extraction.fallback_used,
+                fallback_reason=fallback_reason,
+            )
+            if extraction.requirements is not None
+            else None
+        )
         return {
             "requirements": (
                 extraction.requirements.model_dump() if extraction.requirements else None
@@ -1294,6 +1325,7 @@ class WorkflowService:
                     extraction.requirements,
                     requirements_text=requirements_text,
                     detail_level=detail_level,
+                    analysis_receipt=analysis_receipt,
                 )
                 if extraction.requirements is not None
                 else None
@@ -1305,11 +1337,12 @@ class WorkflowService:
             ),
             "errors": _extraction_errors(extraction.error),
             "provider": extraction.provider,
-            "extraction_provider": extraction_provider_label(
-                extraction.provider, extraction.fallback_used, fallback_reason
-            ),
+            "extraction_provider": extraction_provider,
             "fallback_used": extraction.fallback_used,
             "llm_fallback_reason": fallback_reason,
+            "analysis_receipt": (
+                analysis_receipt.model_dump(mode="json") if analysis_receipt else None
+            ),
         }
 
     def validate_scene(self, scene: SceneSpec) -> ValidationReport:
@@ -1436,7 +1469,9 @@ class WorkflowService:
             )
         original_scene = active_version.scene
         edit_id = edit_id or f"edit_{uuid.uuid4().hex[:8]}"
-        multimodal_consent = self.get_status(workflow_id).get("multimodal_consent", "disabled")
+        active_status = self.get_status(workflow_id)
+        multimodal_consent = active_status.get("multimodal_consent", "disabled")
+        input_analysis_receipt, input_analysis_status = _input_analysis_from_status(active_status)
 
         self._emit_workflow_event(
             workflow_id,
@@ -1671,6 +1706,8 @@ class WorkflowService:
             active_version_id=self.versioning.active_version_id(workflow_id),
             llm_decision_provenance=llm_decision_provenance,
             multimodal_consent=multimodal_consent,
+            input_analysis_receipt=input_analysis_receipt,
+            input_analysis_status=input_analysis_status,
         )
         self._make_archive(version_output_dir)
         self._write_status(
@@ -1682,6 +1719,8 @@ class WorkflowService:
             active_version_id=self.versioning.active_version_id(workflow_id),
             llm_decision_provenance=llm_decision_provenance,
             multimodal_consent=multimodal_consent,
+            input_analysis_receipt=input_analysis_receipt,
+            input_analysis_status=input_analysis_status,
         )
         version_status = self._read_json(version_output_dir / "status.json")
         self.versioning.update_version(
@@ -1764,6 +1803,8 @@ class WorkflowService:
             version_id=version.version_id,
             active_version_id=version.version_id,
             llm_decision_provenance=llm_decision_provenance,
+            input_analysis_receipt=input_analysis_receipt,
+            input_analysis_status=input_analysis_status,
         )
         self.versioning.commit_active_version(workflow_id, version.version_id)
         self._run_after_canonical_commit(
@@ -2193,6 +2234,8 @@ class WorkflowService:
         active_version_id: str | None = None,
         llm_decision_provenance: LLMDecisionProvenance | None = None,
         multimodal_consent: str | None = None,
+        input_analysis_receipt: RequirementAnalysisReceipt | None = None,
+        input_analysis_status: InputAnalysisStatus | None = None,
     ) -> None:
         report = result.report
         asset_import_metadata = _asset_import_metadata(output_dir)
@@ -2201,6 +2244,26 @@ class WorkflowService:
             rag_context=result.rag_context,
         )
         previous_status = _read_status_payload(output_dir)
+        previous_input_analysis, previous_input_analysis_status = _input_analysis_from_status(
+            previous_status
+        )
+        effective_input_analysis = (
+            input_analysis_receipt if input_analysis_status is not None else previous_input_analysis
+        )
+        effective_input_analysis_status = (
+            input_analysis_status
+            if input_analysis_status is not None
+            else previous_input_analysis_status
+        )
+        if effective_input_analysis_status == "verified" and effective_input_analysis is None:
+            raise ValueError("verified input analysis status requires a receipt")
+        if effective_input_analysis_status != "verified" and effective_input_analysis is not None:
+            raise ValueError("input analysis receipt requires verified status")
+        if effective_input_analysis is not None:
+            self._write_json(
+                output_dir / "input_analysis_receipt.json",
+                effective_input_analysis.model_dump(mode="json"),
+            )
         created_at = _status_created_at(previous_status, output_dir)
         metrics = dict(result.metrics)
         metrics.setdefault("started_at", created_at)
@@ -2265,6 +2328,7 @@ class WorkflowService:
             "adaptation_plan": str(output_dir / "adaptation_plan.json"),
             "adaptation_capabilities": str(output_dir / "adaptation_capabilities.json"),
             "llm_decision_provenance": str(output_dir / "llm_decision_provenance.json"),
+            "input_analysis_receipt": str(output_dir / "input_analysis_receipt.json"),
         }
         payload = {
             "workflow_id": workflow_id,
@@ -2282,6 +2346,12 @@ class WorkflowService:
             "llm_available": llm_available,
             "llm_fallback_used": effective_llm_fallback_used,
             "llm_fallback_reason": llm_reason,
+            "input_analysis": (
+                effective_input_analysis.model_dump(mode="json")
+                if effective_input_analysis is not None
+                else None
+            ),
+            "input_analysis_status": effective_input_analysis_status,
             "llm_decision_provenance": (
                 llm_decision_provenance.model_dump(mode="json") if llm_decision_provenance else None
             ),
@@ -2372,12 +2442,19 @@ class WorkflowService:
     def _write_failed_status(self, workflow_id: str, output_dir: Path, error: str) -> None:
         previous_status = _read_status_payload(output_dir)
         created_at = _status_created_at(previous_status, output_dir)
+        input_analysis_receipt, input_analysis_status = _input_analysis_from_status(previous_status)
         payload = {
             "workflow_id": workflow_id,
             "status": "failed",
             "created_at": created_at,
             "origin": previous_status.get("origin", self.runtime_origin),
             "multimodal_consent": previous_status.get("multimodal_consent", "disabled"),
+            "input_analysis": (
+                input_analysis_receipt.model_dump(mode="json")
+                if input_analysis_receipt is not None
+                else None
+            ),
+            "input_analysis_status": input_analysis_status,
             "artifacts": {},
             "errors": [{"code": "WORKFLOW_EXCEPTION", "message": error, "severity": "error"}],
             "warnings": [],
@@ -2386,6 +2463,7 @@ class WorkflowService:
             "metrics": {
                 "status": "failed",
                 "multimodal_consent": previous_status.get("multimodal_consent", "disabled"),
+                "input_analysis_status": input_analysis_status,
                 "started_at": created_at,
             },
         }
@@ -2398,8 +2476,19 @@ class WorkflowService:
         detail_level: str,
         use_llm: bool | None,
         multimodal_consent: str = "disabled",
+        input_analysis_receipt: RequirementAnalysisReceipt | None = None,
+        input_analysis_status: InputAnalysisStatus = "unavailable",
     ) -> None:
+        if input_analysis_status == "verified" and input_analysis_receipt is None:
+            raise ValueError("verified input analysis status requires a receipt")
+        if input_analysis_status != "verified" and input_analysis_receipt is not None:
+            raise ValueError("input analysis receipt requires verified status")
         created_at = _utc_now_iso()
+        if input_analysis_receipt is not None:
+            self._write_json(
+                output_dir / "input_analysis_receipt.json",
+                input_analysis_receipt.model_dump(mode="json"),
+            )
         payload = {
             "workflow_id": workflow_id,
             "status": "pending",
@@ -2416,6 +2505,12 @@ class WorkflowService:
             "llm_available": llm_available_from_workflow_service(self),
             "llm_fallback_used": None,
             "llm_fallback_reason": None,
+            "input_analysis": (
+                input_analysis_receipt.model_dump(mode="json")
+                if input_analysis_receipt is not None
+                else None
+            ),
+            "input_analysis_status": input_analysis_status,
             "rag_context_count": 0,
             "memory_hits": 0,
             "memory_context_count": 0,
@@ -2432,6 +2527,7 @@ class WorkflowService:
                 "detail_level": detail_level,
                 "use_llm": use_llm,
                 "multimodal_consent": multimodal_consent,
+                "input_analysis_status": input_analysis_status,
                 "started_at": created_at,
             },
         }
@@ -3140,7 +3236,7 @@ def _public_status_payload(
     *,
     verified_artifacts: dict[str, str] | None = None,
 ) -> dict:
-    payload = dict(status)
+    payload = _normalized_input_analysis_status(status)
     active_version_id = payload.get("active_version_id")
     certified = (
         payload.get("status") == "completed"
@@ -3268,6 +3364,46 @@ def _read_status_payload(output_dir: Path) -> dict:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _input_analysis_from_status(
+    payload: dict,
+) -> tuple[RequirementAnalysisReceipt | None, InputAnalysisStatus]:
+    """Read persisted input analysis evidence without upgrading legacy records.
+
+    A malformed local record is never exposed as verified.  Older workflows
+    did not carry this evidence at all, so they remain explicitly unavailable
+    rather than receiving reconstructed provenance.
+    """
+
+    raw_status = payload.get("input_analysis_status")
+    if raw_status == "legacy_unattested":
+        return None, "legacy_unattested"
+    if raw_status != "verified":
+        return None, "unavailable"
+    raw_receipt = payload.get("input_analysis")
+    if not isinstance(raw_receipt, dict):
+        return None, "unavailable"
+    try:
+        return RequirementAnalysisReceipt.model_validate(raw_receipt), "verified"
+    except ValueError:
+        return None, "unavailable"
+
+
+def _normalized_input_analysis_status(payload: dict) -> dict:
+    """Return a safe public/status projection of persisted analysis evidence.
+
+    The workflow's primary status file is an operational record, so old or
+    damaged payloads must not make the public API claim that a verified input
+    analysis exists when its receipt cannot be parsed.  This intentionally
+    preserves the distinct legacy state without reconstructing provenance.
+    """
+
+    normalized = dict(payload)
+    receipt, status = _input_analysis_from_status(normalized)
+    normalized["input_analysis"] = receipt.model_dump(mode="json") if receipt is not None else None
+    normalized["input_analysis_status"] = status
+    return normalized
 
 
 def _status_created_at(payload: dict | None, workflow_dir: Path) -> str:
@@ -3450,6 +3586,7 @@ def _load_cognitive_plan_for_revision(
 _ALLOWED_ARTIFACT_FILES = {
     "requirements_spec": "requirements_spec.json",
     "extraction_report": "extraction_report.json",
+    "input_analysis_receipt": "input_analysis_receipt.json",
     "scene_spec": "scene_spec.json",
     "assembly_plan": "assembly_plan.json",
     "constraint_evidence": "constraint_evidence.json",

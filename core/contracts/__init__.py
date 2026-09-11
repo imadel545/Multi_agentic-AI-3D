@@ -20,6 +20,7 @@ from core.contracts.planning_decision import (
 )
 from core.contracts.quality import QualityGateCheck, QualityGateReport
 from core.contracts.repair import RepairEvent, RepairReport
+from core.contracts.requirement_analysis import RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.tower import TowerCharacteristics
@@ -36,6 +37,7 @@ __all__ = [
     "GeometryProgram",
     "GlbInspectionReport",
     "LLMDecisionProvenance",
+    "RequirementAnalysisReceipt",
     "MemoryIndexResult",
     "MemoryRecallResult",
     "MemorySummary",

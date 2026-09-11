@@ -3,10 +3,14 @@ import hmac
 import json
 import math
 import secrets
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
+
+from core.contracts.requirement_analysis import RequirementAnalysisReceipt
 
 # A confirmation is valid only for the API process that issued it. Restarting
 # the local runtime intentionally requires the client to parse the request again.
@@ -22,6 +26,7 @@ def requirements_confirmation_hash(
     *,
     requirements_text: str,
     detail_level: str,
+    analysis_receipt: RequirementAnalysisReceipt | None = None,
 ) -> str:
     """Return a process-bound, JavaScript-safe token for a confirmed requirement.
 
@@ -32,11 +37,15 @@ def requirements_confirmation_hash(
     """
 
     payload = {
-        "confirmation_contract_version": "2.0",
+        "confirmation_contract_version": "3.0" if analysis_receipt is not None else "2.0",
         "requirements_text": requirements_text,
         "detail_level": detail_level,
         "requirements": _canonicalize_json_numbers(_model_payload(requirements)),
     }
+    if analysis_receipt is not None:
+        payload["analysis_receipt"] = _canonicalize_json_numbers(
+            analysis_receipt.model_dump(mode="json")
+        )
     return hmac.new(
         _REQUIREMENTS_CONFIRMATION_SECRET,
         _encode_payload(payload),
@@ -46,6 +55,65 @@ def requirements_confirmation_hash(
 
 def confirmation_tokens_match(expected: str, actual: str) -> bool:
     return hmac.compare_digest(expected, actual)
+
+
+def requirements_text_sha256(requirements_text: str) -> str:
+    return _hash_payload(requirements_text)
+
+
+def confirmed_requirements_sha256(requirements: Any) -> str:
+    """Hash the complete browser-confirmed RequirementSpec payload.
+
+    ``requirements_hash`` intentionally omits advisory warnings and repair
+    history because it keys downstream semantic work.  A confirmation receipt
+    must instead describe the complete reviewed payload; the HMAC remains the
+    final integrity boundary for that payload.
+    """
+
+    return _hash_payload(_canonicalize_json_numbers(_model_payload(requirements)))
+
+
+def issue_requirement_analysis_receipt(
+    requirements: Any,
+    *,
+    requirements_text: str,
+    detail_level: str,
+    provider: str,
+    extraction_provider: str,
+    fallback_used: bool,
+    fallback_reason: str | None,
+) -> RequirementAnalysisReceipt:
+    """Build one server-side analysis receipt before a user confirms input."""
+
+    model = provider.split(":", 1)[1] if provider.startswith("groq:") else None
+    return RequirementAnalysisReceipt(
+        receipt_id=f"ira_{uuid.uuid4().hex}",
+        issued_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        confirmed_prompt_sha256=requirements_text_sha256(requirements_text),
+        confirmed_requirements_sha256=confirmed_requirements_sha256(requirements),
+        detail_level=detail_level,
+        provider=provider,
+        model=model,
+        extraction_provider=extraction_provider,
+        fallback_used=fallback_used,
+        fallback_reason=fallback_reason,
+    )
+
+
+def analysis_receipt_matches_confirmation(
+    receipt: RequirementAnalysisReceipt,
+    requirements: Any,
+    *,
+    requirements_text: str,
+    detail_level: str,
+) -> bool:
+    """Check that an opaque returned receipt still describes this confirmation."""
+
+    return (
+        receipt.confirmed_prompt_sha256 == requirements_text_sha256(requirements_text)
+        and receipt.confirmed_requirements_sha256 == confirmed_requirements_sha256(requirements)
+        and receipt.detail_level == detail_level
+    )
 
 
 def scene_spec_hash(scene: Any) -> str:

@@ -147,7 +147,20 @@ const parsedRequirements = {
   provider: "groq:openai/gpt-oss-120b",
   extraction_provider: "llm",
   fallback_used: false,
-  llm_fallback_reason: null
+  llm_fallback_reason: null,
+  analysis_receipt: {
+    schema_version: "1.0.0" as const,
+    receipt_id: `ira_${"a".repeat(32)}`,
+    issued_at: "2026-09-11T10:00:00+00:00",
+    confirmed_prompt_sha256: "b".repeat(64),
+    confirmed_requirements_sha256: "c".repeat(64),
+    detail_level: "high" as const,
+    provider: "groq:openai/gpt-oss-120b",
+    model: "openai/gpt-oss-120b",
+    extraction_provider: "llm",
+    fallback_used: false,
+    fallback_reason: null
+  }
 };
 
 afterEach(() => cleanup());
@@ -435,6 +448,26 @@ describe("studio kernel components", () => {
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
   });
 
+  it("does not confirm an analysis whose server receipt is missing", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        analysis={{ ...parsedRequirements, analysis_receipt: null }}
+        onConfirm={onConfirm}
+        prompt="site 5G"
+      />
+    );
+
+    const confirm = screen.getByRole("button", { name: "Confirmer et générer" });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "La provenance vérifiée de cette analyse n’est pas disponible"
+    );
+    fireEvent.click(confirm);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("keeps remote image analysis opt-in and hides it without an eligible capability", () => {
     const onConsentChange = vi.fn();
     const { rerender } = render(
@@ -563,6 +596,62 @@ describe("studio kernel components", () => {
     expect(() => ViewerBundleSchema.parse({ ...raw, geometry_program_summary: {
       ...raw.geometry_program_summary, generated_component_count: 1, reused_component_count: 0
     } })).toThrow();
+  });
+
+  it("shows persisted initial analysis without exposing receipt internals", () => {
+    const receipt = {
+      schema_version: "1.0.0" as const,
+      receipt_id: `ira_${"d".repeat(32)}`,
+      issued_at: "2026-09-11T10:00:00+00:00",
+      confirmed_prompt_sha256: "e".repeat(64),
+      confirmed_requirements_sha256: "f".repeat(64),
+      detail_level: "high" as const,
+      provider: "groq:openai/gpt-oss-120b",
+      model: "openai/gpt-oss-120b",
+      extraction_provider: "llm",
+      fallback_used: false,
+      fallback_reason: null
+    };
+    render(
+      <SummaryPanel
+        bundle={{
+          ...bundle,
+          input_analysis: receipt,
+          input_analysis_status: "verified"
+        }}
+        issues={null}
+        summary={null}
+        versions={[]}
+      />
+    );
+
+    const context = screen.getByLabelText("Compréhension initiale");
+    expect(context).toHaveTextContent("Compréhension initiale vérifiée");
+    expect(context).toHaveTextContent("groq:openai/gpt-oss-120b");
+    expect(context).toHaveTextContent("openai/gpt-oss-120b");
+    expect(context).toHaveTextContent("Mode de secours");
+    expect(context).toHaveTextContent("non utilisé");
+    expect(context).not.toHaveTextContent(receipt.receipt_id);
+    expect(context).not.toHaveTextContent(receipt.confirmed_prompt_sha256);
+    expect(context).not.toHaveTextContent(receipt.confirmed_requirements_sha256);
+  });
+
+  it("labels legacy analysis truthfully when a persisted version has no receipt", () => {
+    render(
+      <SummaryPanel
+        bundle={{ ...bundle, input_analysis: null, input_analysis_status: "legacy_unattested" }}
+        issues={null}
+        summary={null}
+        versions={[]}
+      />
+    );
+
+    expect(screen.getByLabelText("Compréhension initiale")).toHaveTextContent(
+      "Compréhension initiale non attestée"
+    );
+    expect(screen.getByLabelText("Compréhension initiale")).toHaveTextContent(
+      "Aucun fournisseur ni modèle n’est revendiqué"
+    );
   });
 
   it("shows model, repair mode and prompt proof for generated geometry", () => {
@@ -701,7 +790,15 @@ describe("studio kernel components", () => {
           extraction_provider: "fallback",
           fallback_used: true,
           llm_fallback_reason: "Groq timeout",
-          errors: [{ code: "LLM_EXTRACTION_ERROR", message: "Groq timeout" }]
+          errors: [{ code: "LLM_EXTRACTION_ERROR", message: "Groq timeout" }],
+          analysis_receipt: {
+            ...parsedRequirements.analysis_receipt,
+            provider: "deterministic",
+            model: null,
+            extraction_provider: "fallback",
+            fallback_used: true,
+            fallback_reason: "Groq timeout"
+          }
         }}
         prompt="site 5G"
       />

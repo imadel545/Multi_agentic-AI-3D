@@ -21,6 +21,7 @@ from core.contracts.quality import QualityGateReport
 from core.contracts.requirements import GeometryRequest, RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
+from core.performance import issue_requirement_analysis_receipt
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import GenerationResult
 from core.services.requirement_parser import parse_requirements_text
@@ -217,6 +218,35 @@ def test_build_lock_binds_supplementary_preview_bytes(tmp_path: Path) -> None:
         match="ACTIVE_VERSION_BUILD_LOCK_ARTIFACT_MISMATCH:preview_front.png",
     ):
         _verify_build_lock(bundle.artifact_dir, scene=bundle.scene)
+
+
+def test_active_version_rejects_a_downloadable_input_analysis_receipt_that_diverges_from_status(
+    tmp_path: Path,
+) -> None:
+    """The public receipt is bound to the active status even though it is not mesh input."""
+
+    bundle = _create_certified_bundle(tmp_path, certificate_schema="1.2.0")
+    receipt = issue_requirement_analysis_receipt(
+        bundle.requirements,
+        requirements_text="Créer un site vérifié.",
+        detail_level="high",
+        provider="groq:openai/gpt-oss-120b",
+        extraction_provider="groq",
+        fallback_used=False,
+        fallback_reason=None,
+    )
+    status_path = bundle.artifact_dir / "status.json"
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    status["input_analysis_status"] = "verified"
+    status["input_analysis"] = receipt.model_dump(mode="json")
+    _write_json(status_path, status)
+
+    altered_receipt = receipt.model_dump(mode="json")
+    altered_receipt["provider"] = "deterministic"
+    _write_json(bundle.artifact_dir / "input_analysis_receipt.json", altered_receipt)
+
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_INPUT_ANALYSIS_RECEIPT_MISMATCH"):
+        bundle.service.verified_active_status_path(bundle.workflow_id)
 
 
 @pytest.mark.parametrize("downgrade", ["certificate", "build_lock"])

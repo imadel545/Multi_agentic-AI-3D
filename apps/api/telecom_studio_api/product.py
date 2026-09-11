@@ -133,6 +133,7 @@ class ProductService:
             "llm_available": llm["llm_available"],
             "llm_fallback_used": status.get("llm_fallback_used"),
             "llm_fallback_reason": llm["llm_fallback_reason"],
+            "input_analysis_status": status.get("input_analysis_status", "unavailable"),
             "asset_quality_summary": _asset_quality_summary(status),
             "limitations": _collect_limitations(status),
             "runtime_capabilities": runtime_capabilities(),
@@ -271,6 +272,13 @@ class ProductService:
         viewer_artifacts.append(
             _artifact("extraction_report.json", "application/json", "extraction_report")
         )
+        viewer_artifacts.append(
+            _artifact(
+                "input_analysis_receipt.json",
+                "application/json",
+                "input_analysis_receipt",
+            )
+        )
         viewer_artifacts.append(_artifact("scene_spec.json", "application/json", "scene_spec"))
         viewer_artifacts.append(
             _artifact("assembly_plan.json", "application/json", "assembly_plan")
@@ -332,6 +340,7 @@ class ProductService:
         component_proofs = _artifact_by_name(viewer_artifacts, "component_proofs.json")
         requirements_spec = _artifact_by_name(viewer_artifacts, "requirements_spec.json")
         extraction_report = _artifact_by_name(viewer_artifacts, "extraction_report.json")
+        input_analysis_receipt = _artifact_by_name(viewer_artifacts, "input_analysis_receipt.json")
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         assembly_plan = _artifact_by_name(viewer_artifacts, "assembly_plan.json")
         constraint_evidence = _artifact_by_name(viewer_artifacts, "constraint_evidence.json")
@@ -400,6 +409,7 @@ class ProductService:
             "component_proofs_url": _available_artifact_url(component_proofs),
             "requirements_spec_url": _available_artifact_url(requirements_spec),
             "extraction_report_url": _available_artifact_url(extraction_report),
+            "input_analysis_receipt_url": _available_artifact_url(input_analysis_receipt),
             "scene_spec_url": _available_artifact_url(scene_spec),
             "assembly_plan_url": _available_artifact_url(assembly_plan),
             "constraint_evidence_url": _available_artifact_url(constraint_evidence),
@@ -423,6 +433,8 @@ class ProductService:
             "llm_fallback_reason": llm["llm_fallback_reason"],
             "llm_decision_provenance": status.get("llm_decision_provenance"),
             "llm_decision_provenance_url": _available_artifact_url(llm_decision_provenance),
+            "input_analysis": status.get("input_analysis"),
+            "input_analysis_status": status.get("input_analysis_status", "unavailable"),
             "rag_context_count": status.get("rag_context_count"),
             "rag_planning_summary": status.get("rag_planning_summary"),
             "rag_reranker_provider": status.get("rag_reranker_provider"),

@@ -10,16 +10,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, workflow_service
+from apps.api.telecom_studio_api.models import ViewerBundle, WorkflowStatus
 from apps.api.telecom_studio_api.workflow import (
     WorkflowBusyError,
     WorkflowService,
     WorkflowStorageError,
     _public_status_payload,
 )
+from core.contracts.requirement_analysis import RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
 from core.contracts.validation import ValidationReport
-from core.performance import requirements_confirmation_hash
+from core.performance import issue_requirement_analysis_receipt, requirements_confirmation_hash
 
 
 def test_runtime_origin_survives_pending_and_failed_status(tmp_path: Path) -> None:
@@ -78,6 +80,97 @@ def test_public_workflow_status_sanitizes_legacy_asset_file_paths() -> None:
     assert imports[4]["asset_file"] is None
     assert imports[5]["asset_file"] is None
     assert "/Users/" not in json.dumps(payload)
+
+
+@pytest.mark.parametrize(
+    ("input_analysis_status", "input_analysis", "expected_status"),
+    [
+        ("verified", None, "unavailable"),
+        ("verified", {"receipt_id": "ira_incomplete"}, "unavailable"),
+        ("legacy_unattested", {"receipt_id": "ira_incomplete"}, "legacy_unattested"),
+    ],
+)
+def test_public_status_normalizes_malformed_input_analysis_evidence(
+    tmp_path: Path,
+    input_analysis_status: str,
+    input_analysis: dict | None,
+    expected_status: str,
+) -> None:
+    """Damaged local status records must degrade honestly at every API projection."""
+
+    original_outputs = workflow_service.outputs_dir
+    workflow_service.outputs_dir = tmp_path
+    workflow_id = "wf_a11cedde1e7e"
+    output_dir = tmp_path / workflow_id
+    output_dir.mkdir()
+    output_dir.joinpath("status.json").write_text(
+        json.dumps(
+            {
+                "workflow_id": workflow_id,
+                "status": "failed",
+                "artifacts": {},
+                "warnings": [],
+                "errors": [],
+                "input_analysis_status": input_analysis_status,
+                "input_analysis": input_analysis,
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    try:
+        design = client.get(f"/designs/{workflow_id}")
+        summary = client.get(f"/designs/{workflow_id}/user-summary")
+        bundle = client.get(f"/designs/{workflow_id}/viewer-bundle")
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        workflow_service._sync_output_services()
+
+    assert design.status_code == 200
+    assert summary.status_code == 200
+    assert bundle.status_code == 200
+    assert design.json()["input_analysis_status"] == expected_status
+    assert design.json()["input_analysis"] is None
+    assert summary.json()["input_analysis_status"] == expected_status
+    assert bundle.json()["input_analysis_status"] == expected_status
+    assert bundle.json()["input_analysis"] is None
+
+
+def test_backend_input_analysis_models_reject_incoherent_verified_claims() -> None:
+    with pytest.raises(ValueError, match="verified input analysis status requires a receipt"):
+        WorkflowStatus(
+            workflow_id="wf_analysis_model",
+            status="failed",
+            artifacts={},
+            warnings=[],
+            errors=[],
+            input_analysis_status="verified",
+        )
+    with pytest.raises(ValueError, match="input analysis receipt requires verified status"):
+        ViewerBundle(
+            workflow_id="wf_analysis_model",
+            status="failed",
+            viewer_artifacts=[],
+            input_analysis=issue_requirement_analysis_receipt(
+                RequirementSpec(
+                    network_type="5G",
+                    tower_type="lattice_tower",
+                    tower_height_m=30,
+                    sector_count=3,
+                    antenna_type="panel_5g",
+                    antenna_install_height_m=24,
+                    azimuths_deg=[0, 120, 240],
+                    detail_level="high",
+                ),
+                requirements_text="Créer un site.",
+                detail_level="high",
+                provider="deterministic",
+                extraction_provider="deterministic",
+                fallback_used=True,
+                fallback_reason="deterministic_extraction_requested",
+            ),
+            input_analysis_status="unavailable",
+        )
 
 
 def test_failed_status_never_advertises_quarantined_artifacts(tmp_path: Path) -> None:
@@ -709,7 +802,10 @@ def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
         RequirementSpec.model_validate(payload["requirements"]),
         requirements_text=requirements_text,
         detail_level="high",
+        analysis_receipt=RequirementAnalysisReceipt.model_validate(payload["analysis_receipt"]),
     )
+    assert payload["analysis_receipt"]["extraction_provider"] == "fallback"
+    assert payload["analysis_receipt"]["fallback_used"] is True
     assert payload["errors"][0]["code"] == "LLM_EXTRACTION_ERROR"
 
 
@@ -789,6 +885,7 @@ def test_confirmed_requirements_hash_survives_javascript_number_serialization(
             "requirements_text": requirements_text,
             "confirmed_requirements": browser_payload,
             "confirmed_requirements_hash": parsed["requirements_hash"],
+            "confirmed_analysis_receipt": parsed["analysis_receipt"],
             "options": {"detail_level": "high", "use_llm": None},
         },
     )
@@ -796,6 +893,210 @@ def test_confirmed_requirements_hash_survives_javascript_number_serialization(
     assert response.status_code == 200
     assert response.json() == {"workflow_id": "wf_browser_confirmed", "status": "pending"}
     assert captured["requirements"] == RequirementSpec.model_validate(browser_payload)
+    assert captured["input_analysis_receipt"].receipt_id == parsed["analysis_receipt"]["receipt_id"]
+
+
+def test_confirmed_analysis_receipt_is_signed_and_rejects_tampering(monkeypatch) -> None:
+    requirements_text = "Créer un site 5G de test avec trois secteurs confirmés."
+    parsed = workflow_service.parse_requirements(
+        requirements_text,
+        detail_level="high",
+        use_llm=False,
+    )
+    captured: dict = {}
+
+    def _capture(confirmed: RequirementSpec, **kwargs) -> dict:
+        captured["requirements"] = confirmed
+        captured.update(kwargs)
+        return {"workflow_id": "wf_receipt_confirmed", "status": "pending"}
+
+    monkeypatch.setattr(workflow_service, "create_design_from_requirements", _capture)
+    payload = {
+        "requirements_text": requirements_text,
+        "confirmed_requirements": parsed["requirements"],
+        "confirmed_requirements_hash": parsed["requirements_hash"],
+        "confirmed_analysis_receipt": parsed["analysis_receipt"],
+        "options": {"detail_level": "high"},
+    }
+
+    accepted = TestClient(app).post("/designs", json=payload)
+
+    assert accepted.status_code == 200
+    assert captured["input_analysis_receipt"].model_dump(mode="json") == parsed["analysis_receipt"]
+
+    tampered = json.loads(json.dumps(payload))
+    tampered["confirmed_analysis_receipt"]["receipt_id"] = "ira_" + ("0" * 32)
+    rejected = TestClient(app).post("/designs", json=tampered)
+
+    assert rejected.status_code == 422
+    assert "hash does not match" in rejected.json()["detail"]
+
+
+def test_input_analysis_receipt_survives_failure_and_version_status_refresh(tmp_path: Path) -> None:
+    requirements = RequirementSpec(
+        network_type="5G",
+        tower_type="lattice_tower",
+        tower_height_m=30,
+        sector_count=3,
+        antenna_type="panel_5g",
+        antenna_install_height_m=24,
+        azimuths_deg=[0, 120, 240],
+        detail_level="high",
+    )
+    receipt = issue_requirement_analysis_receipt(
+        requirements,
+        requirements_text="Créer un site confirmé.",
+        detail_level="high",
+        provider="groq:openai/gpt-oss-120b",
+        extraction_provider="groq",
+        fallback_used=False,
+        fallback_reason=None,
+    )
+    workflow_id = "wf_receipt_persisted"
+    service = WorkflowService(
+        registry=workflow_service.registry,
+        outputs_dir=tmp_path,
+        orchestrator=workflow_service.orchestrator,
+        scene_edit_agent=workflow_service.scene_edit_agent,
+        max_concurrent_workflows=1,
+        max_pending_workflows=0,
+        runtime_origin="TEST",
+    )
+    output_dir = tmp_path / workflow_id
+    output_dir.mkdir()
+    service._write_pending_status(
+        workflow_id,
+        output_dir,
+        "high",
+        False,
+        input_analysis_receipt=receipt,
+        input_analysis_status="verified",
+    )
+    pending = json.loads((output_dir / "status.json").read_text(encoding="utf-8"))
+    assert pending["input_analysis_status"] == "verified"
+    assert pending["input_analysis"] == receipt.model_dump(mode="json")
+    assert json.loads((output_dir / "input_analysis_receipt.json").read_text(encoding="utf-8")) == (
+        receipt.model_dump(mode="json")
+    )
+
+    service._write_failed_status(workflow_id, output_dir, "bounded test failure")
+    failed = json.loads((output_dir / "status.json").read_text(encoding="utf-8"))
+    assert failed["status"] == "failed"
+    assert failed["input_analysis_status"] == "verified"
+    assert failed["input_analysis"] == receipt.model_dump(mode="json")
+
+    version_dir = service.versioning.version_artifacts_dir(workflow_id, "vreceipt")
+    service._copy_artifact_files(output_dir, version_dir)
+    (version_dir / "status.json").write_text(json.dumps(failed, indent=2), encoding="utf-8")
+    service._copy_active_status_to_root(workflow_id, version_dir)
+    refreshed = json.loads((output_dir / "status.json").read_text(encoding="utf-8"))
+    assert refreshed["input_analysis_status"] == "verified"
+    assert refreshed["input_analysis"] == receipt.model_dump(mode="json")
+    persisted_receipt = json.loads(
+        (version_dir / "input_analysis_receipt.json").read_text(encoding="utf-8")
+    )
+    assert persisted_receipt == (receipt.model_dump(mode="json"))
+    service.shutdown()
+
+
+def test_confirmed_requirement_receipt_survives_a_real_workflow_failure(tmp_path: Path) -> None:
+    class FailingConfirmedRequirementsOrchestrator:
+        extractor = None
+        checkpoint_saver = None
+
+        def run_requirements(self, **_kwargs):
+            raise RuntimeError("bounded confirmed-requirements failure")
+
+    requirements = RequirementSpec(
+        network_type="5G",
+        tower_type="lattice_tower",
+        tower_height_m=30,
+        sector_count=3,
+        antenna_type="panel_5g",
+        antenna_install_height_m=24,
+        azimuths_deg=[0, 120, 240],
+        detail_level="high",
+    )
+    receipt = issue_requirement_analysis_receipt(
+        requirements,
+        requirements_text="Créer un site confirmé.",
+        detail_level="high",
+        provider="groq:openai/gpt-oss-120b",
+        extraction_provider="groq",
+        fallback_used=False,
+        fallback_reason=None,
+    )
+    service = WorkflowService(
+        registry=SimpleNamespace(),  # type: ignore[arg-type]
+        outputs_dir=tmp_path,
+        orchestrator=FailingConfirmedRequirementsOrchestrator(),  # type: ignore[arg-type]
+        scene_edit_agent=SimpleNamespace(),  # type: ignore[arg-type]
+        max_concurrent_workflows=1,
+        max_pending_workflows=0,
+        runtime_origin="TEST",
+    )
+    try:
+        response = service.create_design_from_requirements(
+            requirements,
+            detail_level="high",
+            source_label="confirmed_requirement_spec",
+            source_text="Créer un site confirmé.",
+            input_analysis_receipt=receipt,
+            _synchronous=True,
+        )
+        status = service.get_status(response["workflow_id"])
+    finally:
+        service.shutdown()
+
+    assert response["status"] == "failed"
+    assert status["input_analysis_status"] == "verified"
+    assert status["input_analysis"] == receipt.model_dump(mode="json")
+    receipt_path = tmp_path / response["workflow_id"] / "input_analysis_receipt.json"
+    assert json.loads(receipt_path.read_text(encoding="utf-8")) == receipt.model_dump(mode="json")
+
+
+def test_legacy_confirmed_requirements_remain_explicitly_unattested(tmp_path: Path) -> None:
+    class FailingConfirmedRequirementsOrchestrator:
+        extractor = None
+        checkpoint_saver = None
+
+        def run_requirements(self, **_kwargs):
+            raise RuntimeError("bounded legacy failure")
+
+    requirements = RequirementSpec(
+        network_type="5G",
+        tower_type="lattice_tower",
+        tower_height_m=30,
+        sector_count=3,
+        antenna_type="panel_5g",
+        antenna_install_height_m=24,
+        azimuths_deg=[0, 120, 240],
+        detail_level="high",
+    )
+    service = WorkflowService(
+        registry=SimpleNamespace(),  # type: ignore[arg-type]
+        outputs_dir=tmp_path,
+        orchestrator=FailingConfirmedRequirementsOrchestrator(),  # type: ignore[arg-type]
+        scene_edit_agent=SimpleNamespace(),  # type: ignore[arg-type]
+        max_concurrent_workflows=1,
+        max_pending_workflows=0,
+        runtime_origin="TEST",
+    )
+    try:
+        response = service.create_design_from_requirements(
+            requirements,
+            detail_level="high",
+            source_label="confirmed_requirement_spec",
+            source_text="Créer un site historique.",
+            _synchronous=True,
+        )
+        status = service.get_status(response["workflow_id"])
+    finally:
+        service.shutdown()
+
+    assert response["status"] == "failed"
+    assert status["input_analysis_status"] == "legacy_unattested"
+    assert status["input_analysis"] is None
 
 
 def test_confirmed_requirements_token_binds_full_provenance_text_and_detail_level() -> None:

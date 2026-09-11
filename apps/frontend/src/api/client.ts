@@ -55,6 +55,7 @@ import {
   type LLMDecisionProvenance,
   type MultimodalConsent,
   type ParseRequirementsResponse,
+  type RequirementAnalysisReceipt,
   type PublicVersionInfo,
   type RequirementSpec,
   type RollbackVersionResponse,
@@ -83,6 +84,7 @@ export type CreateDesignPayload = {
   requirements_text: string;
   confirmed_requirements?: RequirementSpec;
   confirmed_requirements_hash?: string;
+  confirmed_analysis_receipt?: RequirementAnalysisReceipt;
   options?: {
     detail_level?: "low" | "medium" | "high";
     use_llm?: boolean | null;

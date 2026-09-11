@@ -946,6 +946,12 @@ export default function App({ apiClient = api }: AppProps) {
       setAnalysisError("Analysez puis confirmez la demande actuelle avant de générer le design.");
       return;
     }
+    if (!requirementsAnalysis.analysis_receipt) {
+      setAnalysisError(
+        "La provenance vérifiée de cette analyse n’est pas disponible. Réanalysez la demande avant de générer le design."
+      );
+      return;
+    }
     if (requirementsAnalysis.requirements.requires_confirmation) {
       setAnalysisError(
         "La demande contient des valeurs contradictoires. Corrigez les champs signalés puis relancez l’analyse."
@@ -972,6 +978,7 @@ export default function App({ apiClient = api }: AppProps) {
         requirements_text: prompt,
         confirmed_requirements: requirementsAnalysis.requirements,
         confirmed_requirements_hash: requirementsAnalysis.requirements_hash,
+        confirmed_analysis_receipt: requirementsAnalysis.analysis_receipt,
         options: {
           detail_level: ActivePromptDetail,
           use_llm: null,
@@ -1437,6 +1444,12 @@ export default function App({ apiClient = api }: AppProps) {
   const analysisWasSubmitted =
     analysisIsCurrent &&
     submittedRequirementsHash === requirementsAnalysis?.requirements_hash;
+  const persistedInputAnalysis =
+    state.viewerBundle?.input_analysis ?? state.status?.input_analysis ?? null;
+  const persistedInputAnalysisStatus =
+    state.viewerBundle?.input_analysis_status ??
+    state.status?.input_analysis_status ??
+    "unavailable";
   const canRollbackVersions =
     state.viewerBundle?.runtime_capabilities?.can_rollback_versions === true &&
     state.viewerBundle.available_actions.includes("rollback_version") &&
@@ -1690,6 +1703,8 @@ export default function App({ apiClient = api }: AppProps) {
             llmProvenance={llmProvenance}
             llmProvenanceError={state.resourceErrors.llm_provenance ?? null}
             llmProvenanceLoading={state.resourceLoads.llm_provenance?.status === "loading"}
+            inputAnalysis={persistedInputAnalysis}
+            inputAnalysisStatus={persistedInputAnalysisStatus}
             viewerBundleError={state.resourceErrors.viewer_bundle ?? null}
             viewerBundleLoading={state.resourceLoads.viewer_bundle?.status === "loading"}
             summary={state.summary}
