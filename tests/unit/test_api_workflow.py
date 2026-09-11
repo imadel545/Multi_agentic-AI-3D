@@ -213,7 +213,7 @@ def test_api_rejects_encoded_path_identifiers_before_service_lookup(
     assert response.status_code == 422
 
 
-@pytest.mark.parametrize("suffix", ["events", "versions"])
+@pytest.mark.parametrize("suffix", ["conversation", "events", "versions"])
 def test_collection_endpoints_return_404_for_unknown_workflow(
     tmp_path: Path,
     suffix: str,
@@ -227,6 +227,67 @@ def test_collection_endpoints_return_404_for_unknown_workflow(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "workflow not found"
+
+
+def test_conversation_endpoint_projects_durable_requests_and_system_outcomes(
+    tmp_path: Path,
+) -> None:
+    original_outputs = workflow_service.outputs_dir
+    workflow_id = "wf_000000000000"
+    workflow_service.outputs_dir = tmp_path
+    (tmp_path / workflow_id).mkdir()
+    try:
+        workflow_service._sync_output_services()
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "design_created",
+            {
+                "conversation_message": {
+                    "role": "user",
+                    "text": "Créer un site radio compact.",
+                }
+            },
+        )
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "edit_requested",
+            {
+                "edit_id": "edit_0001",
+                "target_semantic_root": "rru_S1_REAL_1",
+                "conversation_message": {
+                    "role": "user",
+                    "text": "Descendre ce RRU de 40 cm.",
+                },
+            },
+        )
+        workflow_service._emit_workflow_event(
+            workflow_id,
+            "edit_outcome",
+            {
+                "edit_id": "edit_0001",
+                "conversation_message": {
+                    "role": "system",
+                    "text": "La modification a été appliquée et vérifiée.",
+                },
+            },
+        )
+        response = TestClient(app).get(f"/designs/{workflow_id}/conversation")
+    finally:
+        workflow_service.outputs_dir = original_outputs
+        workflow_service._sync_output_services()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["workflow_id"] == workflow_id
+    assert payload["history_status"] == "recorded"
+    assert [(message["role"], message["text"]) for message in payload["messages"]] == [
+        ("user", "Créer un site radio compact."),
+        ("user", "Descendre ce RRU de 40 cm."),
+        ("system", "La modification a été appliquée et vérifiée."),
+    ]
+    assert payload["messages"][1]["operation_id"] == "edit_0001"
+    assert payload["messages"][1]["target_semantic_root"] == "rru_S1_REAL_1"
+    assert all(message["message_id"] and message["timestamp"] for message in payload["messages"])
 
 
 def test_workflow_events_cursor_returns_bounded_deltas_and_preserves_full_history(

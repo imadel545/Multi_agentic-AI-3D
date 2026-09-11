@@ -13,6 +13,7 @@ from starlette.datastructures import UploadFile
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from apps.api.telecom_studio_api.config import settings
+from apps.api.telecom_studio_api.conversation import ConversationView, project_conversation
 from apps.api.telecom_studio_api.models import (
     AdaptationCapabilityCatalogResponse,
     AssetInventoryResponse,
@@ -613,6 +614,13 @@ def rollback_version(workflow_id: WorkflowId, version_id: VersionId) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="version not found") from exc
+
+
+@app.get("/designs/{workflow_id}/conversation", response_model=ConversationView)
+def get_conversation(workflow_id: WorkflowId) -> ConversationView:
+    if not workflow_service.workflow_exists(workflow_id):
+        raise HTTPException(status_code=404, detail="workflow not found")
+    return project_conversation(workflow_id, workflow_service.read_event_journal(workflow_id))
 
 
 @app.get("/designs/{workflow_id}/events", response_model=list[WorkflowEventView])

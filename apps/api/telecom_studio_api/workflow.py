@@ -482,6 +482,7 @@ class WorkflowService:
             workflow_id,
             "design_created",
             {
+                "conversation_message": {"role": "user", "text": requirements_text},
                 "detail_level": detail_level,
                 "use_llm": use_llm,
                 "multimodal_consent": multimodal_consent,
@@ -590,6 +591,14 @@ class WorkflowService:
             workflow_id,
             "design_created",
             {
+                "conversation_message": {
+                    "role": "user"
+                    if source_label == "confirmed_requirement_spec" and source_text
+                    else "system",
+                    "text": source_text
+                    if source_label == "confirmed_requirement_spec" and source_text
+                    else "Conception demandée à partir des exigences documentaires validées.",
+                },
                 "detail_level": detail_level,
                 "use_llm": False,
                 "source": source_label,
@@ -1267,6 +1276,17 @@ class WorkflowService:
                 )
                 self._mark_workflow_active(workflow_id)
                 try:
+                    self._emit_workflow_event(
+                        workflow_id,
+                        "edit_requested",
+                        {
+                            "status": "running",
+                            "edit_id": edit_id,
+                            "target_semantic_root": target_semantic_root,
+                            "version_id": expected_version_id,
+                            "conversation_message": {"role": "user", "text": edit_prompt},
+                        },
+                    )
                     result = self._edit_design(
                         workflow_id,
                         edit_prompt,
@@ -1278,8 +1298,49 @@ class WorkflowService:
                         self._restore_status_after_operation(
                             workflow_id, previous_status, operation_id=edit_id
                         )
+                    self._run_after_canonical_commit(
+                        workflow_id,
+                        "conversation_outcome",
+                        lambda: self._emit_workflow_event(
+                            workflow_id,
+                            "edit_outcome",
+                            {
+                                "status": "completed" if result.status == "applied" else "failed",
+                                "edit_result_status": result.status,
+                                "edit_id": edit_id,
+                                "conversation_message": {
+                                    "role": "system",
+                                    "text": "La modification a été appliquée et vérifiée."
+                                    if result.status == "applied"
+                                    else (
+                                        "La modification n’a pas été appliquée. "
+                                        "La version précédente est conservée."
+                                    ),
+                                },
+                            },
+                        ),
+                    )
                     return result
                 except Exception:
+                    self._run_after_canonical_commit(
+                        workflow_id,
+                        "conversation_failure",
+                        lambda: self._emit_workflow_event(
+                            workflow_id,
+                            "edit_outcome",
+                            {
+                                "status": "failed",
+                                "edit_id": edit_id,
+                                "conversation_message": {
+                                    "role": "system",
+                                    "text": (
+                                        "La modification a été interrompue. "
+                                        "Vérifiez la version active avant de réessayer."
+                                    ),
+                                },
+                            },
+                        ),
+                    )
                     self._restore_status_after_operation(
                         workflow_id, previous_status, operation_id=edit_id
                     )
@@ -1902,6 +1963,11 @@ class WorkflowService:
                 limit=200,
             ).events
         return [e.model_dump() | {"event_source": "workflow_events_jsonl"} for e in events]
+
+    def read_event_journal(self, workflow_id: str):
+        """Return the durable journal used by read-only workflow projections."""
+        self._sync_output_services()
+        return self.event_log.read_events(workflow_id)
 
     def stream_events(self, workflow_id: str, after_event_id: str | None = None):
         """Yield events for a workflow in near real-time.

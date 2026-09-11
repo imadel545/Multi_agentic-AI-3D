@@ -1251,6 +1251,7 @@ export type DocumentPackGenerateDesignResponse = z.infer<typeof DocumentPackGene
 export type PublicVersionInfo = z.infer<typeof PublicVersionInfoSchema>;
 export type EditDesignResponse = z.infer<typeof EditDesignResponseSchema>;
 export type RollbackVersionResponse = z.infer<typeof RollbackVersionResponseSchema>;
+export type Conversation = z.infer<typeof ConversationSchema>;
 
 export function parseContract<T>(schemaName: string, schema: z.ZodType<T>, payload: unknown): T {
   const result = schema.safeParse(payload);
@@ -1262,3 +1263,17 @@ export function parseContract<T>(schemaName: string, schema: z.ZodType<T>, paylo
   }
   return result.data;
 }
+
+export const ConversationSchema = publicSchema(z.object({
+  workflow_id: z.string(),
+  history_status: z.enum(["recorded", "legacy_partial", "damaged"]),
+  messages: z.array(z.object({
+    message_id: z.string(),
+    role: z.enum(["user", "system"]),
+    text: z.string(),
+    timestamp: z.string(),
+    operation_id: z.string().nullable(),
+    target_semantic_root: z.string().nullable(),
+    version_id: z.string().nullable()
+  }))
+}));

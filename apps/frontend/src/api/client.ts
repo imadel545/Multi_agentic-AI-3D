@@ -6,6 +6,7 @@ import {
   AssetLibrarySummarySchema,
   CreateDesignResponseSchema,
   ComponentProofsSchema,
+  ConversationSchema,
   CurrentOperationSchema,
   DocumentPackCapabilitiesSchema,
   DocumentExtractionSchema,
@@ -39,6 +40,7 @@ import {
   type AssetLibrarySummary,
   type CreateDesignResponse,
   type ComponentProofs,
+  type Conversation,
   type CurrentOperation,
   type DocumentPackCapabilities,
   type DocumentPackReview,
@@ -331,6 +333,14 @@ export class TelecomStudioApi {
       "WorkflowStatus",
       WorkflowStatusSchema,
       await this.getJson(`/designs/${workflowId}`, options)
+    );
+  }
+
+  async conversation(workflowId: string): Promise<Conversation> {
+    return parseContract(
+      "Conversation",
+      ConversationSchema,
+      await this.getJson(`/designs/${encodeURIComponent(workflowId)}/conversation`)
     );
   }
 

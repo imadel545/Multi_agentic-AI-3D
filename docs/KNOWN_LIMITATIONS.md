@@ -519,8 +519,10 @@ frontend.
 - Le frontend expose les preuves cognitives réelles disponibles, mais le
   scénario utilisateur créant, sélectionnant et modifiant trois projets
   génériques réels n'est pas encore une acceptance validée.
-- La surface conversationnelle n'est pas encore un transcript de chat durable.
-  Elle restaure le prompt/exigences actifs et au plus trois descriptions de
-  versions, désormais correctement attribuées à l'utilisateur; il n'existe pas
-  encore de modèle canonique append-only des tours
-  utilisateur/assistant ni de sélecteur explicite de sessions.
+- La surface conversationnelle restaure désormais les demandes de création et
+  d’édition enregistrées dans le journal durable, ou une origine documentaire
+  explicitement système, ainsi que des notifications issues des résultats réels.
+  Les anciens workflows restent partiels, car ils ne contiennent pas
+  rétroactivement leur prompt initial. Il n’existe
+  toujours ni transcript complet de tours assistant, ni modèle de sessions ou
+  de projets explicitement sélectionnables.

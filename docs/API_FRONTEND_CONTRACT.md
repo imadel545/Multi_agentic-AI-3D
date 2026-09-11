@@ -6,7 +6,7 @@ stable actuel est `/designs` + `workflow_id`.
 `workflow_id` doit respecter `wf_[0-9a-f]{12}` et `version_id`
 `v[0-9a-f]{8}`. La validation HTTP rejette aussi les traversées encodées avant
 toute lecture locale. Un workflow bien formé mais inconnu retourne `404` pour
-le statut, les événements et les versions.
+le statut, la conversation, les événements et les versions.
 
 > `apps/frontend` est une rework connectée au backend réel, non encore acceptée
 > comme produit. Ce contrat reste la frontière stable `/designs` + `workflow_id`.
@@ -45,6 +45,7 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `GET` | `/designs` | Lister les designs récents. |
 | `POST` | `/designs` | Créer un design depuis un prompt. |
 | `GET` | `/designs/{id}` | Statut complet public: artefacts en URLs backend, pas en chemins locaux. |
+| `GET` | `/designs/{id}/conversation` | Projection lecture seule du journal durable : demandes enregistrées et notifications d’exécution, sans réponse assistant inventée. |
 | `GET` | `/designs/{id}/events` | Timeline des events bruts. |
 | `GET` | `/designs/{id}/events/stream` | `push_sse`: replay JSONL puis events live jusqu'au terminal. |
 | `GET` | `/designs/{id}/versions` | Historique des versions. |
@@ -127,6 +128,24 @@ Dans les réponses publiques (`/designs/{id}`, `/designs/{id}/edit`,
 `/designs/{id}/versions`, `/viewer-bundle`), ces artefacts sont exposés via
 `/designs/{id}/artifacts/{name}` ou `/designs/{id}/download`. Les chemins locaux
 restent internes au backend.
+
+## Conversation durable par workflow
+
+`GET /designs/{id}/conversation` est une projection lecture seule du
+`workflow_events.jsonl` canonique. Les nouveaux designs enregistrent soit le
+texte reçu de l’utilisateur, soit une origine documentaire clairement marquée
+comme système ; les nouvelles modifications enregistrent le texte reçu avant
+l’exécution. Leurs issues sont des notifications système fondées sur le
+résultat réel. Le frontend ne doit jamais présenter ces notifications comme une
+réponse LLM.
+
+Chaque message expose `message_id`, `role` (`user` ou `system`), `text`,
+`timestamp`, ainsi que l’`operation_id`, l’identité ciblée et la version quand
+ces données existent. `history_status=recorded` signifie que l’origine de
+création du workflow a été enregistrée; `legacy_partial` indique que seuls les
+événements historiques réellement présents peuvent être montrés; `damaged`
+signale une portion de journal illisible tout en préservant les messages lus.
+Le contrat ne crée ni projet, ni session de compte, ni transcript assistant.
 
 ## Champs clés du statut workflow
 
@@ -411,10 +430,12 @@ comme une sortie strictement décodée.
 8. Ouvrir `/designs/{workflow_id}/events/stream`.
    Après fallback polling, appeler `/designs/{workflow_id}/events?after_sequence=N`
    et traiter le lot delta au lieu de relire l'historique complet.
-9. À l'événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
-   `/user-issues` et `/versions`.
-10. Charger `/designs/{id}/adaptation-capabilities` avant d'afficher les
-    possibilités d'édition du design actif.
+9. Charger `/designs/{id}/conversation` pour le workflow restauré, puis le
+   relire après les événements de création, d’édition ou de résultat.
+10. À l’événement terminal, charger `/viewer-bundle`, `/timeline-summary`,
+    `/user-issues` et `/versions`.
+11. Charger `/designs/{id}/adaptation-capabilities` avant d’afficher les
+    possibilités d’édition du design actif.
 
 Le frontend doit rendre:
 

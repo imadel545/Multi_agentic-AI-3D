@@ -84,6 +84,9 @@ function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi
       truth: {},
       capabilities: {}
     }),
+    conversation: vi.fn((workflowId: string) => Promise.resolve({
+      workflow_id: workflowId, history_status: "legacy_partial", messages: []
+    })),
     listDesigns: vi.fn().mockResolvedValue([]),
     artifactUrl: vi.fn((url: string | null | undefined) => url ?? null),
     ...overrides
@@ -242,6 +245,19 @@ describe("frontend runtime selection", () => {
     });
     const apiClient = bootstrapApi({
       listDesigns: vi.fn().mockResolvedValue([workflowA]),
+      conversation: vi.fn((workflowId: string) => Promise.resolve({
+        workflow_id: workflowId,
+        history_status: "recorded",
+        messages: [{
+          message_id: `request_${workflowId}`,
+          role: "user",
+          text: workflowId === "wf_a" ? "DEMANDE A STALE" : "DEMANDE B ACTIVE",
+          timestamp: "2026-07-15T09:00:00Z",
+          operation_id: null,
+          target_semantic_root: null,
+          version_id: null
+        }]
+      })),
       workflowStatus: vi.fn((workflowId: string) =>
         Promise.resolve(workflowId === "wf_a" ? workflowA : workflowB)
       ),
@@ -315,7 +331,7 @@ describe("frontend runtime selection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Analyser la demande" }));
     fireEvent.click(await screen.findByRole("button", { name: "Confirmer et générer" }));
 
-    expect(await screen.findByText("VERSION B ACTIVE")).toBeInTheDocument();
+    expect(await screen.findByText("DEMANDE B ACTIVE")).toBeInTheDocument();
     expect(workflowAVersionsSignal?.aborted).toBe(true);
 
     await act(async () => {
@@ -330,7 +346,7 @@ describe("frontend runtime selection", () => {
     });
 
     await waitFor(() => expect(screen.queryByText("VERSION A OBSOLÈTE")).not.toBeInTheDocument());
-    expect(screen.getByText("VERSION B ACTIVE")).toBeInTheDocument();
+    expect(screen.queryByText("DEMANDE A STALE")).not.toBeInTheDocument();
   });
 
   it("does not auto-restore an uncertified completed design", () => {

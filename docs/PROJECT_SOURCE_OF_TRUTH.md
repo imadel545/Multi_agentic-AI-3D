@@ -984,14 +984,17 @@ Statut autoritaire: `IMPLEMENTED_PARTIAL`.
   `SceneSpec` V2 repasse par validation de plan/capacités, Blender, QA,
   certification et versioning existant.
 - Le frontend reconstruit le contexte actif depuis le prompt/exigences et les
-  trois dernières descriptions de versions, expose la scène, les stratégies,
-  la provenance, les composants sélectionnables dans le viewer et la galerie
-  des previews réelles. Les descriptions de révision sont triées et attribuées
-  honnêtement à l'utilisateur, jamais inventées comme réponses assistant. Il ne
-  dispose pas encore d'un journal conversationnel
-  complet et persistant de tours utilisateur/assistant. Il ne présente plus une
-  erreur globale de synchronisation lorsque le bundle certifié principal est
-  déjà disponible.
+  demandes effectivement enregistrées du workflow, expose la scène, les
+  stratégies, la provenance, les composants sélectionnables dans le viewer et
+  la galerie des previews réelles. Les créations enregistrent leur texte
+  utilisateur ou, pour un dossier documentaire, une origine système explicite;
+  les éditions nouvellement reçues sont enregistrées dans le journal durable
+  avant exécution. Leurs issues sont des notifications système fondées sur le
+  résultat réel, jamais des réponses assistant inventées. Les workflows
+  historiques restent explicitement partiels et il n’existe ni transcript
+  assistant complet, ni sélecteur de sessions. Il ne présente plus une erreur
+  globale de synchronisation lorsque le bundle certifié principal est déjà
+  disponible.
 
 Ce statut n'est pas `IMPLEMENTED`: le parcours télécom GPT-OSS réel du
 2026-08-03 passe après correction des contrats JSON, des bounds de sweep, des

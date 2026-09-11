@@ -96,6 +96,8 @@ def _event_human_label(event_type: str, node: str) -> str:
     mapping = {
         "design_created": "Design créé",
         "validated_requirements_received": "Exigences validées reçues",
+        "edit_requested": "Modification reçue",
+        "edit_outcome": "Résultat de la modification",
         "workflow_completed": "Design prêt",
         "workflow_failed": "Workflow en échec",
         "artifact_ready": "Préparation du viewer 3D",
@@ -120,6 +122,8 @@ def _event_progress_message(event_type: str, status: str, human_label: str) -> s
         "validated_requirements_received": (
             "Le backend utilise les exigences consolidées du document pack."
         ),
+        "edit_requested": "La demande de modification est enregistrée et préparée.",
+        "edit_outcome": "Le résultat de la modification est enregistré.",
         "workflow_completed": "Le design est prêt pour inspection 3D.",
         "workflow_failed": "Le design n'a pas pu être terminé.",
         "artifact_ready": "Les artefacts du viewer 3D sont disponibles.",

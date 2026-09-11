@@ -16,6 +16,8 @@ _EVENT_LOG_LOCKS_GUARD = threading.Lock()
 _EVENT_LOG_LOCKS: WeakValueDictionary[Path, threading.RLock] = WeakValueDictionary()
 _EVENT_LOG_SEQUENCES: dict[Path, int] = {}
 _TERMINAL_EVENT_TYPES = {
+    "edit_requested",
+    "edit_outcome",
     "edit_patch_applied",
     "edit_patch_rejected",
     "workflow_completed",

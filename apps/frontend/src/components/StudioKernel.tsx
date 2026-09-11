@@ -146,6 +146,7 @@ export function BackendStatusBar({
 }
 
 export function ChatCommandPanel({
+  conversation,
   creationPath = "telecom",
   onCreationPathChange,
   activeRequirements,
@@ -190,6 +191,7 @@ export function ChatCommandPanel({
   onRevisionSubmit,
   onRetryBootstrap
 }: {
+  conversation?: ReactNode;
   creationPath?: "telecom" | "free";
   onCreationPathChange?: (path: "telecom" | "free") => void;
   activeRequirements?: RequirementSpec | null;
@@ -312,11 +314,11 @@ export function ChatCommandPanel({
       </div>
 
       <div className="conversation-feed" aria-label="Conversation et cahier des charges">
-        <ConversationHistory
+        {conversation ?? <ConversationHistory
           activeRequirements={prompt.trim() ? null : activeRequirements ?? null}
           currentPrompt={analysis || analysisSubmitted ? prompt : ""}
           versions={versions ?? []}
-        />
+        />}
 
         {phase === "failed" ? (
           <article className="workflow-recovery" role="alert">

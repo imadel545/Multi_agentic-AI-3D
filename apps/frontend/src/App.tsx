@@ -1,3 +1,4 @@
+import { DurableConversation } from "./components/DurableConversation";
 import {
   Suspense,
   lazy,
@@ -1444,6 +1445,27 @@ export default function App({ apiClient = api }: AppProps) {
       <main className="studio-layout">
         <aside className="left-rail">
           <ChatCommandPanel
+            conversation={
+              state.workflowId ? (
+                <DurableConversation
+                  apiClient={apiClient}
+                  workflowId={state.workflowId}
+                  busy={revisionBusy}
+                  revision={
+                    state.events
+                      .filter((event) => [
+                        "design_created",
+                        "edit_requested",
+                        "edit_outcome",
+                        "workflow_completed",
+                        "workflow_failed",
+                        "version_rolled_back"
+                      ].includes(event.event_type))
+                      .at(-1)?.event_id ?? state.phase
+                  }
+                />
+              ) : undefined
+            }
             activeRequirements={activeRequirements}
             analysis={analysisIsCurrent ? requirementsAnalysis : null}
             analysisBusy={analysisBusy}

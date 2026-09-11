@@ -44,6 +44,8 @@ const TerminalEventTypes = new Set([
 ]);
 
 const BackendEventTypes = [
+  "edit_requested",
+  "edit_outcome",
   "design_created",
   "node_started",
   "node_completed",
