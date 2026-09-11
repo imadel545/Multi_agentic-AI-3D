@@ -266,6 +266,58 @@ def test_blender_availability_accepts_verified_headless_smoke(tmp_path: Path, mo
     assert _blender_available() is True
 
 
+def test_blender_availability_accepts_native_banner_written_to_stderr(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Match the qualified macOS runtime's real stdout/stderr split."""
+
+    binary = tmp_path / "blender"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._resolve_blender_binary",
+        lambda _configured: binary,
+    )
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._run_blender_probe",
+        lambda command: subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="TELECOM_STUDIO_BLENDER_READY\n",
+            stderr="Blender 4.5.12 LTS (hash verified)\n",
+        ),
+    )
+    _probe_blender_runtime.cache_clear()
+
+    assert _blender_available() is True
+
+
+def test_blender_availability_accepts_banner_after_controlled_marker(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The real 4.5.12 macOS process emits the marker before its banner."""
+
+    binary = tmp_path / "blender"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o755)
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._resolve_blender_binary",
+        lambda _configured: binary,
+    )
+    monkeypatch.setattr(
+        "apps.api.telecom_studio_api.product._run_blender_probe",
+        lambda command: subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="TELECOM_STUDIO_BLENDER_READY\nBlender 4.5.12 LTS (hash verified)\n",
+            stderr="",
+        ),
+    )
+    _probe_blender_runtime.cache_clear()
+
+    assert _blender_available() is True
+
+
 @pytest.mark.blender_runtime
 def test_studio_summary_returns_design_counts(tmp_path: Path) -> None:
     original_outputs = workflow_service.outputs_dir

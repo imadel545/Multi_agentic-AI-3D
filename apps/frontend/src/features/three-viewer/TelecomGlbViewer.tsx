@@ -13,6 +13,7 @@ import {
 } from "./viewerRules";
 import {
   fitCameraToObject,
+  physicalSceneBounds,
   prepareViewerScene,
   probeRenderVisibility,
   summarizeObjects,
@@ -21,6 +22,7 @@ import {
 } from "./viewerMath";
 
 const EMPTY_FOCUS_SEMANTIC_ROOTS: readonly string[] = [];
+type CameraScope = "initial" | "global";
 
 type TelecomGlbViewerProps = {
   bundle: ViewerBundle | null;
@@ -61,14 +63,17 @@ export function TelecomGlbViewer({
     badge.includes("Fallback") || badge.includes("dégradé") || badge.includes("attention") || badge.includes("rejetée")
   );
   const [resetKey, setResetKey] = useState(0);
+  const [cameraScope, setCameraScope] = useState<CameraScope>("initial");
   const [objectSummary, setObjectSummary] = useState<ModelObjectSummary | null>(null);
   const [viewerHealth, setViewerHealth] = useState<ViewerHealth>("idle");
   const [showTechnicalAids, setShowTechnicalAids] = useState(false);
   const [webglSupported, setWebglSupported] = useState<boolean | null>(() =>
     source.kind === "glb" ? probeWebGL() : null
   );
-  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const sourceIdentity = "url" in source ? `${source.kind}:${source.url}` : source.kind;
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const previousSelectionRef = useRef<string | null>(selectedSemanticRoot);
+  const sourceIdentityRef = useRef(sourceIdentity);
   const renderIsBlank = source.kind === "glb" && viewerHealth === "render_blank";
   const retryViewer = () => {
     if (loading) {
@@ -91,8 +96,24 @@ export function TelecomGlbViewer({
   };
   const showWholeDesign = () => {
     onSelectSemanticRoot?.(null);
+    setCameraScope("global");
     setResetKey((value) => value + 1);
   };
+
+  useEffect(() => {
+    if (sourceIdentityRef.current !== sourceIdentity) {
+      sourceIdentityRef.current = sourceIdentity;
+      previousSelectionRef.current = selectedSemanticRoot;
+      setCameraScope("initial");
+    }
+  }, [selectedSemanticRoot, sourceIdentity]);
+
+  useEffect(() => {
+    if (previousSelectionRef.current && !selectedSemanticRoot) {
+      setCameraScope("global");
+    }
+    previousSelectionRef.current = selectedSemanticRoot;
+  }, [selectedSemanticRoot]);
 
   useEffect(() => {
     setObjectSummary(null);
@@ -154,7 +175,7 @@ export function TelecomGlbViewer({
             <div className="viewer-selection" aria-live="polite">
               <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {humanizeSemanticRoot(selectedSemanticRoot)}
               {focusSemanticRoots.length > 1 ? <span> · Cadrage du sous-assemblage mécanique vérifié</span> : null}
-              {onSelectSemanticRoot ? <button type="button" onClick={() => onSelectSemanticRoot(null)}>Désélectionner</button> : null}
+              {onSelectSemanticRoot ? <button type="button" onClick={showWholeDesign}>Désélectionner</button> : null}
             </div>
           ) : null}
           {loading ? (
@@ -219,6 +240,7 @@ export function TelecomGlbViewer({
                 <Suspense fallback={<ViewerLoading />}>
                   <ModelScene
                     controlsRef={controlsRef}
+                    cameraScope={cameraScope}
                     onHealth={setViewerHealth}
                     onLoaded={setObjectSummary}
                     focusSemanticRoots={focusSemanticRoots}
@@ -290,6 +312,7 @@ export function PreviewFallback({
 function ModelScene({
   url,
   controlsRef,
+  cameraScope,
   onHealth,
   onLoaded,
   focusSemanticRoots,
@@ -300,6 +323,7 @@ function ModelScene({
 }: {
   url: string;
   controlsRef: MutableRefObject<OrbitControlsImpl | null>;
+  cameraScope: CameraScope;
   onHealth: (health: ViewerHealth) => void;
   onLoaded: (summary: ModelObjectSummary) => void;
   focusSemanticRoots: readonly string[];
@@ -320,6 +344,10 @@ function ModelScene({
     () => semanticRootsBounds(scene, focusSemanticRoots),
     [scene, focusSemanticRoots]
   );
+  const wholeSiteBox = useMemo(
+    () => cameraScope === "global" ? physicalSceneBounds(scene) : null,
+    [cameraScope, scene]
+  );
   const selectionHelper = useMemo(
     () => selectedBox ? new Box3Helper(selectedBox, new Color("#70e1d2")) : null,
     [selectedBox]
@@ -335,7 +363,7 @@ function ModelScene({
   useEffect(() => {
     fitted.current = false;
     invalidate();
-  }, [focusSemanticRoots, invalidate, selectedSemanticRoot]);
+  }, [cameraScope, focusSemanticRoots, invalidate, selectedSemanticRoot]);
   useFrame(() => {
     if (fitted.current || !controlsRef.current) {
       return;
@@ -345,7 +373,7 @@ function ModelScene({
       camera as PerspectiveCamera,
       scene,
       controlsRef.current,
-      focusBox ?? selectedBox ?? undefined
+      focusBox ?? selectedBox ?? wholeSiteBox ?? undefined
     );
     onHealth(fit ? "camera_fitted" : "glb_error");
   });

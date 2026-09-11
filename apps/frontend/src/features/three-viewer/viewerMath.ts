@@ -108,6 +108,36 @@ export function fitCameraToObject(
   return fit;
 }
 
+/**
+ * Return every visible physical mesh for an explicit whole-site view.
+ *
+ * The initial camera deliberately prioritises the telecom assembly when very
+ * wide civil work would make a tower unreadable. A user who asks to see the
+ * whole site must instead receive all physical exported geometry, while the
+ * viewer-only aids and hidden technical ground plane stay out of the frame.
+ */
+export function physicalSceneBounds(scene: Object3D): Box3 | null {
+  scene.updateWorldMatrix(true, true);
+  const box = new Box3();
+  let hasPhysicalMesh = false;
+  scene.traverse((object) => {
+    if (
+      shouldHideTechnicalObject(object) ||
+      shouldExcludeFromCameraFit(object) ||
+      !(object instanceof Mesh) ||
+      !object.visible
+    ) {
+      return;
+    }
+    const meshBox = new Box3().setFromObject(object);
+    if (!meshBox.isEmpty()) {
+      box.union(meshBox);
+      hasPhysicalMesh = true;
+    }
+  });
+  return hasPhysicalMesh ? box : null;
+}
+
 export function prepareViewerScene(scene: Object3D, showTechnicalAids = false) {
   scene.traverse((object) => {
     if (shouldHideTechnicalObject(object)) {

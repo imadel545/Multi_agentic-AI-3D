@@ -4,6 +4,7 @@ import {
   computeTelecomCameraFit,
   fitCameraToObject,
   isRenderVisiblyDifferent,
+  physicalSceneBounds,
   prepareViewerScene,
   probeRenderVisibility,
   summarizeObjects
@@ -83,6 +84,32 @@ describe("viewer math", () => {
     expect(fit?.box.getSize(new Vector3()).x).toBeLessThan(10);
     expect(fit?.box.getSize(new Vector3()).y).toBeGreaterThan(49);
     expect(fit?.target.x).toBeLessThan(3);
+  });
+
+  it("includes remote physical civil geometry only for an explicit whole-site frame", () => {
+    const scene = new Object3D();
+    const tower = new Mesh(new BoxGeometry(4, 50, 4), new MeshBasicMaterial());
+    tower.name = "tower_TOWER_LATTICE_50M";
+    tower.userData = { role: "tower", semantic_root: "tower_TOWER_LATTICE_50M" };
+    tower.position.set(0, 25, 0);
+    const foundation = new Mesh(new BoxGeometry(160, 1, 24), new MeshBasicMaterial());
+    foundation.name = "foundation_remote_civil_works";
+    foundation.userData = { role: "foundation", semantic_root: "foundation_site" };
+    foundation.position.set(55, -0.5, 0);
+    const aid = new Mesh(new BoxGeometry(400, 0.2, 0.2), new MeshBasicMaterial());
+    aid.name = "azimuth_arrow_S1";
+    aid.userData = { role: "azimuth_arrow", semantic_root: "azimuth_arrow_S1" };
+    aid.position.set(200, 24, 0);
+    const technicalGround = new Mesh(new BoxGeometry(600, 0.1, 600), new MeshBasicMaterial());
+    technicalGround.name = "technical_ground_plane";
+    scene.add(tower, foundation, aid, technicalGround);
+
+    prepareViewerScene(scene, true);
+    const globalBounds = physicalSceneBounds(scene);
+
+    expect(globalBounds?.getSize(new Vector3()).x).toBeGreaterThan(150);
+    expect(globalBounds?.max.x).toBeLessThan(140);
+    expect(globalBounds?.min.y).toBeLessThanOrEqual(-1);
   });
 
   it("keeps a proportional foundation in the complete initial site framing", () => {

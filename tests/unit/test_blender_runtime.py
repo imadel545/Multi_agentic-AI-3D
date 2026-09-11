@@ -22,4 +22,7 @@ def test_only_the_governed_blender_runtime_is_certifiable() -> None:
         }
     )
     assert output_reports_qualified_blender("Blender 4.5.12 LTS (hash verified)\nready")
+    assert output_reports_qualified_blender(
+        "TELECOM_STUDIO_BLENDER_READY\nBlender 4.5.12 LTS (hash verified)\n"
+    )
     assert not output_reports_qualified_blender("Blender 5.1.2\nready")

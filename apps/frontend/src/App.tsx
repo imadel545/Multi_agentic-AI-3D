@@ -136,6 +136,7 @@ export default function App({ apiClient = api }: AppProps) {
   const submissionInFlightRef = useRef(false);
   const revisionInFlightRef = useRef(false);
   const restoredWorkflowRef = useRef(false);
+  const bootstrapRestoreEpochRef = useRef(0);
   const resourceRequestRef = useRef<Record<string, number>>({});
   const activeWorkflowRef = useRef<string | null>(null);
   const terminalBundleRequestRef = useRef(0);
@@ -167,6 +168,9 @@ export default function App({ apiClient = api }: AppProps) {
     (workflowId: string) => activeWorkflowRef.current === workflowId,
     []
   );
+  const invalidateBootstrapRestore = useCallback(() => {
+    bootstrapRestoreEpochRef.current += 1;
+  }, []);
 
   useEffect(() => {
     if (!multimodalConsentAvailable && multimodalConsent !== "disabled") {
@@ -725,10 +729,22 @@ export default function App({ apiClient = api }: AppProps) {
     if (restoredWorkflowRef.current || state.workflowId || state.phase !== "idle") {
       return;
     }
+    const restoreEpoch = bootstrapRestoreEpochRef.current;
+    const restoreRequestIsCurrent = () =>
+      !restoredWorkflowRef.current &&
+      !submissionInFlightRef.current &&
+      activeWorkflowRef.current === null &&
+      bootstrapRestoreEpochRef.current === restoreEpoch;
+    if (!restoreRequestIsCurrent()) {
+      return;
+    }
     await loadSurfaceResource(
       "design_list",
       () => apiClient.listDesigns(),
       (designs) => {
+        if (!restoreRequestIsCurrent()) {
+          return;
+        }
         const latest = selectWorkflowToRestore(designs);
         if (!latest) {
           return;
@@ -861,6 +877,7 @@ export default function App({ apiClient = api }: AppProps) {
 
   const submitFreeIntent = useCallback(async () => {
     if (submissionInFlightRef.current || !state.prompt.trim()) return;
+    invalidateBootstrapRestore();
     submissionInFlightRef.current = true;
     streamRef.current?.close();
     dispatch({ type: "SUBMIT_STARTED" });
@@ -884,7 +901,7 @@ export default function App({ apiClient = api }: AppProps) {
     } finally {
       submissionInFlightRef.current = false;
     }
-  }, [activateWorkflow, apiClient, loadLiveStatus, loadTerminalBundle, multimodalConsent,
+  }, [activateWorkflow, apiClient, invalidateBootstrapRestore, loadLiveStatus, loadTerminalBundle, multimodalConsent,
     multimodalConsentAvailable, state.prompt]);
 
   const analyzePrompt = useCallback(async () => {
@@ -944,6 +961,7 @@ export default function App({ apiClient = api }: AppProps) {
       );
       return;
     }
+    invalidateBootstrapRestore();
     submissionInFlightRef.current = true;
     streamRef.current?.close();
     setRevisionMessage(null);
@@ -978,6 +996,7 @@ export default function App({ apiClient = api }: AppProps) {
     analyzedPrompt,
     activateWorkflow,
     apiClient,
+    invalidateBootstrapRestore,
     loadLiveStatus,
     loadTerminalBundle,
     multimodalConsent,
@@ -1072,6 +1091,7 @@ export default function App({ apiClient = api }: AppProps) {
     if (!documentPackSummary) {
       return;
     }
+    invalidateBootstrapRestore();
     streamRef.current?.close();
     setDocumentPackBusy(true);
     setRevisionMessage(null);
@@ -1109,6 +1129,7 @@ export default function App({ apiClient = api }: AppProps) {
     apiClient,
     activateWorkflow,
     documentPackSummary,
+    invalidateBootstrapRestore,
     loadLiveStatus,
     loadTerminalBundle,
     multimodalConsent,

@@ -22,8 +22,15 @@ def has_qualified_blender_runtime(runtime: object) -> bool:
 
 
 def output_reports_qualified_blender(output: str) -> bool:
-    """Check a headless startup transcript without accepting a newer executable."""
+    """Check a headless startup transcript without accepting a newer executable.
+
+    A controlled Python marker can precede Blender's own banner on native
+    macOS, so the banner is a qualified transcript line rather than always
+    the first non-empty line.
+    """
 
     expected = f"Blender {QUALIFIED_BLENDER_VERSION}"
-    first_line = next((line.strip() for line in output.splitlines() if line.strip()), "")
-    return first_line == expected or first_line.startswith(f"{expected} (")
+    return any(
+        line.strip() == expected or line.strip().startswith(f"{expected} (")
+        for line in output.splitlines()
+    )

@@ -222,6 +222,87 @@ describe("frontend runtime selection", () => {
     expect(selectViewerBundleForDisplay("completed", certified, null)).toBe(certified);
   });
 
+  it("does not let a delayed bootstrap restore replace a workflow the user just created", async () => {
+    const historicalWorkflow = workflow("wf_historical", "completed", "2026-07-15T08:00:00Z");
+    const newWorkflow = workflow("wf_new", "completed", "2026-07-15T09:00:00Z");
+    const delayedDesignList = deferredPromise<WorkflowStatus[]>();
+    const terminalResource = (workflowId: string) => ({
+      workflow_id: workflowId,
+      status: "completed" as const,
+      available_actions: [],
+      unsupported_actions: []
+    });
+    const workflowStatus = vi.fn((workflowId: string) =>
+      Promise.resolve(workflowId === newWorkflow.workflow_id ? newWorkflow : historicalWorkflow)
+    );
+    const apiClient = bootstrapApi({
+      listDesigns: vi.fn(() => delayedDesignList.promise),
+      createDesign: vi.fn().mockResolvedValue({ workflow_id: newWorkflow.workflow_id, status: "pending" }),
+      workflowStatus,
+      currentOperation: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        is_running: false,
+        is_terminal: true
+      })),
+      viewerBundle: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        viewer_artifacts: [],
+        limitations: []
+      })),
+      timelineSummary: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        timeline_steps: []
+      })),
+      userIssues: vi.fn((workflowId: string) => Promise.resolve({
+        ...terminalResource(workflowId),
+        human_readable_issues: []
+      })),
+      versions: vi.fn().mockResolvedValue([]),
+      conversation: vi.fn((workflowId: string) => Promise.resolve({
+        workflow_id: workflowId,
+        history_status: "recorded",
+        messages: [{
+          message_id: `request_${workflowId}`,
+          role: "user",
+          text: workflowId === newWorkflow.workflow_id
+            ? "NOUVEAU WORKFLOW RESTE ACTIF"
+            : "ANCIEN WORKFLOW NE DOIT PAS REMPLACER LE NOUVEAU",
+          timestamp: "2026-07-15T09:00:00Z",
+          operation_id: null,
+          target_semantic_root: null,
+          version_id: null
+        }]
+      }))
+    });
+
+    render(createElement(App, { apiClient }));
+
+    await waitFor(() => expect(apiClient.listDesigns).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Design prompt" }), {
+      target: { value: "Créer un support d'antenne modifiable" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Concevoir depuis cette intention" }));
+
+    await waitFor(() =>
+      expect(apiClient.createDesign).toHaveBeenCalledWith({
+        requirements_text: "Créer un support d'antenne modifiable",
+        options: { detail_level: "high", use_llm: true, multimodal_consent: "disabled" }
+      })
+    );
+    expect(await screen.findByText("NOUVEAU WORKFLOW RESTE ACTIF")).toBeInTheDocument();
+
+    await act(async () => {
+      delayedDesignList.resolve([historicalWorkflow]);
+      await delayedDesignList.promise;
+    });
+
+    expect(workflowStatus).toHaveBeenCalledWith(newWorkflow.workflow_id);
+    expect(workflowStatus).not.toHaveBeenCalledWith(historicalWorkflow.workflow_id);
+    expect(screen.getByText("NOUVEAU WORKFLOW RESTE ACTIF")).toBeInTheDocument();
+    expect(screen.queryByText("ANCIEN WORKFLOW NE DOIT PAS REMPLACER LE NOUVEAU")).not.toBeInTheDocument();
+  });
+
   it("ignores a superseded terminal bundle that resolves after the new workflow", async () => {
     const workflowA = workflow("wf_a", "completed", "2026-07-15T08:00:00Z");
     const workflowB = workflow("wf_b", "completed", "2026-07-15T09:00:00Z");
