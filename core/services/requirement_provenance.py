@@ -73,6 +73,7 @@ DEFAULT_WARNING_BY_FIELD = {
 DIRECT_TEXT_FIELDS = {
     "network_type",
     "tower_type",
+    "tower_characteristics",
     "mechanical_tilt_deg",
     "electrical_tilt_deg",
     "beamwidth_deg",

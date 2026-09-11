@@ -21,6 +21,10 @@ from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
 from core.performance import requirements_hash, scene_spec_hash
+from core.qa.tower_access_inspector import (
+    tower_access_evidence_required,
+    verify_tower_access_evidence,
+)
 from core.services.blender_runner import GenerationResult
 from core.services.cognitive_scene_compiler import cognitive_plan_hash
 
@@ -42,6 +46,31 @@ _ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS = (
 )
 
 
+def _certified_artifact_names(
+    *,
+    component_proof_required: bool,
+    constraint_evidence_required: bool,
+    tower_access_required: bool,
+) -> tuple[str, ...]:
+    """Return the exact evidence set needed by this SceneSpec.
+
+    Tower access is a separate, bounded procedural assembly.  It must not be
+    smuggled into component proofs just because both outputs happen to be
+    geometry.  Keeping the union here makes mixed scenes certify every real
+    evidence type once, while legacy certificates preserve their old sets.
+    """
+
+    names = ["glb", "preview", "metadata"]
+    if component_proof_required:
+        names.append("component_proofs")
+    if constraint_evidence_required:
+        names.append("constraint_evidence")
+    if tower_access_required:
+        names.append("tower_access_evidence")
+    names.append("build_lock")
+    return tuple(names)
+
+
 def build_completion_certificate(
     *,
     workflow_id: str,
@@ -60,7 +89,13 @@ def build_completion_certificate(
     post_blender_gate: QualityGateReport | None,
     cognitive_plan: CognitiveDesignPlan | None = None,
 ) -> CompletionCertificate:
-    if cognitive_plan is not None and not _assembly_constraint_evidence_required(scene):
+    constraint_evidence_required = _assembly_constraint_evidence_required(scene)
+    tower_access_required = tower_access_evidence_required(scene)
+    if (
+        cognitive_plan is not None
+        and not constraint_evidence_required
+        and not tower_access_required
+    ):
         return _build_cognitive_completion_certificate(
             workflow_id=workflow_id,
             cognitive_plan=cognitive_plan,
@@ -81,13 +116,11 @@ def build_completion_certificate(
             or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
         )
     )
-    constraint_evidence_required = _assembly_constraint_evidence_required(scene)
-    if constraint_evidence_required:
-        certified_artifact_names = _ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS
-    elif component_proof_required:
-        certified_artifact_names = _M0_CERTIFIED_ARTIFACTS
-    else:
-        certified_artifact_names = _BASE_CERTIFIED_ARTIFACTS
+    certified_artifact_names = _certified_artifact_names(
+        component_proof_required=component_proof_required,
+        constraint_evidence_required=constraint_evidence_required,
+        tower_access_required=tower_access_required,
+    )
     artifacts = _artifact_evidence(generation, certified_artifact_names)
     requirements_sha256 = requirements_hash(requirements) if requirements else "0" * 64
     blueprint_sha256 = (
@@ -144,15 +177,27 @@ def build_completion_certificate(
             generation,
             scene,
         )
+    if tower_access_required:
+        checks["tower_access_evidence_verified"] = _tower_access_evidence_verified(
+            generation,
+            scene,
+        )
     blockers = [name for name, passed in checks.items() if not passed]
     constraint_evidence_path = (
         Path(generation.artifacts["constraint_evidence"])
         if generation is not None and generation.artifacts.get("constraint_evidence")
         else None
     )
+    tower_access_evidence_path = (
+        Path(generation.artifacts["tower_access_evidence"])
+        if generation is not None and generation.artifacts.get("tower_access_evidence")
+        else None
+    )
     return CompletionCertificate(
         schema_version=(
-            "1.4.0"
+            "1.5.0"
+            if tower_access_required
+            else "1.4.0"
             if constraint_evidence_required
             else "1.2.0"
             if component_proof_required
@@ -166,6 +211,11 @@ def build_completion_certificate(
         constraint_evidence_sha256=(
             _sha256(constraint_evidence_path)
             if constraint_evidence_path is not None and constraint_evidence_path.is_file()
+            else None
+        ),
+        tower_access_evidence_sha256=(
+            _sha256(tower_access_evidence_path)
+            if tower_access_evidence_path is not None and tower_access_evidence_path.is_file()
             else None
         ),
         scene_spec_sha256=scene_sha256,
@@ -189,6 +239,7 @@ def verify_completion_certificate(
         certificate is not None
         and certificate.schema_version == "1.3.0"
         and not _assembly_constraint_evidence_required(scene)
+        and not tower_access_evidence_required(scene)
     ):
         return _verify_cognitive_completion_certificate(
             certificate,
@@ -211,16 +262,22 @@ def verify_completion_certificate(
     ):
         return False
     constraint_evidence_required = _assembly_constraint_evidence_required(scene)
-    if constraint_evidence_required != (certificate.schema_version == "1.4.0"):
+    tower_access_required = tower_access_evidence_required(scene)
+    if tower_access_required != (certificate.schema_version == "1.5.0"):
         return False
-    certified_artifact_names = {
-        "1.0.0": _BASE_CERTIFIED_ARTIFACTS,
-        "1.1.0": _BASE_CERTIFIED_ARTIFACTS,
-        "1.2.0": _M0_CERTIFIED_ARTIFACTS,
-        "1.4.0": _ASSEMBLY_CONSTRAINT_CERTIFIED_ARTIFACTS,
-    }.get(certificate.schema_version)
-    if certified_artifact_names is None:
+    if constraint_evidence_required and certificate.schema_version not in {"1.4.0", "1.5.0"}:
         return False
+    if not constraint_evidence_required and certificate.schema_version == "1.4.0":
+        return False
+    component_proof_required = bool(
+        scene.geometry_programs
+        or (scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0")
+    )
+    certified_artifact_names = _certified_artifact_names(
+        component_proof_required=component_proof_required,
+        constraint_evidence_required=constraint_evidence_required,
+        tower_access_required=tower_access_required,
+    )
     expected = {artifact.logical_name: artifact for artifact in certificate.artifacts}
     if set(expected) != set(certified_artifact_names):
         return False
@@ -237,10 +294,16 @@ def verify_completion_certificate(
             or _sha256(path) != artifact.sha256
         ):
             return False
-    if certificate.schema_version == "1.4.0" and (
+    if constraint_evidence_required and (
         not _constraint_evidence_verified(generation, scene)
         or certificate.constraint_evidence_sha256
         != _sha256(Path(generation.artifacts["constraint_evidence"]))
+    ):
+        return False
+    if tower_access_required and (
+        not _tower_access_evidence_verified(generation, scene)
+        or certificate.tower_access_evidence_sha256
+        != _sha256(Path(generation.artifacts["tower_access_evidence"]))
     ):
         return False
     return True
@@ -486,6 +549,29 @@ def _constraint_evidence_verified(
         and evidence.assembly_plan_sha256
         == _canonical_payload_sha256(scene.assembly_plan.model_dump(mode="json"))
     )
+
+
+def _tower_access_evidence_verified(
+    generation: GenerationResult | None,
+    scene: SceneSpec,
+) -> bool:
+    """Require a fresh post-GLB access inspection before issuing a certificate."""
+
+    if generation is None or not tower_access_evidence_required(scene):
+        return False
+    evidence_value = generation.artifacts.get("tower_access_evidence")
+    glb_value = generation.artifacts.get("glb")
+    if not evidence_value or not glb_value:
+        return False
+    evidence_path = Path(evidence_value)
+    glb_path = Path(glb_value)
+    if not evidence_path.is_file() or not glb_path.is_file():
+        return False
+    try:
+        evidence = verify_tower_access_evidence(evidence_path.parent, scene)
+    except ValueError:
+        return False
+    return bool(evidence.status == "passed" and evidence.glb_sha256 == _sha256(glb_path))
 
 
 def _canonical_payload_sha256(payload: object) -> str:

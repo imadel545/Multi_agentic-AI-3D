@@ -133,3 +133,11 @@ entités backend v1.
 - Static embedding refresh: BLOCKED_EXTERNAL. Configured NVIDIA model is retired;
   bounded replacement batch requests timed out. Runtime memory projection is
   clean; a new static neural index is not claimed.
+
+## Bounded tower-access geometry — 2026-09-12
+
+| Capability | Status | Evidence | Limitation actuelle |
+|---|---|---|---|
+| Lattice tower access profile | IMPLEMENTED_LIMITED | `TowerAccessGeometryProfile`, manifest `TOWER_LATTICE_30M`, `SceneSpec.tower_access_geometry_profile` | Rails, barreaux, plateformes, garde-corps, plinthes et supports sont générés par Blender depuis un profil manifesté et des niveaux explicitement demandés. Seulement les tours treillis concernées; le profil est technique interne, sans identité fabricant ni validation structurelle. |
+| Post-Blender tower-access evidence | IMPLEMENTED_LIMITED | `tower_access_evidence.json`, `TowerAccessInspector`, Mesh QA, certificate 1.5 | Relit les positions et meshes GLB, identité du profil, échelle, dimensions/niveaux des plateaux et clearance AABB des équipements principaux. Ne prouve ni collision triangle, contact, fixation, charge, sécurité ou conformité de chantier. |
+| Tower access in viewer bundle | IMPLEMENTED_LIMITED | `ViewerBundle.tower_access_summary`, `tower_access_evidence_url`, Studio Composition drawer | Le Studio affiche une identité et les mesures vérifiées pour inspection. La sélection est explicitement non éditable; aucune capability de transformation ciblée n'est déclarée. |

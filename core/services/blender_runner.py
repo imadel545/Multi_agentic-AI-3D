@@ -310,6 +310,7 @@ class BlenderRunner:
                 "component_proofs": str(output_dir / "component_proofs.json"),
                 "constraint_evidence": str(output_dir / "constraint_evidence.json"),
                 "sector_preview_evidence": str(output_dir / "sector_preview_evidence.json"),
+                "tower_access_evidence": str(output_dir / "tower_access_evidence.json"),
                 "build_lock": str(output_dir / "build.lock.json"),
             },
             error=error,
@@ -685,7 +686,39 @@ def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None
     sector_preview_error = _write_sector_preview_evidence(output_dir, scene)
     if sector_preview_error:
         return sector_preview_error
+    tower_access_error = _write_tower_access_evidence(output_dir, scene)
+    if tower_access_error:
+        return tower_access_error
     return None
+
+
+def _write_tower_access_evidence(output_dir: Path, scene: SceneSpec) -> str | None:
+    """Measure required access geometry after the GLB, never from worker intent."""
+
+    from core.qa.tower_access_inspector import TowerAccessInspector, tower_access_evidence_required
+
+    evidence_path = output_dir / "tower_access_evidence.json"
+    if not tower_access_evidence_required(scene):
+        evidence_path.unlink(missing_ok=True)
+        return None
+    try:
+        evidence = TowerAccessInspector().inspect(output_dir, scene)
+        _atomic_write_text(
+            evidence_path,
+            json.dumps(evidence.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        evidence_path.unlink(missing_ok=True)
+        return f"BLENDER_TOWER_ACCESS_EVIDENCE_INSPECTION_FAILED:{type(exc).__name__}"
+    if evidence.status != "passed":
+        return "BLENDER_TOWER_ACCESS_EVIDENCE_FAILED"
+    return None
+
+
+def _tower_access_required(scene: SceneSpec) -> bool:
+    from core.qa.tower_access_inspector import tower_access_evidence_required
+
+    return tower_access_evidence_required(scene)
 
 
 def _write_sector_preview_evidence(output_dir: Path, scene: SceneSpec) -> str | None:
@@ -809,6 +842,7 @@ def _promote_staged_artifacts(staging_dir: Path, output_dir: Path) -> None:
         "component_proofs.json",
         "constraint_evidence.json",
         "sector_preview_evidence.json",
+        "tower_access_evidence.json",
         "design.blend",
     )
     names = (*names, *_sector_preview_file_names(staging_dir))
@@ -829,6 +863,7 @@ def _clear_generated_artifacts(output_dir: Path) -> None:
         "component_proofs.json",
         "constraint_evidence.json",
         "sector_preview_evidence.json",
+        "tower_access_evidence.json",
         "design.blend",
         "build.lock.json",
     ):
@@ -868,6 +903,8 @@ def _write_build_lock(
     if (staging_dir / "sector_preview_evidence.json").is_file():
         artifact_names.append("sector_preview_evidence.json")
         artifact_names.extend(_sector_preview_file_names(staging_dir))
+    if (staging_dir / "tower_access_evidence.json").is_file():
+        artifact_names.append("tower_access_evidence.json")
     artifact_hashes = {
         name: {
             "sha256": _sha256(staging_dir / name),
@@ -898,6 +935,12 @@ def _write_build_lock(
             "required": _sector_preview_required(scene),
             "evidence_file": (
                 "sector_preview_evidence.json" if _sector_preview_required(scene) else None
+            ),
+        },
+        "tower_access_profile": {
+            "required": _tower_access_required(scene),
+            "evidence_file": (
+                "tower_access_evidence.json" if _tower_access_required(scene) else None
             ),
         },
         "artifacts": artifact_hashes,
@@ -955,6 +998,12 @@ def _validate_build_lock(
     }
     if payload.get("sector_preview_profile") != expected_sector_preview_profile:
         return "BLENDER_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID"
+    expected_tower_access_profile = {
+        "required": _tower_access_required(scene),
+        "evidence_file": "tower_access_evidence.json" if _tower_access_required(scene) else None,
+    }
+    if payload.get("tower_access_profile") != expected_tower_access_profile:
+        return "BLENDER_BUILD_LOCK_TOWER_ACCESS_PROFILE_INVALID"
     command_profile = payload.get("command_profile")
     if command_profile != {
         "background": True,
@@ -979,6 +1028,8 @@ def _validate_build_lock(
     if (output_dir / "sector_preview_evidence.json").is_file():
         required_names.append("sector_preview_evidence.json")
         required_names.extend(_sector_preview_file_names(output_dir))
+    if _tower_access_required(scene):
+        required_names.append("tower_access_evidence.json")
     for name in required_names:
         evidence = artifacts.get(name)
         path = output_dir / name

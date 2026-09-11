@@ -565,3 +565,17 @@ frontend.
   rétroactivement leur prompt initial. Il n’existe
   toujours ni transcript complet de tours assistant, ni modèle de sessions ou
   de projets explicitement sélectionnables.
+
+## Accès de maintenance généré — 2026-09-12
+
+Les échelles et plateformes des tours treillis sont une géométrie procédurale
+interne issue d'un profil manifesté. Elles améliorent l'inspection technique,
+mais ne constituent pas un équipement constructeur, une conception de
+protection contre les chutes, une justification de charges, une preuve de
+fixation, une validation de dégagement fin ou une autorisation d'installation.
+
+La preuve post-Blender contrôle les rails/barreaux, les dimensions et niveaux
+des plateformes et un dégagement AABB contre les équipements principaux. Elle
+ne remplace pas une collision triangle/BVH, la vérification des contacts ou une
+analyse structurelle. Le viewer expose donc cet ensemble en inspection seule;
+son édition ciblée reste indisponible.

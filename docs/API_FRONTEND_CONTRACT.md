@@ -657,3 +657,21 @@ Non-product memory cannot be promoted by a normal write with the same identity.
 result adds `retrieval_evidence` with method, matched query/source terms, query
 coverage and `geometry_verified: false`. Scores rank metadata relevance only;
 duplicate content is collapsed and missing terms remain visible in coverage.
+
+## Accès de maintenance vérifié
+
+Quand la scène active exige un profil d'accès de tour, `viewer-bundle` peut
+retourner `tower_access_summary` et `tower_access_evidence_url`. Le résumé
+contient l'identité sémantique, le nombre mesuré de barreaux, les niveaux de
+plateformes et les limites de la preuve. Il ne paraît que si la preuve
+post-Blender hashée est passée et correspond au `SceneSpec` actif.
+
+`tower_access_summary.interaction_mode` vaut actuellement
+`inspection_only`. Le frontend peut permettre la sélection et l'inspection de
+l'ensemble, mais ne doit pas proposer une édition ciblée ou présenter cette
+géométrie procédurale interne comme un équipement constructeur ou une
+validation d'installation.
+
+Artifact additionnel:
+
+- `tower_access_evidence` → `tower_access_evidence.json`

@@ -173,7 +173,8 @@ function humanAssetRole(role: string): string {
     gps_antenna: "antennes GPS",
     power_cabinet: "armoires énergie",
     radio: "radios",
-    tower: "pylône"
+    tower: "pylône",
+    tower_access: "accès et maintenance du pylône"
   };
   return labels[role] ?? role.replaceAll("_", " ");
 }

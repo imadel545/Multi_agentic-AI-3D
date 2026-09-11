@@ -451,3 +451,21 @@ queries, no raw CAD. Both batch trials timed out after about 90 s total each;
 `embedding-benchmark.json` records the failed attempts. One separate single-query
 Nemotron 3 response is insufficient to change the configured default. No static
 neural index replacement is declared successful.
+
+## Tower access evidence — 2026-09-12
+
+Quand une tour treillis porte un `TowerAccessGeometryProfile` et une demande
+d'échelle ou de plateformes, le résultat ne peut être activé sans
+`tower_access_evidence.json`. L'inspecteur relit les positions GLB exportées
+et vérifie l'identité sémantique et le hash du profil, deux rails, le minimum de
+barreaux, leur largeur, leur espacement et leurs bornes, puis chaque plateau
+demandé: altitude du dessus, largeur, profondeur, garde-corps, plinthes et
+supports. Il teste également les chevauchements AABB de plateau avec les
+équipements principaux.
+
+Cette vérification est une mesure de géométrie exportée, non une validation
+structurelle ou de sécurité. Les collisions triangle/BVH, les contacts, les
+charges, l'antichute, les détails de fixation et la conformité de chantier
+restent hors périmètre. Le certificat 1.5, le build lock et l'activation de
+version lient cette preuve et la refusent en cas de hash, scène ou relecture
+incohérente.

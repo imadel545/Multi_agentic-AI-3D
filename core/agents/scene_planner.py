@@ -14,7 +14,7 @@ from core.contracts.scene import (
     SectorSpec,
     VisualElements,
 )
-from core.contracts.tower import TowerCharacteristics
+from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
 from core.rag.planning import RagPlanningResolution, resolve_planning_hints
 from core.services.assembly_compiler import resolve_scene_assembly
 
@@ -156,6 +156,10 @@ class ScenePlanner:
                 generation_reason=_component_generation_reason(tower, tower_strategy),
                 height_m=requirements.tower_height_m,
                 characteristics=tower_characteristics,
+                tower_access_geometry_profile=_tower_access_profile_for_scene(
+                    tower,
+                    tower_characteristics,
+                ),
             ),
             sectors=sectors,
             visual_elements=visual_elements,
@@ -417,6 +421,22 @@ def _resolved_tower_characteristics(
             "top_width_m": min(top_width, base_width),
         }
     )
+
+
+def _tower_access_profile_for_scene(
+    tower: AssetManifest,
+    characteristics: TowerCharacteristics,
+) -> TowerAccessGeometryProfile | None:
+    """Carry only a compatible, manifest-authored lattice access profile.
+
+    The profile controls bounded procedural geometry in a later execution
+    stage.  It does not infer a platform when the user has not requested one,
+    nor does it make a vendor or engineering-quality claim.
+    """
+
+    if characteristics.structure != "lattice":
+        return None
+    return tower.tower_access_geometry_profile
 
 
 def _tower_width_at_height(

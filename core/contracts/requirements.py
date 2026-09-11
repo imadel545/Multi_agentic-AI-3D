@@ -180,6 +180,10 @@ class RequirementSpec(StrictModel):
             raise ValueError("sector_count must match len(azimuths_deg)")
         if self.antenna_install_height_m > self.tower_height_m:
             raise ValueError("antenna_install_height_m cannot exceed tower_height_m")
+        if any(
+            level >= self.tower_height_m for level in self.tower_characteristics.platform_levels_m
+        ):
+            raise ValueError("platform_levels_m must remain below tower_height_m")
         request_ids = [request.request_id for request in self.geometry_requests]
         if len(request_ids) != len(set(request_ids)):
             raise ValueError("geometry request IDs must be unique")

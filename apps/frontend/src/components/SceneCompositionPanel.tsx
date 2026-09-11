@@ -4,7 +4,8 @@ import type {
   AssetDecisionSummary,
   AssetInventory,
   ComponentProofs,
-  SectorPreviewSummary
+  SectorPreviewSummary,
+  TowerAccessSummary
 } from "../api/schemas";
 import { compactFidelityLabel, humanSemanticRole, visualReviewStatusLabel } from "./StudioDisplayHelpers";
 import { PanelTitle, ResourceRecovery } from "./StudioPrimitives";
@@ -89,6 +90,7 @@ export function SceneCompositionPanel({
   onSelect,
   selectedSemanticRoot = null,
   sectorPreviews = [],
+  towerAccess = null,
   toAbsoluteUrl = (url) => url ?? null
 }: {
   assemblyPlan: AssemblyPlanEvidence | null;
@@ -101,6 +103,7 @@ export function SceneCompositionPanel({
   onSelect?: (semanticRoot: string | null) => void;
   selectedSemanticRoot?: string | null;
   sectorPreviews?: SectorPreviewSummary[];
+  towerAccess?: TowerAccessSummary | null;
   toAbsoluteUrl?: (url: string | null | undefined) => string | null;
 }) {
   const strategyCounts = new Map<string, number>();
@@ -120,14 +123,17 @@ export function SceneCompositionPanel({
     ? sectorPreviews.find((preview) => preview.semantic_roots.includes(selectedSemanticRoot))
     : undefined;
   const selectedSectorPreviewUrl = toAbsoluteUrl(selectedSectorPreview?.preview_url);
+  const selectedTowerAccess = selectedSemanticRoot === towerAccess?.semantic_root;
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
       <PanelTitle icon={<Layers3 size={17} />} title="Composition vérifiable" />
       {selectedSemanticRoot ? (
         <>
           <div className="scene-plan-summary" role="status">
-            <strong>Composant sélectionné : {selectedSemanticRoot.replaceAll("_", " ")}</strong>
-            <small>La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre.</small>
+            <strong>Composant sélectionné : {selectedTowerAccess ? "accès et maintenance du pylône" : selectedSemanticRoot.replaceAll("_", " ")}</strong>
+            <small>{selectedTowerAccess
+              ? "Cet ensemble est vérifié pour inspection. Sa modification ciblée n’est pas encore disponible. Désélectionnez-le pour demander une révision générale."
+              : "La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre."}</small>
             <button className="secondary-action" type="button" onClick={() => onSelect?.(null)}>Désélectionner</button>
           </div>
           {selectedSectorPreview && selectedSectorPreviewUrl ? (
@@ -172,6 +178,15 @@ export function SceneCompositionPanel({
           <strong>Sélection automatique tracée</strong>
           <small>{assemblyPlan.connections.length} connexion(s) vérifiable(s)</small>
         </div>
+      ) : null}
+      {towerAccess ? (
+        <article className="scene-plan-summary" aria-label="Accès et maintenance du pylône">
+          <strong>Accès et maintenance du pylône</strong>
+          <small>Géométrie exportée vérifiée : {towerAccess.requested_ladder ? `${towerAccess.rung_count} barreaux mesurés` : "sans échelle demandée"}</small>
+          <small>Niveaux de maintenance : {towerAccess.platform_levels_m.length ? towerAccess.platform_levels_m.map((level) => `${level} m`).join(" · ") : "aucune plateforme demandée"}</small>
+          <p>Ensemble technique procédural pour inspection. Il ne constitue pas une validation structurelle, de sécurité ou de pose.</p>
+          <button className="secondary-action" onClick={() => onSelect?.(towerAccess.semantic_root)} type="button">Inspecter dans la vue 3D</button>
+        </article>
       ) : null}
       {assetDecisionSummary?.components.length ? (
         <div className="asset-decision-list" aria-label="Décisions automatiques par composant">

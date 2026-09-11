@@ -299,6 +299,12 @@ def _extract_tower_characteristics(
             "top",
             "plateforme",
             "platform",
+            "palier",
+            "niveau",
+            "level",
+            "accès",
+            "acces",
+            "access",
             "échelle",
             "echelle",
             "ladder",
@@ -323,8 +329,25 @@ def _extract_tower_characteristics(
                 ),
             )
         )
-    has_platform = _contains_any(text, ["plateforme", "platform"])
+    platform_negated = _contains_negation_for(
+        text,
+        [
+            "plateforme",
+            "platform",
+            "palier",
+            "niveau d'accès",
+            "niveaux d'accès",
+            "access level",
+            "access levels",
+        ],
+    )
+    platform_levels_m = [] if platform_negated else _extract_platform_levels(text)
+    has_platform = (
+        _contains_any(text, ["plateforme", "platform", "palier"]) or bool(platform_levels_m)
+    ) and not platform_negated
     platform_count = _extract_count_before_terms(text, ["plateforme", "platform"])
+    if platform_levels_m and platform_count is None:
+        platform_count = len(platform_levels_m)
     if has_platform and platform_count is None:
         platform_count = 1
     return TowerCharacteristics(
@@ -339,6 +362,7 @@ def _extract_tower_characteristics(
         foundation_type=_extract_foundation_type(text, tower_type),
         has_platform=has_platform,
         platform_count=platform_count or 0,
+        platform_levels_m=platform_levels_m,
         has_ladder=_contains_any(text, ["échelle", "echelle", "ladder"]),
         has_lightning_rod=_contains_any(text, ["paratonnerre", "lightning rod"]),
         has_aviation_light=_contains_any(text, ["balisage", "feu aviation", "aviation light"]),
@@ -431,6 +455,45 @@ def _extract_count_before_terms(text: str, terms: list[str]) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+def _extract_platform_levels(text: str) -> list[float]:
+    """Extract a bounded explicit list of access-platform elevations in meters.
+
+    The parser deliberately requires a platform/access-level phrase and an
+    explicit metre unit.  It therefore cannot reinterpret the tower height,
+    HBA, or an unrelated civil offset as access geometry.  The contract
+    canonicalises valid levels in ascending order; conflicting declarations are
+    left to confirmation/validation rather than being silently reconciled.
+    """
+
+    number = r"\d+(?:[.,]\d+)?\s*m\b"
+    separator = r"\s*(?:,|;|/|&|\bet\b|\band\b)\s*"
+    levels = rf"(?P<levels>{number}(?:{separator}{number}){{0,11}})"
+    prefix = (
+        r"\s*(?:(?:aux?\s+)?(?:niveaux?|levels?|hauteurs?|heights?|"
+        r"altitudes?|elevations?)\s*)?(?:(?:à|at|de|:|=)\s*)?"
+    )
+    patterns = (
+        rf"\b(?:niveaux?|paliers?)\s+(?:de\s+)?(?:plateformes?|platforms?|acc[eè]s|access)\b{prefix}{levels}",
+        rf"\b(?:acc[eè]s|access)\s+(?:levels?|niveaux?|plateformes?|platforms?)\b{prefix}{levels}",
+        rf"\b(?:plateformes?|platforms?|paliers?)\s+(?:d['’]\s*)?(?:acc[eè]s|access)\b{prefix}{levels}",
+        rf"\b(?:plateformes?|platforms?|paliers?)\s+(?:de\s+)?(?:maintenance|service)\b{prefix}{levels}",
+        rf"\b(?:maintenance|service)\s+(?:plateformes?|platforms?|paliers?)\b{prefix}{levels}",
+        rf"\b(?:plateformes?|platforms?|paliers?)\s+(?:niveaux?|levels?)\b{prefix}{levels}",
+        rf"\b(?:plateformes?|platforms?|paliers?)\b\s+(?:(?:aux?\s+)?(?:niveaux?|levels?|hauteurs?|heights?|altitudes?|elevations?)\s*)?(?:à|at|de|:|=)\s*{levels}",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match is None:
+            continue
+        values = [
+            float(value.replace(",", "."))
+            for value in re.findall(r"\d+(?:[.,]\d+)?", match.group("levels"))
+        ]
+        if values:
+            return sorted(values)
+    return []
 
 
 def _contains_any(text: str, terms: list[str]) -> bool:

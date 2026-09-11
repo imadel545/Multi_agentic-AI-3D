@@ -79,6 +79,50 @@ def test_parse_professional_tower_characteristics() -> None:
     assert characteristics.material == "galvanized_steel"
 
 
+def test_parser_preserves_explicit_french_and_english_access_platform_levels() -> None:
+    prompts = (
+        (
+            "Créer un site 5G sur pylône treillis 30m avec plateformes d'accès aux "
+            "niveaux 12 m et 24,5 m, avec une échelle. Installer 3 secteurs à 24m. "
+            "Azimuts : 0°, 120°, 240°.",
+            [12.0, 24.5],
+        ),
+        (
+            "Create a 5G site on a 30m lattice tower with access levels at 12 m and "
+            "24.5 m, with a ladder. Install 3 sectors at 24m. "
+            "Azimuths: 0°, 120°, 240°.",
+            [12.0, 24.5],
+        ),
+    )
+
+    for prompt, expected_levels in prompts:
+        spec = parse_requirements_text(prompt)
+        characteristics = spec.tower_characteristics
+
+        assert characteristics.has_platform is True
+        assert characteristics.platform_count == 2
+        assert characteristics.platform_levels_m == expected_levels
+        assert characteristics.has_ladder is True
+        assert spec.field_evidence["tower_characteristics"].selected_source == "user_text"
+        assert spec.field_evidence["tower_characteristics"].explicit is True
+
+
+def test_parser_preserves_maintenance_platform_levels_in_a_realistic_telecom_brief() -> None:
+    spec = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis galvanisé de 36 m, base 4 m, "
+        "sommet 1 m, avec quatre secteurs aux azimuts 0°, 90°, 180° et 270°, "
+        "HBA 30 m, RRU sur supports et câbles inclus. Prévoir une échelle "
+        "d'accès et deux plateformes de maintenance aux niveaux 18 m et 26 m "
+        "avec garde-corps. Ajouter une fondation béton et un balisage aérien."
+    )
+
+    characteristics = spec.tower_characteristics
+    assert characteristics.has_ladder is True
+    assert characteristics.has_platform is True
+    assert characteristics.platform_count == 2
+    assert characteristics.platform_levels_m == [18.0, 26.0]
+
+
 def test_parser_adds_warnings_for_defaults() -> None:
     spec = parse_requirements_text("Créer un site télécom standard.")
 

@@ -742,6 +742,20 @@ class SectorPreviewSummary(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class TowerAccessSummary(BaseModel):
+    """Public result of the exported-GLB access geometry inspection."""
+
+    semantic_root: str = Field(min_length=1)
+    semantic_role: Literal["tower_access"] = "tower_access"
+    interaction_mode: Literal["inspection_only"] = "inspection_only"
+    post_blender_geometry_verified: Literal[True] = True
+    requested_ladder: bool
+    rung_count: int = Field(ge=0)
+    platform_levels_m: list[float] = Field(default_factory=list)
+    measurement_scope: Literal["exported_glb_tower_access_geometry"]
+    limitations: list[str] = Field(default_factory=list)
+
+
 class ViewerBundle(BaseModel):
     version_id: str | None = None
     workflow_id: str
@@ -762,6 +776,7 @@ class ViewerBundle(BaseModel):
     geometry_program_summary: GeometryProgramSummary | None = None
     assembly_constraint_summary: AssemblyConstraintSummary | None = None
     sector_previews: list[SectorPreviewSummary] = Field(default_factory=list)
+    tower_access_summary: TowerAccessSummary | None = None
     human_warnings_count: int = 0
     human_errors_count: int = 0
     primary_glb_url: str | None = None
@@ -775,6 +790,7 @@ class ViewerBundle(BaseModel):
     scene_spec_url: str | None = None
     assembly_plan_url: str | None = None
     constraint_evidence_url: str | None = None
+    tower_access_evidence_url: str | None = None
     qa_report_url: str | None = None
     generation_report_url: str | None = None
     geometry_validation_url: str | None = None

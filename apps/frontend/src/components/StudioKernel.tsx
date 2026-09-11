@@ -45,6 +45,7 @@ import type {
   SceneAdaptationCapabilities,
   StudioSummary,
   TimelineSummary,
+  TowerAccessSummary,
   UserIssue,
   UserIssues,
   ViewerBundle
@@ -1411,6 +1412,7 @@ export function InspectorDock({
   documentCapabilities,
   events,
   componentProofs = null,
+  towerAccess = null,
   cognitiveEvidenceError = null,
   cognitiveEvidenceLoading = false,
   issues,
@@ -1470,6 +1472,7 @@ export function InspectorDock({
   documentCapabilities?: DocumentPackCapabilities | null;
   events: NormalizedWorkflowEvent[];
   componentProofs?: ComponentProofs | null;
+  towerAccess?: TowerAccessSummary | null;
   cognitiveEvidenceError?: string | null;
   cognitiveEvidenceLoading?: boolean;
   issues: UserIssues | null;
@@ -1518,7 +1521,7 @@ export function InspectorDock({
   const drawers: DrawerDefinition[] = [];
   if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Vue", icon: <CheckCircle2 size={16} /> });
   if (events.length || timeline) drawers.push({ id: "agents", label: "Progression", icon: <Sparkles size={16} /> });
-  if (assemblyPlan || componentProofs || cognitiveEvidenceError || cognitiveEvidenceLoading) {
+  if (assemblyPlan || componentProofs || towerAccess || cognitiveEvidenceError || cognitiveEvidenceLoading) {
     drawers.push({
       id: "scene",
       label: "Composition",
@@ -1646,6 +1649,7 @@ export function InspectorDock({
               onSelect={onSelectSceneComponent}
               selectedSemanticRoot={selectedSemanticRoot}
               sectorPreviews={bundle?.sector_previews}
+              towerAccess={towerAccess}
               toAbsoluteUrl={toAbsoluteUrl}
             />
           ) : null}

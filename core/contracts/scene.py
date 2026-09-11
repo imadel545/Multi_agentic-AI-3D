@@ -13,7 +13,7 @@ from core.contracts.common import AssetType, DetailLevel, NetworkType, StrictMod
 from core.contracts.geometry_program import GeometryProgram
 from core.contracts.parametric import GenerationStrategy, GeometrySource
 from core.contracts.rigid_relations import RigidComponentRelation
-from core.contracts.tower import TowerCharacteristics
+from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
 
 
 class RuntimeAssetMetadata(StrictModel):
@@ -67,6 +67,21 @@ class SceneAssetPlacement(StrictModel):
             material="galvanized_steel",
         )
     )
+    tower_access_geometry_profile: TowerAccessGeometryProfile | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+    @model_validator(mode="after")
+    def validate_tower_access_profile(self) -> "SceneAssetPlacement":
+        if (
+            self.tower_access_geometry_profile is not None
+            and self.characteristics.structure != "lattice"
+        ):
+            raise ValueError("tower_access_geometry_profile requires a lattice tower")
+        if any(level >= self.height_m for level in self.characteristics.platform_levels_m):
+            raise ValueError("platform_levels_m must remain below tower height_m")
+        return self
 
 
 class SectorSpec(StrictModel):

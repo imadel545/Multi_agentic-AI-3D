@@ -6,6 +6,7 @@ from core.contracts.assets import AssetManifest, AssetQualification, DimensionsM
 from core.contracts.common import WarningItem
 from core.contracts.requirements import RequirementSpec
 from core.services.asset_registry import AssetRegistry
+from core.validation.requirement_coverage import evaluate_requirement_coverage
 
 
 def test_scene_planner_rejects_rag_overrides_for_source_requirements() -> None:
@@ -406,6 +407,48 @@ def test_scene_planner_resolves_optional_tower_widths_into_scene_spec() -> None:
 
     assert scene.tower.characteristics.base_width_m == 3.2
     assert scene.tower.characteristics.top_width_m == 0.8
+
+
+def test_scene_planner_carries_lattice_access_profile_and_explicit_levels() -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    base_requirements = _requirements()
+    requirements = base_requirements.model_copy(
+        update={
+            "tower_characteristics": base_requirements.tower_characteristics.model_copy(
+                update={
+                    "has_platform": True,
+                    "platform_count": 2,
+                    "platform_levels_m": [12.0, 24.0],
+                    "has_ladder": True,
+                }
+            )
+        }
+    )
+    tower = registry.get("TOWER_LATTICE_30M")
+    antenna = registry.select_asset("antenna", "5G", "lattice_tower")
+    radio = registry.select_asset("radio", "5G", "lattice_tower")
+
+    scene = ScenePlanner().build_scene_spec(
+        workflow_id="wf_lattice_access_levels",
+        requirements=requirements,
+        tower=tower,
+        antenna=antenna,
+        radio=radio,
+    )
+
+    assert scene.tower.tower_access_geometry_profile is not None
+    assert scene.tower.tower_access_geometry_profile.family == "lattice_tower_access_v1"
+    assert scene.tower.tower_access_geometry_profile.platform_width_m == 2.2
+    assert scene.tower.characteristics.platform_levels_m == [12.0, 24.0]
+    assert scene.tower.characteristics.platform_count == 2
+
+    coverage = evaluate_requirement_coverage(requirements, scene)
+    level_check = next(
+        check
+        for check in coverage.checks
+        if check.path == "tower.characteristics.platform_levels_m"
+    )
+    assert level_check.passed is True
 
 
 def test_scene_planner_carries_asset_license_metadata() -> None:

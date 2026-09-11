@@ -917,12 +917,29 @@ class MeshQA:
                 f"MESH_TOWER_HEIGHT_MISMATCH: expected {expected_height:.2f}m, got {actual_label}"
             )
 
-        # Ground check: glTF is Y-up in exported coordinates.
-        if bounding_box.min_y < -1.0 or bounding_box.max_y <= 0:
+        # Ground check: glTF is Y-up in exported coordinates.  Use only the
+        # semantic design roots: a camera helper, a non-semantic marker or an
+        # implementation-specific preview mesh cannot make a valid published
+        # structure appear to be buried below ground.
+        semantic_bbox = _semantic_design_bounding_box(glb_path, payload, semantic_index)
+        ground_bbox = semantic_bbox or bounding_box
+        if ground_bbox.min_y < -1.0 or ground_bbox.max_y <= 0:
             critical_errors.append("MESH_SCENE_BELOW_GROUND")
-            checks.append(MeshCheckResult(name="scene_above_ground", passed=False))
+            checks.append(
+                MeshCheckResult(
+                    name="scene_above_ground",
+                    passed=False,
+                    detail=f"semantic_min_y={ground_bbox.min_y:.3f}m",
+                )
+            )
         else:
-            checks.append(MeshCheckResult(name="scene_above_ground", passed=True))
+            checks.append(
+                MeshCheckResult(
+                    name="scene_above_ground",
+                    passed=True,
+                    detail=f"semantic_min_y={ground_bbox.min_y:.3f}m",
+                )
+            )
 
         # Reasonable scale check
         if bounding_box.height > 300:
@@ -955,6 +972,9 @@ class MeshQA:
         )
         checks.extend(spatial_checks["checks"])
         warnings.extend(spatial_checks["warnings"])
+        tower_access_check = _tower_access_mesh_check(glb_path, scene)
+        if tower_access_check is not None:
+            checks.append(tower_access_check)
         if (
             transform_checks["semantic_transform_checks_complete"]
             and spatial_checks["spatial_checks_complete"]
@@ -1014,6 +1034,8 @@ class MeshQA:
             )
         if spatial_checks["spatial_checks_complete"]:
             required_check_names.add("primary_equipment_aabb_interference_free")
+        if tower_access_check is not None:
+            required_check_names.add(tower_access_check.name)
         if scene.visual_elements.include_labels:
             required_check_names.add("label_transforms_present")
         if scene.tower.characteristics.foundation_type != "unknown":
@@ -1039,6 +1061,47 @@ class MeshQA:
             mesh_qa_passed=mesh_qa_passed,
             limitations=limitations,
         )
+
+
+def _tower_access_mesh_check(glb_path: Path, scene: SceneSpec) -> MeshCheckResult | None:
+    """Add a hard QA result only when a scene requests the bounded access profile."""
+
+    from core.qa.tower_access_inspector import TowerAccessInspector, tower_access_evidence_required
+
+    if not tower_access_evidence_required(scene):
+        return None
+    try:
+        evidence = TowerAccessInspector().inspect(glb_path.parent, scene)
+    except (OSError, TypeError, ValueError):
+        return MeshCheckResult(
+            name="tower_access_exported_geometry_verified",
+            passed=False,
+            detail="exported tower-access geometry could not be independently measured",
+        )
+    return MeshCheckResult(
+        name="tower_access_exported_geometry_verified",
+        passed=evidence.status == "passed",
+        detail=(
+            f"ladder={evidence.requested_ladder}; platforms={evidence.expected_platform_count}; "
+            f"equipment_deck_overlaps={evidence.primary_equipment_deck_overlap_count}"
+        ),
+    )
+
+
+def _semantic_design_bounding_box(
+    glb_path: Path,
+    payload: dict[str, Any],
+    semantic_index: _SemanticIndex,
+) -> BoundingBoxM | None:
+    node_indices = {
+        node_index
+        for entity in semantic_index.entities
+        if entity.evidence_source == "extras"
+        for node_index in entity.node_indices
+    }
+    if not node_indices:
+        return None
+    return _compute_glb_bounding_box(glb_path, payload, node_indices=node_indices)
 
 
 def _validate_generic_program_mesh(

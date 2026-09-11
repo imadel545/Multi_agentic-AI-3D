@@ -19,6 +19,10 @@ from core.contracts.scene import SceneSpec
 from core.contracts.versioning import SceneVersion
 from core.performance import scene_spec_hash
 from core.qa.sector_preview_inspector import sector_preview_required, verify_sector_preview_evidence
+from core.qa.tower_access_inspector import (
+    tower_access_evidence_required,
+    verify_tower_access_evidence,
+)
 from core.services.blender_runtime import has_qualified_blender_runtime
 from core.services.cognitive_scene_compiler import cognitive_plan_hash
 
@@ -30,6 +34,10 @@ _CERTIFIED_ARTIFACTS_M0 = {
 _CERTIFIED_ARTIFACTS_ASSEMBLY_CONSTRAINTS = {
     *_CERTIFIED_ARTIFACTS_M0,
     "constraint_evidence",
+}
+_CERTIFIED_ARTIFACTS_TOWER_ACCESS = {
+    *_CERTIFIED_ARTIFACTS,
+    "tower_access_evidence",
 }
 _CRITICAL_REPORT_FILES = (
     ("qa_report", "qa_report.json"),
@@ -112,6 +120,10 @@ _REQUIRED_COMPLETION_CHECKS_V1_3 = {
 _REQUIRED_COMPLETION_CHECKS_V1_4 = {
     *_REQUIRED_COMPLETION_CHECKS_V1_2,
     "assembly_constraint_evidence_verified",
+}
+_REQUIRED_COMPLETION_CHECKS_V1_5 = {
+    *_REQUIRED_COMPLETION_CHECKS_V1_2,
+    "tower_access_evidence_verified",
 }
 
 
@@ -467,16 +479,6 @@ def verify_persisted_version(
         raise ValueError("ACTIVE_VERSION_COMPLETION_MODE_INVALID")
     if certificate.blockers:
         raise ValueError("ACTIVE_VERSION_COMPLETION_BLOCKERS_PRESENT")
-    required_checks = {
-        "1.0.0": _REQUIRED_COMPLETION_CHECKS_V1,
-        "1.1.0": _REQUIRED_COMPLETION_CHECKS_V1_1,
-        "1.2.0": _REQUIRED_COMPLETION_CHECKS_V1_2,
-        "1.3.0": _REQUIRED_COMPLETION_CHECKS_V1_3,
-        "1.4.0": _REQUIRED_COMPLETION_CHECKS_V1_4,
-    }[certificate.schema_version]
-    if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
-        raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
-
     scene = _read_model(
         artifact_dir / "scene_spec.json",
         SceneSpec,
@@ -489,11 +491,27 @@ def verify_persisted_version(
     constraint_evidence_required = bool(
         scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
     )
-    if constraint_evidence_required and certificate.schema_version != "1.4.0":
+    tower_access_required = tower_access_evidence_required(scene)
+    required_checks = _required_completion_checks(
+        certificate.schema_version,
+        constraint_evidence_required=constraint_evidence_required,
+    )
+    if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
+    if tower_access_required and certificate.schema_version != "1.5.0":
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
-    if component_proof_required and certificate.schema_version not in {"1.2.0", "1.3.0", "1.4.0"}:
+    if constraint_evidence_required and certificate.schema_version not in {"1.4.0", "1.5.0"}:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
+    if component_proof_required and certificate.schema_version not in {
+        "1.2.0",
+        "1.3.0",
+        "1.4.0",
+        "1.5.0",
+    }:
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
     if certificate.schema_version == "1.4.0" and not constraint_evidence_required:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_INVALID")
+    if certificate.schema_version == "1.5.0" and not tower_access_required:
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_INVALID")
     cognitive_plan = None
     if certificate.schema_version == "1.3.0":
@@ -521,7 +539,7 @@ def verify_persisted_version(
             DesignBlueprint,
             "ACTIVE_VERSION_DESIGN_BLUEPRINT_INVALID",
         )
-        if certificate.schema_version in {"1.1.0", "1.2.0", "1.4.0"}
+        if certificate.schema_version in {"1.1.0", "1.2.0", "1.4.0", "1.5.0"}
         else None
     )
     if certificate.schema_version != "1.3.0":
@@ -563,20 +581,24 @@ def verify_persisted_version(
                 "sha256": item.sha256,
             }
         )
-    expected_artifacts = (
-        _CERTIFIED_ARTIFACTS_ASSEMBLY_CONSTRAINTS
-        if certificate.schema_version == "1.4.0"
-        else _CERTIFIED_ARTIFACTS_M0
-        if certificate.schema_version in {"1.2.0", "1.3.0"}
-        else _CERTIFIED_ARTIFACTS
+    expected_artifacts = _expected_certified_artifacts(
+        certificate.schema_version,
+        component_proof_required=component_proof_required,
+        constraint_evidence_required=constraint_evidence_required,
+        tower_access_required=tower_access_required,
     )
     if logical_names != expected_artifacts:
         raise ValueError("ACTIVE_VERSION_CERTIFIED_ARTIFACT_SET_INCOMPLETE")
-    if certificate.schema_version == "1.4.0":
+    if constraint_evidence_required:
         constraint_evidence_path = artifact_dir / "constraint_evidence.json"
         if certificate.constraint_evidence_sha256 != _sha256(constraint_evidence_path):
             raise ValueError("ACTIVE_VERSION_CONSTRAINT_EVIDENCE_HASH_MISMATCH")
         _verify_constraint_evidence(constraint_evidence_path, scene=scene)
+    if tower_access_required:
+        tower_access_evidence_path = artifact_dir / "tower_access_evidence.json"
+        if certificate.tower_access_evidence_sha256 != _sha256(tower_access_evidence_path):
+            raise ValueError("ACTIVE_VERSION_TOWER_ACCESS_EVIDENCE_HASH_MISMATCH")
+        verify_tower_access_evidence(artifact_dir, scene)
     build_lock_schema = _verify_build_lock(artifact_dir, scene=scene)
     if component_proof_required and build_lock_schema not in {"1.2.0", "1.3.0"}:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_DOWNGRADE")
@@ -586,6 +608,48 @@ def verify_persisted_version(
         _verify_critical_report_proof(artifact_dir)
     _verify_terminal_status(artifact_dir / "status.json", workflow_id=workflow_id)
     return sorted(evidence, key=lambda item: item["logical_name"])
+
+
+def _required_completion_checks(
+    schema_version: str,
+    *,
+    constraint_evidence_required: bool,
+) -> set[str]:
+    """Resolve the exact checks for a certificate without weakening older versions."""
+
+    if schema_version == "1.5.0":
+        checks = set(_REQUIRED_COMPLETION_CHECKS_V1_5)
+        if constraint_evidence_required:
+            checks.add("assembly_constraint_evidence_verified")
+        return checks
+    return {
+        "1.0.0": _REQUIRED_COMPLETION_CHECKS_V1,
+        "1.1.0": _REQUIRED_COMPLETION_CHECKS_V1_1,
+        "1.2.0": _REQUIRED_COMPLETION_CHECKS_V1_2,
+        "1.3.0": _REQUIRED_COMPLETION_CHECKS_V1_3,
+        "1.4.0": _REQUIRED_COMPLETION_CHECKS_V1_4,
+    }[schema_version]
+
+
+def _expected_certified_artifacts(
+    schema_version: str,
+    *,
+    component_proof_required: bool,
+    constraint_evidence_required: bool,
+    tower_access_required: bool,
+) -> set[str]:
+    if schema_version == "1.5.0":
+        expected = set(_CERTIFIED_ARTIFACTS_TOWER_ACCESS)
+        if component_proof_required:
+            expected.add("component_proofs")
+        if constraint_evidence_required:
+            expected.add("constraint_evidence")
+        return expected
+    if schema_version == "1.4.0":
+        return _CERTIFIED_ARTIFACTS_ASSEMBLY_CONSTRAINTS
+    if schema_version in {"1.2.0", "1.3.0"}:
+        return _CERTIFIED_ARTIFACTS_M0
+    return _CERTIFIED_ARTIFACTS
 
 
 def _read_model(path: Path, model_type, error_code: str):
@@ -768,6 +832,14 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
         }
         if payload.get("sector_preview_profile") != expected_sector_preview_profile:
             raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID")
+        expected_tower_access_profile = {
+            "required": tower_access_evidence_required(scene),
+            "evidence_file": "tower_access_evidence.json"
+            if tower_access_evidence_required(scene)
+            else None,
+        }
+        if payload.get("tower_access_profile") != expected_tower_access_profile:
+            raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TOWER_ACCESS_PROFILE_INVALID")
     if payload.get("command_profile") != {
         "background": True,
         "factory_startup": True,
@@ -791,6 +863,8 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     artifact_names = ["design.glb", "preview.png", "scene_metadata.json"]
     if (artifact_dir / "component_proofs.json").is_file():
         artifact_names.append("component_proofs.json")
+    if tower_access_evidence_required(scene):
+        artifact_names.append("tower_access_evidence.json")
     for name in artifact_names:
         item = artifacts.get(name)
         path = artifact_dir / name

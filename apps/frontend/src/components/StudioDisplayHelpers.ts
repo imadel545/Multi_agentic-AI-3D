@@ -1,4 +1,5 @@
 export function humanSemanticRole(role: string): string {
+  if (role === "tower_access") return "accès et maintenance du pylône";
   return role.replaceAll("_", " ").replaceAll(".", " ");
 }
 
@@ -44,4 +45,3 @@ export function serviceStatusLabel(status?: string | null): string {
   }
   return "état non confirmé";
 }
-

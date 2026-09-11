@@ -32,6 +32,7 @@ class CertifiedArtifact(StrictModel):
         "metadata",
         "component_proofs",
         "constraint_evidence",
+        "tower_access_evidence",
         "build_lock",
     ]
     file_name: str = Field(min_length=1)
@@ -40,7 +41,7 @@ class CertifiedArtifact(StrictModel):
 
 
 class CompletionCertificate(StrictModel):
-    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0", "1.5.0"] = "1.0.0"
     workflow_id: str = Field(min_length=1)
     status: Literal["issued", "rejected"]
     evaluated_at: datetime
@@ -51,6 +52,7 @@ class CompletionCertificate(StrictModel):
     )
     cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     constraint_evidence_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    tower_access_evidence_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     scene_spec_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     generation_mode: str | None = None
     artifacts: list[CertifiedArtifact] = Field(default_factory=list)
@@ -58,11 +60,26 @@ class CompletionCertificate(StrictModel):
     blockers: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def require_constraint_hash_for_issued_v1_4(self) -> CompletionCertificate:
+    def require_evidence_hashes_for_issued_evidence_schemas(self) -> CompletionCertificate:
         if (
             self.schema_version == "1.4.0"
             and self.status == "issued"
             and self.constraint_evidence_sha256 is None
         ):
             raise ValueError("completion certificate 1.4 requires constraint evidence hash")
+        if (
+            self.schema_version == "1.5.0"
+            and self.status == "issued"
+            and self.tower_access_evidence_sha256 is None
+        ):
+            raise ValueError("completion certificate 1.5 requires tower access evidence hash")
+        if (
+            self.schema_version == "1.5.0"
+            and self.status == "issued"
+            and any(artifact.logical_name == "constraint_evidence" for artifact in self.artifacts)
+            and self.constraint_evidence_sha256 is None
+        ):
+            raise ValueError(
+                "completion certificate 1.5 requires constraint evidence hash when present"
+            )
         return self

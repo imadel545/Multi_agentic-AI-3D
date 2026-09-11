@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from apps.blender_worker.generate_scene import _camera_view_direction
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec
+from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
 
 
 def _scene_payload() -> dict:
@@ -63,6 +64,74 @@ def test_legacy_scene_without_detail_level_defaults_to_high() -> None:
     scene = SceneSpec.model_validate(payload)
 
     assert scene.detail_level == "high"
+
+
+def test_tower_access_levels_derive_legacy_count_without_changing_legacy_scene_shape() -> None:
+    characteristics = TowerCharacteristics(
+        structure="lattice",
+        platform_levels_m=[12.0, 24.0],
+    )
+
+    assert characteristics.has_platform is True
+    assert characteristics.platform_count == 2
+    assert characteristics.platform_levels_m == [12.0, 24.0]
+
+    legacy_payload = _scene_payload()
+    assert "platform_levels_m" not in legacy_payload["tower"]["characteristics"]
+    assert "tower_access_geometry_profile" not in legacy_payload["tower"]
+
+
+def test_tower_access_contract_rejects_conflicting_levels_and_out_of_bounds_scene_level() -> None:
+    with pytest.raises(ValidationError, match="platform_levels_m must be empty"):
+        TowerCharacteristics(
+            structure="lattice",
+            has_platform=False,
+            platform_levels_m=[12.0],
+        )
+
+    with pytest.raises(ValidationError, match="platform_count must match"):
+        TowerCharacteristics(
+            structure="lattice",
+            has_platform=True,
+            platform_count=1,
+            platform_levels_m=[12.0, 24.0],
+        )
+
+    with pytest.raises(ValidationError, match="below tower height_m"):
+        SceneAssetPlacement(
+            asset_id="tower",
+            position=[0, 0, 0],
+            rotation_deg=[0, 0, 0],
+            height_m=30,
+            characteristics=TowerCharacteristics(
+                structure="lattice",
+                platform_levels_m=[30.0],
+            ),
+        )
+
+
+def test_scene_tower_carries_only_a_lattice_access_profile() -> None:
+    profile = TowerAccessGeometryProfile()
+    placement = SceneAssetPlacement(
+        asset_id="tower",
+        position=[0, 0, 0],
+        rotation_deg=[0, 0, 0],
+        height_m=30,
+        characteristics=TowerCharacteristics(structure="lattice"),
+        tower_access_geometry_profile=profile,
+    )
+
+    assert placement.tower_access_geometry_profile == profile
+
+    with pytest.raises(ValidationError, match="requires a lattice tower"):
+        SceneAssetPlacement(
+            asset_id="tower",
+            position=[0, 0, 0],
+            rotation_deg=[0, 0, 0],
+            height_m=30,
+            characteristics=TowerCharacteristics(structure="monopole", leg_count=1),
+            tower_access_geometry_profile=profile,
+        )
 
 
 def test_scene_rejects_duplicate_sector_ids() -> None:

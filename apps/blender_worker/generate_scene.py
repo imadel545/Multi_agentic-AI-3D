@@ -488,7 +488,7 @@ def _create_tower(
     if characteristics.get("foundation_type") == "unknown":
         asset_warnings.append("FOUNDATION_UNKNOWN_NO_GEOMETRY_GENERATED")
     _create_foundation(bpy, characteristics, procedural_objects)
-    _create_tower_accessories(bpy, height, characteristics, procedural_objects)
+    _create_tower_accessories(bpy, scene, height, characteristics, procedural_objects)
 
 
 def _tower_radius_at_height(scene: dict, height_m: float, azimuth_rad: float = 0.0) -> float:
@@ -614,12 +614,60 @@ def _semantic_tree_names(root) -> list[str]:
     return [root.name, *[child.name for child in root.children_recursive]]
 
 
+def _canonical_json_sha256(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _create_tower_accessories(
+    bpy,
+    scene: dict,
+    height: float,
+    characteristics: dict,
+    procedural_objects: list[str],
+) -> None:
+    """Create bounded tower access from a manifest-authored profile when present.
+
+    Legacy scenes intentionally retain the prior accessory geometry.  A profile
+    only activates when the user actually requested access and the tower is a
+    lattice structure; it is internal technical procedural geometry, never a
+    manufacturer installation or safety certification.
+    """
+
+    profile = scene["tower"].get("tower_access_geometry_profile")
+    profile_active = (
+        isinstance(profile, dict)
+        and characteristics.get("structure") == "lattice"
+        and bool(characteristics.get("has_ladder") or characteristics.get("has_platform"))
+    )
+    if profile_active:
+        _create_profiled_tower_access_assembly(
+            bpy,
+            scene,
+            height,
+            characteristics,
+            profile,
+            procedural_objects,
+        )
+        _create_non_access_tower_accessories(bpy, height, characteristics, procedural_objects)
+        return
+    _create_legacy_tower_accessories(bpy, height, characteristics, procedural_objects)
+
+
+def _create_legacy_tower_accessories(
     bpy,
     height: float,
     characteristics: dict,
     procedural_objects: list[str],
 ) -> None:
+    """Keep the pre-profile output stable for persisted legacy SceneSpecs."""
+
     steel = _material(bpy, "accessory_steel", (0.42, 0.44, 0.46, 1))
     base_width = float(characteristics.get("base_width_m") or 4.0)
     if characteristics.get("has_platform"):
@@ -651,6 +699,16 @@ def _create_tower_accessories(
             steel,
         )
         procedural_objects.append("tower_ladder")
+    _create_non_access_tower_accessories(bpy, height, characteristics, procedural_objects)
+
+
+def _create_non_access_tower_accessories(
+    bpy,
+    height: float,
+    characteristics: dict,
+    procedural_objects: list[str],
+) -> None:
+    steel = _material(bpy, "accessory_steel", (0.42, 0.44, 0.46, 1))
     if characteristics.get("has_lightning_rod"):
         _create_cylinder_between(
             bpy, (0, 0, height), (0, 0, height + 1.2), 0.025, "tower_lightning_rod", steel
@@ -667,6 +725,258 @@ def _create_tower_accessories(
         light.name = "tower_aviation_light"
         light.data.materials.append(_material(bpy, "aviation_red", (1.0, 0.02, 0.02, 1)))
         procedural_objects.append("tower_aviation_light")
+
+
+def _create_profiled_tower_access_assembly(
+    bpy,
+    scene: dict,
+    height: float,
+    characteristics: dict,
+    profile: dict,
+    procedural_objects: list[str],
+) -> None:
+    """Build one side-mounted, measurable access assembly from profile values."""
+
+    asset_id = str(scene["tower"]["asset_id"])
+    semantic_root = f"tower_access_{asset_id}"
+    family = str(profile["family"])
+    profile_sha256 = _canonical_json_sha256(profile)
+    face = math.radians(float(profile["access_face_azimuth_deg"]))
+    outward = (math.sin(face), math.cos(face))
+    tangent = (math.cos(face), -math.sin(face))
+    steel = _material(bpy, "tower_access_steel", (0.34, 0.37, 0.40, 1))
+    toe_material = _material(bpy, "tower_access_toe_board", (0.28, 0.31, 0.34, 1))
+    access_objects: list = []
+
+    def point(radial: float, tangential: float, z: float) -> tuple[float, float, float]:
+        return (
+            outward[0] * radial + tangent[0] * tangential,
+            outward[1] * radial + tangent[1] * tangential,
+            z,
+        )
+
+    def properties(
+        feature: str,
+        *,
+        platform_index: int | None = None,
+        level: float | None = None,
+    ) -> dict:
+        values = {
+            "tower_access_feature": feature,
+            "tower_access_profile_family": family,
+            "tower_access_profile_sha256": profile_sha256,
+        }
+        if platform_index is not None:
+            values["tower_access_platform_index"] = platform_index
+        if level is not None:
+            values["tower_access_requested_level_m"] = level
+        return values
+
+    def tag(
+        obj,
+        feature: str,
+        *,
+        platform_index: int | None = None,
+        level: float | None = None,
+    ) -> None:
+        for key, value in properties(feature, platform_index=platform_index, level=level).items():
+            obj[key] = value
+
+    def cylinder(
+        start: tuple[float, float, float],
+        end: tuple[float, float, float],
+        radius: float,
+        name: str,
+        feature: str,
+        *,
+        platform_index: int | None = None,
+        level: float | None = None,
+    ):
+        obj = _create_cylinder_between(bpy, start, end, radius, name, steel)
+        tag(obj, feature, platform_index=platform_index, level=level)
+        access_objects.append(obj)
+        return obj
+
+    def box(
+        *,
+        radial: float,
+        tangential: float,
+        z: float,
+        dimensions: tuple[float, float, float],
+        name: str,
+        feature: str,
+        material,
+        platform_index: int,
+        level: float,
+    ):
+        bpy.ops.mesh.primitive_cube_add(size=1, location=point(radial, tangential, z))
+        obj = bpy.context.object
+        obj.name = name
+        obj.rotation_euler = (0.0, 0.0, -face)
+        obj.dimensions = dimensions
+        obj.data.materials.append(material)
+        tag(obj, feature, platform_index=platform_index, level=level)
+        access_objects.append(obj)
+        return obj
+
+    if characteristics.get("has_ladder"):
+        base_z = float(profile["ladder_base_clearance_m"])
+        top_z = height - float(profile["ladder_top_clearance_m"])
+        ladder_width = float(profile["ladder_width_m"])
+        clearance = float(profile["ladder_tower_clearance_m"])
+        rail_radius = float(profile["ladder_rail_radius_m"])
+        rail_start_radius = _tower_radius_at_height(scene, base_z, face) + clearance
+        rail_top_radius = _tower_radius_at_height(scene, top_z, face) + clearance
+        for side, tangential in (("left", -ladder_width / 2), ("right", ladder_width / 2)):
+            cylinder(
+                point(rail_start_radius, tangential, base_z),
+                point(rail_top_radius, tangential, top_z),
+                rail_radius,
+                f"tower_access_ladder_rail_{side}",
+                "ladder_rail",
+            )
+        spacing = float(profile["ladder_rung_spacing_m"])
+        rung_count = max(2, int(math.floor((top_z - base_z) / spacing)) + 1)
+        for index in range(rung_count):
+            z = min(top_z, base_z + index * spacing)
+            radius = _tower_radius_at_height(scene, z, face) + clearance
+            cylinder(
+                point(radius, -ladder_width / 2, z),
+                point(radius, ladder_width / 2, z),
+                float(profile["ladder_rung_radius_m"]),
+                f"tower_access_ladder_rung_{index + 1}",
+                "ladder_rung",
+            )
+        procedural_objects.append("tower_access:ladder")
+
+    if characteristics.get("has_platform"):
+        count = max(1, int(characteristics.get("platform_count") or 1))
+        explicit_levels = characteristics.get("platform_levels_m")
+        levels = (
+            [float(value) for value in explicit_levels]
+            if isinstance(explicit_levels, list) and explicit_levels
+            else [
+                height
+                * (
+                    float(profile["legacy_platform_start_height_ratio"])
+                    + float(profile["legacy_platform_span_height_ratio"]) * index / max(count, 1)
+                )
+                for index in range(count)
+            ]
+        )
+        width = float(profile["platform_width_m"])
+        depth = float(profile["platform_depth_m"])
+        thickness = float(profile["platform_thickness_m"])
+        guardrail_height = float(profile["platform_guardrail_height_m"])
+        guardrail_radius = float(profile["platform_guardrail_radius_m"])
+        toe_height = float(profile["platform_toe_board_height_m"])
+        toe_thickness = float(profile["platform_toe_board_thickness_m"])
+        deck_clearance = float(profile["platform_tower_clearance_m"])
+        support_radius = float(profile["platform_support_radius_m"])
+        support_offset = width * float(profile["platform_support_tangent_offset_ratio"])
+        for platform_index, level in enumerate(levels, start=1):
+            tower_radius = _tower_radius_at_height(scene, level, face)
+            center_radius = tower_radius + deck_clearance + depth / 2
+            inner_radius = center_radius - depth / 2
+            outer_radius = center_radius + depth / 2
+            deck_center_z = level - thickness / 2
+            box(
+                radial=center_radius,
+                tangential=0.0,
+                z=deck_center_z,
+                dimensions=(width, depth, thickness),
+                name=f"tower_access_platform_deck_{platform_index}",
+                feature="platform_deck",
+                material=steel,
+                platform_index=platform_index,
+                level=level,
+            )
+            # Top rails around the three exposed sides; the inward face remains
+            # open for ladder/tower access and does not claim a compliant gate.
+            rail_z = level + guardrail_height
+            cylinder(
+                point(outer_radius, -width / 2, rail_z),
+                point(outer_radius, width / 2, rail_z),
+                guardrail_radius,
+                f"tower_access_guardrail_outer_{platform_index}",
+                "guardrail",
+                platform_index=platform_index,
+                level=level,
+            )
+            for side, tangential in (("left", -width / 2), ("right", width / 2)):
+                cylinder(
+                    point(inner_radius, tangential, rail_z),
+                    point(outer_radius, tangential, rail_z),
+                    guardrail_radius,
+                    f"tower_access_guardrail_{side}_{platform_index}",
+                    "guardrail",
+                    platform_index=platform_index,
+                    level=level,
+                )
+            for radial, tangential in (
+                (inner_radius, -width / 2),
+                (inner_radius, width / 2),
+                (outer_radius, -width / 2),
+                (outer_radius, width / 2),
+            ):
+                cylinder(
+                    point(radial, tangential, level),
+                    point(radial, tangential, rail_z),
+                    guardrail_radius,
+                    f"tower_access_guardrail_post_{platform_index}_{radial:.3f}_{tangential:.3f}",
+                    "guardrail",
+                    platform_index=platform_index,
+                    level=level,
+                )
+            toe_center_z = level + toe_height / 2
+            box(
+                radial=outer_radius - toe_thickness / 2,
+                tangential=0.0,
+                z=toe_center_z,
+                dimensions=(width, toe_thickness, toe_height),
+                name=f"tower_access_toe_board_outer_{platform_index}",
+                feature="toe_board",
+                material=toe_material,
+                platform_index=platform_index,
+                level=level,
+            )
+            for side, tangential in (("left", -width / 2), ("right", width / 2)):
+                box(
+                    radial=center_radius,
+                    tangential=tangential,
+                    z=toe_center_z,
+                    dimensions=(toe_thickness, depth, toe_height),
+                    name=f"tower_access_toe_board_{side}_{platform_index}",
+                    feature="toe_board",
+                    material=toe_material,
+                    platform_index=platform_index,
+                    level=level,
+                )
+            for tangential in (-support_offset, support_offset):
+                cylinder(
+                    point(tower_radius + 0.02, tangential, deck_center_z),
+                    point(inner_radius, tangential, deck_center_z),
+                    support_radius,
+                    f"tower_access_platform_support_{platform_index}_{tangential:.3f}",
+                    "platform_support",
+                    platform_index=platform_index,
+                    level=level,
+                )
+            procedural_objects.append(f"tower_access:platform:{platform_index}")
+
+    if access_objects:
+        _create_semantic_group(
+            bpy,
+            semantic_root,
+            access_objects,
+            role="tower_access",
+            properties={
+                "tower_access_profile_family": family,
+                "tower_access_profile_sha256": profile_sha256,
+                "tower_access_generation": "manifest_bounded_procedural",
+                **_classification_properties("parametric_generated"),
+            },
+        )
 
 
 def _create_sectors(

@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from core.contracts.common import AssetType, NetworkType, StrictModel
+from core.contracts.tower import TowerAccessGeometryProfile
 
 
 class DimensionsM(StrictModel):
@@ -484,6 +485,7 @@ class AssetManifest(StrictModel):
     adaptation_profile_id: str | None = Field(default=None, min_length=1)
     panel_geometry_profile: PanelAntennaGeometryProfile | None = None
     radio_geometry_profile: RadioGeometryProfile | None = None
+    tower_access_geometry_profile: TowerAccessGeometryProfile | None = None
     preview_file: str | None = Field(default=None, min_length=1)
     builder_profile_id: str | None = Field(default=None, min_length=1, max_length=120)
     capability_tags: list[str] = Field(default_factory=list, max_length=32)
@@ -499,6 +501,13 @@ class AssetManifest(StrictModel):
             raise ValueError("panel_geometry_profile is only valid for antenna assets")
         if self.radio_geometry_profile is not None and self.type != "radio":
             raise ValueError("radio_geometry_profile is only valid for radio assets")
+        if self.tower_access_geometry_profile is not None:
+            if self.type != "tower":
+                raise ValueError("tower_access_geometry_profile is only valid for tower assets")
+            if "lattice_tower" not in self.compatible_tower_types:
+                raise ValueError(
+                    "tower_access_geometry_profile requires a lattice_tower-compatible asset"
+                )
         anchor_ids = {anchor.anchor_id for anchor in self.anchors}
         if len(anchor_ids) != len(self.anchors):
             raise ValueError("asset anchor IDs must be unique")

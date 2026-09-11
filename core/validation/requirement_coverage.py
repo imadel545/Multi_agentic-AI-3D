@@ -103,6 +103,11 @@ def evaluate_requirement_coverage(
             scene.tower.characteristics.platform_count,
         ),
         _check(
+            "tower.characteristics.platform_levels_m",
+            requirements.tower_characteristics.platform_levels_m,
+            scene.tower.characteristics.platform_levels_m,
+        ),
+        _check(
             "tower.characteristics.has_ladder",
             requirements.tower_characteristics.has_ladder,
             scene.tower.characteristics.has_ladder,

@@ -2292,6 +2292,7 @@ class WorkflowService:
             "scene_spec": str(output_dir / "scene_spec.json"),
             "assembly_plan": str(output_dir / "assembly_plan.json"),
             "constraint_evidence": str(output_dir / "constraint_evidence.json"),
+            "tower_access_evidence": str(output_dir / "tower_access_evidence.json"),
             "validation_report": str(output_dir / "validation_report.json"),
             "quality_gates": str(output_dir / "quality_gates.json"),
             "requirement_coverage": str(output_dir / "requirement_coverage.json"),
@@ -3590,6 +3591,7 @@ _ALLOWED_ARTIFACT_FILES = {
     "scene_spec": "scene_spec.json",
     "assembly_plan": "assembly_plan.json",
     "constraint_evidence": "constraint_evidence.json",
+    "tower_access_evidence": "tower_access_evidence.json",
     "sector_preview_evidence": "sector_preview_evidence.json",
     "validation_report": "validation_report.json",
     "quality_gates": "quality_gates.json",
@@ -3638,6 +3640,10 @@ def _artifact_authorized_for_scene(artifact_name: str, scene: SceneSpec) -> bool
         from core.qa.sector_preview_inspector import sector_preview_required
 
         return sector_preview_required(scene)
+    if artifact_name == "tower_access_evidence":
+        from core.qa.tower_access_inspector import tower_access_evidence_required
+
+        return tower_access_evidence_required(scene)
     return True
 
 

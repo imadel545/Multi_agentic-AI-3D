@@ -1055,3 +1055,36 @@ a été dépassée le 2026-09-10 pour les sources explicitement activées : `reu
 exact et `compose` par alignement rigide sont exécutables. `adapt`, assemblage
 arbitraire et qualification professionnelle restent ouverts. Aucune convergence
 globale n'est déclarée.
+
+## Accès de maintenance du pylône — 2026-09-12
+
+Une demande télécom explicite peut maintenant décrire une échelle d'accès et des
+niveaux de plateformes de maintenance. Pour une tour treillis dotée du profil
+manifesté `TOWER_LATTICE_30M`, le `SceneSpec` porte ce profil et les niveaux
+demandés; le worker Blender 4.5 LTS produit des rails, barreaux, plateformes
+latérales, garde-corps, plinthes et supports sous une identité sémantique stable
+`tower_access_<asset_id>`.
+
+Cette capacité concerne uniquement une géométrie procédurale technique interne.
+Elle n'est ni une géométrie de fabricant, ni une qualification professionnelle,
+ni une preuve de résistance, d'antichute, de fixation, de conformité ou
+d'approbation de chantier. Le manifest reste `technical_generic`.
+
+Après export, `tower_access_evidence.json` relit le GLB et vérifie l'identité
+du profil, deux rails et les barreaux de l'échelle, la hauteur de chaque plateau,
+ses dimensions, les garde-corps/plinthes/supports et l'absence de
+chevauchement AABB avec les équipements principaux. La preuve est hashée,
+incluse dans le build lock, obligatoire au certificat 1.5 et recontrôlée avant
+activation, lecture, rollback ou service d'artefact.
+
+Le workflow d'évaluation isolé du 2026-09-12 a exécuté GPT-OSS pour analyser le
+brief, puis Blender 4.5.12 LTS pour le GLB. Il a matérialisé 97 barreaux et deux
+plateformes demandées à 18 m et 26 m, sans chevauchement AABB des plateaux avec
+les équipements principaux. La réponse `viewer-bundle` expose seulement un
+résumé d'inspection et l'artefact de preuve; la sélection de cet ensemble dans
+le Studio est volontairement `inspection_only`, sans édition ciblée.
+
+Le résultat améliore la lisibilité d'un pylône technique, mais ne transforme
+pas le site entier en conception télécom professionnelle. Les assets
+constructeur, les détails de fixation, les collisions fines et la validation
+d'installation restent ouverts.

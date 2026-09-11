@@ -644,6 +644,20 @@ export const SectorPreviewSummarySchema = publicSchema(
   })
 );
 
+export const TowerAccessSummarySchema = publicSchema(
+  UnknownRecord.extend({
+    semantic_root: z.string().min(1),
+    semantic_role: z.literal("tower_access"),
+    interaction_mode: z.literal("inspection_only"),
+    post_blender_geometry_verified: z.literal(true),
+    requested_ladder: z.boolean(),
+    rung_count: z.number().int().nonnegative(),
+    platform_levels_m: z.array(z.number().positive()).default([]),
+    measurement_scope: z.literal("exported_glb_tower_access_geometry"),
+    limitations: z.array(z.string()).default([])
+  })
+);
+
 export const ViewerBundleSchema = publicSchema(
   UnknownRecord.extend({
     workflow_id: z.string(),
@@ -660,6 +674,7 @@ export const ViewerBundleSchema = publicSchema(
     geometry_program_summary: GeometryProgramSummarySchema.nullish(),
     assembly_constraint_summary: AssemblyConstraintSummarySchema.nullish(),
     sector_previews: z.array(SectorPreviewSummarySchema).optional(),
+    tower_access_summary: TowerAccessSummarySchema.nullish(),
     human_warnings_count: z.number().default(0),
     human_errors_count: z.number().default(0),
     primary_glb_url: z.string().nullish(),
@@ -669,6 +684,7 @@ export const ViewerBundleSchema = publicSchema(
     scene_spec_url: z.string().nullish(),
     assembly_plan_url: z.string().nullish(),
     constraint_evidence_url: z.string().nullish(),
+    tower_access_evidence_url: z.string().nullish(),
     qa_report_url: z.string().nullish(),
     generation_report_url: z.string().nullish(),
     geometry_validation_url: z.string().nullish(),
@@ -1307,6 +1323,7 @@ export type MultimodalIntelligence = z.infer<typeof MultimodalIntelligenceSchema
 export type VisualReview = z.infer<typeof VisualReviewSchema>;
 export type AssetDecisionSummary = z.infer<typeof AssetDecisionSummarySchema>;
 export type SectorPreviewSummary = z.infer<typeof SectorPreviewSummarySchema>;
+export type TowerAccessSummary = z.infer<typeof TowerAccessSummarySchema>;
 export type ComponentProofs = z.infer<typeof ComponentProofsSchema>;
 export type ComponentProof = z.infer<typeof ComponentProofSchema>;
 export type ComponentProofInstance = z.infer<typeof ComponentProofInstanceSchema>;

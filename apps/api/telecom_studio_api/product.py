@@ -27,6 +27,7 @@ from apps.api.telecom_studio_api.workflow import WorkflowService
 from core.contracts.assembly_evidence import AssemblyConstraintEvidence
 from core.contracts.scene import RuntimeAssetMetadata, SceneSpec
 from core.contracts.sector_preview import SectorPreviewEvidence
+from core.contracts.tower_access_evidence import TowerAccessEvidence
 from core.services.asset_inventory import AssetInventoryService
 from core.services.blender_runtime import output_reports_qualified_blender
 
@@ -293,6 +294,13 @@ class ProductService:
                 "sector_preview_evidence",
             )
         )
+        viewer_artifacts.append(
+            _artifact(
+                "tower_access_evidence.json",
+                "application/json",
+                "tower_access_evidence",
+            )
+        )
         viewer_artifacts.append(_artifact("qa_report.json", "application/json", "qa_report"))
         viewer_artifacts.append(
             _artifact("generation_report.json", "application/json", "generation_report")
@@ -344,6 +352,9 @@ class ProductService:
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         assembly_plan = _artifact_by_name(viewer_artifacts, "assembly_plan.json")
         constraint_evidence = _artifact_by_name(viewer_artifacts, "constraint_evidence.json")
+        tower_access_evidence = _artifact_by_name(
+            viewer_artifacts, "tower_access_evidence.json"
+        )
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
         rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
@@ -370,6 +381,7 @@ class ProductService:
         )
         constraint_evidence_path = verified_artifacts.get("constraint_evidence")
         sector_preview_evidence_path = verified_artifacts.get("sector_preview_evidence")
+        tower_access_evidence_path = verified_artifacts.get("tower_access_evidence")
 
         return {
             "workflow_id": workflow_id,
@@ -386,6 +398,10 @@ class ProductService:
                 sector_preview_evidence_path,
                 workflow_id=workflow_id,
                 version_id=active_version,
+            ),
+            "tower_access_summary": _tower_access_summary_from_path(
+                tower_access_evidence_path,
+                scene=verified_scene,
             ),
             "visual_review": _visual_review_summary(
                 status,
@@ -413,6 +429,7 @@ class ProductService:
             "scene_spec_url": _available_artifact_url(scene_spec),
             "assembly_plan_url": _available_artifact_url(assembly_plan),
             "constraint_evidence_url": _available_artifact_url(constraint_evidence),
+            "tower_access_evidence_url": _available_artifact_url(tower_access_evidence),
             "qa_report_url": _available_artifact_url(qa_report),
             "generation_report_url": _available_artifact_url(generation_report),
             "rag_evidence_url": _available_artifact_url(rag_evidence),
@@ -915,6 +932,34 @@ def _sector_preview_summaries_from_path(
             }
         )
     return result
+
+
+def _tower_access_summary_from_path(
+    path: Path | None, *, scene: SceneSpec | None
+) -> dict | None:
+    """Expose tower access only after the persisted GLB proof is internally coherent."""
+
+    if path is None or not path.is_file() or scene is None:
+        return None
+    try:
+        evidence = TowerAccessEvidence.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    if evidence.scene_id != scene.scene_id or evidence.status != "passed" or not all(
+        evidence.checks.values()
+    ):
+        return None
+    return {
+        "semantic_root": evidence.semantic_root,
+        "semantic_role": "tower_access",
+        "interaction_mode": "inspection_only",
+        "post_blender_geometry_verified": True,
+        "requested_ladder": evidence.requested_ladder,
+        "rung_count": evidence.ladder.rung_count if evidence.ladder else 0,
+        "platform_levels_m": [item.requested_level_m for item in evidence.platforms],
+        "measurement_scope": evidence.measurement_scope,
+        "limitations": evidence.limitations,
+    }
 
 
 def _asset_decision_summary_from_path(path: Path | None) -> dict | None:

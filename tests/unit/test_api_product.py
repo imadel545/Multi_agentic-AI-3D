@@ -20,11 +20,14 @@ from apps.api.telecom_studio_api.product import (
     _inventory_status,
     _probe_blender_runtime,
     _studio_warnings,
+    _tower_access_summary_from_path,
 )
 from apps.api.telecom_studio_api.runtime_contract import memory_status
 from apps.api.telecom_studio_api.workflow import _rag_runtime_summary
 from core.contracts.assembly_evidence import canonical_evidence_sha256
 from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, VisualElements
+from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
+from core.contracts.tower_access_evidence import canonical_tower_access_evidence_sha256
 from core.contracts.versioning import SceneVersion
 from core.services import scene_versioning
 
@@ -103,6 +106,41 @@ def test_constraint_summary_rejects_tampered_evidence(tmp_path: Path) -> None:
     evidence_path.write_text(json.dumps(payload), encoding="utf-8")
 
     assert _assembly_constraint_summary_from_path(evidence_path) is None
+
+
+def test_tower_access_summary_is_derived_only_from_passing_hashed_evidence(
+    tmp_path: Path,
+) -> None:
+    scene = _tower_access_scene("wf_tower_access")
+    evidence_path = tmp_path / "tower_access_evidence.json"
+    evidence_path.write_text(
+        json.dumps(_tower_access_evidence_payload(scene.scene_id)), encoding="utf-8"
+    )
+
+    assert _tower_access_summary_from_path(evidence_path, scene=scene) == {
+        "semantic_root": "tower_access_TOWER_LATTICE_30M",
+        "semantic_role": "tower_access",
+        "interaction_mode": "inspection_only",
+        "post_blender_geometry_verified": True,
+        "requested_ladder": True,
+        "rung_count": 97,
+        "platform_levels_m": [18.0, 26.0],
+        "measurement_scope": "exported_glb_tower_access_geometry",
+        "limitations": ["limit one", "limit two", "limit three"],
+    }
+
+
+def test_tower_access_summary_rejects_tampered_or_unrelated_evidence(tmp_path: Path) -> None:
+    scene = _tower_access_scene("wf_tower_access")
+    evidence_path = tmp_path / "tower_access_evidence.json"
+    payload = _tower_access_evidence_payload("other_scene")
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _tower_access_summary_from_path(evidence_path, scene=scene) is None
+
+    payload = _tower_access_evidence_payload(scene.scene_id)
+    payload["platforms"][0]["observed_deck_top_m"] = 17.5
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _tower_access_summary_from_path(evidence_path, scene=scene) is None
 
 
 def test_rag_runtime_summary_prefers_durable_result_diagnostics_across_threads() -> None:
@@ -1705,4 +1743,97 @@ def _constraint_evidence_payload() -> dict:
         "limitations": ["limit one", "limit two", "limit three"],
     }
     payload["evidence_sha256"] = canonical_evidence_sha256(payload)
+    return payload
+
+
+def _tower_access_scene(scene_id: str) -> SceneSpec:
+    return SceneSpec(
+        scene_id=scene_id,
+        network_type="5G",
+        tower=SceneAssetPlacement(
+            asset_id="TOWER_LATTICE_30M",
+            position=[0, 0, 0],
+            rotation_deg=[0, 0, 0],
+            height_m=30,
+            characteristics=TowerCharacteristics(
+                structure="lattice",
+                leg_count=4,
+                base_width_m=4,
+                top_width_m=1,
+                has_ladder=True,
+                has_platform=True,
+                platform_count=2,
+                platform_levels_m=[18, 26],
+            ),
+            tower_access_geometry_profile=TowerAccessGeometryProfile(),
+        ),
+        sectors=[
+            SectorSpec(
+                sector_id="S1",
+                antenna_asset_id="ANT_PANEL_5G_001",
+                install_height_m=24,
+                azimuth_deg=0,
+                mechanical_tilt_deg=3,
+                beamwidth_deg=65,
+            )
+        ],
+    )
+
+
+def _tower_access_evidence_payload(scene_id: str) -> dict:
+    payload = {
+        "schema_version": "1.0.0",
+        "scene_id": scene_id,
+        "status": "passed",
+        "measurement_scope": "exported_glb_tower_access_geometry",
+        "glb_sha256": "a" * 64,
+        "semantic_root": "tower_access_TOWER_LATTICE_30M",
+        "profile_family": "lattice_tower_access_v1",
+        "profile_sha256": "b" * 64,
+        "requested_ladder": True,
+        "expected_platform_count": 2,
+        "ladder": {
+            "rail_count": 2,
+            "rung_count": 97,
+            "expected_rail_count": 2,
+            "expected_minimum_rung_count": 97,
+            "expected_width_m": 0.45,
+            "observed_width_m": 0.45,
+            "expected_base_m": 0.5,
+            "observed_base_m": 0.5,
+            "expected_top_m": 29.5,
+            "observed_top_m": 29.5,
+            "expected_rung_spacing_m": 0.3,
+            "observed_rung_spacing_m": 0.3,
+            "passed": True,
+        },
+        "platforms": [
+            {
+                "platform_index": index,
+                "requested_level_m": level,
+                "observed_deck_top_m": level,
+                "elevation_error_m": 0.0,
+                "expected_width_m": 2.2,
+                "expected_depth_m": 2.2,
+                "observed_width_m": 2.2,
+                "observed_depth_m": 2.2,
+                "guardrail_mesh_count": 7,
+                "toe_board_mesh_count": 3,
+                "support_mesh_count": 2,
+                "passed": True,
+            }
+            for index, level in enumerate((18.0, 26.0), start=1)
+        ],
+        "primary_equipment_deck_overlap_count": 0,
+        "checks": {
+            "semantic_root_verified": True,
+            "profile_verified": True,
+            "ladder_geometry_verified": True,
+            "platform_geometry_verified": True,
+            "primary_equipment_deck_clearance": True,
+        },
+        "errors": [],
+        "limitations": ["limit one", "limit two", "limit three"],
+    }
+    payload["evidence_sha256"] = canonical_tower_access_evidence_sha256(payload)
     return payload

@@ -51,6 +51,11 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
                 },
                 "has_platform": {"type": "boolean"},
                 "platform_count": {"type": "integer", "minimum": 0, "maximum": 12},
+                "platform_levels_m": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {"type": "number", "exclusiveMinimum": 0, "maximum": 150},
+                },
                 "has_ladder": {"type": "boolean"},
                 "has_lightning_rod": {"type": "boolean"},
                 "has_aviation_light": {"type": "boolean"},
@@ -67,6 +72,7 @@ REQUIREMENT_SPEC_SCHEMA: dict[str, Any] = {
                 "foundation_type",
                 "has_platform",
                 "platform_count",
+                "platform_levels_m",
                 "has_ladder",
                 "has_lightning_rod",
                 "has_aviation_light",
@@ -236,8 +242,8 @@ class GroqStructuredClient:
                     "azimuths_deg must always be an array of separate JSON numbers, "
                     "for example [0, 120, 240], never a string and never concatenated. "
                     "Extract tower_characteristics from explicit pylon details such as "
-                    "leg count, base/top width, foundation, platforms, ladder, lightning rod, "
-                    "aviation light, and material. "
+                    "leg count, base/top width, foundation, platforms, explicit platform "
+                    "levels in meters, ladder, lightning rod, aviation light, and material. "
                     "Extract supported visual equipment flags such as include_power_cabinet "
                     "and include_gps_antenna when the user asks for power boxes, energy "
                     "cabinets, GPS, or GNSS. "
@@ -859,6 +865,16 @@ _BASELINE_WARNING_FIELDS = {
 }
 
 _EXPLICIT_TEXT_TERMS_BY_FIELD = {
+    "tower_characteristics": (
+        "plateforme",
+        "platform",
+        "palier",
+        "niveau",
+        "level",
+        "échelle",
+        "echelle",
+        "ladder",
+    ),
     "include_rru": ("rru", "radio"),
     "include_cables": ("cable", "câble"),
     "include_beams": ("faisceau", "beam"),

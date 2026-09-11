@@ -98,10 +98,18 @@ export default function App({ apiClient = api }: AppProps) {
   const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
   const [selectedSemanticRoot, setSelectedSemanticRoot] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const towerAccess = state.viewerBundle?.tower_access_summary ?? null;
   const sectorFocusSemanticRoots = useMemo(
     () => sectorMechanicalFocusRoots(componentProofs, selectedSemanticRoot),
     [componentProofs, selectedSemanticRoot]
   );
+  const knownSemanticRoots = useMemo(() => {
+    const roots = componentProofs?.components.flatMap((component) =>
+      component.instances.map((instance) => instance.semantic_root)
+    ) ?? [];
+    if (towerAccess) roots.push(towerAccess.semantic_root);
+    return Array.from(new Set(roots));
+  }, [componentProofs, towerAccess]);
   const selectSemanticRoot = useCallback((root: string | null) => {
     setSelectedSemanticRoot(root);
     setSelectedVersionId(root ? state.viewerBundle?.version_id ?? null : null);
@@ -1155,6 +1163,11 @@ export default function App({ apiClient = api }: AppProps) {
     revisionInFlightRef.current = true;
     const workflowId = state.workflowId;
     const submittedRevisionPrompt = revisionPrompt.trim();
+    if (selectedSemanticRoot && selectedSemanticRoot === towerAccess?.semantic_root) {
+      revisionInFlightRef.current = false;
+      setRevisionMessage("Cet ensemble est vérifié pour inspection. Sa modification ciblée n’est pas encore disponible. Désélectionnez-le pour demander une révision générale.");
+      return;
+    }
     if (selectedSemanticRoot && !selectedVersionId) {
       revisionInFlightRef.current = false;
       setRevisionMessage("La version de cette sélection n’est pas vérifiée. Rechargez le design avant de modifier ce composant.");
@@ -1624,9 +1637,7 @@ export default function App({ apiClient = api }: AppProps) {
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
               selectedSemanticRoot={selectedSemanticRoot}
               focusSemanticRoots={sectorFocusSemanticRoots}
-              knownSemanticRoots={componentProofs?.components.flatMap((component) =>
-                component.instances.map((instance) => instance.semantic_root)
-              ) ?? []}
+              knownSemanticRoots={knownSemanticRoots}
               onSelectSemanticRoot={selectSemanticRoot}
               toAbsoluteUrl={toArtifactUrl}
             />
@@ -1682,6 +1693,7 @@ export default function App({ apiClient = api }: AppProps) {
             canRollback={canRollbackVersions}
             events={state.events}
             componentProofs={componentProofs}
+            towerAccess={towerAccess}
             cognitiveEvidenceError={[
               state.resourceErrors.assembly_plan,
               state.resourceErrors.component_proofs,

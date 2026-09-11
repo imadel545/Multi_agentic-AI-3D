@@ -41,6 +41,7 @@ def test_groq_client_uses_gpt_oss_120b_and_strict_schema(monkeypatch) -> None:
     assert "include_gps_antenna" in schema["required"]
     assert "geometry_requests" in schema["required"]
     assert schema["properties"]["tower_characteristics"]["additionalProperties"] is False
+    assert "platform_levels_m" in schema["properties"]["tower_characteristics"]["required"]
     assert schema["properties"]["include_power_cabinet"]["type"] == "boolean"
     assert schema["properties"]["include_gps_antenna"]["type"] == "boolean"
     assert spec.include_power_cabinet is True
@@ -333,6 +334,7 @@ def _requirements_content() -> str:
                 "foundation_type": "concrete_pad",
                 "has_platform": True,
                 "platform_count": 1,
+                "platform_levels_m": [],
                 "has_ladder": True,
                 "has_lightning_rod": True,
                 "has_aviation_light": True,
