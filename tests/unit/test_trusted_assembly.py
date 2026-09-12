@@ -306,6 +306,30 @@ def test_worker_rejects_connector_removed_from_snapshot_and_manifest(tmp_path: P
         validate_trusted_assembly(scene, isolated_root)
 
 
+def test_worker_rejects_unproved_professional_claim_on_parametric_asset(
+    tmp_path: Path,
+) -> None:
+    scene = _complete_scene()
+    isolated_root = _copy_trust_inputs(tmp_path)
+    component = next(
+        item
+        for item in scene["assembly_plan"]["components"]
+        if item["role_id"] == "antenna_mount"
+    )
+    snapshot = component["manifest_snapshot"]
+    manifest_path = isolated_root / "assets" / "manifests" / snapshot["manifest_file_name"]
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manufacturer"] = "Unverified manufacturer claim"
+    manifest["reference"] = "UNVERIFIED-MOUNT-001"
+    _write_manifest_and_rehash_snapshot(manifest_path, manifest, snapshot)
+    scene["assembly_plan"]["manifest_catalog_sha256"] = AssetRegistry(
+        isolated_root / "assets" / "manifests"
+    ).manifest_hash
+
+    with pytest.raises(RuntimeError, match="ASSET_PROFESSIONAL_ADMISSION_INVALID"):
+        validate_trusted_assembly(scene, isolated_root)
+
+
 def test_resolved_plan_hashes_and_declared_connection_semantics_are_immutable() -> None:
     scene = _complete_scene()
     changed_operation = deepcopy(scene["assembly_plan"])

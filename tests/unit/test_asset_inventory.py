@@ -2,6 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
+from core.services.asset_evidence import ProfessionalAssetVerifier
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_registry import AssetRegistry
 
@@ -109,6 +110,45 @@ def test_asset_inventory_rejects_a_changed_qualified_glb(tmp_path: Path) -> None
     assert entry["generation_eligible"] is False
     assert entry["qualified_file_hash_matches"] is False
     assert "QUALIFIED_ASSET_HASH_MISMATCH" in entry["warnings"]
+
+
+def test_asset_inventory_removes_modes_from_unproved_professional_claim(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    manifests_dir = tmp_path / "catalog-override"
+    asset_dir = project_root / "assets" / "antennas"
+    manifests_dir.mkdir(parents=True)
+    asset_dir.mkdir(parents=True)
+    manifest = json.loads(
+        Path("assets/manifests/ANT_PANEL_4G_001.json").read_text(encoding="utf-8")
+    )
+    manifest.update(
+        {
+            "asset_id": "UNPROVED_VENDOR_PANEL",
+            "source": "vendor_supplied",
+            "manufacturer": "Unverified manufacturer",
+            "reference": "UNVERIFIED-001",
+            "geometry_fidelity": "vendor_qualified",
+        }
+    )
+    (manifests_dir / "UNPROVED_VENDOR_PANEL.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    shutil.copy2(Path(manifest["file"]), project_root / manifest["file"])
+    verifier = ProfessionalAssetVerifier(project_root)
+    registry = AssetRegistry(manifests_dir, evidence_verifier=verifier)
+
+    inventory = AssetInventoryService(project_root, registry).inspect()
+
+    entry = inventory["entries"][0]
+    assert registry.evidence_verifier is verifier
+    assert inventory["generation_eligible_asset_count"] == 0
+    assert inventory["import_ready_asset_count"] == 0
+    assert entry["generation_eligible"] is False
+    assert entry["asset_import_mode"] == "professional_evidence_rejected"
+    assert entry["effective_generation_mode"] == "quarantined_unverified"
+    assert entry["allowed_generation_modes"] == []
+    assert "PROFESSIONAL_ASSET_EVIDENCE_NOT_ADMITTED" in entry["warnings"]
 
 
 def test_asset_inventory_does_not_publish_or_read_outside_root_paths(tmp_path: Path) -> None:

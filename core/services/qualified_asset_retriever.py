@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from core.contracts.assembly import AssetCandidateScore
 from core.contracts.assets import AssetDecisionPacket, AssetManifest
 from core.contracts.cognitive_design import AssetCandidateEvidence
-from core.services.asset_evidence import ProfessionalAssetVerifier
 from core.services.asset_registry import AssetRegistry
 
 
@@ -31,12 +29,9 @@ class QualifiedAssetCandidateRetriever:
     def __init__(
         self,
         registry: AssetRegistry,
-        evidence_verifier: ProfessionalAssetVerifier | None = None,
     ) -> None:
         self.registry = registry
-        self.evidence_verifier = evidence_verifier or ProfessionalAssetVerifier(
-            _project_root_for_registry(registry)
-        )
+        self.evidence_verifier = registry.evidence_verifier
 
     def rank_telecom(
         self,
@@ -69,7 +64,9 @@ class QualifiedAssetCandidateRetriever:
         query_tokens = _component_tokens(component)
         evidence: list[AssetCandidateEvidence] = []
         for manifest in self.registry.list_assets():
-            if not manifest.cognitive_reuse_enabled or not manifest.is_generation_eligible:
+            if not manifest.cognitive_reuse_enabled or not self.registry.is_generation_admitted(
+                manifest
+            ):
                 continue
             compatible_roles = {
                 item.strip().lower() for item in manifest.compatibility_rules.compatible_roles
@@ -134,6 +131,8 @@ class QualifiedAssetCandidateRetriever:
         if manifest.qa_evidence.status != "passed":
             risks.append("Professional asset QA has not passed.")
         evidence = self.evidence_verifier.verify(manifest)
+        admission = self.evidence_verifier.verify_generation_admission(manifest)
+        risks.extend(admission.failures)
         risks.extend(evidence.failures)
         risks.extend(rejection_risks or [])
         risks = list(dict.fromkeys(risks))[:32]
@@ -157,7 +156,7 @@ class QualifiedAssetCandidateRetriever:
             conversion_method=manifest.conversion_method,
             geometry_fidelity=manifest.geometry_fidelity,
             qualification_status=manifest.qualification.status,
-            generation_eligible=manifest.is_generation_eligible,
+            generation_eligible=admission.eligible,
             milestone_evidence_eligible=evidence.eligible,
             dimensions_m=manifest.dimensions_m,
             bounding_box_m=manifest.bounding_box_m,
@@ -174,22 +173,24 @@ class QualifiedAssetCandidateRetriever:
             adapter_capability_id=manifest.adapter_capability_id,
             qa=manifest.qa_evidence,
             qualification_version=manifest.qualification_version,
-            allowed_generation_modes=manifest.qualification.allowed_generation_modes,
-            allowed_strategies=_decision_packet_strategies(manifest),
+            allowed_generation_modes=(
+                manifest.qualification.allowed_generation_modes if admission.eligible else []
+            ),
+            allowed_strategies=_decision_packet_strategies(
+                manifest,
+                generation_admitted=admission.eligible,
+            ),
             estimated_blender_cost=_cost_class(manifest),
             rejection_risks=risks,
         )
 
 
-def _project_root_for_registry(registry: AssetRegistry) -> Path:
-    manifests_dir = registry.manifests_dir.resolve()
-    if manifests_dir.name == "manifests" and manifests_dir.parent.name == "assets":
-        return manifests_dir.parent.parent
-    return manifests_dir
-
-
-def _decision_packet_strategies(manifest: AssetManifest) -> list[str]:
-    if not manifest.is_generation_eligible:
+def _decision_packet_strategies(
+    manifest: AssetManifest,
+    *,
+    generation_admitted: bool,
+) -> list[str]:
+    if not generation_admitted:
         return []
     strategies = []
     if manifest.allows_generation_mode("imported_glb_exact"):

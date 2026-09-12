@@ -14,8 +14,11 @@ def _fixture(tmp_path):
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     manifest = {
         "asset_id": "panel",
+        "type": "antenna",
         "file": "assets/panel.glb",
         "status": "validated",
+        "builder_profile_id": "sector_panel_v1",
+        "compatible_networks": ["4G"],
         "cognitive_reuse_enabled": True,
         "import_fallback_allowed": False,
         "compatibility_rules": {"compatible_roles": ["antenna"]},
@@ -137,4 +140,21 @@ def test_exact_worker_rejects_changed_asset_bytes(tmp_path):
     program, _, _ = _fixture(tmp_path)
     (tmp_path / "assets/panel.glb").write_bytes(b"changed source")
     with pytest.raises(ValueError, match="FILE_HASH"):
+        validate_exact_program(program, tmp_path)
+
+
+def test_exact_worker_refuses_professional_claim_without_bound_evidence(tmp_path):
+    program, manifest, path = _fixture(tmp_path)
+    manifest.update(
+        {
+            "source": "vendor_supplied",
+            "manufacturer": "Unverified manufacturer",
+            "reference": "UNVERIFIED-001",
+            "geometry_fidelity": "vendor_qualified",
+        }
+    )
+    path.write_text(json.dumps(manifest))
+    program["nodes"][0]["manifest_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    with pytest.raises(ValueError, match="EXACT_ASSET_PROFESSIONAL_ADMISSION_INVALID"):
         validate_exact_program(program, tmp_path)

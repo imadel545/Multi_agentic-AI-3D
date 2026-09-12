@@ -167,7 +167,7 @@ def test_professional_milestone_declaration_cannot_replace_runtime_evidence(
         source="vendor_supplied",
         source_provenance="Authorized STEP AP242 export from the source assembly.",
         source_format="step",
-        source_file_sha256="c" * 64,
+        source_file_sha256="a" * 64,
         geometry_status="neutral_format_conversion",
         conversion_method="FreeCAD/OpenCascade controlled tessellation",
         geometry_fidelity="vendor_qualified",
@@ -243,12 +243,16 @@ def test_professional_milestone_declaration_cannot_replace_runtime_evidence(
 
     assert manifest.milestone_evidence_declaration_failures == []
     packet = QualifiedAssetCandidateRetriever(
-        AssetRegistry(MANIFESTS_DIR),
-        evidence_verifier=ProfessionalAssetVerifier(tmp_path),
+        AssetRegistry(
+            MANIFESTS_DIR,
+            evidence_verifier=ProfessionalAssetVerifier(tmp_path),
+        )
     ).packet_for(manifest)
     assert packet.milestone_evidence_eligible is False
     assert "Master representation file is missing." in packet.rejection_risks
-    assert packet.allowed_strategies == ["reuse_component"]
+    assert packet.generation_eligible is False
+    assert packet.allowed_generation_modes == []
+    assert packet.allowed_strategies == []
 
 
 def test_generic_retrieval_requires_explicit_cognitive_execution_authorization(

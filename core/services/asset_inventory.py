@@ -13,7 +13,7 @@ class AssetInventoryService:
 
     def inspect(self) -> dict:
         assets = self.registry.list_assets()
-        verifier = ProfessionalAssetVerifier(self.project_root)
+        verifier = self.registry.evidence_verifier
         entries = [_entry(self.project_root, asset, verifier) for asset in assets]
         missing = [
             entry
@@ -89,8 +89,10 @@ def _entry(
     hash_matches = actual_sha256 == expected_sha256 if expected_sha256 else None
     import_authorized = asset.allows_generation_mode("imported_glb_exact")
     parametric_authorized = asset.allows_generation_mode("parametric_generated")
-    import_ready = import_authorized and file_exists and hash_matches is True
-    generation_eligible = asset.is_generation_eligible and (parametric_authorized or import_ready)
+    admission = verifier.verify_generation_admission(asset)
+    import_ready = admission.eligible and import_authorized and file_exists and hash_matches is True
+    parametric_ready = admission.eligible and parametric_authorized
+    generation_eligible = import_ready or parametric_ready
     warnings = []
     if file_required and not file_exists:
         warnings.append("ASSET_FILE_MISSING")
@@ -104,14 +106,19 @@ def _entry(
         warnings.append("ATTRIBUTION_REQUIRED")
     if asset.source == "cc_by":
         warnings.append("CC_BY_ASSET_NOT_VENDOR_GRADE")
+    if asset.is_generation_eligible and not admission.eligible:
+        warnings.append("PROFESSIONAL_ASSET_EVIDENCE_NOT_ADMITTED")
     if import_authorized and not file_exists:
         warnings.append("QUALIFIED_ASSET_FILE_MISSING")
     if import_authorized and file_exists and hash_matches is False:
         warnings.append("QUALIFIED_ASSET_HASH_MISMATCH")
-    if import_ready:
+    if asset.is_generation_eligible and not admission.eligible:
+        asset_import_mode = "professional_evidence_rejected"
+        effective_generation_mode = "quarantined_unverified"
+    elif import_ready:
         asset_import_mode = "imported_glb_exact"
         effective_generation_mode = "imported_glb_exact"
-    elif parametric_authorized:
+    elif parametric_ready:
         asset_import_mode = "parametric_generated"
         effective_generation_mode = "parametric_generated"
     elif import_authorized:
@@ -173,7 +180,9 @@ def _entry(
         "adaptation_profile_id": asset.adaptation_profile_id,
         "qualification_status": qualification.status,
         "generation_eligible": generation_eligible,
-        "allowed_generation_modes": list(qualification.allowed_generation_modes),
+        "allowed_generation_modes": (
+            list(qualification.allowed_generation_modes) if admission.eligible else []
+        ),
         "qualification_method": qualification.qualification_method,
         "qualification_limitations": list(qualification.limitations),
         "verified_file_sha256": expected_sha256,

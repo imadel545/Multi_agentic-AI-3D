@@ -5,6 +5,13 @@ import json
 import math
 from pathlib import Path
 
+try:
+    from professional_asset_worker_gate import professional_generation_admission_failures
+except ModuleNotFoundError:  # Application-side tests import the bundled source by package path.
+    from core.services.professional_asset_worker_gate import (
+        professional_generation_admission_failures,
+    )
+
 
 def validate_exact_program(program: dict, project_root: Path) -> list[dict]:
     nodes = program.get("nodes", [])
@@ -43,6 +50,8 @@ def validate_exact_program(program: dict, project_root: Path) -> list[dict]:
     if hashlib.sha256(raw).hexdigest() != node["manifest_sha256"]:
         raise ValueError("EXACT_ASSET_MANIFEST_HASH_MISMATCH")
     manifest = json.loads(raw)
+    if professional_generation_admission_failures(manifest, root):
+        raise ValueError("EXACT_ASSET_PROFESSIONAL_ADMISSION_INVALID")
     qualification = manifest.get("qualification") or {}
     if (
         manifest.get("asset_id") != node["asset_id"]

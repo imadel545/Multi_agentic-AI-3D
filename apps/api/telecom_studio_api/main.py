@@ -186,8 +186,11 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-registry = AssetRegistry(settings.manifests_dir)
 professional_asset_verifier = ProfessionalAssetVerifier(settings.project_root)
+registry = AssetRegistry(
+    settings.manifests_dir,
+    evidence_verifier=professional_asset_verifier,
+)
 asset_inventory_service = AssetInventoryService(settings.project_root, registry)
 asset_library_service = AssetLibraryService(settings.asset_library_dir)
 adaptation_capability_service = AdaptationCapabilityService(settings.project_root, registry)
@@ -783,7 +786,9 @@ def get_asset_provenance(asset_id: str) -> dict:
         "geometry_status": asset.resolved_geometry_status,
         "geometry_fidelity": asset.geometry_fidelity,
         "conversion_method": asset.conversion_method,
-        "generation_eligible": asset.is_generation_eligible,
+        "generation_eligible": professional_asset_verifier.verify_generation_admission(
+            asset
+        ).eligible,
         "dimensions_m": (
             asset.dimensions_m.model_dump(mode="json")
             if asset.dimensions_m is not None

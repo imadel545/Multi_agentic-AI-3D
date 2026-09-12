@@ -48,7 +48,10 @@ class BlenderRunner:
         self.blender_binary = blender_binary
         self.timeout_s = timeout_s
         self.worker_script = project_root / "apps" / "blender_worker" / "generate_scene.py"
-        self.worker_sources = tuple(sorted((project_root / "apps" / "blender_worker").glob("*.py")))
+        self.worker_sources = tuple(
+            sorted((project_root / "apps" / "blender_worker").glob("*.py"))
+            + [project_root / "core" / "services" / "professional_asset_worker_gate.py"]
+        )
 
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()

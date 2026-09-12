@@ -1,7 +1,31 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from apps.api.telecom_studio_api.config import Settings
+
+
+def test_manifest_catalog_must_match_the_project_canonical_catalog(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    expected = project_root / "assets" / "manifests"
+
+    configured = Settings(
+        _env_file=None,
+        project_root=project_root,
+        asset_manifests_dir=expected,
+    )
+
+    assert configured.manifests_dir.resolve() == expected.resolve()
+    with pytest.raises(
+        ValidationError,
+        match="asset_manifests_dir must resolve to project_root/assets/manifests",
+    ):
+        Settings(
+            _env_file=None,
+            project_root=project_root,
+            asset_manifests_dir=tmp_path / "external-catalog",
+        )
 
 
 def test_embedding_strict_quality_is_part_of_typed_settings(monkeypatch) -> None:

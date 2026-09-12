@@ -666,6 +666,11 @@ class AssetManifest(StrictModel):
             failures.append("Professional master representation is not a neutral CAD format.")
         elif self.viewer_representation.format != "glb":
             failures.append("Professional viewer representation is not a GLB.")
+        if (
+            self.master_representation is not None
+            and self.source_file_sha256 != self.master_representation.sha256
+        ):
+            failures.append("Published source hash does not match the master representation.")
         if self.viewer_representation is not None:
             if self.viewer_representation.file != self.file:
                 failures.append("Manifest runtime file does not match the viewer representation.")

@@ -286,14 +286,23 @@ not manufacturer fidelity, physical fastening or collision certification.
 - The current runtime catalog contains 14 manifests: 13 usable
   internal/technical manifests and one real professional candidate kept as
   `reference_only`. **0 of 14 passes the new professional M1 proof gate**.
-  `ProfessionalAssetVerifier` is now the filesystem-aware authority for that
-  flag: it recomputes master/viewer/preview/report hashes, validates GLB/PNG
-  structure, path containment, viewer lineage, dimensions and anchors. Manifest
-  completeness alone can no longer publish an eligible result. No neutral
-  STEP/B-Rep source is admitted to the qualified catalog yet. One Sierra
-  Wireless/Semtech antenna candidate is inspected and visible as
-  `reference_only`; raw DWG ACIS remains `source_only` and cannot be promoted
-  by retrieval or an LLM decision.
+  Generation eligibility is now an effective runtime decision rather than the
+  qualification declaration alone: any manifest claiming a vendor source,
+  vendor-qualified fidelity, manufacturer or reference must pass
+  `ProfessionalAssetVerifier`. Its `professional_asset_qa.v1` report must bind
+  the asset ID, qualification version, master hash, viewer hash and passed mesh,
+  dimensions, pivot and orientation checks. The published source hash must
+  match the master representation. Registry selection and snapshots, decision
+  packets, cognitive reuse, exact-asset execution and trusted assembly all fail
+  closed when this admission fails. A professional identity is admitted only
+  through its exact qualified viewer import; a generic parametric builder cannot
+  inherit manufacturer identity from an unrelated proof bundle. The configured
+  manifest directory must resolve to `<project_root>/assets/manifests`, keeping
+  API selection, snapshots, trusted-input hashing and Blender on one catalog.
+- This closes a declaration-only bypass; it does not admit a new professional
+  asset. No catalog publication transaction or rights decision is implemented.
+  Sierra Wireless/Semtech `6001124` remains `reference_only`, and raw DWG ACIS
+  remains `source_only`.
 - Consequently, no current-tree professional Blender/browser end-to-end run
   proves the required seven real assets, asset previews, reuse/adapt/compose,
   procedural complement, GLB, QA, provenance and targeted new version. The

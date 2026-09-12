@@ -598,6 +598,7 @@ def test_blender_runner_honors_operational_scene_switches_and_build_lock(
     assert build_lock["scene_id"] == scene.scene_id
     assert "generate_scene.py" in build_lock["worker_bundle"]["files"]
     assert "parametric_builder.py" in build_lock["worker_bundle"]["files"]
+    assert "professional_asset_worker_gate.py" in build_lock["worker_bundle"]["files"]
     assert build_lock["blender_runtime"]["background"] is True
     assert build_lock["blender_runtime"]["version"]
     assert build_lock["command_profile"]["factory_startup"] is True

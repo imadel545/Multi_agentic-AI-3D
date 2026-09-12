@@ -5,11 +5,19 @@ from pathlib import Path
 from core.contracts.assembly import AssetCandidateScore, AssetManifestSnapshot, _canonical_sha256
 from core.contracts.assets import AssetManifest
 from core.performance import asset_manifest_hash
+from core.services.asset_evidence import ProfessionalAssetVerifier
 
 
 class AssetRegistry:
-    def __init__(self, manifests_dir: Path) -> None:
+    def __init__(
+        self,
+        manifests_dir: Path,
+        evidence_verifier: ProfessionalAssetVerifier | None = None,
+    ) -> None:
         self.manifests_dir = manifests_dir
+        self.evidence_verifier = evidence_verifier or ProfessionalAssetVerifier(
+            _project_root_for_manifests(manifests_dir)
+        )
         self._assets: dict[str, AssetManifest] | None = None
         self._manifest_hash: str | None = None
         self.cache_hits = 0
@@ -33,6 +41,9 @@ class AssetRegistry:
         """Create a self-hashed immutable snapshot from the authoritative manifest file."""
 
         asset = self.get(asset_id)
+        admission = self.evidence_verifier.verify_generation_admission(asset)
+        if not admission.eligible:
+            raise ValueError(f"ASSET_GENERATION_NOT_ADMITTED:{asset_id}")
         manifest_path = self.manifests_dir / f"{asset_id}.json"
         if not manifest_path.is_file():
             raise ValueError(f"ASSET_MANIFEST_FILE_MISSING:{asset_id}")
@@ -78,7 +89,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == "tower"
-            and asset.is_generation_eligible
+            and self.is_generation_admitted(asset)
             and network_type in asset.compatible_networks
             and tower_type in asset.compatible_tower_types
         ]
@@ -99,7 +110,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == "tower"
-            and asset.is_generation_eligible
+            and self.is_generation_admitted(asset)
             and network_type in asset.compatible_networks
         ]
         if not candidates:
@@ -138,7 +149,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == asset_type
-            and asset.is_generation_eligible
+            and self.is_generation_admitted(asset)
             and network_type in asset.compatible_networks
             and (
                 not tower_type
@@ -171,7 +182,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == asset_type
-            and asset.is_generation_eligible
+            and self.is_generation_admitted(asset)
             and network_type in asset.compatible_networks
             and (
                 not tower_type
@@ -205,7 +216,7 @@ class AssetRegistry:
             asset
             for asset in self.list_assets()
             if asset.type == asset_type
-            and asset.is_generation_eligible
+            and self.is_generation_admitted(asset)
             and network_type in asset.compatible_networks
             and (
                 not tower_type
@@ -218,12 +229,15 @@ class AssetRegistry:
                 asset
                 for asset in self.list_assets()
                 if asset.type == asset_type
-                and asset.is_generation_eligible
+                and self.is_generation_admitted(asset)
                 and network_type in asset.compatible_networks
             ]
         if not candidates:
             raise LookupError(f"no fallback {asset_type} asset for {network_type}")
         return sorted(candidates, key=lambda asset: asset.asset_id)[0]
+
+    def is_generation_admitted(self, asset: AssetManifest) -> bool:
+        return self.evidence_verifier.verify_generation_admission(asset).eligible
 
     def _load(self) -> dict[str, AssetManifest]:
         current_hash = asset_manifest_hash(self.manifests_dir)
@@ -251,6 +265,13 @@ class AssetRegistry:
             "asset_cache_hits": self.cache_hits,
             "asset_cache_misses": self.cache_misses,
         }
+
+
+def _project_root_for_manifests(manifests_dir: Path) -> Path:
+    resolved = manifests_dir.resolve()
+    if resolved.name == "manifests" and resolved.parent.name == "assets":
+        return resolved.parent.parent
+    return resolved
 
 
 def _tower_type_distance(requested: str, compatible_tower_types: list[str]) -> int:

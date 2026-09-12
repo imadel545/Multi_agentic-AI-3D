@@ -41,7 +41,7 @@ def observe_asset_admission(
 
     def validate(value: GeometryProgram) -> ExactAssetAdmission:
         records = validate_exact_program(
-            value.model_dump(mode="json"), registry.manifests_dir.resolve().parent.parent
+            value.model_dump(mode="json"), registry.evidence_verifier.project_root
         )
         if len(records) != 1:
             raise ValueError("EXACT_ASSET_ADMISSION_REQUIRES_ONE_SOURCE")
@@ -115,7 +115,7 @@ def compile_asset_reuse(
     manifest = AssetManifest.model_validate(json.loads(raw))
     if (
         not manifest.cognitive_reuse_enabled
-        or not manifest.is_generation_eligible
+        or not registry.is_generation_admitted(manifest)
         or not manifest.allows_generation_mode("imported_glb_exact")
     ):
         raise ValueError("COGNITIVE_REUSE_NOT_AUTHORIZED")
@@ -171,6 +171,6 @@ def compile_asset_reuse(
         ),
     )
     validate_exact_program(
-        program.model_dump(mode="json"), registry.manifests_dir.resolve().parent.parent
+        program.model_dump(mode="json"), registry.evidence_verifier.project_root
     )
     return program

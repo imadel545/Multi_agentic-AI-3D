@@ -28,9 +28,11 @@ def test_professional_evidence_requires_real_untampered_bytes(tmp_path: Path) ->
     verifier = ProfessionalAssetVerifier(tmp_path)
 
     verified = verifier.verify(manifest)
+    admitted = verifier.verify_generation_admission(manifest)
 
     assert verified.eligible is True
     assert verified.failures == ()
+    assert admitted.eligible is True
 
     (tmp_path / manifest.viewer_representation.file).write_bytes(b"tampered")  # type: ignore[union-attr]
     tampered = verifier.verify(manifest)
@@ -83,10 +85,6 @@ def _professional_contract_fixture(project_root: Path) -> AssetManifest:
     viewer_path = qualified / "panel.glb"
     shutil.copy2(Path("assets/antennas/ant_panel_4g_001.glb"), viewer_path)
     report_path = qualified / "panel-qa.json"
-    report_path.write_text(
-        json.dumps({"status": "passed", "checks": ["mesh_integrity", "dimensions"]}),
-        encoding="utf-8",
-    )
 
     previews: list[AssetPreview] = []
     for view in ("front", "side", "top", "perspective", "closeup"):
@@ -121,6 +119,27 @@ def _professional_contract_fixture(project_root: Path) -> AssetManifest:
         derived_from_representation_id="master_step",
         tessellation_tolerance_m=0.0005,
     )
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "professional_asset_qa.v1",
+                "asset_id": "PROFESSIONAL_PANEL_CONTRACT_FIXTURE",
+                "qualification_version": "m1.contract-test",
+                "status": "passed",
+                "representations": {
+                    "master_sha256": master.sha256,
+                    "viewer_sha256": viewer.sha256,
+                },
+                "checks": {
+                    "mesh_integrity": True,
+                    "dimensions": True,
+                    "pivot": True,
+                    "orientation": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     return AssetManifest(
         asset_id="PROFESSIONAL_PANEL_CONTRACT_FIXTURE",
         type="antenna",
@@ -150,7 +169,7 @@ def _professional_contract_fixture(project_root: Path) -> AssetManifest:
             compatible_roles=["sector_antenna"],
             required_connector_kinds=["mechanical"],
         ),
-        builder_profile_id="qualified_asset_import_v1",
+        builder_profile_id="sector_panel_v1",
         anchors=[
             AssetAnchor(
                 anchor_id="rear_mount",
@@ -191,6 +210,113 @@ def _professional_contract_fixture(project_root: Path) -> AssetManifest:
             orientation_verified=True,
         ),
     )
+
+
+def test_professional_evidence_rejects_status_only_report_even_when_hash_matches(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    assert manifest.qa_evidence.report_file is not None
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report_path.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            )
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Professional QA report schema is missing or unsupported." in result.failures
+    assert "Professional QA report asset identity does not match the manifest." in result.failures
+    assert "Professional QA report representation bindings are incomplete." in result.failures
+    assert "Professional QA report checks are not a structured result map." in result.failures
+
+
+def test_professional_claim_cannot_use_technical_qualification_as_admission(
+    tmp_path: Path,
+) -> None:
+    manifest = AssetManifest.model_validate_json(
+        Path("assets/manifests/ANT_PANEL_4G_001.json").read_text(encoding="utf-8")
+    ).model_copy(
+        update={
+            "asset_id": "UNVERIFIED_VENDOR_PANEL",
+            "source": "vendor_supplied",
+            "manufacturer": "Unverified manufacturer",
+            "reference": "UNVERIFIED-001",
+            "geometry_fidelity": "vendor_qualified",
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify_generation_admission(manifest)
+
+    assert manifest.is_generation_eligible is True
+    assert result.eligible is False
+    assert "Master and viewer representations are not both published." in result.failures
+    assert "Professional asset QA evidence is incomplete or has not passed." in result.failures
+
+
+def test_professional_claim_cannot_execute_a_generic_parametric_builder(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    manifest = manifest.model_copy(
+        update={
+            "qualification": manifest.qualification.model_copy(
+                update={
+                    "allowed_generation_modes": ["parametric_generated"],
+                    "mesh_integrity_verified": False,
+                    "dimensions_verified": False,
+                    "pivot_verified": False,
+                    "orientation_verified": False,
+                }
+            )
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify_generation_admission(manifest)
+
+    assert result.eligible is False
+    assert (
+        "Professional identity is admitted only for the exact qualified viewer import."
+        in result.failures
+    )
+    assert "Professional exact-import qualification checks are incomplete." in result.failures
+
+
+def test_professional_evidence_rejects_report_rebound_to_other_evidence(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    assert manifest.qa_evidence.report_file is not None
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["asset_id"] = "OTHER_ASSET"
+    report["qualification_version"] = "other-version"
+    report["representations"]["viewer_sha256"] = "0" * 64
+    report["checks"]["orientation"] = False
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            )
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Professional QA report asset identity does not match the manifest." in result.failures
+    assert (
+        "Professional QA report qualification version does not match the manifest."
+        in result.failures
+    )
+    assert "Professional QA report viewer hash does not match the manifest." in result.failures
+    assert "Professional QA report has missing or failed checks: orientation." in result.failures
 
 
 def _sha256(path: Path) -> str:

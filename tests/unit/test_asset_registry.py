@@ -1,3 +1,5 @@
+import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -66,6 +68,45 @@ def test_registry_exposes_only_qualified_generation_candidates() -> None:
     assert selected.allows_generation_mode("imported_glb_exact") is True
     assert bracket.is_generation_eligible is True
     assert bracket.builder_profile_id == "mount_bracket_v1"
+
+
+def test_registry_refuses_unverified_vendor_claim_from_selection_and_snapshot(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    manifests_dir = project_root / "assets" / "manifests"
+    asset_dir = project_root / "assets" / "antennas"
+    manifests_dir.mkdir(parents=True)
+    asset_dir.mkdir(parents=True)
+    payload = json.loads(
+        Path("assets/manifests/ANT_PANEL_4G_001.json").read_text(encoding="utf-8")
+    )
+    payload.update(
+        {
+            "asset_id": "UNVERIFIED_VENDOR_PANEL",
+            "source": "vendor_supplied",
+            "manufacturer": "Unverified manufacturer",
+            "reference": "UNVERIFIED-001",
+            "geometry_fidelity": "vendor_qualified",
+        }
+    )
+    (manifests_dir / "UNVERIFIED_VENDOR_PANEL.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    shutil.copy2(Path(payload["file"]), project_root / payload["file"])
+    registry = AssetRegistry(manifests_dir)
+    manifest = registry.get("UNVERIFIED_VENDOR_PANEL")
+
+    assert manifest.is_generation_eligible is True
+    assert registry.is_generation_admitted(manifest) is False
+    with pytest.raises(LookupError, match="no validated antenna asset"):
+        registry.select_asset("antenna", "4G", "lattice_tower")
+    with pytest.raises(ValueError, match="ASSET_GENERATION_NOT_ADMITTED"):
+        registry.manifest_snapshot(
+            manifest.asset_id,
+            generation_mode="imported_glb_exact",
+        )
 
 
 def test_candidate_scoring_prioritizes_declared_vendor_fidelity() -> None:

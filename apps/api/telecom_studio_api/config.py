@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.llm.groq_policy import normalize_groq_base_url
@@ -84,6 +84,20 @@ class Settings(BaseSettings):
         if not normalized:
             raise ValueError("groq_model must not be empty")
         return normalized
+
+    @model_validator(mode="after")
+    def validate_governed_manifest_catalog(self) -> "Settings":
+        """Keep planning, snapshots and Blender on the same governed catalog."""
+
+        if self.asset_manifests_dir is None:
+            return self
+        expected = (self.project_root / "assets" / "manifests").resolve()
+        configured = self.asset_manifests_dir.resolve()
+        if configured != expected:
+            raise ValueError(
+                "asset_manifests_dir must resolve to project_root/assets/manifests"
+            )
+        return self
 
     @field_validator("groq_text_model")
     @classmethod

@@ -463,22 +463,31 @@ frontend.
   `4829995130a43c09c5fb0c23d4216ed007e2d2c2` and tag
   `cognitive-3d-m1-baseline-20260808`; current convergence continues directly
   on the sole local branch `main`.
-- All 14 current runtime manifests fail the stronger professional proof gate.
-  They do not collectively provide a neutral master, qualified viewer lineage,
-  explicit professional provenance/licence, five passed asset previews,
-  typed anchors/connectors and the required qualification QA.
-- The public gate is now byte-verified by `ProfessionalAssetVerifier`, not
-  copied from the manifest declaration. Missing/out-of-root/tampered
-  master/viewer/previews/report files, invalid GLB/PNG data, inconsistent
-  dimensions or out-of-bounds anchors fail closed. This verifier does not
-  create the missing neutral CAD source, prove licensing rights or validate a
-  B-Rep semantically.
-- No neutral STEP/B-Rep source is currently admitted for generation or
-  professional qualification. One Sierra Wireless/Semtech antenna candidate
-  is inspected and retained as `reference_only`; the requested professional
-  structure, RRU, support, ground cabinet, GPS and platform roles still have no
-  admitted source. DWG `3DSOLID`/ACIS remains `source_only`; metadata search or
-  an LLM decision cannot convert it into exact geometry.
+- All 14 current runtime manifests fail the professional proof gate. The 13
+  internal/technical assets retain their existing generation contract; Sierra
+  Wireless/Semtech `6001124` remains `reference_only`.
+- A manifest claiming a vendor source, vendor-qualified fidelity, manufacturer
+  or reference is no longer executable from declaration alone. The registry,
+  snapshots, decision packets, cognitive reuse, exact-asset worker and trusted
+  assembly require the effective professional admission result. Professional
+  identity is limited to exact import of the qualified viewer; current generic
+  parametric builders cannot carry a manufacturer identity.
+- `ProfessionalAssetVerifier` re-hashes the master, viewer, previews and report,
+  validates GLB/PNG structure, paths, lineage, dimensions and anchor bounds, and
+  requires a `professional_asset_qa.v1` report bound to the asset ID,
+  qualification version and master/viewer hashes with passed mesh, dimensions,
+  pivot and orientation checks. The source hash must equal the master hash.
+- This gate does not prove licensing rights, semantic B-Rep identity, connector
+  mating, mount fitness or engineering validity, and it does not publish a
+  catalog bundle transactionally. No professional source is currently admitted
+  for generation; DWG `3DSOLID`/ACIS remains `source_only`.
+- Blender revalidates the professional boundary with a pure-standard-library
+  module copied and hashed into each immutable worker bundle. The application
+  adds typed and deeper GLB checks before planning; neither boundary promotes a
+  quarantined source.
+- A manifest catalog outside `<project_root>/assets/manifests` is rejected at
+  configuration time. External catalog roots are not propagated through the
+  current SceneSpec, trusted-input hashing and worker boundary.
 - `QualifiedAssetCandidateRetriever` and `AssetDecisionPacket` improve the
   decision contract, not the underlying fidelity. Telecom persists and
   validates semantic strategies. Generic cognitive retrieval now exposes

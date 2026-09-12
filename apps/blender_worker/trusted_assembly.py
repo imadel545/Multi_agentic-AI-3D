@@ -7,6 +7,13 @@ import json
 import math
 from pathlib import Path
 
+try:
+    from professional_asset_worker_gate import professional_generation_admission_failures
+except ModuleNotFoundError:  # Application-side tests import the bundled source by package path.
+    from core.services.professional_asset_worker_gate import (
+        professional_generation_admission_failures,
+    )
+
 _KNOWN_HANDLERS = {
     "tower_structure",
     "sector_equipment",
@@ -257,6 +264,8 @@ def _revalidate_manifest_source(project_root: Path, snapshot: dict) -> None:
         manifest = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("ASSET_MANIFEST_SOURCE_INVALID") from exc
+    if professional_generation_admission_failures(manifest, project_root):
+        raise RuntimeError("ASSET_PROFESSIONAL_ADMISSION_INVALID")
     qualification = manifest.get("qualification") or {}
     comparisons = {
         "asset_id": manifest.get("asset_id"),
