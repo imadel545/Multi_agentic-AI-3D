@@ -585,3 +585,18 @@ des plateformes et un dégagement AABB contre les équipements principaux. Elle
 ne remplace pas une collision triangle/BVH, la vérification des contacts ou une
 analyse structurelle. Le viewer expose donc cet ensemble en inspection seule;
 son édition ciblée reste indisponible.
+
+## Revue de bibliothèque professionnelle — 2026-09-12
+
+- Le Studio permet d'examiner le dossier du candidat Sierra
+  Wireless/Semtech `6001124` et le maintient explicitement hors génération.
+- La hiérarchie STEP et le passage du maillage dans Blender ont été observés,
+  mais cela ne qualifie ni le repère d'installation, ni les interfaces
+  mécaniques, ni les droits d'utilisation du projet.
+- Les fichiers RRU Ericsson/Huawei et le support RFS sondés restent des sources
+  DWG ACIS sans conversion qualifiée. Ils ne doivent pas être assemblés au
+  candidat Sierra sur la seule base de leurs noms ou de leur proximité dans le
+  corpus.
+- La prise en charge du nombre décimal LibreDWG `123.` corrige la lecture du
+  diagnostic de `Radio_2260.dwg`; elle ne convertit aucun solide et ne change
+  aucune décision d'admission.

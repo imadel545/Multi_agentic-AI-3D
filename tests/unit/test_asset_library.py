@@ -130,6 +130,37 @@ def test_probe_accepts_real_dwgread_latin1_and_non_finite_json_dialect(
     assert result["conversion_route"] == "requires_acis_brep_bridge"
     assert result["parser_mode"] == "latin1_non_finite_normalized"
     assert result["sanitized_non_finite_values"] == 2
+    assert result["sanitized_trailing_decimal_values"] == 0
+
+
+def test_probe_accepts_dwgread_trailing_decimal_number_without_altering_strings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    root = tmp_path / "library"
+    raw = root / "raw" / "maj_des_blocs" / "3D" / "Radio"
+    raw.mkdir(parents=True)
+    (raw / "Radio_2260.dwg").write_bytes(b"AC1018radio")
+    build_asset_library_catalog(root / "raw" / "maj_des_blocs", root / "index")
+    service = AssetLibraryService(root, dwgread_binary="dwgread")
+    file_id = service.search("radio 2260")["results"][0]["file_id"]
+
+    def completed_probe(args, **_kwargs):
+        output_path = Path(args[args.index("-o") + 1])
+        output_path.write_text(
+            '{"objects":[{"entity":"3DSOLID","matrix":[123.,-4.],'
+            '"source_text":"123., nan"}]}',
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("core.services.asset_library.subprocess.run", completed_probe)
+
+    result = service.probe(file_id)
+
+    assert result["entity_counts"] == {"3DSOLID": 1}
+    assert result["parser_mode"] == "utf8_trailing_decimal_normalized"
+    assert result["sanitized_non_finite_values"] == 0
+    assert result["sanitized_trailing_decimal_values"] == 2
 
 
 @pytest.mark.parametrize(

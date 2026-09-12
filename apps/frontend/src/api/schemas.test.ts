@@ -361,6 +361,7 @@ describe("frontend contract schemas", () => {
       tool: "dwgread",
       parser_mode: "latin1_non_finite_normalized",
       sanitized_non_finite_values: 2,
+      sanitized_trailing_decimal_values: 0,
       declared_unit: "millimeters",
       unit_metadata_conflict: true,
       entity_counts: { "3DSOLID": 4 },

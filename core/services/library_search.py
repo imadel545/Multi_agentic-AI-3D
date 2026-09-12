@@ -31,6 +31,10 @@ class LibraryMetadataSearch:
     def __init__(self, entries: list[dict]):
         self.entries = entries
         self.tokens = [metadata_tokens(entry["relative_path"]) for entry in entries]
+        self.filename_tokens = [
+            metadata_tokens(entry["relative_path"].rsplit("/", 1)[-1].rsplit(".", 1)[0])
+            for entry in entries
+        ]
         frequency = Counter(token for tokens in self.tokens for token in tokens)
         self.idf = {token: math.log1p(len(entries) / count) for token, count in frequency.items()}
 
@@ -41,7 +45,9 @@ class LibraryMetadataSearch:
             for token in requested
         }
         ranked = []
-        for entry, tokens in zip(self.entries, self.tokens, strict=True):
+        for entry, tokens, filename_tokens in zip(
+            self.entries, self.tokens, self.filename_tokens, strict=True
+        ):
             if entry["relative_path"].rsplit("/", 1)[-1].startswith("."):
                 continue
             if claimed_dimension and entry["claimed_dimension"] != claimed_dimension:
@@ -62,6 +68,11 @@ class LibraryMetadataSearch:
             )
             coverage = len(matches) / len(requested) if requested else 1
             score *= coverage
+            # A request that exactly names a file stem must outrank sibling
+            # detail drawings with the same path vocabulary. This remains a
+            # metadata signal; it never implies geometry qualification.
+            if requested and requested == filename_tokens:
+                score += sum(self.idf.get(token, 0) for token in requested) * 3
             ranked.append(
                 (
                     score,

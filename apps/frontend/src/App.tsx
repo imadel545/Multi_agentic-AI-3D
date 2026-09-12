@@ -1738,6 +1738,7 @@ export default function App({ apiClient = api }: AppProps) {
             onRetryViewerBundle={() => void reloadViewerBundle().catch(() => undefined)}
             onSearchAssetLibrary={searchAssetLibrary}
             onProbeAssetLibrary={probeAssetLibrary}
+            onReviewAsset={(assetId) => apiClient.assetProvenance(assetId)}
             rollbackBusyVersionId={rollbackBusyVersionId}
             selectedSemanticRoot={selectedSemanticRoot}
             versionMessage={versionMessage}

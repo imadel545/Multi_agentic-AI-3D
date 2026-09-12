@@ -1,6 +1,6 @@
 import { AssetLibraryPanel } from "./AssetLibraryPanel";
 import { SceneCompositionPanel } from "./SceneCompositionPanel";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ViewerBundleSchema, type ViewerBundle } from "../api/schemas";
 import {
@@ -1972,6 +1972,120 @@ describe("studio kernel components", () => {
     expect(onSearch).toHaveBeenCalledWith("pylône Orange 30 m");
   });
 
+  it("opens a professional candidate dossier without offering design use", async () => {
+    const onReview = vi.fn().mockResolvedValue({
+      asset_id: "ANT_SIERRA_6001124_REFERENCE",
+      family: "lte_mimo_panel",
+      subtype: "2-in-1 omnidirectional panel antenna",
+      manufacturer: "Sierra Wireless / Semtech",
+      reference: "6001124",
+      source: "vendor_supplied",
+      source_provenance: "Source STEP officielle du fabricant et fiche technique associée.",
+      original_url: "https://source.sierrawireless.com/6001124.step",
+      source_format: "step",
+      source_file_sha256: "a".repeat(64),
+      license: "Revue interne locale uniquement; redistribution non autorisée.",
+      attribution_required: true,
+      attribution: "Sierra Wireless / Semtech 6001124",
+      geometry_status: "reference_only",
+      geometry_fidelity: "technical_generic",
+      conversion_method: "Hiérarchie STEP inspectée et aller-retour 3D réel mesuré.",
+      generation_eligible: false,
+      dimensions_m: { width: 0.15, depth: 0.045, height: 0.049 },
+      bounding_box_m: null,
+      qualification: {
+        status: "reference_only",
+        allowed_generation_modes: [],
+        units: "meters",
+        mesh_integrity_verified: true,
+        dimensions_verified: false,
+        pivot_verified: false,
+        orientation_verified: false,
+        limitations: ["Connector identities and anchor coordinates are unverified."]
+      },
+      qualification_version: null,
+      qa: { status: "not_run", checks: [], limitations: [] },
+      milestone_evidence_eligible: false,
+      milestone_evidence_failures: ["Asset is not qualified for generation."],
+      representations: [],
+      previews: []
+    });
+    render(
+      <AssetLibraryPanel
+        inventory={{
+          status: "qualified_mixed_catalog",
+          asset_count: 2,
+          missing_file_count: 0,
+          real_glb_asset_count: 0,
+          import_qualified_glb_count: 0,
+          generation_eligible_asset_count: 1,
+          professional_evidence_asset_count: 0,
+          reference_only_asset_count: 1,
+          qualified_integrity_failure_count: 0,
+          entries: [{
+            asset_id: "ANT_SIERRA_6001124_REFERENCE",
+            type: "antenna",
+            family: "lte_mimo_panel",
+            subtype: "2-in-1 omnidirectional panel antenna",
+            manufacturer: "Sierra Wireless / Semtech",
+            reference: "6001124",
+            source: "vendor_supplied",
+            source_format: "step",
+            dimensions_m: { width: 0.15, depth: 0.045, height: 0.049 },
+            generation_eligible: false,
+            qualification_status: "reference_only",
+            allowed_generation_modes: [],
+            qualification_limitations: ["Stable anchors remain unverified."],
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: ["Anchors are not qualified."]
+          }, {
+            asset_id: "ANT_GENERIC_PANEL",
+            type: "antenna",
+            family: "generic_panel",
+            subtype: "generic panel",
+            manufacturer: null,
+            reference: null,
+            source: "internal_parametric",
+            source_format: "parametric_profile",
+            generation_eligible: true,
+            qualification_status: "qualified",
+            allowed_generation_modes: ["parametric_generated"],
+            qualification_limitations: [],
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: []
+          }],
+          missing_files: []
+        }}
+        onReview={onReview}
+        summary={{
+          status: "catalogued_quarantined",
+          schema_version: "1.1.0",
+          catalog_available: true,
+          generation_eligible_count: 0,
+          cad_with_reference_preview_count: 0,
+          reference_preview_link_count: 0,
+          limitations: []
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Examiner le candidat" }));
+
+    await waitFor(() => expect(onReview).toHaveBeenCalledWith("ANT_SIERRA_6001124_REFERENCE"));
+    expect(await screen.findByLabelText("Dossier du candidat professionnel")).toHaveTextContent(
+      "Non utilisable dans un design"
+    );
+    expect(screen.getByText("Maillage contrôlé").parentElement).toHaveTextContent("oui");
+    expect(screen.getByText(/Pivot et orientation d’installation/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /utiliser|ajouter/i })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/Rechercher un pylône/), {
+      target: { value: "Sierra 6001124" }
+    });
+    expect(screen.queryByText("ant generic panel")).not.toBeInTheDocument();
+    expect(screen.getByText("Sierra Wireless / Semtech", { selector: "strong" })).toBeInTheDocument();
+  });
+
   it("shows real library results without offering unqualified Blender use", () => {
     render(
       <AssetLibraryPanel
@@ -2096,13 +2210,13 @@ describe("studio kernel components", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Analyser la géométrie locale" }));
+    fireEvent.click(screen.getByRole("button", { name: "Examiner le contenu 3D" }));
 
     expect(onProbe).toHaveBeenCalledWith("lib_rfs_mount");
-    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(
-      "Une passerelle CAD B-Rep vérifiée est requise"
+    expect(screen.getByLabelText("Résultat de l’analyse géométrique")).toHaveTextContent(
+      "de vrais solides 3D"
     );
-    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(/Géométrie exploitable\s*non/);
+    expect(screen.getByLabelText("Résultat de l’analyse géométrique")).toHaveTextContent(/Géométrie exploitable\s*non/);
     expect(screen.queryByRole("button", { name: /utiliser.*blender|générer/i })).not.toBeInTheDocument();
   });
 

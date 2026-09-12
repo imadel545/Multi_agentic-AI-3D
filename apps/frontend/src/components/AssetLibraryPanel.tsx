@@ -4,7 +4,8 @@ import type {
   AssetInventory,
   AssetLibraryProbe,
   AssetLibrarySearch,
-  AssetLibrarySummary
+  AssetLibrarySummary,
+  AssetProvenance
 } from "../api/schemas";
 import { List, Metric, PanelTitle, ResourceRecovery, formatInteger } from "./StudioPrimitives";
 
@@ -18,6 +19,7 @@ export function AssetLibraryPanel({
   onRetry,
   onRetryProbe,
   onRetrySearch,
+  onReview,
   onProbe,
   probe = null,
   probeBusy = false,
@@ -35,6 +37,7 @@ export function AssetLibraryPanel({
   onRetry?: () => void;
   onRetryProbe?: () => void;
   onRetrySearch?: () => void;
+  onReview?: (assetId: string) => Promise<AssetProvenance>;
   onProbe?: (fileId: string) => void | Promise<void>;
   probe?: AssetLibraryProbe | null;
   probeBusy?: boolean;
@@ -44,17 +47,41 @@ export function AssetLibraryPanel({
   summaryError?: string | null;
 }) {
   const [query, setQuery] = useState("");
+  const [review, setReview] = useState<AssetProvenance | null>(null);
+  const [reviewBusyAssetId, setReviewBusyAssetId] = useState<string | null>(null);
+  const [lastReviewAssetId, setLastReviewAssetId] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const dimensions = summary?.claimed_dimension_counts ?? {};
   const qualifiedAssets = (inventory?.entries ?? []).filter(
     (entry) => entry.generation_eligible
   );
+  const visibleQualifiedAssets = qualifiedAssets.filter((entry) =>
+    matchesInventoryEntry(entry, query)
+  );
   const referenceAssets = (inventory?.entries ?? []).filter(
     (entry) => entry.qualification_status === "reference_only"
+  );
+  const visibleReferenceAssets = referenceAssets.filter((entry) =>
+    matchesInventoryEntry(entry, query)
   );
   const probeAvailable = summary?.dwg_probe_available !== false;
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (query.trim() && onSearch) void onSearch(query.trim());
+  };
+  const examineCandidate = async (assetId: string) => {
+    if (!onReview) return;
+    setLastReviewAssetId(assetId);
+    setReviewBusyAssetId(assetId);
+    setReviewError(null);
+    try {
+      setReview(await onReview(assetId));
+    } catch {
+      setReview(null);
+      setReviewError("Le dossier de ce candidat n’a pas pu être chargé.");
+    } finally {
+      setReviewBusyAssetId(null);
+    }
   };
   return (
     <section className="drawer-section" aria-label="Bibliothèque de designs">
@@ -89,11 +116,13 @@ export function AssetLibraryPanel({
             <Metric label="Référence seule" value={formatInteger(inventory.reference_only_asset_count)} />
           </div>
           <div className="library-results">
-            <div className="library-results-heading">
-              <strong>Composants 3D contrôlés</strong>
-              <small>Le mode d’utilisation vient du manifest, pas du nom du fichier.</small>
-            </div>
-            {qualifiedAssets.map((entry) => (
+            {visibleQualifiedAssets.length ? (
+              <div className="library-results-heading">
+                <strong>Composants 3D contrôlés</strong>
+                <small>Le mode d’utilisation vient du manifest, pas du nom du fichier.</small>
+              </div>
+            ) : null}
+            {visibleQualifiedAssets.map((entry) => (
               <article className="library-result-card" key={entry.asset_id}>
                 <div>
                   <strong>{humanAssetId(entry.asset_id)}</strong>
@@ -104,13 +133,13 @@ export function AssetLibraryPanel({
                 <p>{assetQualificationMessage(entry.allowed_generation_modes, entry.source)}</p>
               </article>
             ))}
-            {referenceAssets.length ? (
+            {visibleReferenceAssets.length ? (
               <>
                 <div className="library-results-heading">
-                  <strong>Références professionnelles en qualification</strong>
-                  <small>Identité et provenance visibles; aucune référence seule n’est utilisée pour produire la géométrie.</small>
+                  <strong>Candidats professionnels documentés</strong>
+                  <small>Leur identité peut être examinée; ils restent exclus des designs tant que les preuves sont incomplètes.</small>
                 </div>
-                {referenceAssets.map((entry) => (
+                {visibleReferenceAssets.map((entry) => (
                   <article className="library-result-card incomplete" key={entry.asset_id}>
                     <div>
                       <strong>{entry.manufacturer ?? "Fabricant à confirmer"}</strong>
@@ -128,6 +157,17 @@ export function AssetLibraryPanel({
                         ? `Boîtier déclaré : ${formatAssetDimensions(entry.dimensions_m)}.`
                         : "Dimensions déclarées à confirmer."} {referenceAssetMessage(entry.qualification_limitations)}
                     </p>
+                    {onReview ? (
+                      <button
+                        disabled={reviewBusyAssetId !== null}
+                        onClick={() => void examineCandidate(entry.asset_id)}
+                        type="button"
+                      >
+                        {reviewBusyAssetId === entry.asset_id
+                          ? "Ouverture du dossier…"
+                          : "Examiner le candidat"}
+                      </button>
+                    ) : null}
                     {entry.original_url ? (
                       <a href={entry.original_url} rel="noreferrer" target="_blank">
                         Ouvrir la source fabricant
@@ -135,6 +175,17 @@ export function AssetLibraryPanel({
                     ) : null}
                   </article>
                 ))}
+                {review ? <AssetReviewEvidence review={review} /> : null}
+                {reviewError ? (
+                  <ResourceRecovery
+                    busy={reviewBusyAssetId !== null}
+                    label="Le dossier documenté reste indisponible."
+                    message={reviewError}
+                    onRetry={lastReviewAssetId
+                      ? () => void examineCandidate(lastReviewAssetId)
+                      : undefined}
+                  />
+                ) : null}
               </>
             ) : null}
           </div>
@@ -197,13 +248,13 @@ export function AssetLibraryPanel({
                     <span>{entry.reference_preview_file_ids.length} aperçu{entry.reference_preview_file_ids.length > 1 ? "s" : ""}</span>
                   </div>
                   {entry.retrieval_evidence ? <LibraryRetrievalEvidence entry={entry} /> : null}
-                  {onProbe ? (
+                  {onProbe && entry.extension.toLowerCase() === "dwg" ? (
                     <button
                       disabled={busy || probeBusy || !probeAvailable}
                       onClick={() => void onProbe(entry.file_id)}
                       type="button"
                     >
-                      {probeBusy ? "Analyse géométrique…" : "Analyser la géométrie locale"}
+                      {probeBusy ? "Analyse géométrique…" : "Examiner le contenu 3D"}
                     </button>
                   ) : null}
                   {probe?.file.file_id === entry.file_id ? <CadProbeEvidence probe={probe} /> : null}
@@ -213,21 +264,21 @@ export function AssetLibraryPanel({
               {probeError ? (
                 <ResourceRecovery
                   busy={probeBusy}
-                  label="Le probe géométrique n’a pas abouti; le fichier reste en quarantaine."
+                  label="L’analyse géométrique n’a pas abouti; le fichier reste en quarantaine."
                   message={probeError}
                   onRetry={onRetryProbe}
                 />
               ) : null}
               {!probeAvailable ? (
-                <p className="muted">Le probe DWG local est indisponible; aucun diagnostic n’est inventé.</p>
+                <p className="muted">L’analyse locale des fichiers DWG est indisponible; aucun diagnostic n’est inventé.</p>
               ) : null}
             </div>
           ) : null}
           <div className="summary-card warning-card">
             <strong>Qualification requise</strong>
             <p>
-              Les licences sont à vérifier et les solides DWG ACIS exigent une passerelle CAD
-              avant maillage. Cette quarantaine protège les designs produits.
+              Les droits, les unités, les repères et la géométrie doivent être vérifiés avant
+              qu’un composant puisse entrer dans un design. Cette quarantaine protège les résultats.
             </p>
           </div>
           <List title="Limites actuelles" items={summary.limitations} empty="Aucune limitation remontée." />
@@ -262,16 +313,24 @@ function LibraryRetrievalEvidence({ entry }: { entry: AssetLibrarySearch["result
 
 function CadProbeEvidence({ probe }: { probe: AssetLibraryProbe }) {
   return (
-    <section className="summary-card warning-card" aria-label="Résultat du probe géométrique">
-      <strong>Résultat du probe géométrique</strong>
+    <section className="summary-card warning-card" aria-label="Résultat de l’analyse géométrique">
+      <strong>Résultat de l’analyse géométrique</strong>
       <p>{cadProbeVerdict(probe)}</p>
       <div className="metric-grid">
         <Metric label="Unités source" value={probeUnitLabel(probe)} />
-        <Metric label="Solides ACIS" value={probe.contains_acis_3d_solids ? "détectés" : "absents"} />
+        <Metric label="Solides CAO" value={probe.contains_acis_3d_solids ? "détectés" : "absents"} />
         <Metric label="Maillage natif" value={probe.contains_mesh_convertible_geometry ? "détecté" : "absent"} />
         <Metric label="Géométrie exploitable" value={probe.blender_ready ? "oui" : "non"} />
       </div>
-      <p className="muted">Entités détectées : {formatEntityCounts(probe.entity_counts)}</p>
+      <details>
+        <summary>Détails techniques</summary>
+        <p className="muted">Entités détectées : {formatEntityCounts(probe.entity_counts)}</p>
+        <p className="muted">
+          {probe.contains_acis_3d_solids
+            ? "Le fichier contient des solides ACIS/B-Rep qui nécessitent un convertisseur CAD qualifié."
+            : "Aucun solide ACIS/B-Rep n’a été détecté."}
+        </p>
+      </details>
       <List title="Limites de qualification" items={probe.limitations} empty="Aucune limite publiée." />
     </section>
   );
@@ -279,12 +338,112 @@ function CadProbeEvidence({ probe }: { probe: AssetLibraryProbe }) {
 
 function cadProbeVerdict(probe: AssetLibraryProbe): string {
   if (probe.conversion_route === "requires_acis_brep_bridge") {
-    return "Des solides ACIS sont présents. Une passerelle CAD B-Rep vérifiée est requise avant toute conversion Blender.";
+    return "Le fichier contient de vrais solides 3D, mais le studio ne dispose pas encore d’une conversion qualifiée pour les utiliser.";
   }
   if (probe.contains_mesh_convertible_geometry) {
     return "Un maillage natif est détecté. La conversion, les unités, les droits et la QA restent obligatoires avant toute admission.";
   }
-  return "Le probe ne trouve pas de maillage natif exploitable. Ce fichier reste une référence ou un dessin 2D en quarantaine.";
+  return "L’analyse ne trouve pas de géométrie 3D directement exploitable. Ce fichier reste une référence en quarantaine.";
+}
+
+function AssetReviewEvidence({ review }: { review: AssetProvenance }) {
+  const blockers = professionalReviewBlockers(review);
+  return (
+    <section className="summary-card warning-card" aria-label="Dossier du candidat professionnel">
+      <div className="library-results-heading">
+        <strong>{review.manufacturer ?? "Fabricant à confirmer"} {review.reference ?? ""}</strong>
+        <span className="status-pill warn">Non utilisable dans un design</span>
+      </div>
+      <div className="metric-grid">
+        <Metric label="Source" value={review.source_format.toUpperCase()} />
+        <Metric
+          label="Dimensions publiées"
+          value={formatAssetDimensions(review.dimensions_m)}
+        />
+        <Metric
+          label="Maillage contrôlé"
+          value={review.qualification.mesh_integrity_verified ? "oui" : "non"}
+        />
+        <Metric label="Contrôle qualité" value={review.qa.status === "passed" ? "passé" : "incomplet"} />
+      </div>
+      <p>{professionalSourceSummary(review)}</p>
+      <p>{professionalGeometrySummary(review)}</p>
+      <List
+        title="À vérifier avant utilisation"
+        items={blockers}
+        empty="Aucun blocage publié."
+      />
+      <details>
+        <summary>Détails techniques et droits</summary>
+        <p className="muted">
+          {review.source_provenance ?? "La provenance technique détaillée reste à confirmer."}
+        </p>
+        <p className="muted">
+          {review.conversion_method ?? "Aucune méthode d’observation géométrique n’est publiée."}
+        </p>
+        <p className="muted">{review.license ?? "Droits non publiés."}</p>
+        <p className="muted">
+          {review.representations.length} représentation(s) publiée(s) · {review.previews.length} vue(s) publiée(s).
+        </p>
+      </details>
+    </section>
+  );
+}
+
+function professionalSourceSummary(review: AssetProvenance): string {
+  const sourceKind = review.source_format.toUpperCase();
+  if (review.manufacturer && review.reference && review.source_provenance) {
+    return `Source ${sourceKind} attribuée à ${review.manufacturer}, référence ${review.reference}; sa provenance est conservée dans le dossier.`;
+  }
+  if (review.source_provenance) {
+    return `La provenance de la source ${sourceKind} est conservée dans le dossier.`;
+  }
+  return `La provenance détaillée de la source ${sourceKind} reste à confirmer.`;
+}
+
+function professionalGeometrySummary(review: AssetProvenance): string {
+  if (review.qualification.mesh_integrity_verified) {
+    return "La structure géométrique et son passage dans le moteur 3D ont été contrôlés. Ce contrôle ne valide pas encore le repère d’installation ni les interfaces mécaniques.";
+  }
+  if (review.conversion_method) {
+    return "Une méthode d’observation géométrique est documentée, mais son intégrité n’est pas encore validée pour la génération.";
+  }
+  return "Aucune observation géométrique contrôlée n’est encore publiée.";
+}
+
+function professionalReviewBlockers(review: AssetProvenance): string[] {
+  const blockers: string[] = [];
+  if (!review.generation_eligible) blockers.push("Admission à la génération non accordée.");
+  if (!review.qualification.dimensions_verified) blockers.push("Dimensions complètes et périmètre de mesure à confirmer.");
+  if (!review.qualification.pivot_verified || !review.qualification.orientation_verified) {
+    blockers.push("Pivot et orientation d’installation à mesurer.");
+  }
+  if (review.qualification.limitations.some((item) => /anchor|connector|mating/i.test(item))) {
+    blockers.push("Ancrages, raccordement et compatibilité mécanique à vérifier.");
+  }
+  if (review.representations.length < 2 || review.previews.length < 5) {
+    blockers.push("Représentations et vues de qualification à publier avec leurs preuves.");
+  }
+  if (review.qa.status !== "passed") blockers.push("Contrôle qualité professionnel à terminer.");
+  if (review.license) blockers.push("Droits d’utilisation et de redistribution à valider pour ce projet.");
+  return blockers;
+}
+
+function matchesInventoryEntry(
+  entry: AssetInventory["entries"][number],
+  query: string
+): boolean {
+  const tokens = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const searchable = [
+    entry.asset_id,
+    entry.manufacturer,
+    entry.reference,
+    entry.family,
+    entry.subtype,
+    entry.type
+  ].filter(Boolean).join(" ").toLocaleLowerCase();
+  return tokens.every((token) => searchable.includes(token));
 }
 
 function probeUnitLabel(probe: AssetLibraryProbe): string {

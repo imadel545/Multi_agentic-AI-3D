@@ -183,6 +183,10 @@ def test_professional_step_candidate_identity_is_visible_but_not_executable() ->
     assert payload["reference"] == "6001124"
     assert payload["source_format"] == "step"
     assert payload["geometry_status"] == "reference_only"
+    assert payload["generation_eligible"] is False
+    assert payload["dimensions_m"] == {"width": 0.15, "depth": 0.045, "height": 0.049}
+    assert payload["bounding_box_m"] is None
+    assert payload["original_url"].startswith("https://source.sierrawireless.com/")
     assert payload["milestone_evidence_eligible"] is False
     assert payload["qualification"]["status"] == "reference_only"
 

@@ -98,9 +98,12 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
 - [x] Le 2026-08-11, `npm run test -- --run` passe avec 180 tests; typecheck et
   build passent aussi sur le current tree.
-- [x] Le 2026-09-12, la suite frontend passe avec 209 tests; typecheck et build
+- [x] Le 2026-09-12, la suite frontend passe avec 211 tests; typecheck et build
   production passent. Chrome charge un canvas WebGL réel sans exception console,
   échec réseau ni réponse HTTP en erreur.
+- [x] Le drawer Bibliothèque permet d'examiner un candidat constructeur réel,
+  affiche son exclusion de la génération et les preuves manquantes en langage
+  utilisateur, sans proposer d'action d'ajout ou d'utilisation.
 - [x] Le smoke layout current-tree en lecture seule charge le GLB certifié à
   1440 x 1000 et 1047 x 2748 sans scroll desktop concurrent; ce contrôle ne
   remplace pas le replay navigateur des mutations ni un smoke de conversion CAD.

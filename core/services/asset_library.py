@@ -140,7 +140,12 @@ class AssetLibraryService:
                     f"dwgread={diagnostic[:300]}"
                 )
             try:
-                payload, parser_mode, sanitized_non_finite_values = _load_dwg_probe_payload(output)
+                (
+                    payload,
+                    parser_mode,
+                    sanitized_non_finite_values,
+                    sanitized_trailing_decimal_values,
+                ) = _load_dwg_probe_payload(output)
             except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise AssetLibraryError(
                     "Le probe DWG a produit une sortie JSON illisible; "
@@ -172,6 +177,7 @@ class AssetLibraryService:
             "tool": "dwgread",
             "parser_mode": parser_mode,
             "sanitized_non_finite_values": sanitized_non_finite_values,
+            "sanitized_trailing_decimal_values": sanitized_trailing_decimal_values,
             "dwg_version": file_header.get("version") if isinstance(file_header, dict) else None,
             "declared_unit": unit_info["declared_unit"],
             "unit_scale_to_meters": unit_info["unit_scale_to_meters"],
@@ -218,17 +224,21 @@ _NON_FINITE_JSON_TOKEN = re.compile(
     r"(?P<prefix>[:\[,]\s*)(?:[-+]?nan|[-+]?inf(?:inity)?)(?=\s*[,}\]])",
     flags=re.IGNORECASE,
 )
+_TRAILING_DECIMAL_JSON_TOKEN = re.compile(
+    r"(?P<prefix>[:\[,]\s*)(?P<number>-?(?:0|[1-9]\d*)\.)(?=\s*[,}\]])"
+)
 _JSON_STRING_TOKEN = re.compile(r'"(?:\\.|[^"\\])*"', flags=re.DOTALL)
 
 
-def _load_dwg_probe_payload(output: Path) -> tuple[dict[str, Any], str, int]:
+def _load_dwg_probe_payload(output: Path) -> tuple[dict[str, Any], str, int, int]:
     """Read LibreDWG minJSON without treating its dialect as strict UTF-8 JSON.
 
     Real DWG files can make ``dwgread -O minJSON`` emit ISO-8859-1 strings and
-    lower-case non-finite numeric tokens such as ``nan``.  Those details are not
-    geometry qualification failures, but Python's strict JSON decoder rejects
-    them.  Decode losslessly, replace only bare non-finite number tokens outside
-    JSON strings, and keep the normalization visible in the probe result.
+    lower-case non-finite numeric tokens such as ``nan`` and numbers with a
+    trailing decimal point such as ``123.``. Those details are not geometry
+    qualification failures, but Python's strict JSON decoder rejects them.
+    Decode losslessly, normalize only those bare number tokens outside JSON
+    strings, and keep each normalization count visible in the probe result.
     """
 
     raw = output.read_bytes()
@@ -239,32 +249,52 @@ def _load_dwg_probe_payload(output: Path) -> tuple[dict[str, Any], str, int]:
         text = raw.decode("latin-1")
         encoding = "latin1"
 
-    normalized, replacement_count = _normalize_non_finite_json_numbers(text)
+    normalized, non_finite_count = _normalize_json_numbers(
+        text,
+        _NON_FINITE_JSON_TOKEN,
+        lambda match: f"{match.group('prefix')}null",
+    )
+    normalized, trailing_decimal_count = _normalize_json_numbers(
+        normalized,
+        _TRAILING_DECIMAL_JSON_TOKEN,
+        lambda match: f"{match.group('prefix')}{match.group('number')}0",
+    )
     payload = json.loads(normalized)
     if not isinstance(payload, dict):
         raise json.JSONDecodeError("DWG probe root must be an object", normalized, 0)
-    mode = encoding if replacement_count == 0 else f"{encoding}_non_finite_normalized"
-    return payload, mode, replacement_count
+    normalizations = []
+    if non_finite_count:
+        normalizations.append("non_finite")
+    if trailing_decimal_count:
+        normalizations.append("trailing_decimal")
+    mode = encoding
+    if normalizations:
+        mode = f"{encoding}_{'_and_'.join(normalizations)}_normalized"
+    return payload, mode, non_finite_count, trailing_decimal_count
 
 
 def _normalize_non_finite_json_numbers(text: str) -> tuple[str, int]:
     """Replace non-standard bare numbers while preserving JSON string contents."""
 
+    return _normalize_json_numbers(
+        text,
+        _NON_FINITE_JSON_TOKEN,
+        lambda match: f"{match.group('prefix')}null",
+    )
+
+
+def _normalize_json_numbers(text: str, pattern: re.Pattern, replacement) -> tuple[str, int]:
+    """Apply one numeric-dialect repair outside JSON strings only."""
+
     chunks: list[str] = []
     replacement_count = 0
     cursor = 0
     for string_match in _JSON_STRING_TOKEN.finditer(text):
-        plain, count = _NON_FINITE_JSON_TOKEN.subn(
-            lambda match: f"{match.group('prefix')}null",
-            text[cursor : string_match.start()],
-        )
+        plain, count = pattern.subn(replacement, text[cursor : string_match.start()])
         chunks.extend((plain, string_match.group(0)))
         replacement_count += count
         cursor = string_match.end()
-    tail, count = _NON_FINITE_JSON_TOKEN.subn(
-        lambda match: f"{match.group('prefix')}null",
-        text[cursor:],
-    )
+    tail, count = pattern.subn(replacement, text[cursor:])
     chunks.append(tail)
     return "".join(chunks), replacement_count + count
 

@@ -1101,3 +1101,25 @@ Le résultat améliore la lisibilité d'un pylône technique, mais ne transforme
 pas le site entier en conception télécom professionnelle. Les assets
 constructeur, les détails de fixation, les collisions fines et la validation
 d'installation restent ouverts.
+
+## Revue produit des candidats professionnels — 2026-09-12
+
+La bibliothèque du Studio expose maintenant le dossier du candidat constructeur
+Sierra Wireless/Semtech `6001124` depuis l'inventaire réel et l'endpoint de
+provenance. L'utilisateur voit l'identité, la source STEP, les dimensions
+publiées, l'état du contrôle géométrique et les preuves encore manquantes. La
+recherche par fabricant ou référence filtre les composants sans rapport. Aucun
+bouton d'ajout ou d'utilisation n'est proposé tant que
+`generation_eligible=false`.
+
+Cette revue ne promeut pas l'asset. Le candidat reste `reference_only` : son
+repère d'installation, ses ancres, ses connecteurs, sa compatibilité mécanique,
+les droits du projet et la QA professionnelle ne sont pas validés. Les preuves
+techniques détaillées restent consultables sans devenir le texte principal de
+l'interface.
+
+La sonde DWG accepte aussi le dialecte JSON réel observé sur `Radio_2260.dwg`,
+où LibreDWG émet une valeur décimale avec point final en plus de valeurs non
+finies. La normalisation est bornée, tracée par `parser_mode` et ne rend pas le
+fichier exploitable : la sonde confirme trois solides ACIS, 34 régions, les
+unités millimètres, aucun maillage natif et aucune admission à la génération.

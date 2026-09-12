@@ -3,6 +3,7 @@ import {
   AssemblyPlanEvidenceSchema,
   AssetInventorySchema,
   AssetLibraryProbeSchema,
+  AssetProvenanceSchema,
   AssetLibrarySearchSchema,
   AssetLibrarySummarySchema,
   CreateDesignResponseSchema,
@@ -38,6 +39,7 @@ import {
   type AssemblyPlanEvidence,
   type AssetInventory,
   type AssetLibraryProbe,
+  type AssetProvenance,
   type AssetLibrarySearch,
   type AssetLibrarySummary,
   type CreateDesignResponse,
@@ -160,6 +162,14 @@ export class TelecomStudioApi {
       "AssetLibraryProbe",
       AssetLibraryProbeSchema,
       await this.postJson(`/assets/library/${encodeURIComponent(fileId)}/probe`, {})
+    );
+  }
+
+  async assetProvenance(assetId: string): Promise<AssetProvenance> {
+    return parseContract(
+      "AssetProvenance",
+      AssetProvenanceSchema,
+      await this.getJson(`/assets/${encodeURIComponent(assetId)}/provenance`)
     );
   }
 

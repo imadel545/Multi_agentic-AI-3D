@@ -136,6 +136,57 @@ describe("TelecomStudioApi", () => {
     );
   });
 
+  it("loads a documented professional candidate without enabling it", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({
+      asset_id: "ANT_SIERRA_6001124_REFERENCE",
+      family: "lte_mimo_panel",
+      subtype: "2-in-1 omnidirectional panel antenna",
+      manufacturer: "Sierra Wireless / Semtech",
+      reference: "6001124",
+      source: "vendor_supplied",
+      source_provenance: "Official manufacturer STEP assembly.",
+      original_url: "https://source.sierrawireless.com/6001124.step",
+      source_format: "step",
+      source_file_sha256: "a".repeat(64),
+      license: "Internal review only.",
+      attribution_required: true,
+      geometry_status: "reference_only",
+      geometry_fidelity: "technical_generic",
+      conversion_method: "Controlled STEP inspection and Blender roundtrip.",
+      generation_eligible: false,
+      dimensions_m: { width: 0.15, depth: 0.045, height: 0.049 },
+      bounding_box_m: null,
+      qualification: {
+        status: "reference_only",
+        allowed_generation_modes: [],
+        units: "meters",
+        mesh_integrity_verified: true,
+        dimensions_verified: false,
+        pivot_verified: false,
+        orientation_verified: false,
+        limitations: ["Anchor coordinates are unverified."]
+      },
+      qualification_version: null,
+      qa: { status: "not_run", checks: [], limitations: [] },
+      milestone_evidence_eligible: false,
+      milestone_evidence_failures: ["Asset is not qualified for generation."],
+      representations: [],
+      previews: []
+    }));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+
+    const result = await client.assetProvenance("ANT_SIERRA_6001124_REFERENCE");
+
+    expect(result.generation_eligible).toBe(false);
+    expect(result.qualification.mesh_integrity_verified).toBe(true);
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL(
+        "/assets/ANT_SIERRA_6001124_REFERENCE/provenance",
+        "http://127.0.0.1:8000"
+      )
+    );
+  });
+
   it("searches the real asset-library catalog with an encoded query", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       jsonResponse({

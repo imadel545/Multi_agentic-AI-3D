@@ -774,6 +774,7 @@ def get_asset_provenance(asset_id: str) -> dict:
         "reference": asset.reference,
         "source": asset.source,
         "source_provenance": asset.source_provenance,
+        "original_url": asset.original_url,
         "source_format": asset.resolved_source_format,
         "source_file_sha256": asset.source_file_sha256,
         "license": asset.license,
@@ -782,6 +783,17 @@ def get_asset_provenance(asset_id: str) -> dict:
         "geometry_status": asset.resolved_geometry_status,
         "geometry_fidelity": asset.geometry_fidelity,
         "conversion_method": asset.conversion_method,
+        "generation_eligible": asset.is_generation_eligible,
+        "dimensions_m": (
+            asset.dimensions_m.model_dump(mode="json")
+            if asset.dimensions_m is not None
+            else None
+        ),
+        "bounding_box_m": (
+            asset.bounding_box_m.model_dump(mode="json")
+            if asset.bounding_box_m is not None
+            else None
+        ),
         "qualification": asset.qualification.model_dump(mode="json"),
         "qualification_version": asset.qualification_version,
         "qa": {

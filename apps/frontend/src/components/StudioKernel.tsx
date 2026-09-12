@@ -27,6 +27,7 @@ import type {
   AssetLibrarySearch,
   AssetLibrarySummary,
   AssetInventory,
+  AssetProvenance,
   ComponentProofs,
   CurrentOperation,
   DocumentPackCapabilities,
@@ -1443,6 +1444,7 @@ export function InspectorDock({
   onRetryCognitiveEvidence,
   onRetryViewerBundle,
   onProbeAssetLibrary,
+  onReviewAsset,
   onSearchAssetLibrary,
   onSelectSceneComponent,
   rollbackBusyVersionId,
@@ -1503,6 +1505,7 @@ export function InspectorDock({
   onRetryCognitiveEvidence?: () => void;
   onRetryViewerBundle?: () => void;
   onProbeAssetLibrary?: (fileId: string) => void | Promise<void>;
+  onReviewAsset?: (assetId: string) => Promise<AssetProvenance>;
   onSearchAssetLibrary?: (query: string) => void | Promise<void>;
   onSelectSceneComponent?: (semanticRoot: string | null) => void;
   rollbackBusyVersionId: string | null;
@@ -1678,6 +1681,7 @@ export function InspectorDock({
               onRetryProbe={onRetryAssetProbe}
               onRetrySearch={onRetryAssetSearch}
               onProbe={onProbeAssetLibrary}
+              onReview={onReviewAsset}
               onSearch={onSearchAssetLibrary}
               probe={assetLibraryProbe}
               probeBusy={assetLibraryProbeBusy}

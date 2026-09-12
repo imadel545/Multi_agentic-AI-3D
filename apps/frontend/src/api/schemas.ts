@@ -1009,6 +1009,7 @@ export const AssetLibraryProbeSchema = publicSchema(
     tool: z.string(),
     parser_mode: z.string().nullish(),
     sanitized_non_finite_values: z.number().int().nonnegative().nullish(),
+    sanitized_trailing_decimal_values: z.number().int().nonnegative().nullish(),
     dwg_version: z.string().nullish(),
     declared_unit: z.string().nullish(),
     unit_scale_to_meters: z.number().positive().nullish(),
@@ -1022,6 +1023,55 @@ export const AssetLibraryProbeSchema = publicSchema(
     blender_ready: z.boolean(),
     generation_eligible: z.boolean(),
     limitations: z.array(z.string()).default([])
+  })
+);
+
+export const AssetProvenanceSchema = publicSchema(
+  UnknownRecord.extend({
+    asset_id: z.string(),
+    family: z.string(),
+    subtype: z.string().nullish(),
+    manufacturer: z.string().nullish(),
+    reference: z.string().nullish(),
+    source: z.string().nullish(),
+    source_provenance: z.string().nullish(),
+    original_url: z.string().url().nullish(),
+    source_format: z.string(),
+    source_file_sha256: z.string().regex(/^[a-f0-9]{64}$/).nullish(),
+    license: z.string().nullish(),
+    attribution_required: z.boolean().default(false),
+    attribution: z.string().nullish(),
+    geometry_status: z.string(),
+    geometry_fidelity: z.string().nullish(),
+    conversion_method: z.string().nullish(),
+    generation_eligible: z.boolean().default(false),
+    dimensions_m: UnknownRecord.nullish(),
+    bounding_box_m: UnknownRecord.nullish(),
+    qualification: publicSchema(
+      UnknownRecord.extend({
+        status: z.string(),
+        allowed_generation_modes: z.array(z.string()).default([]),
+        units: z.string().nullish(),
+        mesh_integrity_verified: z.boolean().default(false),
+        dimensions_verified: z.boolean().default(false),
+        pivot_verified: z.boolean().default(false),
+        orientation_verified: z.boolean().default(false),
+        qualification_method: z.string().nullish(),
+        limitations: z.array(z.string()).default([])
+      })
+    ),
+    qualification_version: z.string().nullish(),
+    qa: publicSchema(
+      UnknownRecord.extend({
+        status: z.string(),
+        checks: z.array(z.string()).default([]),
+        limitations: z.array(z.string()).default([])
+      })
+    ),
+    milestone_evidence_eligible: z.boolean().default(false),
+    milestone_evidence_failures: z.array(z.string()).default([]),
+    representations: z.array(UnknownRecord).default([]),
+    previews: z.array(UnknownRecord).default([])
   })
 );
 
@@ -1341,6 +1391,7 @@ export type AssetLibrarySummary = z.infer<typeof AssetLibrarySummarySchema>;
 export type AssetLibraryEntry = z.infer<typeof AssetLibraryEntrySchema>;
 export type AssetLibrarySearch = z.infer<typeof AssetLibrarySearchSchema>;
 export type AssetLibraryProbe = z.infer<typeof AssetLibraryProbeSchema>;
+export type AssetProvenance = z.infer<typeof AssetProvenanceSchema>;
 export type AdaptationCapabilityCatalog = z.infer<typeof AdaptationCapabilityCatalogSchema>;
 export type SceneAdaptationCapabilities = z.infer<typeof SceneAdaptationCapabilitiesSchema>;
 export type ResolvedAdaptationCapability = z.infer<typeof ResolvedAdaptationCapabilitySchema>;

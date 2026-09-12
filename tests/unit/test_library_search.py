@@ -46,3 +46,17 @@ def test_unknown_query_and_os_junk_are_not_candidates():
     index = LibraryMetadataSearch([_entry("Volx/.DS_Store"), _entry("Volx/Support.dwg")])
     assert index.rank("unicorn", claimed_dimension=None, extension=None) == []
     assert len(index.rank("Volx", claimed_dimension=None, extension=None)) == 1
+
+
+def test_exact_filename_stem_outranks_sibling_detail_drawings():
+    index = LibraryMetadataSearch(
+        [
+            _entry("3D/Antenne/RFS/Fixation/APM40/APM40_1.dwg"),
+            _entry("3D/Antenne/RFS/Fixation/APM40/APM40_2_Bielle.dwg"),
+            _entry("3D/Antenne/RFS/Fixation/APM40/APM40_Fixation.dwg"),
+        ]
+    )
+
+    results = index.rank("APM40_Fixation", claimed_dimension="3d", extension="dwg")
+
+    assert results[0][1]["relative_path"].endswith("APM40_Fixation.dwg")
