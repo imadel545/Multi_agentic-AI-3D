@@ -190,9 +190,13 @@ name parsing, synthetic sector or universal constraint solver is introduced;
 legacy workflows retain their existing single-root/global focus behaviour.
 
 The exported overall preview remains a technical view and is not yet a
-professional presentation. A browser end-user visual acceptance run remains
-open, and no vendor-grade asset or installation quality is claimed by this
-checkpoint.
+professional presentation. On 2026-09-12, an isolated Chrome/WebGL smoke loaded
+the certified design, picked an antenna from the real GLB, framed its proven
+antenna/mount/radio group and opened the matching sector inspection. The product
+surface used the readable label `antenne du secteur S3`; the backend semantic
+root remained internal. This closes the bounded picking/focus proof, not the
+professional visual-quality gate. No vendor-grade asset or installation quality
+is claimed by this checkpoint.
 
 ## Targeted editing checkpoint — 2026-09-09
 
@@ -213,10 +217,16 @@ This exposed and fixed inconsistent normalization in the assembly evidence
 angle recalculation without changing QA tolerances.
 
 The frontend supports picking known component identities and framing all meshes
-of a selected assembly. A local isolated browser smoke generated and displayed
-a certified GLB with explicit fallback and generic-fidelity notices; the full
-mouse-pick/edit browser sequence was not established. API/Blender and frontend
-integration tests provide the targeted-edit evidence separately.
+of a selected assembly. The isolated browser workflow `wf_6baad6cdb0df` selected
+the S2 antenna, submitted a 130-degree azimuth edit, produced certified Blender
+version `v04a88085`, and recorded the user request and outcome in the durable
+conversation. The provider edit call failed and the explicit deterministic
+fallback applied the user's exact numeric value; this is not recorded as a live
+LLM success. Two later vague edits were refused without producing versions, and
+an explicit rollback restored `v519150d5` while preserving `v04a88085` in
+history. A subsequent Chrome reload restored the conversation and active GLB,
+then picked S3 with the readable product label and verified sector close-up,
+with no console, network or HTTP error observed.
 
 The three-source [CAD benchmark](QA_STRATEGY.md#cad-conversion-benchmark--2026-09-09)
 produced no admissible mesh. No professional asset was promoted. Library-first
@@ -996,11 +1006,14 @@ certification, or acceptance of every generic 3D scenario.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 180 passing
-component/contract tests. Current-tree connected creation has passed in the real
-browser. Edit/version is proved by the API and focused Blender E2E; its final
-browser replay, along with every degraded, document-pack, rollback and recovery
-branch, remains a broader product release gate outside this milestone.
+frontend now has a verified chat-first/3D-first product baseline and 209 passing
+component/contract tests. Current-tree connected creation, real GLB picking,
+targeted edit/version, durable conversation restoration and explicit rollback
+have each passed in the isolated product path. The 2026-09-12 current-tree smoke
+also removed backend semantic roots and RAG/SceneSpec/Blender jargon from the
+normal selection, conversation, progress and source-decision surfaces. Every
+degraded, document-pack and interruption branch still remains a broader product
+release gate outside this milestone.
 
 The frontend must keep these limitations visible: `mesh_level_spatial_basic`,
 `mesh_level_transform_basic` or `mesh_level_basic` QA, local-process `push_sse`, limited document-pack

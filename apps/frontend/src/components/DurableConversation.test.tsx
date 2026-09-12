@@ -22,6 +22,45 @@ it("restores recorded requests on remount without requiring version descriptions
   expect(apiClient.conversation).toHaveBeenCalledTimes(2);
 });
 
+it("renders a targeted edit with the product component label", async () => {
+  const targeted = history("wf_a", "Orienter cette antenne à 130 degrés.");
+  targeted.messages[0].target_semantic_root = "antenna_S2_ANT_PANEL_5G_001";
+  const apiClient = { conversation: vi.fn().mockResolvedValue(targeted) } as unknown as TelecomStudioApi;
+  render(
+    <DurableConversation
+      apiClient={apiClient}
+      busy={false}
+      componentProofs={{
+        schema_version: "1.0",
+        workflow_id: "wf_a",
+        components: [{
+          component_id: "sector_antennas",
+          role_id: "sector_antenna",
+          origin: "catalog",
+          strategy: "reuse",
+          generation_strategy: "imported_glb_exact",
+          asset_id: "ANT_PANEL_5G_001",
+          quantity: 1,
+          instances: [{
+            instance_id: "S2",
+            object_role: "antenna",
+            semantic_root: "antenna_S2_ANT_PANEL_5G_001",
+            geometry_source: "imported_glb_exact",
+            qa: null
+          }],
+          qa: null
+        }],
+        geometry_programs: []
+      }}
+      revision="one"
+      workflowId="wf_a"
+    />
+  );
+
+  expect(await screen.findByText("Composant visé : antenne du secteur S2")).toBeInTheDocument();
+  expect(screen.queryByText(/antenna S2 ANT PANEL/)).not.toBeInTheDocument();
+});
+
 it("discards an older workflow response after switching designs", async () => {
   let resolveA!: (value: Conversation) => void;
   const pendingA = new Promise<Conversation>((resolve) => { resolveA = resolve; });

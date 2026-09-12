@@ -3,7 +3,7 @@
 Critères obligatoires pour accepter le futur frontend.  
 Si un critère échoue, le frontend n'est pas accepté.
 
-Dernière synchronisation ciblée: 2026-08-11. La baseline visuelle réelle est validée; les
+Dernière synchronisation ciblée: 2026-09-12. La baseline visuelle réelle est validée; les
 cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
@@ -80,8 +80,8 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] Generate design from prompt.
 - [x] Upload document pack.
 - [ ] Generate from document pack.
-- [ ] Edit design by prompt.
-- [ ] Version rollback.
+- [x] Edit design by prompt.
+- [x] Version rollback.
 - [ ] Download artifacts.
 - [ ] Comprendre et confirmer un composant hors catalogue avant génération.
 - [x] Afficher modèle, mode, hash, enveloppe et ajustements GeometryProgram après
@@ -98,6 +98,9 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
 - [x] Le 2026-08-11, `npm run test -- --run` passe avec 180 tests; typecheck et
   build passent aussi sur le current tree.
+- [x] Le 2026-09-12, la suite frontend passe avec 209 tests; typecheck et build
+  production passent. Chrome charge un canvas WebGL réel sans exception console,
+  échec réseau ni réponse HTTP en erreur.
 - [x] Le smoke layout current-tree en lecture seule charge le GLB certifié à
   1440 x 1000 et 1047 x 2748 sans scroll desktop concurrent; ce contrôle ne
   remplace pas le replay navigateur des mutations ni un smoke de conversion CAD.
@@ -106,6 +109,10 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 - [x] Screenshot final du studio avec un design réel `real_blender` chargé.
 - [x] Preuve que le GLB est visible et grand.
+- [x] Clic réel sur une antenne exportée : cadrage du sous-assemblage prouvé,
+  identité utilisateur lisible et vue rapprochée du même secteur.
+- [x] Conversation restaurée après rechargement avec création, édition ciblée,
+  refus explicites et rollback, sans exposer la racine sémantique backend.
 - [ ] Smoke visuel du parcours GeometryProgram initial + révision. Le backend
   réel `wf_ead2456914b2` et `v2e0a4faf` a produit `real_blender`, QA 1.0,
   certificat, GLB et preview, mais cette preuve backend ne remplace pas le smoke

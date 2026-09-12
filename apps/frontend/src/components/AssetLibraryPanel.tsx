@@ -108,7 +108,7 @@ export function AssetLibraryPanel({
               <>
                 <div className="library-results-heading">
                   <strong>Références professionnelles en qualification</strong>
-                  <small>Identité et provenance visibles; aucune référence seule n’est envoyée à Blender.</small>
+                  <small>Identité et provenance visibles; aucune référence seule n’est utilisée pour produire la géométrie.</small>
                 </div>
                 {referenceAssets.map((entry) => (
                   <article className="library-result-card incomplete" key={entry.asset_id}>
@@ -146,14 +146,14 @@ export function AssetLibraryPanel({
             <strong>{formatInteger(summary.file_count ?? 0)} fichiers catalogués</strong>
             <p>
               La recherche exploite les noms et chemins catalogués. Aucun fichier brut n'est
-              analysé comme géométrie ni utilisé dans Blender avant qualification et conversion contrôlée.
+              analysé comme géométrie ni utilisé dans le modèle avant qualification et conversion contrôlée.
             </p>
           </div>
           <div className="metric-grid">
             <Metric label="Contenus uniques" value={formatInteger(summary.unique_content_count ?? 0)} />
             <Metric label="Classés 3D" value={formatInteger(dimensions["3d"] ?? 0)} />
             <Metric label="Classés 2D" value={formatInteger(dimensions["2d"] ?? 0)} />
-            <Metric label="Prêts pour Blender" value={formatInteger(summary.generation_eligible_count)} />
+            <Metric label="Géométries exploitables" value={formatInteger(summary.generation_eligible_count)} />
             <Metric label="CAD avec aperçu" value={formatInteger(summary.cad_with_reference_preview_count)} />
           </div>
           <form className="library-search" onSubmit={submitSearch}>
@@ -269,7 +269,7 @@ function CadProbeEvidence({ probe }: { probe: AssetLibraryProbe }) {
         <Metric label="Unités source" value={probeUnitLabel(probe)} />
         <Metric label="Solides ACIS" value={probe.contains_acis_3d_solids ? "détectés" : "absents"} />
         <Metric label="Maillage natif" value={probe.contains_mesh_convertible_geometry ? "détecté" : "absent"} />
-        <Metric label="Prêt pour Blender" value={probe.blender_ready ? "oui" : "non"} />
+        <Metric label="Géométrie exploitable" value={probe.blender_ready ? "oui" : "non"} />
       </div>
       <p className="muted">Entités détectées : {formatEntityCounts(probe.entity_counts)}</p>
       <List title="Limites de qualification" items={probe.limitations} empty="Aucune limite publiée." />
@@ -334,7 +334,7 @@ function assetQualificationMessage(modes: string[], source: string | null | unde
   if (modes.includes("imported_glb_exact")) {
     return `Fichier, dimensions, pivot et orientation vérifiés. ${origin}`;
   }
-  return `Dimensions pilotées par SceneSpec et générateur borné. ${origin}`;
+  return `Dimensions pilotées par la spécification 3D validée et un générateur borné. ${origin}`;
 }
 
 function formatAssetDimensions(dimensions: unknown): string {

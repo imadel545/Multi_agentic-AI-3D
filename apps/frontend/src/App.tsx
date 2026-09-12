@@ -49,6 +49,7 @@ import {
   InspectorDock,
   LiveGenerationOverlay
 } from "./components/StudioKernel";
+import { humanComponentInstanceLabel } from "./components/StudioDisplayHelpers";
 import {
   actionIsSupported,
   initialWorkflowState,
@@ -1549,6 +1550,7 @@ export default function App({ apiClient = api }: AppProps) {
                     />
                   }
                   apiClient={apiClient}
+                  componentProofs={componentProofs}
                   workflowId={state.workflowId}
                   busy={revisionBusy}
                   revision={
@@ -1636,6 +1638,7 @@ export default function App({ apiClient = api }: AppProps) {
               loading={viewerSurfaceLoading}
               onReloadBundle={() => void retryViewerSurface().catch(() => undefined)}
               selectedSemanticRoot={selectedSemanticRoot}
+              selectedComponentLabel={humanComponentInstanceLabel(componentProofs, selectedSemanticRoot)}
               focusSemanticRoots={sectorFocusSemanticRoots}
               knownSemanticRoots={knownSemanticRoots}
               onSelectSemanticRoot={selectSemanticRoot}

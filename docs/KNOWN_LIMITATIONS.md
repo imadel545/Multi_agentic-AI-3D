@@ -514,6 +514,12 @@ frontend.
   streaming, GLB display and the post-export assembly drawer without console
   errors. It does not close rollback, document-pack, upload, degraded-provider,
   interruption or every edit/recovery branch. No global convergence is claimed.
+- The 2026-09-12 isolated Chrome smoke additionally covers a real WebGL pick,
+  grouped sector focus, a targeted azimuth edit that produced a second certified
+  Blender version, durable conversation restoration and an explicit rollback.
+  The edit used the controlled deterministic fallback after the provider call
+  failed, so it is not evidence of successful live LLM editing. Document-pack,
+  provider-degraded and process-interruption branches are not all browser-accepted.
 
 ## Can wait
 

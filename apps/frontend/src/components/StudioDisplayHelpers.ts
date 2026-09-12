@@ -1,6 +1,43 @@
+import type { ComponentProofs } from "../api/schemas";
+
+const semanticRoleLabels: Record<string, string> = {
+  antenna: "antenne",
+  antenna_mount: "support d’antenne",
+  cable: "chemin de câble",
+  mount_bracket: "support d’antenne",
+  radio: "unité radio",
+  remote_radio: "unité radio",
+  rru: "unité radio",
+  safety_feature: "élément de sécurité",
+  sector_antenna: "antenne sectorielle",
+  sector_cable_route: "chemin de câble du secteur",
+  support_structure: "structure porteuse",
+  technical_shelter: "abri technique",
+  tower: "pylône",
+  tower_access: "accès et maintenance du pylône"
+};
+
 export function humanSemanticRole(role: string): string {
-  if (role === "tower_access") return "accès et maintenance du pylône";
-  return role.replaceAll("_", " ").replaceAll(".", " ");
+  const normalized = role.trim().toLowerCase();
+  return semanticRoleLabels[normalized] ?? normalized.replaceAll("_", " ").replaceAll(".", " ");
+}
+
+/** Resolve a backend identity to a stable product label without parsing its name. */
+export function humanComponentInstanceLabel(
+  proofs: ComponentProofs | null,
+  semanticRoot: string | null
+): string | null {
+  if (!semanticRoot) return null;
+  for (const component of proofs?.components ?? []) {
+    const instance = component.instances.find((candidate) => candidate.semantic_root === semanticRoot);
+    if (instance) {
+      const role = humanSemanticRole(instance.object_role || component.role_id);
+      return /^S\d+$/i.test(instance.instance_id)
+        ? `${role} du secteur ${instance.instance_id.toUpperCase()}`
+        : role;
+    }
+  }
+  return "composant 3D sélectionné";
 }
 
 export function visualReviewStatusLabel(status: string): string {

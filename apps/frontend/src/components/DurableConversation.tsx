@@ -1,16 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { TelecomStudioApi } from "../api/client";
-import type { Conversation } from "../api/schemas";
+import type { ComponentProofs, Conversation } from "../api/schemas";
+import { humanComponentInstanceLabel } from "./StudioDisplayHelpers";
 import { ResourceRecovery } from "./StudioPrimitives";
 
 export function DurableConversation({
-  activeContext, apiClient, workflowId, revision, busy
+  activeContext, apiClient, workflowId, revision, busy, componentProofs = null
 }: {
   activeContext?: ReactNode;
   apiClient: TelecomStudioApi;
   workflowId: string;
   revision: string;
   busy: boolean;
+  componentProofs?: ComponentProofs | null;
 }) {
   const [snapshot, setSnapshot] = useState<Conversation | null>(null);
   const [failed, setFailed] = useState(false);
@@ -49,7 +51,7 @@ export function DurableConversation({
           <strong>{message.role === "user" ? "Vous" : "Notification du studio"}</strong>
           <p>{message.text}</p>
           {message.target_semantic_root ?
-            <small>Composant visé : {message.target_semantic_root.replaceAll("_", " ")}</small> : null}
+            <small>Composant visé : {humanComponentInstanceLabel(componentProofs, message.target_semantic_root)}</small> : null}
         </article>
       )}
     </div>

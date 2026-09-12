@@ -567,7 +567,7 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.getByText("Composants nouveaux compris par l’IA")).toBeInTheDocument();
-    expect(screen.getByText("technical shelter")).toBeInTheDocument();
+    expect(screen.getByText("abri technique")).toBeInTheDocument();
     expect(screen.getByText("Placement demandé : À droite du pylône.")).toBeInTheDocument();
     expect(screen.getByText(/Enveloppe maximale : 3 × 2.2 × 2.5 m/)).toBeInTheDocument();
     expect(
@@ -1451,13 +1451,13 @@ describe("studio kernel components", () => {
 
     expect(screen.getByText("Compréhension de la demande").closest("article")).toHaveTextContent("terminé");
     expect(screen.getByText("Conception du plan 3D").closest("article")).toHaveTextContent("terminé");
-    expect(screen.getByText("Construction dans Blender").closest("article")).toHaveTextContent("terminé");
+    expect(screen.getByText("Construction du modèle 3D").closest("article")).toHaveTextContent("terminé");
   });
 
   it("does not invent RAG evidence when the artifact is absent", () => {
     render(<RagEvidencePanel bundle={bundle} evidence={null} />);
 
-    expect(screen.getByText("Aucune preuve RAG chargée; le frontend n’en invente pas.")).toBeInTheDocument();
+    expect(screen.getByText("Aucune source de conception chargée; le studio n’en invente pas.")).toBeInTheDocument();
     expect(screen.queryByText("NVIDIA reranker unavailable")).not.toBeInTheDocument();
     expect(screen.getByText(/reranker NVIDIA est indisponible/)).toBeInTheDocument();
   });
@@ -1474,7 +1474,7 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("disponible avec limites")).toBeInTheDocument();
+    expect(screen.getAllByText("disponible avec limites").length).toBeGreaterThan(0);
     expect(screen.getByText(/recherche vectorielle est indisponible/)).toBeInTheDocument();
     expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
   });
@@ -1513,8 +1513,8 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("Hints candidats récupérés")).toBeInTheDocument();
-    expect(screen.getByText("Aucun hint n’est prouvé comme appliqué au SceneSpec.")).toBeInTheDocument();
+    expect(screen.getByText("Indices candidats récupérés")).toBeInTheDocument();
+    expect(screen.getByText("Aucun indice récupéré n’est prouvé comme appliqué au plan 3D.")).toBeInTheDocument();
     expect(screen.getByText("include_labels")).toBeInTheDocument();
     expect(screen.getByText("scene_templates.md")).toBeInTheDocument();
     expect(screen.queryByText("Données RAG techniques")).not.toBeInTheDocument();
@@ -1531,8 +1531,8 @@ describe("studio kernel components", () => {
 
     expect(translated).toHaveLength(3);
     expect(translated.join(" ")).not.toMatch(/free-form|does not participate|whitelisted/);
-    expect(translated.join(" ")).toMatch(/contexte de planification contrôlé/);
-    expect(translated.join(" ")).toMatch(/RequirementSpec/);
+    expect(translated.join(" ")).toMatch(/contexte contrôlé/);
+    expect(translated.join(" ")).toMatch(/extraction initiale des exigences/);
     expect(translated.join(" ")).toMatch(/explicitement autorisés/);
   });
 
@@ -1654,6 +1654,41 @@ describe("studio kernel components", () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
+  it("shows a product label from component evidence instead of the backend identity", () => {
+    render(
+      <SceneCompositionPanel
+        assemblyPlan={null}
+        componentProofs={{
+          schema_version: "1.0",
+          workflow_id: "wf_labels",
+          components: [{
+            component_id: "sector_antennas",
+            role_id: "sector_antenna",
+            origin: "catalog",
+            strategy: "reuse",
+            generation_strategy: "imported_glb_exact",
+            asset_id: "ANT_PANEL_5G_001",
+            quantity: 1,
+            instances: [{
+              instance_id: "S2",
+              object_role: "antenna",
+              semantic_root: "antenna_S2_ANT_PANEL_5G_001",
+              geometry_source: "imported_glb_exact",
+              qa: null
+            }],
+            qa: null
+          }],
+          geometry_programs: []
+        }}
+        selectedSemanticRoot="antenna_S2_ANT_PANEL_5G_001"
+      />
+    );
+
+    const selectionStatus = screen.getByRole("status");
+    expect(selectionStatus).toHaveTextContent("antenne du secteur S2");
+    expect(selectionStatus).not.toHaveTextContent("ANT_PANEL_5G_001");
+  });
+
   it("shows a version-bound Blender sector inspection only for the selected exported component", () => {
     render(
       <SceneCompositionPanel
@@ -1677,12 +1712,12 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByRole("img", { name: "Rendu Blender d’inspection du secteur S1" }))
+    expect(screen.getByRole("img", { name: "Vue rapprochée du secteur S1" }))
       .toHaveAttribute(
         "src",
         "http://127.0.0.1:8000/designs/wf_1/sector-previews/3696ad59777e09d5?version_id=v12345678"
       );
-    expect(screen.getByText("Identité réexportée par le GLB : vérifiée")).toBeInTheDocument();
+    expect(screen.getByText("Identité dans le modèle 3D : vérifiée")).toBeInTheDocument();
     expect(screen.getByText(/qualification constructeur ni une validation de pose/)).toBeInTheDocument();
   });
 
@@ -2067,7 +2102,7 @@ describe("studio kernel components", () => {
     expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(
       "Une passerelle CAD B-Rep vérifiée est requise"
     );
-    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(/Prêt pour Blender\s*non/);
+    expect(screen.getByLabelText("Résultat du probe géométrique")).toHaveTextContent(/Géométrie exploitable\s*non/);
     expect(screen.queryByRole("button", { name: /utiliser.*blender|générer/i })).not.toBeInTheDocument();
   });
 
@@ -2158,7 +2193,7 @@ describe("studio kernel components", () => {
 
     expect(screen.getByRole("button", { name: "Bibliothèque" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Intelligence" }));
-    expect(screen.getByText("RAG et preuves")).toBeInTheDocument();
+    expect(screen.getByText("Sources et décisions")).toBeInTheDocument();
     expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
   });
 

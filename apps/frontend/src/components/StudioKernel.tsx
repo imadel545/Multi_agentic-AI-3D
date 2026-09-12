@@ -282,13 +282,13 @@ export function ChatCommandPanel({
     : revisionMode
       ? "Demandez un changement précis. La version actuelle reste disponible si les contrôles refusent la modification."
       : disabled
-        ? "La demande confirmée est en cours d’assemblage. Le résultat ne sera annoncé qu’après Blender et la QA."
+        ? "La demande confirmée est en cours d’assemblage. Le résultat ne sera annoncé qu’après construction et vérification du modèle 3D."
       : phase === "completed"
         ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
         : phase === "failed"
           ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération vérifiée."
           : creationPath === "free" ? "Décrivez l’objet et ses contraintes. Le moteur choisit le domaine et contrôle la construction avant de publier un résultat."
-          : "Les contraintes sont extraites puis confirmées avant toute génération Blender.";
+          : "Les contraintes sont extraites puis confirmées avant toute construction du modèle 3D.";
   const failedIssue = phase === "failed" && failureIssue
     ? humanizeUserIssue(failureIssue)
     : null;
@@ -1240,7 +1240,7 @@ export function LiveGenerationOverlay({
   const message =
     liveOperation?.progress_message ??
     (intent === "revision"
-      ? "Le patch est interprété, exécuté dans Blender puis contrôlé avant de remplacer la version visible."
+      ? "La modification est interprétée, appliquée au modèle 3D puis contrôlée avant de remplacer la version visible."
       : intent === "rollback"
         ? "La version sélectionnée est vérifiée avant de redevenir active."
         : "Les spécialistes coordonnent la conception et publient leurs preuves au fur et à mesure.");
@@ -1307,7 +1307,7 @@ function humanOperationLabel(operation: string | null | undefined): string | nul
     return "Conception du plan 3D";
   }
   if (normalized.includes("blender") || normalized.includes("build") || normalized.includes("geometry")) {
-    return "Construction dans Blender";
+    return "Construction du modèle 3D";
   }
   if (normalized.includes("qa") || normalized.includes("quality") || normalized.includes("certif")) {
     return "Vérification du résultat";
@@ -1974,13 +1974,13 @@ export function QaPanel({
               {bundle.status === "failed"
                 ? qa?.blocked_before_qa === true
                   ? "La conception a été bloquée avant la QA; aucun contrôle 3D ne peut être annoncé."
-                  : "La conception s’est arrêtée avant la construction Blender; aucun contrôle 3D ne peut être annoncé."
-                : "Aucune preuve complète de construction Blender et de QA n’est disponible pour ce résultat."}
+                  : "La conception s’est arrêtée avant la construction du modèle; aucun contrôle 3D ne peut être annoncé."
+                : "Aucune preuve complète de construction et de vérification 3D n’est disponible pour ce résultat."}
             </p>
           </div>
         </div>
       ) : (
-        <p className="muted">La vérification apparaîtra après une construction Blender réelle.</p>
+        <p className="muted">La vérification apparaîtra après la construction réelle du modèle 3D.</p>
       )}
       {bundle ? (
         <div className="qa-evidence-split">
@@ -2211,12 +2211,12 @@ export function RagEvidencePanel({
 }) {
   const summary = summarizeRagEvidence(evidence);
   return (
-    <section className="drawer-section" aria-label="RAG evidence">
-      <PanelTitle icon={<Cpu size={17} />} title="RAG et preuves" />
+    <section className="drawer-section" aria-label="Sources et décisions de conception">
+      <PanelTitle icon={<Cpu size={17} />} title="Sources et décisions" />
       <div className="metric-grid">
         <Metric label="Provider" value={bundle?.rag_reranker_provider ?? "unknown"} />
         <Metric label="Recherche" value={serviceStatusLabel(bundle?.rag_retrieval_status)} />
-        <Metric label="Reranker" value={bundle?.rag_reranker_status ?? "unknown"} />
+        <Metric label="Classement des sources" value={serviceStatusLabel(bundle?.rag_reranker_status)} />
         <Metric label="Sources" value={String(bundle?.rag_context_count ?? 0)} />
         <Metric label="Extraction" value={summary.ragUsedForExtraction ? "oui" : "non"} />
         <Metric label="Planning" value={summary.ragUsedForPlanning ? "oui" : "non"} />
@@ -2234,24 +2234,24 @@ export function RagEvidencePanel({
         </p>
       ) : null}
       {loading ? (
-        <p className="muted" aria-live="polite">Chargement des preuves RAG vérifiées…</p>
+        <p className="muted" aria-live="polite">Chargement des sources et décisions vérifiées…</p>
       ) : error ? (
         <ResourceRecovery
-          label="Les preuves RAG n’ont pas pu être chargées."
+          label="Les sources et décisions n’ont pas pu être chargées."
           message={error}
           onRetry={onRetry}
         />
       ) : evidence ? (
         <>
           <List
-            title="Hints appliqués au plan"
+            title="Indices appliqués au plan"
             items={summary.appliedHints}
-            empty="Aucun hint n’est prouvé comme appliqué au SceneSpec."
+            empty="Aucun indice récupéré n’est prouvé comme appliqué au plan 3D."
           />
           <List
-            title="Hints candidats récupérés"
+            title="Indices candidats récupérés"
             items={summary.candidateHints}
-            empty="Aucun hint candidat remonté."
+            empty="Aucun indice candidat remonté."
           />
           <div className="source-list">
             {summary.sources.length ? (
@@ -2263,17 +2263,17 @@ export function RagEvidencePanel({
                 </article>
               ))
             ) : (
-              <p className="muted">Aucune source RAG exploitable affichable.</p>
+              <p className="muted">Aucune source exploitable affichable.</p>
             )}
           </div>
           <List
-            title="Limites RAG"
+            title="Limites de la recherche"
             items={summary.limitations.map(humanRagLimitation)}
-            empty="Aucune limite RAG remontée."
+            empty="Aucune limite de recherche remontée."
           />
         </>
       ) : (
-        <p className="muted">Aucune preuve RAG chargée; le frontend n’en invente pas.</p>
+        <p className="muted">Aucune source de conception chargée; le studio n’en invente pas.</p>
       )}
     </section>
   );
@@ -2582,7 +2582,7 @@ export function summarizeStages(events: NormalizedWorkflowEvent[], timeline: Tim
     },
     {
       phase: "generation",
-      label: "Construction dans Blender",
+      label: "Construction du modèle 3D",
       phases: ["generation", "blender", "viewer"],
       nodes: ["generate_blender", "blender_worker", "blender_failure_handler"]
     },
@@ -2959,7 +2959,7 @@ function humanTowerType(towerType: string): string {
 
 function humanAdaptationTool(tool: string): string {
   return {
-    parametric_rebuild: "reconstruction paramétrique Blender",
+    parametric_rebuild: "reconstruction paramétrique du composant",
     sector_layout: "placement radio contrôlé",
     asset_transform: "transformation d’asset",
     scene_visibility: "composition de scène",
@@ -3083,7 +3083,7 @@ function nextUserAction(bundle: ViewerBundle | null, issueCount: number): string
     return "Lire les alertes, corriger la demande, puis relancer.";
   }
   if (bundle.generation_mode !== "real_blender") {
-    return "Utiliser la preview seulement comme fallback; corriger Blender avant validation.";
+    return "Utiliser l’aperçu seulement comme secours; corriger la construction 3D avant validation.";
   }
   if (bundle.mesh_qa_passed === false) {
     return "Inspecter la QA et les alertes avant de considérer le GLB exploitable.";
@@ -3181,19 +3181,19 @@ export function humanRagLimitation(value: string): string {
     normalized.includes("evidence and controlled planning context") ||
     normalized.includes("not a free-form planner")
   ) {
-    return "Le RAG fournit des preuves et un contexte de planification contrôlé; il ne planifie jamais librement la géométrie.";
+    return "La recherche documentaire fournit des preuves et un contexte contrôlé; elle ne décide pas librement de la géométrie.";
   }
   if (
     normalized.includes("does not participate in requirementspec extraction") ||
     normalized.includes("not used for requirementspec extraction")
   ) {
-    return "Le RAG ne participe pas à l’extraction du RequirementSpec dans cette version.";
+    return "La recherche documentaire ne participe pas à l’extraction initiale des exigences dans cette version.";
   }
   if (
     normalized.includes("whitelisted") &&
     normalized.includes("planning_hints")
   ) {
-    return "Seuls les indices de planification explicitement autorisés peuvent influencer le SceneSpec.";
+    return "Seuls les indices de planification explicitement autorisés peuvent influencer le plan 3D.";
   }
   if (normalized.includes("reranker") && normalized.includes("unavailable")) {
     return "Le reranker NVIDIA est indisponible; l’ordre vectoriel est conservé et le mode dégradé reste signalé.";
@@ -3201,7 +3201,7 @@ export function humanRagLimitation(value: string): string {
   if (/^(le|la|les|un|une|seul|seuls|aucun|aucune)\b/i.test(value.trim())) {
     return value.trim();
   }
-  return "Une limitation RAG supplémentaire est déclarée par le backend; son détail technique reste disponible dans les livrables.";
+  return "Une limitation supplémentaire de la recherche est déclarée; son détail technique reste disponible dans les livrables.";
 }
 
 function StatusPill({
@@ -3291,7 +3291,7 @@ function generationTruth(bundle: ViewerBundle | null): string {
     return "aucun";
   }
   if (bundle.generation_mode === "real_blender") {
-    return "Blender réel";
+    return "Construction 3D réelle";
   }
   return bundle.generation_mode ?? "unknown";
 }

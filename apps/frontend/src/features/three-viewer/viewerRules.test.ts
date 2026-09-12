@@ -162,7 +162,7 @@ describe("viewer source rules", () => {
         "QA attention",
         "Intégrité vérifiée",
         "Fallback LLM",
-        "RAG dégradé"
+        "Recherche documentaire avec limites"
       ])
     );
   });

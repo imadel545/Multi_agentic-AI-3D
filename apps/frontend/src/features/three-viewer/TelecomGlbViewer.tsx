@@ -31,6 +31,7 @@ type TelecomGlbViewerProps = {
   onReloadBundle?: () => void | Promise<void>;
   probeWebGL?: () => boolean;
   selectedSemanticRoot?: string | null;
+  selectedComponentLabel?: string | null;
   focusSemanticRoots?: readonly string[];
   knownSemanticRoots?: readonly string[];
   onSelectSemanticRoot?: (root: string | null) => void;
@@ -53,6 +54,7 @@ export function TelecomGlbViewer({
   onReloadBundle,
   probeWebGL = hasUsableWebGL,
   selectedSemanticRoot = null,
+  selectedComponentLabel = null,
   focusSemanticRoots = EMPTY_FOCUS_SEMANTIC_ROOTS,
   knownSemanticRoots = [],
   onSelectSemanticRoot,
@@ -173,7 +175,7 @@ export function TelecomGlbViewer({
         <div className="canvas-frame">
           {selectedSemanticRoot ? (
             <div className="viewer-selection" aria-live="polite">
-              <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {humanizeSemanticRoot(selectedSemanticRoot)}
+              <Layers3 size={15} aria-hidden="true" /> Composant sélectionné : {selectedComponentLabel ?? "composant 3D"}
               {focusSemanticRoots.length > 1 ? <span> · Cadrage du sous-assemblage mécanique vérifié</span> : null}
               {onSelectSemanticRoot ? <button type="button" onClick={showWholeDesign}>Désélectionner</button> : null}
             </div>
@@ -438,10 +440,6 @@ export function semanticRootsBounds(scene: Object3D, roots: readonly string[]): 
     }
   });
   return bounds.isEmpty() ? null : bounds;
-}
-
-function humanizeSemanticRoot(value: string): string {
-  return value.replaceAll("_", " ");
 }
 
 function ViewerEmpty({ message }: { message: string }) {

@@ -100,7 +100,7 @@ export function viewerBadges(bundle: ViewerBundle | null): string[] {
     badges.push("Fallback LLM");
   }
   if (bundle.rag_reranker_degraded_reason) {
-    badges.push("RAG dégradé");
+    badges.push("Recherche documentaire avec limites");
   }
   const assetSummary = bundle.asset_import_summary ?? {};
   const fallbackCount = Number(assetSummary["procedural_fallback_count"] ?? 0);

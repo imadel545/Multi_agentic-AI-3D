@@ -7,7 +7,12 @@ import type {
   SectorPreviewSummary,
   TowerAccessSummary
 } from "../api/schemas";
-import { compactFidelityLabel, humanSemanticRole, visualReviewStatusLabel } from "./StudioDisplayHelpers";
+import {
+  compactFidelityLabel,
+  humanComponentInstanceLabel,
+  humanSemanticRole,
+  visualReviewStatusLabel
+} from "./StudioDisplayHelpers";
 import { PanelTitle, ResourceRecovery } from "./StudioPrimitives";
 
 export function sceneInstanceCount(proofs: ComponentProofs): number {
@@ -124,28 +129,31 @@ export function SceneCompositionPanel({
     : undefined;
   const selectedSectorPreviewUrl = toAbsoluteUrl(selectedSectorPreview?.preview_url);
   const selectedTowerAccess = selectedSemanticRoot === towerAccess?.semantic_root;
+  const selectedComponentLabel = selectedTowerAccess
+    ? "accès et maintenance du pylône"
+    : humanComponentInstanceLabel(componentProofs, selectedSemanticRoot);
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
       <PanelTitle icon={<Layers3 size={17} />} title="Composition vérifiable" />
       {selectedSemanticRoot ? (
         <>
           <div className="scene-plan-summary" role="status">
-            <strong>Composant sélectionné : {selectedTowerAccess ? "accès et maintenance du pylône" : selectedSemanticRoot.replaceAll("_", " ")}</strong>
+            <strong>Composant sélectionné : {selectedComponentLabel}</strong>
             <small>{selectedTowerAccess
               ? "Cet ensemble est vérifié pour inspection. Sa modification ciblée n’est pas encore disponible. Désélectionnez-le pour demander une révision générale."
               : "La prochaine modification sera limitée à ce composant et vérifiée sur la version sélectionnée. Ses dépendances mécaniques peuvent suivre."}</small>
             <button className="secondary-action" type="button" onClick={() => onSelect?.(null)}>Désélectionner</button>
           </div>
           {selectedSectorPreview && selectedSectorPreviewUrl ? (
-            <article className="asset-evidence-card verified sector-preview-card" aria-label={`Aperçu Blender du secteur ${selectedSectorPreview.sector_id}`}>
+            <article className="asset-evidence-card verified sector-preview-card" aria-label={`Vue rapprochée vérifiée du secteur ${selectedSectorPreview.sector_id}`}>
               <img
-                alt={`Rendu Blender d’inspection du secteur ${selectedSectorPreview.sector_id}`}
+                alt={`Vue rapprochée du secteur ${selectedSectorPreview.sector_id}`}
                 src={selectedSectorPreviewUrl}
               />
               <div>
-                <strong>Rendu Blender du secteur {selectedSectorPreview.sector_id}</strong>
+                <strong>Vue rapprochée vérifiée du secteur {selectedSectorPreview.sector_id}</strong>
                 <small>
-                  Identité réexportée par le GLB : {selectedSectorPreview.post_blender_identity_verified ? "vérifiée" : "non vérifiée"}
+                  Identité dans le modèle 3D : {selectedSectorPreview.post_blender_identity_verified ? "vérifiée" : "non vérifiée"}
                 </small>
                 <small>
                   Cadrage et contraste : {selectedSectorPreview.visual_framing_verified ? "vérifiés" : "à examiner"}
@@ -153,8 +161,8 @@ export function SceneCompositionPanel({
                     ? ` · sujet ${Math.round(selectedSectorPreview.subject_bbox_height_ratio * 100)} % de la hauteur`
                     : ""}
                 </small>
-                <small>Sous-assemblage cadré : {selectedSectorPreview.framed_roles.join(", ")}</small>
-                <p>Les rôles exportés du secteur incluent aussi {selectedSectorPreview.exported_roles.join(", ")}. Ce rendu cadre la pose ; il ne constitue pas une qualification constructeur ni une validation de pose.</p>
+                <small>Sous-assemblage cadré : {selectedSectorPreview.framed_roles.map(humanSemanticRole).join(", ")}</small>
+                <p>Le modèle exporté contient aussi {selectedSectorPreview.exported_roles.map(humanSemanticRole).join(", ")}. Cette vue facilite l’inspection ; elle ne constitue pas une qualification constructeur ni une validation de pose.</p>
               </div>
             </article>
           ) : null}
@@ -323,7 +331,7 @@ export function SceneCompositionPanel({
                   <strong>{humanSemanticRole(program.role_id)}</strong>
                   <small>{strategyLabel(program.strategy)} · {program.origin === "catalog_asset"
                     ? "géométrie source importée"
-                    : "programme géométrique"}</small>
+                    : "géométrie générée"}</small>
                 </div>
                 <span>{program.quantity}</span>
               </div>
