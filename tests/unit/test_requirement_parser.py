@@ -213,3 +213,15 @@ def test_parser_marks_planning_fields_that_are_inferred() -> None:
     assert "DEFAULT_BEAMWIDTH_USED" in warning_codes
     assert "DEFAULT_CABLES_USED" in warning_codes
     assert "DEFAULT_BEAMS_USED" in warning_codes
+
+
+def test_negation_is_a_word_not_part_of_monopole() -> None:
+    included = parse_requirements_text("Site 5G sur monopole 15m avec RRU et câbles.")
+    excluded = parse_requirements_text("Site 5G sur monopole 15m sans RRU ni câbles.")
+    english = parse_requirements_text("5G monopole 15m, no RRU, without cables.")
+    assert included.include_rru is True
+    assert included.include_cables is True
+    assert excluded.include_rru is False
+    assert excluded.include_cables is False
+    assert english.include_rru is False
+    assert english.include_cables is False

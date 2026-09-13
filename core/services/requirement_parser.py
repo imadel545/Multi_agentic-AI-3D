@@ -553,7 +553,7 @@ def _contains_negation_for(text: str, terms: list[str]) -> bool:
     )
     for term in terms:
         escaped = re.escape(term.lower().replace("’", "'"))
-        if re.search(rf"{negation_prefix}[^.!?;:]{{0,96}}{escaped}", normalized):
+        if re.search(rf"\b{negation_prefix}\b[^.!?;:]{{0,96}}\b{escaped}", normalized):
             return True
         if re.search(rf"\bni\s+(?:de\s+|d[' ]\s*)?{escaped}", normalized):
             return True
