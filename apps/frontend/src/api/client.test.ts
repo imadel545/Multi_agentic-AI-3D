@@ -170,8 +170,28 @@ describe("TelecomStudioApi", () => {
       qa: { status: "not_run", checks: [], limitations: [] },
       milestone_evidence_eligible: false,
       milestone_evidence_failures: ["Asset is not qualified for generation."],
+      usage_rights: {
+        status: "review_only",
+        project_use_authorized: false,
+        derivative_use_authorized: false,
+        redistribution_authorized: false,
+        evidence: "Internal evidence review only."
+      },
+      local_evidence_status: "unavailable",
       representations: [],
-      previews: []
+      previews: [],
+      review: {
+        status: "reference_only",
+        summary: "La source peut être examinée, mais elle reste exclue des designs.",
+        checks: [],
+        blockers: [{ code: "admission", message: "Ce composant ne peut pas entrer dans un design." }],
+        available_actions: [{
+          action_id: "open_vendor_source",
+          kind: "external_source",
+          label: "Ouvrir la source constructeur",
+          url: "https://source.sierrawireless.com/6001124.step"
+        }]
+      }
     }));
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
 
@@ -179,6 +199,7 @@ describe("TelecomStudioApi", () => {
 
     expect(result.generation_eligible).toBe(false);
     expect(result.qualification.mesh_integrity_verified).toBe(true);
+    expect(result.review.status).toBe("reference_only");
     expect(fetcher).toHaveBeenCalledWith(
       new URL(
         "/assets/ANT_SIERRA_6001124_REFERENCE/provenance",

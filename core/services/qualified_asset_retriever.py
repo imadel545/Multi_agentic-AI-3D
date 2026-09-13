@@ -131,7 +131,7 @@ class QualifiedAssetCandidateRetriever:
         if manifest.qa_evidence.status != "passed":
             risks.append("Professional asset QA has not passed.")
         evidence = self.evidence_verifier.verify(manifest)
-        admission = self.evidence_verifier.verify_generation_admission(manifest)
+        admission = self.evidence_verifier.verify_effective_generation_admission(manifest)
         risks.extend(admission.failures)
         risks.extend(evidence.failures)
         risks.extend(rejection_risks or [])
@@ -150,6 +150,7 @@ class QualifiedAssetCandidateRetriever:
                 or manifest.source
             ),
             license=manifest.license,
+            usage_rights=manifest.usage_rights,
             source_format=manifest.resolved_source_format,
             source_file_sha256=manifest.source_file_sha256,
             geometry_status=manifest.resolved_geometry_status,

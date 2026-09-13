@@ -2,7 +2,9 @@ import json
 import re
 from pathlib import Path
 
+from core.contracts.assets import AssetManifest
 from core.rag.models import RagDocument
+from core.services.asset_evidence import ProfessionalAssetVerifier
 
 KNOWLEDGE_COLLECTIONS = {
     "telecom_rules.md": "telecom_rules",
@@ -84,8 +86,14 @@ def _load_knowledge_documents(project_root: Path, knowledge_dir: Path) -> list[R
 
 def _load_asset_manifest_documents(project_root: Path, manifests_dir: Path) -> list[RagDocument]:
     documents: list[RagDocument] = []
+    verifier = ProfessionalAssetVerifier(project_root)
     for path in sorted(manifests_dir.glob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
+        manifest = AssetManifest.model_validate(payload)
+        admission = verifier.verify_effective_generation_admission(manifest)
+        if not admission.eligible:
+            continue
+        qualification = payload["qualification"]
         asset_text = _asset_text(payload)
         documents.append(
             RagDocument(
@@ -99,6 +107,9 @@ def _load_asset_manifest_documents(project_root: Path, manifests_dir: Path) -> l
                     "asset_id": payload["asset_id"],
                     "asset_type": payload["type"],
                     "status": payload.get("status", "unknown"),
+                    "qualification_status": qualification["status"],
+                    "generation_eligible": True,
+                    "geometry_fidelity": payload.get("geometry_fidelity", "schematic"),
                     "version": payload.get("version", "unknown"),
                     "network_type": payload.get("compatible_networks", []),
                     "tower_type": payload.get("compatible_tower_types", []),
@@ -120,6 +131,11 @@ def _asset_text(payload: dict) -> str:
             f"compatible_networks: {', '.join(payload.get('compatible_networks', []))}",
             f"compatible_tower_types: {', '.join(payload.get('compatible_tower_types', []))}",
             f"status: {payload.get('status', 'unknown')}",
+            f"qualification_status: {payload.get('qualification', {}).get('status', 'unknown')}",
+            f"geometry_fidelity: {payload.get('geometry_fidelity', 'schematic')}",
+            f"source: {payload.get('source', 'unknown')}",
+            "qualification_limitations: "
+            + "; ".join(payload.get("qualification", {}).get("limitations", [])),
             f"version: {payload.get('version', 'unknown')}",
         ]
     )

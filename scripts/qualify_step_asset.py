@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import json
 import math
+import shutil
 import statistics
 import subprocess
 import time
@@ -31,6 +32,11 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 
 from core.services.blender_runner import BlenderRunner
+from core.services.blender_runtime import (
+    QUALIFIED_BLENDER_VERSION,
+    QUALIFIED_BLENDER_VERSION_TUPLE,
+    output_reports_qualified_blender,
+)
 from core.services.step_mesh_extraction import extract_step_mesh
 
 _PREVIEW_FILES = {
@@ -135,9 +141,10 @@ def qualify(
         }
 
         root = Path(__file__).resolve().parents[1]
-        binary = BlenderRunner(root, blender)._resolve_blender_binary()
+        binary = _resolve_qualification_blender(root, blender)
         if binary is None:
             raise ValueError("Blender is required; no placeholder output is generated.")
+        report["qualification_runtime"] = _probe_qualified_blender(binary, root)
         blender_log = output / "blender.log"
         with blender_log.open("wb") as log:
             subprocess.run(
@@ -381,6 +388,42 @@ def _hash(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _resolve_qualification_blender(root: Path, requested: str) -> Path | None:
+    """Resolve an explicit CLI binary before the ambient environment override."""
+
+    if requested != "blender":
+        candidate = Path(requested).expanduser()
+        if candidate.is_file():
+            return candidate
+        resolved = shutil.which(requested)
+        return Path(resolved) if resolved else None
+    return BlenderRunner(root, requested)._resolve_blender_binary()
+
+
+def _probe_qualified_blender(binary: Path, root: Path) -> dict:
+    probe = subprocess.run(
+        [str(binary), "--background", "--factory-startup", "--version"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    transcript = "\n".join(part for part in (probe.stdout, probe.stderr) if part)
+    if probe.returncode != 0 or not output_reports_qualified_blender(transcript):
+        raise ValueError(
+            f"Qualification requires Blender {QUALIFIED_BLENDER_VERSION}; "
+            "the selected executable is not admitted."
+        )
+    return {
+        "version": QUALIFIED_BLENDER_VERSION,
+        "version_tuple": list(QUALIFIED_BLENDER_VERSION_TUPLE),
+        "background": True,
+        "factory_startup": True,
+        "binary_name": binary.name,
+    }
 
 
 def _artifact_record(path: Path) -> dict:

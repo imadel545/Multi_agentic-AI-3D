@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import httpx
@@ -10,6 +11,41 @@ from core.rag.embeddings import HashEmbeddingProvider, build_embedding_provider
 from core.rag.models import RagSearchResult
 from core.rag.reranker import NvidiaReranker, PassthroughReranker, build_reranker
 from core.rag.text import normalized_tokens
+
+
+def test_static_rag_excludes_reference_only_assets_from_planning_context() -> None:
+    documents = load_rag_documents(Path.cwd())
+    asset_ids = {
+        document.payload.get("asset_id")
+        for document in documents
+        if document.payload.get("doc_type") == "asset_manifest"
+    }
+
+    assert "ANT_SIERRA_6001124_REFERENCE" not in asset_ids
+    assert "ANT_PANEL_4G_001" in asset_ids
+    panel = next(
+        document
+        for document in documents
+        if document.payload.get("asset_id") == "ANT_PANEL_4G_001"
+    )
+    assert "qualification_status: qualified_for_generation" in panel.text
+    assert panel.payload["generation_eligible"] is True
+
+
+def test_static_rag_excludes_an_exact_asset_when_its_runtime_file_is_missing(
+    tmp_path: Path,
+) -> None:
+    manifests = tmp_path / "assets" / "manifests"
+    manifests.mkdir(parents=True)
+    source = Path("assets/manifests/ANT_PANEL_4G_001.json")
+    shutil.copy2(source, manifests / source.name)
+
+    documents = load_rag_documents(tmp_path)
+
+    assert not any(
+        document.payload.get("asset_id") == "ANT_PANEL_4G_001"
+        for document in documents
+    )
 
 
 def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:

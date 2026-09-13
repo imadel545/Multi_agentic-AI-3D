@@ -436,6 +436,10 @@ class AssetInventoryEntry(BaseModel):
     milestone_evidence_eligible: bool = False
     milestone_evidence_failures: list[str] = Field(default_factory=list)
     preview_set: list[dict[str, Any]] = Field(default_factory=list)
+    local_evidence_status: Literal["available", "partial", "unavailable", "not_published"] = (
+        "not_published"
+    )
+    reference_evidence_available: bool = False
     provenance_url: str | None = None
     verified_file_sha256: str | None = None
     qualified_file_hash_matches: bool | None = None
@@ -459,11 +463,61 @@ class AssetInventoryResponse(BaseModel):
     professional_evidence_asset_count: int
     reference_only_asset_count: int
     qualified_integrity_failure_count: int
+    professional_evidence_rejected_count: int = 0
+    reference_evidence_missing_count: int = 0
     procedural_fallback_count: int
     parametric_generation_count: int
     procedural_generation_required: bool
     entries: list[AssetInventoryEntry]
     missing_files: list[AssetInventoryEntry] = Field(default_factory=list)
+
+
+class AssetQualificationReviewCheck(BaseModel):
+    check_id: str
+    status: Literal["passed", "incomplete"]
+    title: str
+    detail: str
+
+
+class AssetQualificationReviewBlocker(BaseModel):
+    code: str
+    message: str
+
+
+class AssetQualificationReviewAction(BaseModel):
+    action_id: str
+    kind: Literal["internal_preview", "external_source"]
+    label: str
+    url: str
+
+
+class AssetQualificationReview(BaseModel):
+    status: Literal[
+        "technical_asset", "reference_only", "blocked", "evidence_invalid", "admitted"
+    ]
+    summary: str
+    checks: list[AssetQualificationReviewCheck] = Field(default_factory=list)
+    blockers: list[AssetQualificationReviewBlocker] = Field(default_factory=list)
+    available_actions: list[AssetQualificationReviewAction] = Field(default_factory=list)
+
+
+class AssetProvenanceResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    asset_id: str
+    family: str
+    source_format: str
+    geometry_status: str
+    generation_eligible: bool
+    qualification: dict[str, Any]
+    qa: dict[str, Any]
+    milestone_evidence_eligible: bool
+    milestone_evidence_failures: list[str] = Field(default_factory=list)
+    usage_rights: dict[str, Any]
+    local_evidence_status: Literal["available", "partial", "unavailable", "not_published"]
+    representations: list[dict[str, Any]] = Field(default_factory=list)
+    previews: list[dict[str, Any]] = Field(default_factory=list)
+    review: AssetQualificationReview
 
 
 class AssetLibrarySummaryResponse(BaseModel):

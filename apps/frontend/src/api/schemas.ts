@@ -1,4 +1,9 @@
 import { z } from "zod";
+
+const HttpUrlSchema = z.string().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === "http:" || protocol === "https:";
+}, "URL must use HTTP or HTTPS");
 import { publicPathIssue } from "./publicUrl";
 
 const ForbiddenPublicFields = new Set([
@@ -906,17 +911,20 @@ export const QualifiedAssetInventoryEntrySchema = publicSchema(
     reference: z.string().nullish(),
     source: z.string().nullish(),
     source_provenance: z.string().nullish(),
-    original_url: z.string().url().nullish(),
+    original_url: HttpUrlSchema.nullish(),
     source_format: z.string().nullish(),
     dimensions_m: UnknownRecord.nullish(),
     license: z.string().nullish(),
     geometry_status: z.string().nullish(),
+    asset_import_mode: z.string().optional(),
     generation_eligible: z.boolean().default(false),
     qualification_status: z.string(),
     allowed_generation_modes: z.array(z.string()).default([]),
     qualification_limitations: z.array(z.string()).default([]),
     qualified_file_hash_matches: z.boolean().nullish(),
     preview_set: z.array(AssetPreviewSchema).optional(),
+    local_evidence_status: z.enum(["available", "partial", "unavailable", "not_published"]).optional(),
+    reference_evidence_available: z.boolean().optional(),
     provenance_url: z.string().nullish(),
     visual_review_status: z
       .enum(["not_requested", "passed_advisory", "review_required", "failed"])
@@ -937,6 +945,8 @@ export const AssetInventorySchema = publicSchema(
     import_qualified_glb_count: z.number().int().nonnegative().default(0),
     generation_eligible_asset_count: z.number().int().nonnegative().default(0),
     professional_evidence_asset_count: z.number().int().nonnegative().default(0),
+    professional_evidence_rejected_count: z.number().int().nonnegative().optional(),
+    reference_evidence_missing_count: z.number().int().nonnegative().optional(),
     reference_only_asset_count: z.number().int().nonnegative().default(0),
     qualified_integrity_failure_count: z.number().int().nonnegative().default(0),
     entries: z.array(QualifiedAssetInventoryEntrySchema).default([]),
@@ -1035,7 +1045,7 @@ export const AssetProvenanceSchema = publicSchema(
     reference: z.string().nullish(),
     source: z.string().nullish(),
     source_provenance: z.string().nullish(),
-    original_url: z.string().url().nullish(),
+    original_url: HttpUrlSchema.nullish(),
     source_format: z.string(),
     source_file_sha256: z.string().regex(/^[a-f0-9]{64}$/).nullish(),
     license: z.string().nullish(),
@@ -1070,8 +1080,66 @@ export const AssetProvenanceSchema = publicSchema(
     ),
     milestone_evidence_eligible: z.boolean().default(false),
     milestone_evidence_failures: z.array(z.string()).default([]),
+    usage_rights: publicSchema(
+      UnknownRecord.extend({
+        status: z.enum(["unknown", "review_only", "project_authorized"]),
+        project_use_authorized: z.boolean(),
+        derivative_use_authorized: z.boolean(),
+        redistribution_authorized: z.boolean(),
+        evidence: z.string().nullish()
+      })
+    ),
+    local_evidence_status: z.enum(["available", "partial", "unavailable", "not_published"]),
     representations: z.array(UnknownRecord).default([]),
-    previews: z.array(UnknownRecord).default([])
+    previews: z.array(AssetPreviewSchema).default([]),
+    review: publicSchema(
+      UnknownRecord.extend({
+        status: z.enum([
+          "technical_asset",
+          "reference_only",
+          "blocked",
+          "evidence_invalid",
+          "admitted"
+        ]),
+        summary: z.string(),
+        checks: z.array(
+          publicSchema(
+            UnknownRecord.extend({
+              check_id: z.string(),
+              status: z.enum(["passed", "incomplete"]),
+              title: z.string(),
+              detail: z.string()
+            })
+          )
+        ).default([]),
+        blockers: z.array(
+          publicSchema(
+            UnknownRecord.extend({
+              code: z.string(),
+              message: z.string()
+            })
+          )
+        ).default([]),
+        available_actions: z.array(z.discriminatedUnion("kind", [
+          publicSchema(
+            UnknownRecord.extend({
+              action_id: z.string(),
+              kind: z.literal("internal_preview"),
+              label: z.string(),
+              url: z.string().startsWith("/")
+            })
+          ),
+          publicSchema(
+            UnknownRecord.extend({
+              action_id: z.string(),
+              kind: z.literal("external_source"),
+              label: z.string(),
+              url: HttpUrlSchema
+            })
+          )
+        ])).default([])
+      })
+    )
   })
 );
 

@@ -53,7 +53,7 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `POST` | `/designs/{id}/versions/{vid}/rollback` | Rollback vers une version. |
 | `GET` | `/designs/{id}/artifacts/{name}` | Télécharger GLB, PNG, metadata, rapports. |
 | `GET` | `/assets/inventory` | Inventaire des assets et leur état. |
-| `GET` | `/assets/{asset_id}/provenance` | Provenance publique, licence, fidélité, route de conversion et état de qualification, sans chemin local. |
+| `GET` | `/assets/{asset_id}/provenance` | Provenance publique, droits structurés, fidélité, disponibilité locale des preuves, route de conversion et dossier de qualification autoritaire, sans chemin local. Les actions distinguent source HTTP(S) externe et preview API interne. |
 | `GET` | `/assets/{asset_id}/previews/{view}` | Preview qualifiée publiée par le manifest; existence et hash sont vérifiés avant service. |
 | `GET` | `/assets/adaptation-capabilities` | Catalogue versionné des profils d'adaptation. |
 | `GET` | `/designs/{id}/adaptation-capabilities` | Paramètres réellement modifiables dans la version active. |
@@ -224,6 +224,12 @@ Les entrées M1 peuvent aussi exposer `preview_set`, `provenance_url`,
 `milestone_evidence_failures`. Le catalogue courant contient 14 assets
 runtime mais 0 preuve professionnelle M1; le frontend ne doit donc pas les
 présenter comme composants constructeur qualifiés.
+
+`/assets/{asset_id}/provenance` expose en plus `usage_rights`,
+`local_evidence_status` et un `review` calculé par le même gate que la sélection.
+Les liens `internal_preview` doivent être résolus par rapport à l'origine API;
+les liens `external_source` sont limités à HTTP(S). Le frontend ne reconstruit
+pas l'admission depuis des champs optimistes du manifest.
 
 `milestone_evidence_eligible` est une preuve runtime, pas une recopie du
 manifest. Le backend vérifie le confinement des chemins, l'existence et les

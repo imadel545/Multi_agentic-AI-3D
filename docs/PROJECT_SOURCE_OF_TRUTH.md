@@ -84,21 +84,24 @@ professional telecom asset or a complete usable chair. No generated catalog asse
 admitted from this path. ACIS telecom conversion, professional assembly and frontend
 integration of this inspection remain open.
 
-## Professional STEP candidate evidence — 2026-09-10
+## Professional STEP candidate evidence — 2026-09-12
 
 The bounded `scripts.qualify_step_asset` command now records a local review for
 one real manufacturer source without promoting it into generation. The source
 is the official Sierra Wireless/Semtech `6001124` 2-in-1 MIMO panel antenna
 STEP. Its manifest is `ANT_SIERRA_6001124_REFERENCE` with
 `geometry_status=reference_only`; the STEP, derived GLB and previews remain in
-the quarantined workspace outside Git.
+the quarantined workspace outside Git. The manifest preserves their immutable
+hashes; `/assets/inventory` and the review drawer expose whether those local
+bytes are available, partial or absent on the current installation.
 
 The source declares millimetres in its STEP header. OCP XDE preserved one
 top-level assembly, 20 occurrences and 18 mesh leaves with stable definition
 entries. The complete extracted extents are 0.468118 × 0.093021 × 0.044536 m
 because the two cable runs are included; the housing leaf measures about
 150 × 49 × 45 mm and is kept distinct from the assembly extents. Real Blender
-4.5.12 produced and re-imported a GLB with 18 meshes and 49,478 triangles;
+4.5.12 LTS, verified before qualification against the shared runtime contract,
+produced and re-imported a GLB with 18 meshes and 49,478 triangles;
 the independent post-Blender measurement found 126,238 vertices, 18 component
 identities and a 0.0 m maximum roundtrip vertex error. Perspective, front, side,
 top and housing close-up PNGs passed the bounded framing/contrast evidence gate.
@@ -300,7 +303,10 @@ not manufacturer fidelity, physical fastening or collision certification.
   manifest directory must resolve to `<project_root>/assets/manifests`, keeping
   API selection, snapshots, trusted-input hashing and Blender on one catalog.
 - This closes a declaration-only bypass; it does not admit a new professional
-  asset. No catalog publication transaction or rights decision is implemented.
+  asset. Structured rights status is now part of the manifest and admission
+  gate; Sierra is explicitly `review_only`, with project, derivative and
+  redistribution authorization all false. No catalog publication transaction
+  or project authorization has been completed.
   Sierra Wireless/Semtech `6001124` remains `reference_only`, and raw DWG ACIS
   remains `source_only`.
 - Consequently, no current-tree professional Blender/browser end-to-end run
@@ -1117,8 +1123,11 @@ La bibliothèque du Studio expose maintenant le dossier du candidat constructeur
 Sierra Wireless/Semtech `6001124` depuis l'inventaire réel et l'endpoint de
 provenance. L'utilisateur voit l'identité, la source STEP, les dimensions
 publiées, l'état du contrôle géométrique et les preuves encore manquantes. La
-recherche par fabricant ou référence filtre les composants sans rapport. Aucun
-bouton d'ajout ou d'utilisation n'est proposé tant que
+recherche par fabricant ou référence filtre les composants sans rapport.
+Les aperçus locaux sont résolus sur l'origine réelle de l'API et ne dépendent
+plus du proxy Vite. Le dossier reste accessible après une future admission et
+publie la décision de droits ainsi que la disponibilité locale des preuves.
+Aucun bouton d'ajout ou d'utilisation n'est proposé tant que
 `generation_eligible=false`.
 
 Cette revue ne promeut pas l'asset. Le candidat reste `reference_only` : son
@@ -1132,3 +1141,26 @@ où LibreDWG émet une valeur décimale avec point final en plus de valeurs non
 finies. La normalisation est bornée, tracée par `parser_mode` et ne rend pas le
 fichier exploitable : la sonde confirme trois solides ACIS, 34 régions, les
 unités millimètres, aucun maillage natif et aucune admission à la génération.
+
+
+### Vérification de la revue — 2026-09-13
+
+La qualification publiée réutilise le verdict effectif d'admission dans le
+registre, le retriever et les documents RAG. Les droits de projet sont
+explicites ; leur enregistrement ne constitue pas une expertise juridique.
+Une preuve QA contradictoire ne permet plus de présenter géométrie, pivot ou
+orientation comme vérifiés. Un aperçu exige son hash, une structure PNG valide
+et les dimensions déclarées ; son endpoint refuse les données incohérentes et
+sert les images valides en affichage inline. Les tests de contrat ne supposent
+plus la présence du cache Sierra ignoré par Git.
+
+Validation : 819 tests backend passent, 1 est ignoré et 55 sont désélectionnés
+hors gates Blender/provider ; 212 tests frontend passent, ainsi que TypeScript,
+bundle et Ruff. Après le changement inline, les 7 tests du contrat public ont
+été rejoués avec succès. Sur API isolée 8023 et frontend 5183, health, dossier
+et cinq PNG répondent HTTP 200. Le parcours navigateur bibliothèque → examiner
+Sierra a exposé le dossier réel, ses limites et ses cinq liens vers l'API.
+L'ouverture directe de l'image a été bloquée par le client navigateur : cette
+étape visuelle n'est donc pas déclarée acceptée. Aucune nouvelle génération
+LLM, composition professionnelle ou édition de ce candidat n'est prouvée par
+ce contrôle de consultation. Le candidat reste reference_only.

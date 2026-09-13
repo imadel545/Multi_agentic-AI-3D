@@ -1,7 +1,8 @@
 import math
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from core.contracts.common import AssetType, NetworkType, StrictModel
 from core.contracts.tower import TowerAccessGeometryProfile
@@ -120,6 +121,32 @@ class AssetQaEvidence(StrictModel):
     limitations: list[str] = Field(default_factory=list, max_length=64)
 
 
+class AssetUsageRights(StrictModel):
+    """Structured rights decision; free-form licence text alone grants no use."""
+
+    status: Literal["unknown", "review_only", "project_authorized"] = "unknown"
+    project_use_authorized: bool = False
+    derivative_use_authorized: bool = False
+    redistribution_authorized: bool = False
+    evidence: str | None = Field(default=None, min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def validate_authorization(self) -> "AssetUsageRights":
+        if self.status == "project_authorized" and not (
+            self.project_use_authorized and self.evidence
+        ):
+            raise ValueError(
+                "project-authorized rights require project use and evidence"
+            )
+        if self.status != "project_authorized" and (
+            self.project_use_authorized
+            or self.derivative_use_authorized
+            or self.redistribution_authorized
+        ):
+            raise ValueError("unapproved rights cannot authorize asset use")
+        return self
+
+
 class AssetDecisionPacket(StrictModel):
     """Bounded asset evidence supplied to a selector; never an execution instruction."""
 
@@ -132,6 +159,7 @@ class AssetDecisionPacket(StrictModel):
     reference: str | None = Field(default=None, max_length=160)
     source_provenance: str = Field(min_length=1, max_length=600)
     license: str | None = Field(default=None, max_length=300)
+    usage_rights: AssetUsageRights = Field(default_factory=AssetUsageRights)
     source_format: AssetSourceFormat
     source_file_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     geometry_status: AssetGeometryStatus
@@ -192,6 +220,9 @@ class AssetDecisionPacket(StrictModel):
                 self.generation_eligible
                 and bool(self.source_provenance)
                 and bool(self.license)
+                and self.usage_rights.status == "project_authorized"
+                and self.usage_rights.project_use_authorized
+                and bool(self.usage_rights.evidence)
                 and self.master_representation is not None
                 and self.viewer_representation is not None
                 and self.dimensions_m is not None
@@ -474,6 +505,7 @@ class AssetManifest(StrictModel):
         "internal_project_generated",
     ] = "vendor_expected"
     license: str | None = None
+    usage_rights: AssetUsageRights = Field(default_factory=AssetUsageRights)
     attribution_required: bool = False
     attribution: str | None = None
     original_url: str | None = None
@@ -494,6 +526,16 @@ class AssetManifest(StrictModel):
     allowed_parameters: list[AllowedAssetParameter] = Field(default_factory=list, max_length=48)
     transform_permissions: AssetTransformPermissions | None = None
     qualification: AssetQualification = Field(default_factory=AssetQualification)
+
+    @field_validator("original_url")
+    @classmethod
+    def validate_original_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("original_url must be an absolute HTTP(S) URL")
+        return value
 
     @model_validator(mode="after")
     def validate_geometry_profile_role(self) -> "AssetManifest":
@@ -656,6 +698,12 @@ class AssetManifest(StrictModel):
             failures.append("Source provenance is not explicitly documented.")
         if not self.license:
             failures.append("Asset licence is not explicitly documented.")
+        if not (
+            self.usage_rights.status == "project_authorized"
+            and self.usage_rights.project_use_authorized
+            and self.usage_rights.evidence
+        ):
+            failures.append("Project usage rights are not explicitly authorized and evidenced.")
         if self.geometry_fidelity != "vendor_qualified":
             failures.append("Geometry fidelity is not vendor-qualified.")
         if not (self.source_file_sha256 or self.qualification.verified_file_sha256):

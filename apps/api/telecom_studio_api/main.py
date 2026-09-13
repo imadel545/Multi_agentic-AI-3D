@@ -20,6 +20,7 @@ from apps.api.telecom_studio_api.models import (
     AssetLibraryProbeResponse,
     AssetLibrarySearchResponse,
     AssetLibrarySummaryResponse,
+    AssetProvenanceResponse,
     CreateDesignRequest,
     CreateDesignResponse,
     CurrentOperation,
@@ -88,7 +89,11 @@ from core.rag.embeddings import build_embedding_provider
 from core.rag.reranker import build_reranker
 from core.rag.service import RagIndexCompatibilityError
 from core.services.adaptation_capabilities import AdaptationCapabilityService
-from core.services.asset_evidence import ProfessionalAssetVerifier
+from core.services.asset_evidence import (
+    ProfessionalAssetVerification,
+    ProfessionalAssetVerifier,
+    preview_image_matches,
+)
 from core.services.asset_inventory import AssetInventoryService
 from core.services.asset_library import AssetLibraryError, AssetLibraryNotFound, AssetLibraryService
 from core.services.asset_registry import AssetRegistry
@@ -762,13 +767,32 @@ def get_asset(asset_id: str) -> dict:
         raise HTTPException(status_code=404, detail="asset not found") from exc
 
 
-@app.get("/assets/{asset_id}/provenance")
+@app.get("/assets/{asset_id}/provenance", response_model=AssetProvenanceResponse)
 def get_asset_provenance(asset_id: str) -> dict:
     try:
         asset = registry.get(asset_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="asset not found") from exc
-    evidence = professional_asset_verifier.verify(asset)
+    inventory_entry = asset_inventory_service.inspect_asset(asset_id)
+    evidence = ProfessionalAssetVerification(
+        eligible=bool(inventory_entry["milestone_evidence_eligible"]),
+        failures=tuple(inventory_entry["milestone_evidence_failures"]),
+    )
+    admission = ProfessionalAssetVerification(
+        eligible=bool(inventory_entry["generation_eligible"]),
+        failures=(
+            ()
+            if inventory_entry["generation_eligible"]
+            else tuple(inventory_entry["milestone_evidence_failures"])
+            or ("Asset runtime is not admitted for generation.",)
+        ),
+    )
+    review = professional_asset_verifier.qualification_review(
+        asset,
+        published_previews=inventory_entry["preview_set"],
+        evidence=evidence,
+        admission=admission,
+    )
     return {
         "asset_id": asset.asset_id,
         "family": asset.resolved_family,
@@ -781,14 +805,13 @@ def get_asset_provenance(asset_id: str) -> dict:
         "source_format": asset.resolved_source_format,
         "source_file_sha256": asset.source_file_sha256,
         "license": asset.license,
+        "usage_rights": asset.usage_rights.model_dump(mode="json"),
         "attribution_required": asset.attribution_required,
         "attribution": asset.attribution,
         "geometry_status": asset.resolved_geometry_status,
         "geometry_fidelity": asset.geometry_fidelity,
         "conversion_method": asset.conversion_method,
-        "generation_eligible": professional_asset_verifier.verify_generation_admission(
-            asset
-        ).eligible,
+        "generation_eligible": inventory_entry["generation_eligible"],
         "dimensions_m": (
             asset.dimensions_m.model_dump(mode="json")
             if asset.dimensions_m is not None
@@ -817,10 +840,9 @@ def get_asset_provenance(asset_id: str) -> dict:
             for representation in (asset.master_representation, asset.viewer_representation)
             if representation is not None
         ],
-        "previews": [
-            {key: value for key, value in preview.model_dump(mode="json").items() if key != "file"}
-            for preview in asset.preview_set
-        ],
+        "previews": inventory_entry["preview_set"],
+        "local_evidence_status": inventory_entry["local_evidence_status"],
+        "review": review,
     }
 
 
@@ -845,9 +867,14 @@ def get_asset_preview(asset_id: str, view: str) -> FileResponse:
         for chunk in iter(lambda: preview_stream.read(1024 * 1024), b""):
             digest_builder.update(chunk)
     digest = digest_builder.hexdigest()
-    if digest != preview.sha256:
+    if digest != preview.sha256 or not preview_image_matches(
+        path, preview.width_px, preview.height_px
+    ):
         raise HTTPException(status_code=409, detail="asset preview integrity check failed")
-    return FileResponse(path, media_type="image/png", filename=f"{asset_id}-{view}.png")
+    return FileResponse(
+        path, media_type="image/png", filename=f"{asset_id}-{view}.png",
+        content_disposition_type="inline",
+    )
 
 
 @app.post("/document-packs")

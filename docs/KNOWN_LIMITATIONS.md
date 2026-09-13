@@ -477,14 +477,19 @@ frontend.
   requires a `professional_asset_qa.v1` report bound to the asset ID,
   qualification version and master/viewer hashes with passed mesh, dimensions,
   pivot and orientation checks. The source hash must equal the master hash.
-- This gate does not prove licensing rights, semantic B-Rep identity, connector
-  mating, mount fitness or engineering validity, and it does not publish a
+- This gate requires an explicit, evidenced project-authorization record; it
+  does not independently establish the legal validity of that record, semantic
+  B-Rep identity, connector mating, mount fitness or engineering validity, and it does not publish a
   catalog bundle transactionally. No professional source is currently admitted
   for generation; DWG `3DSOLID`/ACIS remains `source_only`.
 - Blender revalidates the professional boundary with a pure-standard-library
   module copied and hashed into each immutable worker bundle. The application
   adds typed and deeper GLB checks before planning; neither boundary promotes a
   quarantined source.
+- Exact-import assets, including technical internal assets, must also have their
+  runtime GLB present, hash-matched and structurally valid before registry
+  selection or RAG indexing. Missing or altered bytes no longer remain planning
+  candidates.
 - A manifest catalog outside `<project_root>/assets/manifests` is rejected at
   configuration time. External catalog roots are not propagated through the
   current SceneSpec, trusted-input hashing and worker boundary.
@@ -606,6 +611,13 @@ son édition ciblée reste indisponible.
   DWG ACIS sans conversion qualifiée. Ils ne doivent pas être assemblés au
   candidat Sierra sur la seule base de leurs noms ou de leur proximité dans le
   corpus.
+- Le STEP, le GLB, le rapport et les cinq vues restent dans une quarantaine
+  locale ignorée par Git. Le Studio expose `available`, `partial` ou
+  `unavailable`; un clone propre reste fermé et ne propose que la source
+  constructeur. Les hashes du manifest sont portables, pas les octets soumis
+  aux conditions du fournisseur.
+- La qualification refuse explicitement Blender 5.1.2 présent sur le même
+  poste; seul Blender 4.5.12 LTS satisfait ce contrat de preuve.
 - La prise en charge du nombre décimal LibreDWG `123.` corrige la lecture du
   diagnostic de `Radio_2260.dwg`; elle ne convertit aucun solide et ne change
   aucune décision d'admission.

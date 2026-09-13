@@ -144,11 +144,31 @@ def test_asset_inventory_removes_modes_from_unproved_professional_claim(tmp_path
     assert registry.evidence_verifier is verifier
     assert inventory["generation_eligible_asset_count"] == 0
     assert inventory["import_ready_asset_count"] == 0
+    assert inventory["status"] == "qualification_error"
+    assert inventory["professional_evidence_rejected_count"] == 1
     assert entry["generation_eligible"] is False
     assert entry["asset_import_mode"] == "professional_evidence_rejected"
     assert entry["effective_generation_mode"] == "quarantined_unverified"
     assert entry["allowed_generation_modes"] == []
     assert "PROFESSIONAL_ASSET_EVIDENCE_NOT_ADMITTED" in entry["warnings"]
+
+
+def test_reference_manifest_without_local_quarantine_reports_missing_evidence(
+    tmp_path: Path,
+) -> None:
+    manifests_dir = tmp_path / "assets" / "manifests"
+    manifests_dir.mkdir(parents=True)
+    source = Path("assets/manifests/ANT_SIERRA_6001124_REFERENCE.json")
+    shutil.copy2(source, manifests_dir / source.name)
+
+    inventory = AssetInventoryService(tmp_path, AssetRegistry(manifests_dir)).inspect()
+    entry = inventory["entries"][0]
+
+    assert inventory["reference_evidence_missing_count"] == 1
+    assert entry["generation_eligible"] is False
+    assert entry["reference_evidence_available"] is False
+    assert entry["local_evidence_status"] == "unavailable"
+    assert all(preview["available"] is False for preview in entry["preview_set"])
 
 
 def test_asset_inventory_does_not_publish_or_read_outside_root_paths(tmp_path: Path) -> None:

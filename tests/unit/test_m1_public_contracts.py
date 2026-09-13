@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from pydantic import ValidationError
 
 from apps.api.telecom_studio_api.main import app, registry, settings
@@ -164,14 +166,20 @@ def test_professional_step_candidate_identity_is_visible_but_not_executable() ->
     assert entry["family"] == "lte_mimo_panel"
     assert entry["manufacturer"] == "Sierra Wireless / Semtech"
     assert entry["reference"] == "6001124"
-    assert entry["source_provenance"].startswith("Official Sierra Wireless STEP assembly")
+    assert entry["source_provenance"].startswith(
+        "Official Sierra Wireless/Semtech 6001124 STEP assembly"
+    )
     assert entry["source_format"] == "step"
     assert entry["asset_import_mode"] == "reference_only"
     assert entry["generation_eligible"] is False
     assert entry["milestone_evidence_eligible"] is False
-    assert entry["dimensions_m"] == {"width": 0.15, "depth": 0.045, "height": 0.049}
+    assert entry["dimensions_m"] == {
+        "width": 0.468118110343795,
+        "depth": 0.093020748920981,
+        "height": 0.044536220687476306,
+    }
     assert any(
-        "restrictive vendor source terms" in warning.lower()
+        "restrictive vendor terms" in warning.lower()
         for warning in entry["qualification_limitations"]
     )
 
@@ -184,11 +192,34 @@ def test_professional_step_candidate_identity_is_visible_but_not_executable() ->
     assert payload["source_format"] == "step"
     assert payload["geometry_status"] == "reference_only"
     assert payload["generation_eligible"] is False
-    assert payload["dimensions_m"] == {"width": 0.15, "depth": 0.045, "height": 0.049}
-    assert payload["bounding_box_m"] is None
+    assert payload["dimensions_m"] == {
+        "width": 0.468118110343795,
+        "depth": 0.093020748920981,
+        "height": 0.044536220687476306,
+    }
+    assert payload["bounding_box_m"] == {
+        "minimum": [-0.07476811034373819, -0.04392114247208096, -0.022268110343738174],
+        "maximum": [0.3933500000000568, 0.04909960644890003, 0.022268110343738132],
+    }
     assert payload["original_url"].startswith("https://source.sierrawireless.com/")
     assert payload["milestone_evidence_eligible"] is False
+    assert payload["usage_rights"]["status"] == "review_only"
+    assert payload["usage_rights"]["project_use_authorized"] is False
+    assert payload["local_evidence_status"] == entry["local_evidence_status"]
     assert payload["qualification"]["status"] == "reference_only"
+    assert payload["review"]["status"] == "reference_only"
+    assert payload["review"]["blockers"]
+    assert payload["review"]["checks"][0]["check_id"] == "identity_source"
+    assert not any(
+        action["action_id"] == "start_design_with_asset"
+        for action in payload["review"]["available_actions"]
+    )
+    assert all(
+        action["kind"] in {"internal_preview", "external_source"}
+        for action in payload["review"]["available_actions"]
+    )
+    assert all("file" not in preview for preview in payload["previews"])
+
 
 
 def test_asset_preview_endpoint_verifies_the_published_hash(
@@ -196,7 +227,9 @@ def test_asset_preview_endpoint_verifies_the_published_hash(
 ) -> None:
     preview_path = tmp_path / "qualified" / "front.png"
     preview_path.parent.mkdir(parents=True)
-    content = b"bounded-preview-fixture"
+    image_bytes = BytesIO()
+    Image.new("RGB", (128, 128), (80, 120, 160)).save(image_bytes, format="PNG")
+    content = image_bytes.getvalue()
     preview_path.write_bytes(content)
     preview = AssetPreview(
         view="front",
@@ -214,8 +247,13 @@ def test_asset_preview_endpoint_verifies_the_published_hash(
     published = client.get(f"/assets/{asset.asset_id}/previews/front")
     assert published.status_code == 200
     assert published.content == content
+    assert published.headers["content-disposition"].startswith("inline;")
 
     preview_path.write_bytes(b"tampered-preview")
     rejected = client.get(f"/assets/{asset.asset_id}/previews/front")
     assert rejected.status_code == 409
     assert rejected.json()["detail"] == "asset preview integrity check failed"
+
+    preview.sha256 = hashlib.sha256(b"tampered-preview").hexdigest()
+    invalid_image = client.get(f"/assets/{asset.asset_id}/previews/front")
+    assert invalid_image.status_code == 409

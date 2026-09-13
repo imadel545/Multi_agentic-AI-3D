@@ -237,7 +237,7 @@ class AssetRegistry:
         return sorted(candidates, key=lambda asset: asset.asset_id)[0]
 
     def is_generation_admitted(self, asset: AssetManifest) -> bool:
-        return self.evidence_verifier.verify_generation_admission(asset).eligible
+        return self.evidence_verifier.verify_effective_generation_admission(asset).eligible
 
     def _load(self) -> dict[str, AssetManifest]:
         current_hash = asset_manifest_hash(self.manifests_dir)

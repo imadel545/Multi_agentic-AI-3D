@@ -26,7 +26,8 @@ export function AssetLibraryPanel({
   probeError = null,
   search = null,
   summary,
-  summaryError = null
+  summaryError = null,
+  toAbsoluteUrl
 }: {
   busy?: boolean;
   error?: string | null;
@@ -45,6 +46,7 @@ export function AssetLibraryPanel({
   search?: AssetLibrarySearch | null;
   summary: AssetLibrarySummary | null;
   summaryError?: string | null;
+  toAbsoluteUrl?: (url: string | null | undefined) => string | null;
 }) {
   const [query, setQuery] = useState("");
   const [review, setReview] = useState<AssetProvenance | null>(null);
@@ -55,13 +57,13 @@ export function AssetLibraryPanel({
   const qualifiedAssets = (inventory?.entries ?? []).filter(
     (entry) => entry.generation_eligible
   );
-  const visibleQualifiedAssets = qualifiedAssets.filter((entry) =>
-    matchesInventoryEntry(entry, query)
+  const visibleQualifiedAssets = qualifiedAssets.filter(
+    (entry) => !claimsProfessionalIdentity(entry) && matchesInventoryEntry(entry, query)
   );
-  const referenceAssets = (inventory?.entries ?? []).filter(
-    (entry) => entry.qualification_status === "reference_only"
+  const professionalCandidates = (inventory?.entries ?? []).filter(
+    claimsProfessionalIdentity
   );
-  const visibleReferenceAssets = referenceAssets.filter((entry) =>
+  const visibleProfessionalCandidates = professionalCandidates.filter((entry) =>
     matchesInventoryEntry(entry, query)
   );
   const probeAvailable = summary?.dwg_probe_available !== false;
@@ -114,6 +116,10 @@ export function AssetLibraryPanel({
               value={formatInteger(inventory.generation_eligible_asset_count)}
             />
             <Metric label="Référence seule" value={formatInteger(inventory.reference_only_asset_count)} />
+            <Metric
+              label="Preuves locales absentes"
+              value={formatInteger(inventory.reference_evidence_missing_count ?? 0)}
+            />
           </div>
           <div className="library-results">
             {visibleQualifiedAssets.length ? (
@@ -133,17 +139,22 @@ export function AssetLibraryPanel({
                 <p>{assetQualificationMessage(entry.allowed_generation_modes, entry.source)}</p>
               </article>
             ))}
-            {visibleReferenceAssets.length ? (
+            {visibleProfessionalCandidates.length ? (
               <>
                 <div className="library-results-heading">
                   <strong>Candidats professionnels documentés</strong>
-                  <small>Leur identité peut être examinée; ils restent exclus des designs tant que les preuves sont incomplètes.</small>
+                  <small>Les candidats restent visibles même lorsqu’une preuve déclarée est absente ou incohérente.</small>
                 </div>
-                {visibleReferenceAssets.map((entry) => (
-                  <article className="library-result-card incomplete" key={entry.asset_id}>
+                {visibleProfessionalCandidates.map((entry) => (
+                  <article
+                    className={`library-result-card${entry.milestone_evidence_eligible ? "" : " incomplete"}`}
+                    key={entry.asset_id}
+                  >
                     <div>
                       <strong>{entry.manufacturer ?? "Fabricant à confirmer"}</strong>
-                      <span className="status-pill warn">Référence uniquement</span>
+                      <span className={`status-pill ${entry.milestone_evidence_eligible ? "ok" : "warn"}`}>
+                        {candidateStatusLabel(entry.asset_import_mode ?? entry.qualification_status)}
+                      </span>
                       <small>
                         {entry.reference ?? entry.asset_id} · {entry.subtype ?? humanAssetType(entry.type)}
                       </small>
@@ -154,12 +165,13 @@ export function AssetLibraryPanel({
                     </div>
                     <p>
                       {entry.dimensions_m
-                        ? `Boîtier déclaré : ${formatAssetDimensions(entry.dimensions_m)}.`
+                        ? `Enveloppe publiée : ${formatAssetDimensions(entry.dimensions_m)}.`
                         : "Dimensions déclarées à confirmer."} {referenceAssetMessage(entry.qualification_limitations)}
                     </p>
                     {onReview ? (
                       <button
                         disabled={reviewBusyAssetId !== null}
+                        aria-label={`Examiner ${entry.manufacturer ?? "le candidat"} ${entry.reference ?? entry.asset_id}`}
                         onClick={() => void examineCandidate(entry.asset_id)}
                         type="button"
                       >
@@ -169,13 +181,18 @@ export function AssetLibraryPanel({
                       </button>
                     ) : null}
                     {entry.original_url ? (
-                      <a href={entry.original_url} rel="noreferrer" target="_blank">
+                      <a
+                        aria-label={`Ouvrir la source de ${entry.manufacturer ?? "fabricant"} ${entry.reference ?? entry.asset_id}`}
+                        href={entry.original_url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
                         Ouvrir la source fabricant
                       </a>
                     ) : null}
                   </article>
                 ))}
-                {review ? <AssetReviewEvidence review={review} /> : null}
+                {review ? <AssetReviewEvidence review={review} toAbsoluteUrl={toAbsoluteUrl} /> : null}
                 {reviewError ? (
                   <ResourceRecovery
                     busy={reviewBusyAssetId !== null}
@@ -346,14 +363,33 @@ function cadProbeVerdict(probe: AssetLibraryProbe): string {
   return "L’analyse ne trouve pas de géométrie 3D directement exploitable. Ce fichier reste une référence en quarantaine.";
 }
 
-function AssetReviewEvidence({ review }: { review: AssetProvenance }) {
-  const blockers = professionalReviewBlockers(review);
+function AssetReviewEvidence({
+  review,
+  toAbsoluteUrl
+}: {
+  review: AssetProvenance;
+  toAbsoluteUrl?: (url: string | null | undefined) => string | null;
+}) {
+  const previewActions = review.review.available_actions.filter((action) =>
+    action.kind === "internal_preview"
+  );
+  const sourceActions = review.review.available_actions.filter(
+    (action) => action.kind === "external_source"
+  );
+  const admitted = review.review.status === "admitted";
   return (
-    <section className="summary-card warning-card" aria-label="Dossier du candidat professionnel">
+    <section
+      className={`summary-card${admitted ? "" : " warning-card"}`}
+      aria-label="Dossier du candidat professionnel"
+      aria-live="polite"
+    >
       <div className="library-results-heading">
         <strong>{review.manufacturer ?? "Fabricant à confirmer"} {review.reference ?? ""}</strong>
-        <span className="status-pill warn">Non utilisable dans un design</span>
+        <span className={`status-pill ${admitted ? "ok" : "warn"}`}>
+          {reviewStatusLabel(review.review.status)}
+        </span>
       </div>
+      <p>{review.review.summary}</p>
       <div className="metric-grid">
         <Metric label="Source" value={review.source_format.toUpperCase()} />
         <Metric
@@ -365,14 +401,52 @@ function AssetReviewEvidence({ review }: { review: AssetProvenance }) {
           value={review.qualification.mesh_integrity_verified ? "oui" : "non"}
         />
         <Metric label="Contrôle qualité" value={review.qa.status === "passed" ? "passé" : "incomplet"} />
+        <Metric label="Preuves locales" value={localEvidenceStatusLabel(review.local_evidence_status)} />
       </div>
       <p>{professionalSourceSummary(review)}</p>
       <p>{professionalGeometrySummary(review)}</p>
+      <div className="library-results">
+        {review.review.checks.map((check) => (
+          <article
+            className={`library-result-card${check.status === "passed" ? "" : " incomplete"}`}
+            key={check.check_id}
+          >
+            <div>
+              <strong>{check.title}</strong>
+              <span className={`status-pill ${check.status === "passed" ? "ok" : "warn"}`}>
+                {check.status === "passed" ? "Vérifié" : "À compléter"}
+              </span>
+            </div>
+            <p>{check.detail}</p>
+          </article>
+        ))}
+      </div>
       <List
         title="À vérifier avant utilisation"
-        items={blockers}
+        items={review.review.blockers.map((blocker) => blocker.message)}
         empty="Aucun blocage publié."
       />
+      {previewActions.length ? (
+        <div className="library-results">
+          {previewActions.map((action) => (
+            toAbsoluteUrl?.(action.url) ? (
+              <a
+                href={toAbsoluteUrl(action.url) ?? undefined}
+                key={action.action_id}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {action.label}
+              </a>
+            ) : null
+          ))}
+        </div>
+      ) : null}
+      {sourceActions.map((action) => (
+        <a href={action.url} key={action.action_id} rel="noreferrer" target="_blank">
+          {action.label}
+        </a>
+      ))}
       <details>
         <summary>Détails techniques et droits</summary>
         <p className="muted">
@@ -382,6 +456,9 @@ function AssetReviewEvidence({ review }: { review: AssetProvenance }) {
           {review.conversion_method ?? "Aucune méthode d’observation géométrique n’est publiée."}
         </p>
         <p className="muted">{review.license ?? "Droits non publiés."}</p>
+        <p className="muted">
+          Décision d’usage : {usageRightsStatusLabel(review.usage_rights.status)}. {review.usage_rights.evidence ?? "Aucune preuve de décision publiée."}
+        </p>
         <p className="muted">
           {review.representations.length} représentation(s) publiée(s) · {review.previews.length} vue(s) publiée(s).
         </p>
@@ -411,23 +488,49 @@ function professionalGeometrySummary(review: AssetProvenance): string {
   return "Aucune observation géométrique contrôlée n’est encore publiée.";
 }
 
-function professionalReviewBlockers(review: AssetProvenance): string[] {
-  const blockers: string[] = [];
-  if (!review.generation_eligible) blockers.push("Admission à la génération non accordée.");
-  if (!review.qualification.dimensions_verified) blockers.push("Dimensions complètes et périmètre de mesure à confirmer.");
-  if (!review.qualification.pivot_verified || !review.qualification.orientation_verified) {
-    blockers.push("Pivot et orientation d’installation à mesurer.");
-  }
-  if (review.qualification.limitations.some((item) => /anchor|connector|mating/i.test(item))) {
-    blockers.push("Ancrages, raccordement et compatibilité mécanique à vérifier.");
-  }
-  if (review.representations.length < 2 || review.previews.length < 5) {
-    blockers.push("Représentations et vues de qualification à publier avec leurs preuves.");
-  }
-  if (review.qa.status !== "passed") blockers.push("Contrôle qualité professionnel à terminer.");
-  if (review.license) blockers.push("Droits d’utilisation et de redistribution à valider pour ce projet.");
-  return blockers;
+function candidateStatusLabel(importMode: string | undefined): string {
+  return {
+    imported_glb_exact: "Admis pour import exact",
+    professional_evidence_rejected: "Preuves incohérentes",
+    qualified_file_rejected: "Fichier qualifié indisponible",
+    quarantined_unverified: "Qualification requise",
+    reference_only: "Référence uniquement"
+  }[importMode ?? ""] ?? "Qualification requise";
 }
+
+function claimsProfessionalIdentity(entry: AssetInventory["entries"][number]): boolean {
+  return entry.source === "vendor_supplied" || Boolean(entry.manufacturer) ||
+    Boolean(entry.reference) || entry.asset_import_mode === "professional_evidence_rejected";
+}
+
+function localEvidenceStatusLabel(status: AssetProvenance["local_evidence_status"]): string {
+  return {
+    available: "vérifiées sur ce poste",
+    partial: "partielles sur ce poste",
+    unavailable: "absentes sur ce poste",
+    not_published: "non publiées"
+  }[status];
+}
+
+function usageRightsStatusLabel(status: AssetProvenance["usage_rights"]["status"]): string {
+  return {
+    project_authorized: "autorisée pour ce projet",
+    review_only: "revue seulement",
+    unknown: "à confirmer"
+  }[status];
+}
+
+function reviewStatusLabel(status: AssetReviewStatus): string {
+  return {
+    admitted: "Admis pour import exact",
+    blocked: "Qualification bloquée",
+    evidence_invalid: "Preuves incohérentes",
+    reference_only: "Non utilisable dans un design",
+    technical_asset: "Composant technique"
+  }[status];
+}
+
+type AssetReviewStatus = AssetProvenance["review"]["status"];
 
 function matchesInventoryEntry(
   entry: AssetInventory["entries"][number],

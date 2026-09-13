@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from core.contracts.assets import (
     AssetQualification,
     AssetRepresentation,
     AssetTransformPermissions,
+    AssetUsageRights,
     DimensionsM,
 )
 from core.services.assembly_planner import AssetAssemblyPlanner
@@ -172,6 +174,13 @@ def test_professional_milestone_declaration_cannot_replace_runtime_evidence(
         conversion_method="FreeCAD/OpenCascade controlled tessellation",
         geometry_fidelity="vendor_qualified",
         license="Project-authorized engineering use",
+        usage_rights=AssetUsageRights(
+            status="project_authorized",
+            project_use_authorized=True,
+            derivative_use_authorized=True,
+            redistribution_authorized=False,
+            evidence="Project contract fixture authorization record.",
+        ),
         master_representation=master,
         viewer_representation=viewer,
         dimensions_m=DimensionsM(width=0.42, depth=0.18, height=1.4),
@@ -273,11 +282,17 @@ def test_generic_retrieval_requires_explicit_cognitive_execution_authorization(
             ),
         }
     )
-    (tmp_path / "AUTHORIZED_GENERIC_PANEL.json").write_text(
+    project_root = tmp_path / "project"
+    manifests_dir = project_root / "assets" / "manifests"
+    runtime_file = project_root / authorized.file
+    manifests_dir.mkdir(parents=True)
+    runtime_file.parent.mkdir(parents=True)
+    shutil.copy2(Path(base.file), runtime_file)
+    (manifests_dir / "AUTHORIZED_GENERIC_PANEL.json").write_text(
         authorized.model_dump_json(indent=2),
         encoding="utf-8",
     )
-    retriever = QualifiedAssetCandidateRetriever(AssetRegistry(tmp_path))
+    retriever = QualifiedAssetCandidateRetriever(AssetRegistry(manifests_dir))
 
     results = retriever.search(
         {

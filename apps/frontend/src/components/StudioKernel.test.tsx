@@ -1956,14 +1956,14 @@ describe("studio kernel components", () => {
     expect(screen.getByText(/6001124 · 2-in-1 omnidirectional panel antenna/)).toBeInTheDocument();
     expect(screen.getByText("Référence uniquement")).toBeInTheDocument();
     expect(screen.getByText(/STEP · attribution requise/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Ouvrir la source fabricant" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Ouvrir la source de Sierra Wireless/ })).toHaveAttribute(
       "href",
       "https://source.sierrawireless.com/6001124.step"
     );
     expect(screen.getByText(/mesh vérifié/)).toBeInTheDocument();
     expect(screen.getByText(/2\s834/)).toBeInTheDocument();
     expect(screen.getByText("Qualification requise")).toBeInTheDocument();
-    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByText("Géométries exploitables").parentElement).toHaveTextContent("0");
 
     fireEvent.change(screen.getByLabelText(/Rechercher un pylône/), {
       target: { value: "pylône Orange 30 m" }
@@ -2007,19 +2007,58 @@ describe("studio kernel components", () => {
       qa: { status: "not_run", checks: [], limitations: [] },
       milestone_evidence_eligible: false,
       milestone_evidence_failures: ["Asset is not qualified for generation."],
+      usage_rights: {
+        status: "review_only",
+        project_use_authorized: false,
+        derivative_use_authorized: false,
+        redistribution_authorized: false,
+        evidence: "Revue interne locale uniquement."
+      },
+      local_evidence_status: "unavailable",
       representations: [],
-      previews: []
+      previews: [],
+      review: {
+        status: "reference_only",
+        summary: "La source peut être examinée, mais elle reste exclue des designs.",
+        checks: [{
+          check_id: "geometry_scale",
+          status: "incomplete",
+          title: "Géométrie et échelle",
+          detail: "Les dimensions complètes restent à qualifier."
+        }, {
+          check_id: "pivot_orientation",
+          status: "incomplete",
+          title: "Repère d’installation",
+          detail: "Le pivot et l’orientation d’installation restent à mesurer."
+        }],
+        blockers: [{
+          code: "pivot_orientation",
+          message: "Le pivot et l’orientation d’installation restent à mesurer."
+        }],
+        available_actions: [{
+          action_id: "open_vendor_source",
+          kind: "external_source",
+          label: "Ouvrir la source constructeur",
+          url: "https://source.sierrawireless.com/6001124.step"
+        }, {
+          action_id: "view_verified_preview:front",
+          kind: "internal_preview",
+          label: "Voir la vue vérifiée front",
+          url: "/assets/ANT_SIERRA_6001124_REFERENCE/previews/front"
+        }]
+      }
     });
     render(
       <AssetLibraryPanel
         inventory={{
           status: "qualified_mixed_catalog",
-          asset_count: 2,
+          asset_count: 3,
           missing_file_count: 0,
           real_glb_asset_count: 0,
           import_qualified_glb_count: 0,
           generation_eligible_asset_count: 1,
           professional_evidence_asset_count: 0,
+          professional_evidence_rejected_count: 1,
           reference_only_asset_count: 1,
           qualified_integrity_failure_count: 0,
           entries: [{
@@ -2039,6 +2078,22 @@ describe("studio kernel components", () => {
             milestone_evidence_eligible: false,
             milestone_evidence_failures: ["Anchors are not qualified."]
           }, {
+            asset_id: "UNPROVED_VENDOR_PANEL",
+            type: "antenna",
+            family: "vendor_panel",
+            subtype: "declared panel",
+            manufacturer: "Evidence pending vendor",
+            reference: "PANEL-PENDING",
+            source: "vendor_supplied",
+            source_format: "glb",
+            asset_import_mode: "professional_evidence_rejected",
+            generation_eligible: false,
+            qualification_status: "qualified_for_generation",
+            allowed_generation_modes: [],
+            qualification_limitations: [],
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: ["Viewer representation hash mismatch."]
+          }, {
             asset_id: "ANT_GENERIC_PANEL",
             type: "antenna",
             family: "generic_panel",
@@ -2057,6 +2112,7 @@ describe("studio kernel components", () => {
           missing_files: []
         }}
         onReview={onReview}
+        toAbsoluteUrl={(url) => url ? new URL(url, "http://127.0.0.1:8012").toString() : null}
         summary={{
           status: "catalogued_quarantined",
           schema_version: "1.1.0",
@@ -2069,14 +2125,21 @@ describe("studio kernel components", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Examiner le candidat" }));
+    fireEvent.click(screen.getByRole("button", { name: /Examiner Sierra Wireless.*6001124/ }));
 
     await waitFor(() => expect(onReview).toHaveBeenCalledWith("ANT_SIERRA_6001124_REFERENCE"));
     expect(await screen.findByLabelText("Dossier du candidat professionnel")).toHaveTextContent(
       "Non utilisable dans un design"
     );
     expect(screen.getByText("Maillage contrôlé").parentElement).toHaveTextContent("oui");
-    expect(screen.getByText(/Pivot et orientation d’installation/)).toBeInTheDocument();
+    expect(screen.getAllByText(/pivot et l’orientation d’installation/i)).toHaveLength(2);
+    expect(screen.getByText("Géométrie et échelle")).toBeInTheDocument();
+    expect(screen.getByText("Evidence pending vendor")).toBeInTheDocument();
+    expect(screen.getByText("Preuves incohérentes")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Voir la vue vérifiée front" })).toHaveAttribute(
+      "href",
+      "http://127.0.0.1:8012/assets/ANT_SIERRA_6001124_REFERENCE/previews/front"
+    );
     expect(screen.queryByRole("button", { name: /utiliser|ajouter/i })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/Rechercher un pylône/), {
@@ -2084,6 +2147,49 @@ describe("studio kernel components", () => {
     });
     expect(screen.queryByText("ant generic panel")).not.toBeInTheDocument();
     expect(screen.getByText("Sierra Wireless / Semtech", { selector: "strong" })).toBeInTheDocument();
+  });
+
+  it("keeps an admitted professional asset inspectable", () => {
+    const onReview = vi.fn();
+    render(
+      <AssetLibraryPanel
+        inventory={{
+          status: "qualified_mixed_catalog",
+          asset_count: 1,
+          missing_file_count: 0,
+          real_glb_asset_count: 1,
+          import_qualified_glb_count: 1,
+          generation_eligible_asset_count: 1,
+          professional_evidence_asset_count: 1,
+          reference_only_asset_count: 0,
+          qualified_integrity_failure_count: 0,
+          entries: [{
+            asset_id: "AUTHORIZED_VENDOR_PANEL",
+            type: "antenna",
+            family: "sector_panel",
+            manufacturer: "Authorized manufacturer",
+            reference: "PANEL-001",
+            source: "vendor_supplied",
+            source_format: "glb",
+            asset_import_mode: "imported_glb_exact",
+            generation_eligible: true,
+            qualification_status: "qualified_for_generation",
+            allowed_generation_modes: ["imported_glb_exact"],
+            qualification_limitations: [],
+            milestone_evidence_eligible: true,
+            milestone_evidence_failures: []
+          }],
+          missing_files: []
+        }}
+        onReview={onReview}
+        summary={null}
+      />
+    );
+
+    expect(screen.getByText("Authorized manufacturer")).toBeInTheDocument();
+    expect(screen.getByText("Admis pour import exact")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Examiner Authorized manufacturer PANEL-001/ }));
+    expect(onReview).toHaveBeenCalledWith("AUTHORIZED_VENDOR_PANEL");
   });
 
   it("shows real library results without offering unqualified Blender use", () => {

@@ -55,6 +55,7 @@ def professional_evidence_failures(
     master = _mapping(manifest.get("master_representation"))
     viewer = _mapping(manifest.get("viewer_representation"))
     qa = _mapping(manifest.get("qa_evidence"))
+    rights = _mapping(manifest.get("usage_rights"))
 
     if not (
         manifest.get("status") == "validated"
@@ -86,6 +87,12 @@ def professional_evidence_failures(
         failures.append("Source provenance is not explicitly documented.")
     if not manifest.get("license"):
         failures.append("Asset licence is not explicitly documented.")
+    if not (
+        rights.get("status") == "project_authorized"
+        and rights.get("project_use_authorized") is True
+        and rights.get("evidence")
+    ):
+        failures.append("Project asset usage rights are not explicitly authorized.")
     if manifest.get("geometry_fidelity") != "vendor_qualified":
         failures.append("Geometry fidelity is not vendor-qualified.")
     if not master or not viewer:

@@ -1689,6 +1689,7 @@ export function InspectorDock({
               search={assetLibrarySearch}
               summary={assetLibrarySummary}
               summaryError={assetLibrarySummaryError}
+              toAbsoluteUrl={toAbsoluteUrl}
             />
           ) : null}
           {activeDrawer === "system" ? (

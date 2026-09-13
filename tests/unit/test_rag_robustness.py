@@ -501,8 +501,14 @@ def test_asset_manifest_change_invalidates_static_index(tmp_path: Path) -> None:
         "height_m": 30,
         "compatible_networks": ["5G"],
         "compatible_tower_types": ["lattice_tower"],
-        "status": "internal",
+        "status": "validated",
         "version": "1.0.0",
+        "builder_profile_id": "test_tower_builder_v1",
+        "qualification": {
+            "status": "qualified_for_generation",
+            "allowed_generation_modes": ["parametric_generated"],
+            "limitations": ["Test manifest for index identity only."],
+        },
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     service = RagService(
