@@ -15,23 +15,45 @@ class DiffEngine:
             "visual_changes": {},
         }
 
-        # Tower diff
-        if original.tower.height_m != patched.tower.height_m:
-            summary["tower_changed"] = True
-            summary["tower_changes"]["height_m"] = {
-                "old": original.tower.height_m,
-                "new": patched.tower.height_m,
+        # V2 scenes may consist entirely of geometry programs, with no V1 tower.
+        if original.tower is None or patched.tower is None:
+            if original.tower != patched.tower:
+                summary["tower_changed"] = True
+                summary["tower_changes"]["presence"] = {
+                    "old": original.tower is not None,
+                    "new": patched.tower is not None,
+                }
+        else:
+            if original.tower.height_m != patched.tower.height_m:
+                summary["tower_changed"] = True
+                summary["tower_changes"]["height_m"] = {
+                    "old": original.tower.height_m,
+                    "new": patched.tower.height_m,
+                }
+            orig_char = original.tower.characteristics.model_dump()
+            patch_char = patched.tower.characteristics.model_dump()
+            char_diff = {
+                k: {"old": orig_char[k], "new": patch_char[k]}
+                for k in orig_char
+                if orig_char[k] != patch_char[k]
             }
-        orig_char = original.tower.characteristics.model_dump()
-        patch_char = patched.tower.characteristics.model_dump()
-        char_diff = {
-            k: {"old": orig_char[k], "new": patch_char[k]}
-            for k in orig_char
-            if orig_char[k] != patch_char[k]
+            if char_diff:
+                summary["tower_changed"] = True
+                summary["tower_changes"].update(char_diff)
+
+        original_programs = {
+            p.program_id: p.model_dump(mode="json") for p in original.geometry_programs
         }
-        if char_diff:
-            summary["tower_changed"] = True
-            summary["tower_changes"].update(char_diff)
+        patched_programs = {
+            p.program_id: p.model_dump(mode="json") for p in patched.geometry_programs
+        }
+        program_changes = []
+        for program_id in sorted(original_programs.keys() | patched_programs.keys()):
+            old, new = original_programs.get(program_id), patched_programs.get(program_id)
+            if old != new:
+                program_changes.append({"program_id": program_id, "old": old, "new": new})
+        summary["geometry_programs_changed"] = bool(program_changes)
+        summary["geometry_program_changes"] = program_changes
 
         # Visual elements diff
         orig_vis = original.visual_elements.model_dump()

@@ -2,6 +2,20 @@
   "schema_version": "1.0.0",
   "profiles": [
     {
+      "profile_id": "equipped_tower_exact_v1",
+      "version": "1.0.0",
+      "asset_types": [
+        "tower"
+      ],
+      "allowed_generation_modes": [
+        "imported_glb_exact"
+      ],
+      "worker_handler": "exact_asset",
+      "geometry_family": null,
+      "instance_strategy": "single",
+      "allowed_parameter_ids": []
+    },
+    {
       "profile_id": "tower_structure_v1",
       "version": "1.0.0",
       "asset_types": ["tower"],

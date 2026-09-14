@@ -62,6 +62,7 @@ from core.agents.cognitive_domain_router import (
     ConservativeDesignDomainRouter,
     GroqDesignDomainRouter,
 )
+from core.agents.geometry_program_planner import GeometryProgramPlanner
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import SceneAdaptationCapabilities
@@ -108,10 +109,12 @@ from core.services.checkpoint_saver import SqliteCheckpointSaver
 from core.services.cognitive_asset_reuse import asset_admission_registry
 from core.services.cognitive_runtime import build_cognitive_design_planner
 from core.services.cognitive_scene_compiler import CognitiveSceneCompiler
+from core.services.geometry_capabilities import geometry_capability_registry
 from core.services.telecom_brief_admission import (
     TELECOM_BRIEF_MESSAGE,
     has_site_requirement_evidence,
 )
+from core.validation.library_first import project_geometry_roles
 
 WorkflowId = Annotated[str, ApiPath(pattern=WORKFLOW_ID_PATTERN)]
 VersionId = Annotated[str, ApiPath(pattern=VERSION_ID_PATTERN)]
@@ -330,13 +333,30 @@ asset_selection_client = (
     if settings.resolved_groq_api_key and settings.enable_groq_asset_selection
     else None
 )
+geometry_program_planner = (
+    GeometryProgramPlanner(
+        GroqStructuredClient(
+            api_key=settings.resolved_groq_api_key,
+            model=settings.resolved_groq_text_model,
+            base_url=settings.groq_base_url,
+            timeout_s=settings.groq_geometry_timeout_s,
+            transport=groq_transport,
+        ),
+        max_completion_tokens=settings.groq_geometry_max_completion_tokens,
+        reasoning_effort=settings.groq_geometry_reasoning_effort,
+    )
+    if settings.resolved_groq_api_key and settings.enable_groq_geometry_program
+    else None
+)
 design_domain_router = (
     GroqDesignDomainRouter(groq_client)
     if groq_client is not None
     else ConservativeDesignDomainRouter()
 )
 cognitive_design_planner = (
-    build_cognitive_design_planner(groq_client, registry)
+    build_cognitive_design_planner(
+        groq_client, registry, enable_project_geometry=geometry_program_planner is not None
+    )
     if groq_client is not None
     else None
 )
@@ -356,7 +376,8 @@ blender_runner = BlenderRunner(
     project_root=settings.project_root,
     blender_binary=settings.resolved_blender_binary,
     timeout_s=settings.blender_timeout_s,
-    catalog_only_registry=registry,
+    library_first_registry=registry,
+    project_specific_roles=project_geometry_roles(),
 )
 checkpoint_saver = SqliteCheckpointSaver(settings.local_sqlite_path.with_name("checkpoints.db"))
 while True:
@@ -378,13 +399,16 @@ orchestrator = DesignOrchestrator(
     asset_selection_client=asset_selection_client,
     design_domain_router=design_domain_router,
     cognitive_design_planner=cognitive_design_planner,
+    geometry_program_planner=geometry_program_planner,
+    project_specific_roles=project_geometry_roles(),
     cognitive_scene_compiler=CognitiveSceneCompiler(
-        asset_admission_registry(registry), registry=registry
+        asset_admission_registry(registry).merged(geometry_capability_registry()), registry=registry
     ),
     allow_blender_fallback=settings.allow_blender_fallback,
-    catalog_only_generation=True,
+    library_first_generation=True,
 )
 scene_edit_agent = SceneEditAgent(
+    geometry_program_planner=geometry_program_planner,
     groq_client=groq_client,
     capability_service=adaptation_capability_service,
     checkpoint_saver=checkpoint_saver,

@@ -37,7 +37,7 @@ class QualifiedAssetCandidateRetriever:
         self.evidence_verifier = registry.evidence_verifier
 
     def _source_allowed(self, manifest: AssetManifest) -> bool:
-        from core.validation.catalog_only import has_external_geometry_source
+        from core.validation.library_first import has_external_geometry_source
 
         return not self.external_sources_only or has_external_geometry_source(manifest)
 

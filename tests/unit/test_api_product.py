@@ -1167,7 +1167,7 @@ def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -
         issues = client.get(f"/designs/{workflow_id}/user-issues").json()
 
         assert status["status"] == "failed"
-        assert any(error["code"] == "INVALID_REQUIREMENTS" for error in status["errors"])
+        assert any(error["code"] == "DESIGN_DOMAIN_ROUTING_BLOCKED" for error in status["errors"])
         assert operation["is_terminal"] is True
         assert operation["progress_label"] == "Échec"
         assert "retry_with_changes" in operation["available_actions"]
@@ -1176,7 +1176,7 @@ def test_invalid_design_has_frontend_readable_failure_contract(tmp_path: Path) -
         assert timeline["timeline_steps"][-1]["status"] == "failed"
         assert issues["human_readable_issues"]
         assert any(
-            issue["technical_code"] == "INVALID_REQUIREMENTS"
+            issue["technical_code"] == "DESIGN_DOMAIN_ROUTING_BLOCKED"
             for issue in issues["human_readable_issues"]
         )
     finally:

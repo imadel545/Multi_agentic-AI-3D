@@ -36,7 +36,7 @@ class CompleteCatalogReuseRouteClient:
     def request_json(self, payload, *, policy):
         assert policy.capability == "design_domain_routing"
         system_prompt = payload["messages"][0]["content"]
-        assert "catalog-only product" in system_prompt
+        assert "library-first product" in system_prompt
         assert "qualified catalog assets" in system_prompt
         return {
             "route": "generic_cognitive_v1",

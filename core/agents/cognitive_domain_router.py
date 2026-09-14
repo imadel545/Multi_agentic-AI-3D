@@ -40,11 +40,13 @@ class GroqDesignDomainRouter:
                     {
                         "role": "system",
                         "content": (
-                            "Classify one 3D design request for a catalog-only product. Choose "
+                            "Classify one 3D design request for a library-first product. Choose "
                             "generic_cognitive_v1 for every physical design request, including a "
                             "telecom site, tower, mast, radio installation, architecture or "
-                            "equipment. That route must discover, reuse or rigidly compose only "
-                            "qualified catalog assets. Never choose telecom_v1 because its legacy "
+                            "equipment. That route must discover, reuse or rigidly compose "
+                            "qualified catalog assets, plus genuinely missing "
+                            "project-specific geometry. "
+                            "Never choose telecom_v1 because its legacy "
                             "parametric construction is disabled by product policy. Choose "
                             "generic_cognitive_v1 also for stairs, furniture, terrain, "
                             "landscape and mixed environments. Choose blocked only when the "
@@ -128,7 +130,7 @@ class ConservativeDesignDomainRouter:
                 fallback_used=True,
                 fallback_reason=(
                     "LLM domain router unavailable; legacy parametric telecom generation is "
-                    "disabled by catalog-only product policy."
+                    "disabled by library-first product policy."
                 ),
             )
         return DesignRouteDecision(

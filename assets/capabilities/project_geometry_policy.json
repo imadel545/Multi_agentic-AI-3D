@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Project-specific geometry may be constructed only after retrieval finds no admitted reusable source. Standard telecom equipment requires catalog geometry.",
+  "generated_roles": [
+    "terrain",
+    "cable_route",
+    "foundation",
+    "custom_adapter",
+    "project_support",
+    "connecting_geometry"
+  ]
+}

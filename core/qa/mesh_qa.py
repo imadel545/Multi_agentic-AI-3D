@@ -1173,8 +1173,14 @@ def _validate_generic_program_mesh(
         else bool(program.materials)
         for program in scene.geometry_programs
     )
+    # High-detail equipment must have a real source or non-trivial geometry.
+    # A flat project terrain or connector may be deliberately simple without
+    # reducing the fidelity of an imported tower in the same scene.
+    from core.validation.library_first import project_geometry_roles
+
     non_primitive_detail = all(
         scene.detail_level != "high"
+        or program.semantic_role in project_geometry_roles()
         or any(node.kind not in {"primitive", "instance"} for node in program.nodes)
         for program in scene.geometry_programs
     )

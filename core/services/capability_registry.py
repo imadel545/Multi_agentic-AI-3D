@@ -38,6 +38,10 @@ class CapabilityRegistry:
             raise ValueError("capability IDs must be unique")
         self._registrations = {item.definition.capability_id: item for item in items}
 
+    def merged(self, other: CapabilityRegistry) -> CapabilityRegistry:
+        """Combine executable registrations while rejecting duplicate capability IDs."""
+        return CapabilityRegistry([*self._registrations.values(), *other._registrations.values()])
+
     def discover(
         self,
         *,

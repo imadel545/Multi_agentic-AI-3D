@@ -690,16 +690,24 @@ son édition ciblée reste indisponible.
   diagnostic de `Radio_2260.dwg`; elle ne convertit aucun solide et ne change
   aucune décision d'admission.
 
-## Réutilisation catalogue stricte — 2026-09-14
+## Réutilisation prioritaire — 2026-09-14
 
-Le parcours de production actif est fermé aux composants physiques synthétiques :
-la scène doit contenir des programmes `exact_asset` dont le manifest, le GLB,
-les droits, les dimensions et les hashes sont vérifiés avant Blender. Le gabarit
-`TELECOM_SITE_TEMPLATE_CC_BY_001` est le premier design complet réutilisable de
-bout en bout ; il est technique-générique sous CC BY et ne constitue pas un
-modèle constructeur. Les anciens GLB `internal_project_generated` restent
-consultables pour compatibilité historique mais sont exclus de la sélection
-produit.
+Le parcours de production privilégie les actifs externes admis et refuse de
+remplacer un équipement standard réutilisable par une géométrie synthétique.
+Le gabarit `EQUIPPED_LATTICE_TOWER_CC_BY_001` est une **tour treillis équipée de
+paraboles**, non un site télécom complet ni un modèle constructeur. Son GLB CC BY,
+son empreinte et ses dimensions sont contrôlés avant Blender. Les anciens GLB
+`internal_project_generated` restent consultables pour compatibilité historique,
+mais sont exclus de la sélection comme source externe.
+
+Une scène peut combiner cet actif avec une géométrie propre au projet (terrain,
+trajet de câble, fondation, adaptateur, support spécifique ou liaison) si aucun
+actif réutilisable admis ne correspond à son rôle. Un workflow Groq + Blender
+réel (`wf_6c163b12f352`) a réutilisé la tour inchangée et ajouté un terrain
+plat explicitement non structurel. Cette preuve ne qualifie pas une fondation,
+un raccordement, un équipement radio ou un site complet. Les branches de
+certificat 1.3 (scène générique), 1.4 et 1.5 demeurent distinctes et les
+versions persistées conservent leur preuve historique.
 
 Le corpus CAD brut contient de nombreux candidats 3D déclarés, principalement
 DWG. Leur chemin ou leur nom ne prouve ni une géométrie exploitable ni des

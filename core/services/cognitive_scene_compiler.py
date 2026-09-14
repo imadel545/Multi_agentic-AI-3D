@@ -104,6 +104,10 @@ class CognitiveSceneCompiler:
         generated_strategies = {"procedural_generate", "compose_and_generate"}
         for decision in plan.asset_decision_plan.decisions:
             component = graph_components[decision.component_id]
+            if decision.strategy == "compose_and_generate":
+                # A mixed scene uses separate reuse and generated decisions. A single
+                # mixed decision cannot silently discard its selected source asset.
+                raise ValueError("COGNITIVE_MIXED_COMPONENT_REQUIRES_SEPARATE_SOURCE_AND_GEOMETRY")
             if decision.strategy in generated_strategies:
                 program = program_by_role.get(component.semantic_role)
                 if program is None:

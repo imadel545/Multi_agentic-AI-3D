@@ -21,7 +21,7 @@ from core.contracts.scene import SceneSpec
 if TYPE_CHECKING:
     from core.services.asset_registry import AssetRegistry
 from core.services.blender_runtime import has_qualified_blender_runtime
-from core.validation.catalog_only import catalog_only_scene_violations
+from core.validation.library_first import library_first_scene_violations
 
 _SECTOR_PREVIEW_FILE_NAME = re.compile(r"^preview_sector_[a-f0-9]{16}\.png$")
 
@@ -50,9 +50,11 @@ class BlenderRunner:
         project_root: Path,
         blender_binary: str = "blender",
         timeout_s: int = 180,
-        catalog_only_registry: AssetRegistry | None = None,
+        library_first_registry: AssetRegistry | None = None,
+        project_specific_roles: frozenset[str] = frozenset(),
     ) -> None:
-        self.catalog_only_registry = catalog_only_registry
+        self.library_first_registry = library_first_registry
+        self.project_specific_roles = project_specific_roles
         self.project_root = project_root
         self.blender_binary = blender_binary
         self.timeout_s = timeout_s
@@ -64,16 +66,20 @@ class BlenderRunner:
 
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()
-        if self.catalog_only_registry is not None:
-            violations = catalog_only_scene_violations(scene, registry=self.catalog_only_registry)
+        if self.library_first_registry is not None:
+            violations = library_first_scene_violations(
+                scene,
+                registry=self.library_first_registry,
+                generated_roles=self.project_specific_roles,
+            )
             if violations:
                 return GenerationResult(
                     status="failed",
-                    mode="catalog_only_rejected",
+                    mode="library_first_rejected",
                     blender_available=False,
                     duration_ms=0,
                     artifacts={},
-                    error="CATALOG_ONLY_ASSET_REQUIRED",
+                    error="LIBRARY_SOURCE_REQUIRED",
                 )
         output_dir.mkdir(parents=True, exist_ok=True)
         scene_spec_path = output_dir / "scene_spec.json"

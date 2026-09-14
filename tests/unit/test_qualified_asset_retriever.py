@@ -62,10 +62,10 @@ def test_legacy_manifests_load_and_emit_truthful_decision_packets() -> None:
 
 def test_complete_site_template_is_reusable_only_for_its_complete_site_role() -> None:
     retriever = QualifiedAssetCandidateRetriever(AssetRegistry(MANIFESTS_DIR))
-    assert "telecom_site" in retriever.available_semantic_roles()
+    assert "equipped_tower" in retriever.available_semantic_roles()
     component = {
         "component_id": "complete_site",
-        "semantic_role": "telecom_site",
+        "semantic_role": "equipped_tower",
         "description": "Complete telecom site with its installed equipment.",
         "target_dimensions_m": {"x": 7.147688, "y": 8.096867, "z": 30.0},
         "minimum_detail_parts": 1,
@@ -78,13 +78,13 @@ def test_complete_site_template_is_reusable_only_for_its_complete_site_role() ->
     selected = next(
         candidate
         for candidate in complete_site
-        if candidate.candidate_id == "TELECOM_SITE_TEMPLATE_CC_BY_001"
+        if candidate.candidate_id == "EQUIPPED_LATTICE_TOWER_CC_BY_001"
     )
     assert selected.allowed_strategies == ["reuse"]
     assert selected.decision_packet is not None
     assert selected.decision_packet.allowed_generation_modes == ["imported_glb_exact"]
     assert all(
-        candidate.candidate_id != "TELECOM_SITE_TEMPLATE_CC_BY_001" for candidate in bare_support
+        candidate.candidate_id != "EQUIPPED_LATTICE_TOWER_CC_BY_001" for candidate in bare_support
     )
 
 

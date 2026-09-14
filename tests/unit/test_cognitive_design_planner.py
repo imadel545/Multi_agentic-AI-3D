@@ -331,3 +331,35 @@ def test_cognitive_strict_400_from_shared_transport_reaches_json_object_fallback
 
     assert result == {"result": {"name": "validated"}}
     assert structured.calls == 2
+
+
+def test_project_specific_generation_requires_empty_retrieval_and_allowed_role() -> None:
+    import pytest
+
+    class ProjectClient(PlanningClient):
+        def decompose(self, payload):
+            result = super().decompose(payload)
+            result["component_graph"]["components"][0]["semantic_role"] = "project_support"
+            return result
+
+        def decide_assets(self, payload):
+            assert "procedural_generate" in payload["required_strategies"]
+            return super().decide_assets(payload)
+
+    planner = CognitiveDesignPlanner(
+        ProjectClient(),
+        CandidateRetriever(),
+        _supervisor(),
+        [_capability()],
+        project_specific_roles=frozenset({"project_support"}),
+    )
+    assert (
+        planner.plan(workflow_id="wf_custom", request="custom support")
+        .asset_decision_plan.decisions[0]
+        .strategy
+        == "procedural_generate"
+    )
+    # A standard equipment role is denied even if a provider returns generation.
+    planner.planning_client = PlanningClient()
+    with pytest.raises(ValueError, match="POLICY_REJECTED_GENERATED_GEOMETRY"):
+        planner.plan(workflow_id="wf_standard", request="standard access equipment")

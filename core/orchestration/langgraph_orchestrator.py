@@ -70,12 +70,12 @@ from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
 from core.services.cognitive_scene_compiler import CognitiveSceneCompiler, cognitive_plan_hash
 from core.validation import validate_scene_spec
-from core.validation.catalog_only import catalog_only_scene_violations
 from core.validation.completion_certificate import build_completion_certificate
 from core.validation.design_blueprint import (
     evaluate_blueprint_requirement_coverage,
     evaluate_blueprint_scene_coverage,
 )
+from core.validation.library_first import library_first_scene_violations
 from core.validation.quality_gates import (
     evaluate_post_blender_gate,
     evaluate_pre_blender_gate,
@@ -216,7 +216,8 @@ class DesignOrchestrator:
         design_domain_router: DesignDomainRouteClient | None = None,
         cognitive_design_planner: CognitiveDesignPlanner | None = None,
         cognitive_scene_compiler: CognitiveSceneCompiler | None = None,
-        catalog_only_generation: bool = False,
+        library_first_generation: bool = False,
+        project_specific_roles: frozenset[str] = frozenset(),
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -232,7 +233,8 @@ class DesignOrchestrator:
         self.geometry_program_planner = geometry_program_planner
         self.design_domain_router = design_domain_router
         self.cognitive_design_planner = cognitive_design_planner
-        self.catalog_only_generation = catalog_only_generation
+        self.library_first_generation = library_first_generation
+        self.project_specific_roles = project_specific_roles
         self.cognitive_scene_compiler = cognitive_scene_compiler or CognitiveSceneCompiler(
             registry=registry
         )
@@ -1981,26 +1983,28 @@ class DesignOrchestrator:
                 max_repair_attempts=state.get("max_repair_attempts", 2),
                 requirement_coverage=state.get("requirement_coverage"),
             )
-        if self.catalog_only_generation:
-            violations = catalog_only_scene_violations(state["scene"], registry=self.registry)
+        if self.library_first_generation:
+            violations = library_first_scene_violations(
+                state["scene"], registry=self.registry, generated_roles=self.project_specific_roles
+            )
             if violations:
                 gate = gate.model_copy(
                     update={
                         "passed": False,
-                        "checks": {**gate.checks, "catalog_only_assets": False},
+                        "checks": {**gate.checks, "library_first_assets": False},
                         "details": {
                             **gate.details,
-                            "catalog_only_violations": violations,
+                            "library_first_violations": violations,
                         },
                         "critical_errors": [
                             *gate.critical_errors,
-                            "CATALOG_ONLY_ASSET_REQUIRED",
+                            "LIBRARY_SOURCE_REQUIRED",
                         ],
                     }
                 )
             else:
                 gate = gate.model_copy(
-                    update={"checks": {**gate.checks, "catalog_only_assets": True}}
+                    update={"checks": {**gate.checks, "library_first_assets": True}}
                 )
         report = (
             state["report"]
@@ -3235,7 +3239,7 @@ def _merge_quality_gate_report(
                 message=(
                     "Un composant demandé ne dispose pas encore d’un modèle 3D de bibliothèque "
                     "admis pour cette utilisation. Aucun remplacement n’a été fabriqué."
-                    if error == "CATALOG_ONLY_ASSET_REQUIRED"
+                    if error == "LIBRARY_SOURCE_REQUIRED"
                     else f"Quality gate failed: {gate.stage}.{error}"
                 ),
                 severity="error",

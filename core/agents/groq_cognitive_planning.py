@@ -73,6 +73,7 @@ class GroqCognitivePlanningClient:
                 "contract": payload["contract"],
                 "design_intent": decomposition_context,
                 "available_catalog_roles": payload["available_catalog_roles"],
+                "project_specific_roles": payload.get("project_specific_roles", []),
                 "response_key": "components",
                 "response_schema": graph_schema["properties"]["components"],
             },
@@ -82,7 +83,11 @@ class GroqCognitivePlanningClient:
                 "24 functional 3D components and subassemblies. Return exactly one JSON object "
                 "with one top-level key components. Follow the supplied response_schema. Include "
                 "dimensions, functions, material intent, parent relationships and honest detail "
-                "needs. Do not emit Blender code, asset IDs, capability IDs or prose."
+                "needs. For genuinely project-specific geometry use its matching "
+                "project_specific_roles "
+                "entry; never label standard equipment as a custom support or terrain. "
+                "Keep reusable equipment and new connecting geometry as separate components. "
+                "Do not emit Blender code, asset IDs, capability IDs or prose."
                 " When the source request explicitly asks to reuse a complete catalog design and "
                 "one available_catalog_roles value names that same functional whole, use that "
                 "exact role. These roles describe searchable interfaces, not proof that a matching "
@@ -164,8 +169,11 @@ class GroqCognitivePlanningClient:
                 "and capability IDs are authoritative. Select only supplied qualified candidate "
                 "IDs, allowed strategies, allowed parameters and supplied capability IDs. Prefer "
                 "reuse or rigid catalog composition when quality and QA risk justify it. If no "
-                "supplied candidate can satisfy the component, choose unsupported or clarify; "
-                "never invent geometry or a substitute asset. Return exactly one JSON "
+                "supplied candidate can satisfy standard equipment, choose unsupported or clarify. "
+                "Only when required_strategies explicitly allows procedural_generate, construct "
+                "genuinely missing project-specific geometry, with an explicit rationale. "
+                "Never recreate manufacturer equipment or override catalog geometry. "
+                "Return exactly one JSON "
                 "object with top-level key decisions and no prose outside JSON. Return exactly "
                 "one decision. Put parameter choices in selected_parameters as "
                 "{parameter_id,value} entries; never invent an ID. "

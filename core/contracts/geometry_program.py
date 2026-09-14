@@ -620,10 +620,6 @@ class GeometryProgram(StrictModel):
             )
         if any(node.node_id in construction_ids for node in semantic_nodes):
             raise ValueError("primary semantic nodes cannot be construction-only")
-        if self.authorship == "llm_generated" and len(self.nodes) < 3:
-            raise ValueError(
-                "LLM-authored geometry programs require at least three semantic/detail nodes"
-            )
         if self.maximum_dimensions_m is not None:
             maximum = self.maximum_dimensions_m
             if any(value <= 0 or value > 300 for value in (maximum.x, maximum.y, maximum.z)):

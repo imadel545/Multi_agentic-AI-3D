@@ -103,8 +103,8 @@ class GeometryProgramPlanner:
                     "modifiers, terrain, anchors, connectors and semantic groups when they improve "
                     "functional construction. "
                     "Create coherent multi-part technical geometry with stable semantic roles. "
-                    "An LLM-authored program must contain at least three nodes, including "
-                    "supporting/detail geometry in addition to its primary semantic node. "
+                    "Use the smallest sufficient construction; a single useful node is valid. "
+                    "Never add decorative geometry merely to meet a node count. "
                     "Put the requested semantic_role only on visible mesh-producing nodes; "
                     "never put a primary semantic node in construction_node_ids. "
                     "Never emit ellipsis tokens (... or …), placeholder objects or abbreviated "
@@ -351,8 +351,8 @@ GeometryProgram compact contract:
 - instance node: kind="instance", source_node_id references another node.
 - node_id, material_id, parent_id and source_node_id use lowercase identifiers.
 - at least one node semantic_role must equal the top-level semantic_role.
-- every LLM-authored program contains at least three nodes in total; add real
-  supporting/detail geometry instead of padding with duplicate empty parts.
+- use the smallest sufficient construction; a single useful node is valid.
+  Never add decorative geometry merely to meet a node count.
 - exactly requested_quantity visible mesh-producing nodes must carry the
   top-level semantic_role; use instances for repeated equal components. Those
   primary nodes must never appear in construction_node_ids.

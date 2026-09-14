@@ -51,7 +51,7 @@ class CatalogReusePlanner:
         return CognitiveDesignPlan.model_validate(payload)
 
 
-class CompleteTelecomSiteReusePlanner:
+class EquippedTowerReusePlanner:
     def __init__(self, registry):
         self.retriever = QualifiedAssetCandidateRetriever(registry)
 
@@ -63,9 +63,9 @@ class CompleteTelecomSiteReusePlanner:
         )
         component = payload["component_graph"]["components"][0]
         component.update(
-            semantic_role="telecom_site",
+            semantic_role="equipped_tower",
             description=(
-                "Reuse one complete telecom site template with its installed equipment "
+                "Reuse one equipped telecom tower assembly with its installed equipment "
                 "without decomposition or deformation."
             ),
             target_dimensions_m={"x": 7.147688, "y": 8.096867, "z": 30.0},
@@ -76,7 +76,7 @@ class CompleteTelecomSiteReusePlanner:
         selected = next(
             candidate
             for candidate in candidates
-            if candidate.candidate_id == "TELECOM_SITE_TEMPLATE_CC_BY_001"
+            if candidate.candidate_id == "EQUIPPED_LATTICE_TOWER_CC_BY_001"
         )
         assert "reuse" in selected.allowed_strategies
         decision = payload["asset_decision_plan"]["decisions"][0]
@@ -87,7 +87,7 @@ class CompleteTelecomSiteReusePlanner:
             required_capability_ids=[],
             placement={"translation_m": {"x": 0, "y": 0, "z": 0}},
             rationale=(
-                "Reuse the admitted complete site as one unchanged exact asset; its "
+                "Reuse the admitted equipped tower as one unchanged exact asset; its "
                 "embedded equipment is not selected as separate components."
             ),
         )
@@ -157,25 +157,22 @@ def test_generic_exact_reuse_reaches_real_blender_certificate(tmp_path):
 
 
 @pytest.mark.blender_runtime
-def test_complete_telecom_site_template_reuse_reaches_real_blender_certificate(tmp_path):
+def test_equipped_tower_assembly_reuse_reaches_real_blender_certificate(tmp_path):
     registry = AssetRegistry(Path("assets/manifests"))
     orchestrator = DesignOrchestrator(
         registry=registry,
         extractor=RequirementExtractor(enabled=False),
         rag_service=None,
-        blender_runner=BlenderRunner(project_root=Path.cwd(), catalog_only_registry=registry),
-        catalog_only_generation=True,
+        blender_runner=BlenderRunner(project_root=Path.cwd(), library_first_registry=registry),
+        library_first_generation=True,
         design_domain_router=GenericRoute(),
-        cognitive_design_planner=CompleteTelecomSiteReusePlanner(registry),
+        cognitive_design_planner=EquippedTowerReusePlanner(registry),
         geometry_program_planner=None,
         allow_blender_fallback=False,
     )
     result = orchestrator.run(
         workflow_id="wf_complete_site_reuse_001",
-        requirements_text=(
-            "Reuse one complete ready-made telecom site template without changing or "
-            "decomposing it."
-        ),
+        requirements_text=("Reuse one equipped tower assembly without changing or decomposing it."),
         detail_level="high",
         output_dir=tmp_path,
         use_llm=True,
@@ -192,7 +189,7 @@ def test_complete_telecom_site_template_reuse_reaches_real_blender_certificate(t
     proof = proofs["geometry_programs"][0]
     assert proof["strategy"] == "reuse"
     assert proof["generation_strategy"] == "imported_glb_exact"
-    assert proof["asset_id"] == "TELECOM_SITE_TEMPLATE_CC_BY_001"
+    assert proof["asset_id"] == "EQUIPPED_LATTICE_TOWER_CC_BY_001"
     assert proof["qa"]["passed"] is True
     assert proof["bounding_box_m"]["dimensions_m"] == pytest.approx(
         [7.147688, 8.096867, 30.0], abs=0.001
@@ -200,7 +197,7 @@ def test_complete_telecom_site_template_reuse_reaches_real_blender_certificate(t
 
     metadata = json.loads((tmp_path / "scene_metadata.json").read_text())
     record = metadata["asset_imports"][0]
-    assert record["asset_id"] == "TELECOM_SITE_TEMPLATE_CC_BY_001"
+    assert record["asset_id"] == "EQUIPPED_LATTICE_TOWER_CC_BY_001"
     assert record["asset_import_success"] is True
     assert record["import_fallback_allowed"] is False
     assert record["scale_factors"] == [1, 1, 1]
@@ -223,7 +220,7 @@ def test_complete_telecom_site_template_reuse_reaches_real_blender_certificate(t
 
     lock = json.loads((tmp_path / "build.lock.json").read_text())
     assert lock["trusted_inputs"]["exact_assets"][0]["asset_id"] == (
-        "TELECOM_SITE_TEMPLATE_CC_BY_001"
+        "EQUIPPED_LATTICE_TOWER_CC_BY_001"
     )
     from copy import deepcopy
 
@@ -317,3 +314,102 @@ def _triangle_payload(path):
         for material in document.get("materials", [])
     )
     return sorted(triangles), materials
+
+
+@pytest.mark.blender_runtime
+def test_library_first_mixes_preserved_tower_with_project_terrain(tmp_path):
+    from copy import deepcopy
+
+    from core.contracts.geometry_program import GeometryProgram
+    from core.services.cognitive_asset_reuse import asset_admission_registry
+    from core.services.cognitive_scene_compiler import CognitiveSceneCompiler
+    from core.services.geometry_capabilities import geometry_capability_registry
+    from core.validation.library_first import project_geometry_roles
+    from tests.unit.test_cognitive_runtime_integration import FakeGeometryPlanner
+
+    registry = AssetRegistry(Path("assets/manifests"))
+
+    class MixedPlanner(EquippedTowerReusePlanner):
+        def plan(self, **kwargs):
+            raw = super().plan(**kwargs).model_dump(mode="json")
+            terrain = deepcopy(raw["component_graph"]["components"][0])
+            terrain.update(
+                component_id="site_terrain",
+                semantic_role="terrain",
+                description="Project presentation terrain, not a structural foundation.",
+                target_dimensions_m={"x": 16, "y": 16, "z": 0.2},
+            )
+            raw["component_graph"]["components"].append(terrain)
+            decision = deepcopy(raw["asset_decision_plan"]["decisions"][0])
+            decision.update(
+                component_id="site_terrain",
+                strategy="procedural_generate",
+                candidates=[],
+                selected_candidate_ids=[],
+                placement=None,
+                required_capability_ids=["geometry.primitive@1.0.0"],
+                rationale="No admitted terrain candidate; project-specific dimensions.",
+            )
+            raw["asset_decision_plan"]["decisions"].append(decision)
+            return CognitiveDesignPlan.model_validate(raw)
+
+    class TerrainPlanner:
+        def plan(self, **kwargs):
+            raw = FakeGeometryPlanner().plan(schema_version="2.0.0").model_dump(mode="json")
+            raw.update(
+                program_id="site_terrain.program",
+                semantic_role="terrain",
+                source_description="Project presentation terrain",
+            )
+            node = raw["nodes"][0]
+            node.update(
+                node_id="terrain",
+                semantic_role="terrain",
+                size_m={"x": 16, "y": 16, "z": 0.2},
+                transform={"translation_m": {"x": 0, "y": 0, "z": -0.2}},
+            )
+            raw["nodes"] = [node]
+            return GeometryProgram.model_validate(raw)
+
+    runner = BlenderRunner(
+        Path.cwd(), library_first_registry=registry, project_specific_roles=project_geometry_roles()
+    )
+    orchestrator = DesignOrchestrator(
+        registry=registry,
+        extractor=RequirementExtractor(enabled=False),
+        rag_service=None,
+        blender_runner=runner,
+        design_domain_router=GenericRoute(),
+        cognitive_design_planner=MixedPlanner(registry),
+        geometry_program_planner=TerrainPlanner(),
+        cognitive_scene_compiler=CognitiveSceneCompiler(
+            asset_admission_registry(registry).merged(geometry_capability_registry()),
+            registry=registry,
+        ),
+        library_first_generation=True,
+        project_specific_roles=project_geometry_roles(),
+        allow_blender_fallback=False,
+    )
+    result = orchestrator.run(
+        workflow_id="wf_mixed_library_001",
+        requirements_text="Reuse tower and add project terrain",
+        detail_level="high",
+        output_dir=tmp_path,
+        use_llm=True,
+    )
+    assert result.status == "completed", result.report.errors
+    assert result.generation.mode == "real_blender"
+    assert result.completion_certificate.status == "issued"
+    assert len(result.scene.geometry_programs) == 2
+    source_triangles, _ = _triangle_payload(Path("assets/towers/tower_lattice_30m.glb"))
+    output_triangles, _ = _triangle_payload(tmp_path / "design.glb")
+    # Added terrain cannot replace or change any triangle of the imported equipment.
+    from collections import Counter
+
+    # The additional terrain can reorder glTF material indices, while every
+    # imported tower triangle must retain its exact vertex coordinates.
+    assert not (
+        Counter(vertices for _, vertices in source_triangles)
+        - Counter(vertices for _, vertices in output_triangles)
+    )
+    assert len(output_triangles) > len(source_triangles)

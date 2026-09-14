@@ -336,13 +336,13 @@ def test_geometry_program_planner_falls_back_after_strict_groq_400(
 
     assert len(fake.payloads) == 2
     assert fake.payloads[0]["response_format"]["type"] == "json_schema"
-    assert "must contain at least three nodes" in fake.payloads[0]["messages"][0]["content"]
+    assert "a single useful node is valid" in fake.payloads[0]["messages"][0]["content"]
     assert "never put a primary semantic node" in fake.payloads[0]["messages"][0]["content"]
     assert fake.payloads[1]["response_format"] == {"type": "json_object"}
     fallback_contract = fake.payloads[1]["messages"][-1]["content"]
     assert 'base_color_rgba as {"r":0..1' in fallback_contract
     assert '"translation_m":{"x":7.0' in fallback_contract
-    assert "at least three nodes in total" in fallback_contract
+    assert "a single useful node is valid" in fallback_contract
     assert "must never appear in construction_node_ids" in fallback_contract
     assert "ellipsis tokens" in fallback_contract
     assert "placeholder objects" in fallback_contract
