@@ -140,6 +140,15 @@ class BlenderRunner:
             try:
                 completed = self._run_blender_command(command)
             except subprocess.TimeoutExpired as exc:
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="blender_process",
+                    reason="BLENDER_TIMEOUT",
+                    command_output=_timeout_command_output(exc),
+                )
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 self._write_fallback_artifacts(output_dir, scene, mode="fallback_blender_timeout")
                 return self._result(
@@ -156,6 +165,15 @@ class BlenderRunner:
                 attempt_errors.append(
                     f"attempt_{attempt}: {raw_error or f'exit_code={completed.returncode}'}"
                 )
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="blender_process",
+                    reason=raw_error or f"exit_code={completed.returncode}",
+                    completed=completed,
+                )
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 if attempt < 3:
                     time.sleep(attempt)
@@ -167,6 +185,15 @@ class BlenderRunner:
                 attempt_errors.append(
                     f"attempt_{attempt}: {validation_error}"
                     + (f"; {raw_error}" if raw_error else "")
+                )
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="staged_artifact_validation",
+                    reason=validation_error,
+                    completed=completed,
                 )
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 if attempt < 3:
@@ -201,6 +228,15 @@ class BlenderRunner:
                 lock_error = _build_lock_preparation_error(exc)
             if lock_error:
                 attempt_errors.append(f"attempt_{attempt}: {lock_error}")
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="build_lock_validation",
+                    reason=lock_error,
+                    completed=completed,
+                )
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 if attempt < 3:
                     time.sleep(attempt)
@@ -211,6 +247,15 @@ class BlenderRunner:
                 public_scene_hash = None
             if public_scene_hash != scene_spec_sha256:
                 attempt_errors.append(f"attempt_{attempt}: BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH")
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="public_scene_validation",
+                    reason="BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH",
+                    completed=completed,
+                )
                 shutil.rmtree(staging_dir, ignore_errors=True)
                 if attempt < 3:
                     time.sleep(attempt)
@@ -222,6 +267,15 @@ class BlenderRunner:
                 public_scene_hash = None
             if public_scene_hash != scene_spec_sha256:
                 attempt_errors.append(f"attempt_{attempt}: BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH")
+                _persist_failed_attempt_diagnostic(
+                    output_dir,
+                    staging_dir,
+                    attempt_number=attempt,
+                    attempt_id=attempt_id,
+                    phase="public_scene_validation",
+                    reason="BLENDER_SCENE_SPEC_PUBLIC_HASH_MISMATCH_AFTER_PROMOTION",
+                    completed=completed,
+                )
                 _clear_generated_artifacts(output_dir)
                 if attempt < 3:
                     time.sleep(attempt)
@@ -634,6 +688,64 @@ def _command_failure_details(completed: subprocess.CompletedProcess[str]) -> str
         prefix = f"exit_code={completed.returncode}"
     output = _combined_command_output(completed)
     return f"{prefix}\n{output}" if output else prefix
+
+
+def _timeout_command_output(exc: subprocess.TimeoutExpired) -> str:
+    values: list[str] = []
+    for value in (exc.stdout, exc.stderr):
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", errors="replace")
+        if value:
+            values.append(value.strip())
+    return "\n".join(values)
+
+
+def _persist_failed_attempt_diagnostic(
+    output_dir: Path,
+    staging_dir: Path,
+    *,
+    attempt_number: int,
+    attempt_id: str,
+    phase: str,
+    reason: str,
+    completed: subprocess.CompletedProcess[str] | None = None,
+    command_output: str | None = None,
+) -> None:
+    """Persist bounded internal diagnostics before a failed staging tree is removed."""
+
+    try:
+        diagnostic_dir = output_dir / ".blender_attempt_diagnostics"
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
+        staged_files = (
+            [
+                {"name": path.name, "size_bytes": path.stat().st_size}
+                for path in sorted(staging_dir.iterdir(), key=lambda item: item.name)
+                if path.is_file()
+            ]
+            if staging_dir.is_dir()
+            else []
+        )
+        output = command_output
+        if output is None and completed is not None:
+            output = _combined_command_output(completed)
+        payload = {
+            "schema_version": "1.0.0",
+            "recorded_at": datetime.now(UTC).isoformat(),
+            "attempt_number": attempt_number,
+            "attempt_id": attempt_id,
+            "phase": phase,
+            "reason": reason[-4000:],
+            "process_returncode": completed.returncode if completed is not None else None,
+            "command_output_tail": (output or "")[-32_000:],
+            "staged_files": staged_files,
+        }
+        _atomic_write_text(
+            diagnostic_dir / f"attempt_{attempt_number}.json",
+            json.dumps(payload, indent=2, ensure_ascii=False),
+        )
+    except OSError:
+        # Diagnostics must never replace the original bounded retry/fallback path.
+        return
 
 
 def _validate_staged_artifacts(output_dir: Path, scene: SceneSpec) -> str | None:

@@ -234,7 +234,7 @@ def test_scene_planner_carries_explicit_requirement_accessories() -> None:
     placements = {accessory.asset_type: accessory for accessory in scene.accessory_assets}
     assert placements["cabinet"].position[2] == 0.0
     assert placements["gps"].position[2] == 29.5
-    assert placements["gps"].position[1] < 1.0
+    assert abs(placements["gps"].position[1] - 0.785) < 1e-9
 
 
 def test_scene_planner_uses_only_manifest_authorized_generation_modes() -> None:

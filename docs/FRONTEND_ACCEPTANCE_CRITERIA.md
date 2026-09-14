@@ -1,139 +1,110 @@
 # Frontend Acceptance Criteria
 
-Critères obligatoires pour accepter le futur frontend.  
-Si un critère échoue, le frontend n'est pas accepté.
-
-Dernière synchronisation ciblée: 2026-09-12. La baseline visuelle réelle est validée; les
-cases non cochées exigent encore une preuve fonctionnelle enregistrée et
-empêchent de déclarer la Gate finale complète.
-
-Le smoke Product API du 2026-07-24 couvre génération Groq/Blender, édition,
-version, rollback et upload ZIP. La génération autonome depuis document-pack a
-été supprimée du produit; un fichier sert uniquement de contexte à un prompt
-non vide. Les cases de mutation restent ouvertes tant que ces mêmes actions ne
-sont pas toutes rejouées depuis les contrôles du navigateur. Le smoke navigateur
-du 2026-07-28 prouve l'upload direct et la restauration du même `pack_id` après
-rechargement. L'interface conserve un pointeur local versionné et un résumé
-compact; les extractions, scores et diagnostics restent internes au backend.
-
-Le smoke de clôture du 2026-07-29 a aussi restauré
-`wf_a6660b81b929` sur le contrat API courant, vérifié le modèle réel en
-desktop/mobile et la preview backend explicite sous Chrome headless sans
-WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
-
----
+Ces critères acceptent le frontend produit, pas seulement ses composants. Les
+preuves d'exécution datées sont centralisées dans
+[PROJECT_SOURCE_OF_TRUTH.md](PROJECT_SOURCE_OF_TRUTH.md). Une case ouverte reste
+un travail à démontrer sur le runtime réel.
 
 ## 1. Compréhension immédiate
 
-- [x] Un nouvel utilisateur comprend quoi faire en moins de 5 secondes.
-- [x] Le chat, le bouton de pièce jointe et le champ de commande sont visibles
-  sans scroll sur le layout desktop nominal.
+- [ ] Confirmer par un essai utilisateur que la première action est comprise
+  en moins de 5 secondes.
+- [x] Le chat, la pièce jointe et le champ de commande sont visibles sans scroll
+  sur le layout desktop nominal.
 
 ## 2. Viewer 3D dominant
 
-- [x] Le viewer 3D prend la majorité de l'espace horizontal et vertical.
-- [x] Le modèle est visible, grand et bien cadré au premier chargement.
-- [x] La tour est lisible, pas coupée ni noyée dans le sol.
+- [x] Le viewer occupe la majorité de l'espace utile.
+- [x] Un modèle vérifié est visible, grand et cadré au chargement.
+- [x] Une tour haute reste lisible sans être coupée ni noyée dans le sol.
 
-## 3. Chat comme zone de commande
+## 3. Chat comme commande
 
 - [x] Le chat est la zone de commande principale.
-- [ ] L'utilisateur peut générer, éditer, uploader, et voir l'état depuis le chat.
-- [x] Les réponses de l'agent sont en langage utilisateur, pas en codes techniques.
+- [ ] L'utilisateur peut générer, éditer, joindre un document et voir tout l'état
+  utile depuis le chat dans un même parcours navigateur enregistré.
+- [x] Les réponses et erreurs sont en langage utilisateur, sans codes internes.
 
-## 4. Document dropzone
+## 4. Pièces jointes
 
-- [x] Le bouton de pièce jointe du composeur accepte plusieurs fichiers directs
-  ou un ZIP, affiche la sélection avant envoi, permet le retrait individuel et
-  applique les limites exposées par le backend.
-- [x] La pièce jointe reste compacte; les extractions et diagnostics internes ne sont pas affichés.
-- [x] Le bouton `×` supprime les fichiers locaux et leur mémoire documentaire.
+- [x] Le composeur accepte plusieurs fichiers directs ou un ZIP, affiche les noms
+  sélectionnés, permet le retrait individuel et respecte les limites backend.
+- [x] Une pièce jointe restaurée reste compacte; extraction, scores, identifiants
+  et diagnostics internes ne deviennent pas l'interface principale.
+- [x] Le bouton `×` appelle la suppression gardée et distingue explicitement le
+  succès de l'échec.
+- [x] Un document enrichit seulement une commande non vide; il ne déclenche pas
+  une génération autonome.
 
-## 5. Pas de panneaux vides
+## 5. Surfaces contextuelles
 
 - [x] Aucun grand panneau vide ou placeholder permanent.
-- [x] Les drawers ne s'ouvrent que quand ils ont du contenu utile.
+- [x] Les drawers Composition, Livrables et Versions s’ouvrent à la demande
+  avec un contenu utile.
+- [x] La timeline détaillée reste contextuelle; seule l'opération active est
+  visible dans la conversation.
+- [x] Rapports, warnings et fallbacks sont résumés en langage utilisateur. Aucun
+  JSON brut n'est rendu comme surface produit.
 
-## 6. Pas de JSON brut comme UI principale
+## 6. État et temps réel
 
-- [x] Les rapports QA, warnings, et assets sont traduits en cartes/summaries.
-- [x] Aucun JSON brut n'est rendu dans la surface produit.
+- [x] La progression vient des phases et événements SSE, avec polling de reprise
+  prévu par le contrat.
+- [x] Génération, succès, échec et dégradation sont distincts; l'UI ne fabrique
+  ni transcript de raisonnement ni streaming de tokens.
+- [x] Les fallbacks Blender, asset et LLM restent visibles.
+- [x] Une sortie `GeometryProgram` réparée est distinguée d'une sortie structurée
+  acceptée directement.
 
-## 7. Warnings utilisateur
+## 7. Fonctions produit
 
-- [x] Les warnings sont traduits en langage utilisateur avec impact et action suggérée.
-- [x] Les modes fallback (Blender, asset, LLM) sont explicitement visibles.
-- [x] Une sortie GeometryProgram réparée est distinguée d'une sortie JSON
-  strictement décodée.
-
-## 8. Timeline cachée
-
-- [x] La timeline complète des events est dans un drawer, pas affichée par défaut.
-- [x] Seule l'opération active et son état courant sont visibles dans le chat.
-
-## 9. Temps réel
-
-- [x] La progression d'une opération active est visible en temps réel par SSE,
-  avec fallback polling prévu par le contrat.
-- [x] L'utilisateur voit clairement quand une génération est en cours.
-
-## 10. Fonctions testées
-
-- [x] Generate design from prompt.
-- [x] Upload document pack.
-- [x] Combine an attached document pack with a non-empty prompt.
-- [x] Edit design by prompt.
-- [x] Version rollback.
-- [ ] Download artifacts.
+- [x] Générer depuis une commande.
+- [x] Joindre un document pack et le combiner à une commande non vide.
+- [x] Modifier un design par commande.
+- [x] Restaurer une version.
+- [ ] Télécharger les artifacts depuis les contrôles du navigateur.
 - [ ] Comprendre et confirmer un composant hors catalogue avant génération.
-- [x] Afficher modèle, mode, hash, enveloppe et ajustements GeometryProgram après
-  génération.
-- [ ] Modifier un composant généré et constater la nouvelle version.
-- [ ] Expliquer un échec du spécialiste géométrique avant tout lancement Blender.
+- [x] Afficher la provenance, l'enveloppe et les ajustements d'un composant
+  `GeometryProgram`.
+- [ ] Modifier un composant généré et constater la nouvelle version dans un smoke
+  navigateur enregistré.
+- [ ] Expliquer l'échec du spécialiste géométrique avant Blender.
 
-## 11. Qualité technique
+## 8. Qualité technique
 
-- [x] `npm run typecheck` passe le 2026-07-31.
-- [x] `npm run test -- --run` passe avec 125 tests le 2026-07-31.
-- [x] `npm run build` passe le 2026-07-31; tous les chunks JavaScript restent
-  sous 371 kB non compressés.
-- [x] Console navigateur sans erreurs sur le smoke de restauration et d'inspection.
-- [x] Le 2026-08-11, `npm run test -- --run` passe avec 180 tests; typecheck et
-  build passent aussi sur le current tree.
-- [x] Le 2026-09-12, la suite frontend passe avec 211 tests; typecheck et build
-  production passent. Chrome charge un canvas WebGL réel sans exception console,
-  échec réseau ni réponse HTTP en erreur.
-- [x] Le 2026-09-14, la suite frontend passe avec 225 tests; typecheck et build
-  production passent. Tous les fichiers TypeScript, TSX et CSS sous
-  `apps/frontend/src` restent sous la limite de 700 lignes. Le smoke HTTP couvre
-  ajout, liaison au chat, contexte hashé et suppression réelle d'une pièce; un
-  onglet Chrome neuf charge le studio sans erreur ni alerte console.
-- [x] Le drawer Bibliothèque permet d'examiner un candidat constructeur réel,
-  affiche son exclusion de la génération et les preuves manquantes en langage
-  utilisateur, sans proposer d'action d'ajout ou d'utilisation.
-- [x] Le smoke layout current-tree en lecture seule charge le GLB certifié à
-  1440 x 1000 et 1047 x 2748 sans scroll desktop concurrent; ce contrôle ne
-  remplace pas le replay navigateur des mutations ni un smoke de conversion CAD.
+- [x] La suite frontend courante passe sans dépendre d'un nombre historique figé.
+- [x] TypeScript et le build de production passent.
+- [x] Le frontend valide les réponses backend aux frontières avec Zod.
+- [x] Une session navigateur enregistrée charge le studio et un GLB réel sans
+  erreur applicative console ou réponse réseau inattendue.
+- [x] Le drawer Bibliothèque montre qu'un candidat constructeur exclu de la
+  génération reste une preuve incomplète et ne propose pas de l'utiliser.
+- [x] Le layout desktop et portrait garde le viewer et le chat utilisables.
 
-## 12. Preuve visuelle
+## 9. Preuve visuelle
 
-- [x] Screenshot final du studio avec un design réel `real_blender` chargé.
-- [x] Preuve que le GLB est visible et grand.
-- [x] Clic réel sur une antenne exportée : cadrage du sous-assemblage prouvé,
-  identité utilisateur lisible et vue rapprochée du même secteur.
-- [x] Conversation restaurée après rechargement avec création, édition ciblée,
-  refus explicites et rollback, sans exposer la racine sémantique backend.
-- [ ] Smoke visuel du parcours GeometryProgram initial + révision. Le backend
-  réel `wf_ead2456914b2` et `v2e0a4faf` a produit `real_blender`, QA 1.0,
-  certificat, GLB et preview, mais cette preuve backend ne remplace pas le smoke
-  navigateur.
+- [x] Un design `real_blender` est visible dans le viewer.
+- [x] Le cadrage montre le modèle à une échelle utile.
+- [x] Un clic sur un composant exporté cadre son sous-assemblage prouvé et garde
+  l'identité utilisateur lisible.
+- [x] Une conversation restaurée montre création, édition ciblée, refus et
+  rollback sans exposer les racines sémantiques backend.
+- [ ] Parcours navigateur enregistré pour création puis révision d'un
+  `GeometryProgram`; une preuve backend seule ne ferme pas cette case.
 
 ## Rejet automatique
 
-Le frontend est rejeté si :
+Le frontend est rejeté si le viewer n'est pas dominant, si l'interface redevient
+un dashboard technique, si elle expose les codes/JSON internes comme contenu
+principal, si elle affiche un panneau vide permanent, si les tests/build échouent,
+ou si elle présente une preview ou un fallback comme un modèle 3D vérifié.
 
-- le layout ressemble à un dashboard dev ;
-- le viewer 3D n'occupe pas la majorité de l'écran ;
-- des codes techniques sont affichés comme UI principale ;
-- un grand panneau vide est présent par défaut ;
-- les tests/build échouent.
+## Authentification et durée de tâche
+
+- [x] La page Circet permet l’inscription du propriétaire local avec nom,
+  identifiant et mot de passe; erreurs de champs, focus et affichage du mot de
+  passe vérifiés sur desktop et écran étroit.
+- [x] Les routes produit refusent une session absente; la déconnexion révoque
+  la session serveur. Aucun identifiant par défaut n’est livré.
+- [x] Le temps écoulé repose sur le début réel de l’opération, continue pendant
+  son exécution puis se fige à la fin; le rechargement conserve les bornes serveur.

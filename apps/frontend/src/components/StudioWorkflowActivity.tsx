@@ -72,8 +72,7 @@ export function LiveGenerationOverlay({
       status: stage.status
     }));
   const label =
-    liveOperation?.human_label ??
-    humanOperationLabel(liveOperation?.current_operation) ??
+    humanOperationLabel(liveOperation?.current_node ?? liveOperation?.current_operation) ??
     (intent === "revision"
       ? "Modification du design"
       : intent === "rollback"
@@ -82,12 +81,11 @@ export function LiveGenerationOverlay({
           ? "Préparation du design"
           : "Conception en cours");
   const message =
-    liveOperation?.progress_message ??
     (intent === "revision"
       ? "La modification est interprétée, appliquée au modèle 3D puis contrôlée avant de remplacer la version visible."
       : intent === "rollback"
         ? "La version sélectionnée est vérifiée avant de redevenir active."
-        : "Les spécialistes coordonnent la conception et publient leurs preuves au fur et à mesure.");
+        : "Le modèle est construit puis vérifié avant de devenir la version active.");
   return (
     <section
       aria-atomic="true"
@@ -147,11 +145,11 @@ function humanOperationLabel(operation: string | null | undefined): string | nul
   if (normalized.includes("requirement") || normalized.includes("extract")) {
     return "Compréhension de la demande";
   }
+  if (normalized.includes("blender") || normalized.includes("build") || normalized.includes("geometry") || normalized.includes("assembl")) {
+    return "Construction du modèle 3D";
+  }
   if (normalized.includes("plan") || normalized.includes("blueprint") || normalized.includes("scene")) {
     return "Conception du plan 3D";
-  }
-  if (normalized.includes("blender") || normalized.includes("build") || normalized.includes("geometry")) {
-    return "Construction du modèle 3D";
   }
   if (normalized.includes("qa") || normalized.includes("quality") || normalized.includes("certif")) {
     return "Vérification du résultat";
@@ -221,5 +219,4 @@ export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflow
     </section>
   );
 }
-
 

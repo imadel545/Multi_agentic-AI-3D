@@ -19,6 +19,8 @@ from apps.api.telecom_studio_api.product import (
     _geometry_program_summary_from_path,
     _inventory_status,
     _probe_blender_runtime,
+    _public_rag_reranker_model,
+    _rag_reranker_model,
     _studio_warnings,
     _tower_access_summary_from_path,
 )
@@ -29,6 +31,7 @@ from core.contracts.scene import SceneAssetPlacement, SceneSpec, SectorSpec, Vis
 from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
 from core.contracts.tower_access_evidence import canonical_tower_access_evidence_sha256
 from core.contracts.versioning import SceneVersion
+from core.rag.reranker import PassthroughReranker
 from core.services import scene_versioning
 
 
@@ -54,6 +57,50 @@ def test_blender_availability_requires_successful_headless_smoke(
     _probe_blender_runtime.cache_clear()
 
     assert _blender_available() is False
+
+
+def test_actual_passthrough_does_not_report_unused_configured_reranker_model() -> None:
+    rag_service = type(
+        "RagServiceStub",
+        (),
+        {
+            "_reranker": PassthroughReranker(),
+            "_reranker_model": "nvidia/retired-reranker",
+        },
+    )()
+
+    assert _rag_reranker_model(rag_service) is None
+
+
+def test_legacy_rag_service_without_reranker_keeps_configured_model_fallback() -> None:
+    rag_service = type(
+        "LegacyRagServiceStub",
+        (),
+        {"_reranker_model": "legacy/configured-reranker"},
+    )()
+
+    assert _rag_reranker_model(rag_service) == "legacy/configured-reranker"
+
+
+def test_viewer_projection_hides_historical_model_for_explicit_passthrough_only() -> None:
+    retired_model = "nvidia/retired-reranker"
+
+    assert (
+        _public_rag_reranker_model(
+            provider="passthrough",
+            status="passthrough_no_rerank",
+            model=retired_model,
+        )
+        is None
+    )
+    assert (
+        _public_rag_reranker_model(
+            provider="nvidia",
+            status="degraded_passthrough",
+            model=retired_model,
+        )
+        == retired_model
+    )
 
 
 def test_blender_availability_rejects_a_successful_unqualified_runtime(
@@ -811,6 +858,83 @@ def test_current_operation_prefers_persisted_edit_over_old_terminal_event(
         workflow_service.outputs_dir = original_outputs
 
 
+def test_task_event_bounds_keep_full_history_and_correlate_latest_edit(monkeypatch) -> None:
+    events = [
+        {
+            "event_type": "design_created",
+            "timestamp": "2026-09-14T10:00:00Z",
+            "payload": {},
+        },
+        *[
+            {
+                "event_type": "node_completed",
+                "timestamp": f"2026-09-14T10:{index // 60:02d}:{index % 60:02d}Z",
+                "payload": {"node": f"step_{index}"},
+            }
+            for index in range(205)
+        ],
+    ]
+
+    service = ProductService(workflow_service, object())
+    monkeypatch.setattr(
+        service.workflow_service,
+        "get_status",
+        lambda _workflow_id: {"status": "completed", "warnings": [], "errors": []},
+    )
+    monkeypatch.setattr(service.workflow_service, "get_events", lambda _workflow_id: events)
+    operation = service.current_operation("wf_long_history")
+
+    assert operation["task_started_at"] == "2026-09-14T10:00:00Z"
+    assert operation["task_finished_at"] is None
+
+    events.extend(
+        [
+            {
+                "event_type": "workflow_completed",
+                "timestamp": "2026-09-14T10:10:00Z",
+                "payload": {},
+            },
+            {
+                "event_type": "edit_requested",
+                "timestamp": "2026-09-14T11:00:00Z",
+                "payload": {"edit_id": "edit_old"},
+            },
+            {
+                "event_type": "edit_patch_applied",
+                "timestamp": "2026-09-14T11:01:00Z",
+                "payload": {"edit_id": "edit_old"},
+            },
+            {
+                "event_type": "edit_requested",
+                "timestamp": "2026-09-14T12:00:00Z",
+                "payload": {"edit_id": "edit_latest"},
+            },
+            {
+                "event_type": "edit_outcome",
+                "timestamp": "2026-09-14T12:00:10Z",
+                "payload": {"edit_id": "edit_old"},
+            },
+            {
+                "event_type": "edit_patch_rejected",
+                "timestamp": "2026-09-14T12:01:00Z",
+                "payload": {"edit_id": "edit_latest"},
+            },
+            {
+                "event_type": "edit_outcome",
+                "timestamp": "2026-09-14T12:02:00Z",
+                "payload": {"edit_id": "edit_latest"},
+            },
+        ]
+    )
+
+    operation = service.current_operation("wf_long_history")
+
+    assert (operation["task_started_at"], operation["task_finished_at"]) == (
+        "2026-09-14T12:00:00Z",
+        "2026-09-14T12:01:00Z",
+    )
+
+
 @pytest.mark.blender_runtime
 def test_viewer_bundle_returns_artifact_urls(tmp_path: Path, monkeypatch) -> None:
     original_outputs = workflow_service.outputs_dir
@@ -1550,6 +1674,40 @@ def test_product_issues_humanize_failed_runtime_nodes_without_internal_details()
         }
     ]
     assert "/Users/" not in str(issues)
+
+
+def test_product_issues_distinguish_an_interrupted_service_from_an_invalid_request() -> None:
+    from apps.api.telecom_studio_api.product import _collect_user_issues
+
+    issues = _collect_user_issues(
+        {
+            "status": "failed",
+            "warnings": [],
+            "errors": [
+                {
+                    "code": "WORKFLOW_INTERRUPTED",
+                    "message": "Le processus local s'est arrêté avant la fin du design.",
+                    "severity": "error",
+                }
+            ],
+        }
+    )
+
+    assert issues == [
+        {
+            "title": "Service interrompu pendant la génération",
+            "severity": "error",
+            "impact": (
+                "Le service local s'est interrompu avant la fin. Votre demande est "
+                "conservée, mais aucun nouveau modèle validé n'a été publié."
+            ),
+            "recommended_action": (
+                "Relancez cette demande lorsque le studio est disponible ou reprenez-la "
+                "dans une nouvelle conversation."
+            ),
+            "technical_code": "WORKFLOW_INTERRUPTED",
+        }
+    ]
 
 
 def test_product_issues_keep_one_explicit_root_cause_instead_of_runtime_duplicates() -> None:

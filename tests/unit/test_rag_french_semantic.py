@@ -28,14 +28,14 @@ def test_french_query_finds_lattice_tower_assets_without_network(tmp_path: Path)
     )
 
 
-def test_embedding_provider_is_nvidia_nemotron_1024_without_network() -> None:
+def test_embedding_provider_is_nvidia_nemotron_3_without_network() -> None:
     provider = NvidiaEmbeddingProvider(
         DEFAULT_MODEL,
         api_key="unit-test-key",
-        dimensions=1024,
+        dimensions=2048,
     )
 
     assert "nvidia" in provider.name
-    assert "llama-nemotron-embed-1b-v2" in provider.name
-    assert provider.dimensions == 1024
-    assert provider.request_dimensions == 1024
+    assert "nemotron-3-embed-1b" in provider.name
+    assert provider.dimensions == 2048
+    assert provider.request_dimensions is None

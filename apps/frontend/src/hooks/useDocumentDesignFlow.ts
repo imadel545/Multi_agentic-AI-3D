@@ -18,7 +18,11 @@ import {
   shouldForgetDocumentPackSession,
   userFacingError
 } from "../AppSupport";
-import type { LoadSurfaceResource, WorkflowDispatch } from "./studioAppTypes";
+import type {
+  DocumentPackMessageStatus,
+  LoadSurfaceResource,
+  WorkflowDispatch
+} from "./studioAppTypes";
 
 const ActivePromptDetail = "high" as const;
 
@@ -63,6 +67,7 @@ export function useDocumentDesignFlow({
 }: UseDocumentDesignFlowOptions) {
   const [documentPackSummary, setDocumentPackSummary] = useState<DocumentPackSummary | null>(null);
   const [documentPackMessage, setDocumentPackMessage] = useState<string | null>(null);
+  const [documentPackMessageStatus, setDocumentPackMessageStatus] = useState<DocumentPackMessageStatus | null>(null);
   const [documentPackBusy, setDocumentPackBusy] = useState(false);
   const [requirementsAnalysis, setRequirementsAnalysis] = useState<ParseRequirementsResponse | null>(null);
   const [analyzedPrompt, setAnalyzedPrompt] = useState<string | null>(null);
@@ -110,9 +115,12 @@ export function useDocumentDesignFlow({
     let cancelled = false;
     setDocumentPackBusy(true);
     void loadDocumentPackSummary(packId).then((summary) => {
-      if (!cancelled) setDocumentPackMessage(
-        `${summary.document_count} ${summary.document_count === 1 ? "pièce jointe restaurée" : "pièces jointes restaurées"}. Ajoutez votre demande pour continuer.`
-      );
+      if (!cancelled) {
+        setDocumentPackMessage(
+          `${summary.document_count} ${summary.document_count === 1 ? "pièce jointe restaurée" : "pièces jointes restaurées"}. Ajoutez votre demande pour continuer.`
+        );
+        setDocumentPackMessageStatus("info");
+      }
     }).catch((error) => {
       const missingPack = shouldForgetDocumentPackSession(error);
       if (missingPack && storage) clearDocumentPackSession(storage);
@@ -121,6 +129,7 @@ export function useDocumentDesignFlow({
         setDocumentPackMessage(missingPack
           ? "Les pièces précédentes ne sont plus disponibles. Importez-les de nouveau."
           : "Les pièces jointes n’ont pas pu être resynchronisées. Réessayez dans un instant.");
+        setDocumentPackMessageStatus("error");
       }
     }).finally(() => {
       if (!cancelled) setDocumentPackBusy(false);
@@ -134,11 +143,14 @@ export function useDocumentDesignFlow({
     if (!packId) return;
     setDocumentPackBusy(true);
     setDocumentPackMessage(null);
+    setDocumentPackMessageStatus(null);
     try {
       const summary = await loadDocumentPackSummary(packId);
       setDocumentPackMessage(`${summary.document_count} pièce(s) jointe(s) à cette conversation.`);
+      setDocumentPackMessageStatus("info");
     } catch (error) {
       setDocumentPackMessage(userFacingError(error, "documents"));
+      setDocumentPackMessageStatus("error");
     } finally {
       setDocumentPackBusy(false);
     }
@@ -151,6 +163,7 @@ export function useDocumentDesignFlow({
     if (!packId) return;
     setDocumentPackBusy(true);
     setDocumentPackMessage(null);
+    setDocumentPackMessageStatus(null);
     try {
       await apiClient.deleteDocumentPack(packId, chatId);
       await onDocumentPackDetached?.(packId);
@@ -160,8 +173,10 @@ export function useDocumentDesignFlow({
       setDocumentPackMessage(chatId
         ? "Cahier de charge retiré de cette conversation. Vous pouvez joindre d’autres pièces."
         : "Cahier de charge retiré de cette session. Vous pouvez joindre d’autres pièces.");
+      setDocumentPackMessageStatus("removal_confirmed");
     } catch (error) {
       setDocumentPackMessage(userFacingError(error, "documents"));
+      setDocumentPackMessageStatus("error");
     } finally {
       setDocumentPackBusy(false);
     }
@@ -293,19 +308,23 @@ export function useDocumentDesignFlow({
     const sizeError = documentPackFilesSizeError(files, documentCapabilities);
     if (sizeError) {
       setDocumentPackMessage(sizeError);
+      setDocumentPackMessageStatus("error");
       return false;
     }
     setDocumentPackBusy(true);
     setDocumentPackMessage(null);
+    setDocumentPackMessageStatus(null);
     try {
       const summary = await apiClient.createDocumentPack(files, chatId);
       await onDocumentPackLinked?.(summary.pack_id);
       setDocumentPackSummary(summary);
       clearAnalysis();
       setDocumentPackMessage(`${summary.document_count} ${summary.document_count === 1 ? "pièce ajoutée" : "pièces ajoutées"}. Décrivez maintenant ce que vous souhaitez concevoir.`);
+      setDocumentPackMessageStatus("info");
       return true;
     } catch (error) {
       setDocumentPackMessage(userFacingError(error, "documents"));
+      setDocumentPackMessageStatus("error");
       return false;
     } finally {
       setDocumentPackBusy(false);
@@ -322,7 +341,7 @@ export function useDocumentDesignFlow({
   return {
     analysisBusy, analysisError, analysisIsCurrent, analysisWasSubmitted, analyzePrompt, freeDesignAvailable,
     changePrompt, clearAnalysis, detachDocumentPack, documentPackBusy,
-    documentPackMessage, documentPackSummary, multimodalConsent, multimodalConsentAvailable,
+    documentPackMessage, documentPackMessageStatus, documentPackSummary, multimodalConsent, multimodalConsentAvailable,
     multimodalIntelligence, requirementsAnalysis, retryDocumentPackSummary,
     setMultimodalConsent, submissionBusy, submitFreeIntent, submitPrompt, uploadDocumentPack
   };

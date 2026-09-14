@@ -60,10 +60,21 @@ docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env 
 docker compose -p agentic-3d-studio -f infra/docker-compose.yml --env-file .env ps
 ```
 
+The default ports are shown below. To retain an existing native workspace,
+set `TELECOM_STUDIO_FRONTEND_PORT=15173` and `TELECOM_STUDIO_API_PORT=18000`
+in `.env`; allowed browser origins follow the frontend port. Docker keeps
+separate persistent volumes; it does not migrate historical native certificates.
+
 - Studio: `http://127.0.0.1:5173`
 - API and Swagger: `http://127.0.0.1:8000/docs`
 - Adminer: `http://127.0.0.1:8080`
 - Qdrant dashboard: `http://127.0.0.1:6333/dashboard`
+
+If Docker Desktop requires its internal HTTP proxy for outbound provider calls,
+set `TELECOM_STUDIO_HTTP_PROXY` and `TELECOM_STUDIO_HTTPS_PROXY` in the local
+`.env` (for the standard Desktop proxy, `http://http.docker.internal:3128`).
+Compose passes these values only to the API container and keeps Qdrant and the
+other local services in `TELECOM_STUDIO_NO_PROXY`. TLS verification remains on.
 
 In Adminer, choose SQLite and open one of these read-only snapshot databases:
 
@@ -99,15 +110,18 @@ uv pip install -e ".[dev,rag,document-intel]"
 uvicorn apps.api.telecom_studio_api.main:app --reload
 ```
 
-Open API docs at `http://127.0.0.1:8000/docs`.
+Open the studio at `http://127.0.0.1:5173` and create its local owner account.
+API docs at `http://127.0.0.1:8000/docs` require that session.
 
 Default CORS is local only: `http://127.0.0.1:5173,http://localhost:5173`.
 Override with `TELECOM_STUDIO_CORS_ORIGINS` when a future frontend uses a different local origin.
 Trusted hosts default to `127.0.0.1`, `localhost`, and `testserver`; configure
 `TELECOM_STUDIO_TRUSTED_HOSTS` only for another explicit local hostname. A
 state-changing browser request with a foreign `Origin` is rejected before the
-service runs. This is a local browser boundary, not user authentication; the
-current mono-user loopback product has no JWT or account system.
+service runs. A separate local owner account protects data and artifacts with
+a revocable, expiring `HttpOnly` session cookie. Registration asks for a name,
+identifier and password; it does not introduce a multi-user SaaS or JWT storage
+in the browser.
 
 ### Optional: Blender
 
@@ -172,11 +186,10 @@ against a global Groq, network, or model outage.
 
 ### Product intelligence: NVIDIA RAG embeddings
 
-Product RAG uses NVIDIA API `nvidia/llama-nemotron-embed-1b-v2` at 1024
-dimensions. Product reranking uses the NVIDIA
-reranker configured by `TELECOM_STUDIO_RERANKER_MODEL`; if the reranker is not
-available, the API exposes a degraded passthrough status instead of pretending
-reranking happened. Static documents are embedded by one cross-collection
+Product RAG uses NVIDIA API `nvidia/nemotron-3-embed-1b` at 2048 dimensions.
+The hosted NVIDIA text rerankers checked on 2026-09-14 were unavailable, so the
+current default is explicit passthrough and the API does not report neural
+reranking. Static documents are embedded by one cross-collection
 operation, sent to NVIDIA in bounded batches of at most 32 passages, and the
 synchronous path performs no SDK retry. If NVIDIA indexing or
 query embedding times out, retrieval falls back to lexical ranking over the
@@ -187,10 +200,10 @@ hash embedding and never labels that fallback as vector retrieval.
 NVIDIA_API_KEY=...
 # or TELECOM_STUDIO_NVIDIA_API_KEY=...
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
-TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-1b-v2
-TELECOM_STUDIO_EMBEDDING_DIMENSIONS=1024
-TELECOM_STUDIO_RERANKER_PROVIDER=nvidia
-TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
+TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
+TELECOM_STUDIO_EMBEDDING_DIMENSIONS=2048
+TELECOM_STUDIO_EMBEDDING_TIMEOUT_S=30
+TELECOM_STUDIO_RERANKER_PROVIDER=passthrough
 ```
 
 `TELECOM_STUDIO_EMBEDDING_PROVIDER=deterministic` is for tests/bootstrap only.
@@ -253,7 +266,7 @@ requirements_text or document pack
 → Groq structured RequirementSpec or deterministic fallback
 → NVIDIA Nemotron multilingual query/passage embeddings + Qdrant retrieval
   or visible lexical retrieval over the real local corpus
-→ NVIDIA reranking + bounded GPT-OSS planning decision
+→ explicit passthrough ranking + bounded GPT-OSS planning decision
 → SQLite memory recall
 → scored qualified asset candidates + AssemblyPlan
 → rule engine
@@ -290,24 +303,20 @@ requirements_text or document pack
 
 ## Status
 
-- Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 14 manifests, 12 local GLBs, 13 generation-eligible, 3 exact imports,
-  10 parametric generation profiles, 1 reference-only, and 0 professional M1
-  evidence asset after runtime byte verification; `qualified_mixed_catalog`,
-  not vendor-grade.
-- Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.
-- E2E assembly/edit/version proof: `.venv/bin/python -m pytest -q -m blender_runtime tests/e2e/test_m0_trusted_assembly_recovery.py`.
-- Markdown context is intentionally small: `AGENTS.md`, `README.md`, and 10 active docs under `docs/`.
-- Frontend: `apps/frontend` contains a real-backend product rework in progress.
-  The previous dashboard-like kernel is rejected; acceptance requires a
-  chat-first / 3D-first smoke with visible GLB or explicit fallback.
-- Latest real GeometryProgram proof: workflow `wf_ead2456914b2` and revision
-  `v2e0a4faf` completed with `real_blender`, QA 1.0, an issued certificate, GLB
-  and preview. This proves that scenario only. The current frontend gate passes
-  180 tests, typecheck and production build. The 2026-08-11 connected browser
-  smoke `wf_0843599873e7` rendered the real certified GLB, loaded RAG evidence,
-  exposed the asset library/intelligence drawers and preserved the truthful
-  0/14 professional asset state. A later read-only current-tree layout smoke
-  loaded that certified GLB at 1440 x 1000 and 1047 x 2748 with external
-  providers disabled; it validates framing/scroll only, not provider health or
-  CAD fidelity.
+- Backend: local-first workflow with bounded Groq decisions, real Blender output,
+  versioning, QA and certificate revalidation.
+- Frontend: chat-first and 3D-first rework connected to the real Product API;
+  remaining acceptance items stay explicit in
+  [`docs/FRONTEND_ACCEPTANCE_CRITERIA.md`](docs/FRONTEND_ACCEPTANCE_CRITERIA.md).
+- Assets: `qualified_mixed_catalog`; the generation catalog is technical and
+  internal, while manufacturer and raw-CAD candidates remain excluded until
+  their rights, geometry and integration evidence pass.
+- RAG: NVIDIA `nvidia/nemotron-3-embed-1b` with explicit local lexical
+  degradation and passthrough reranking. Configuration alone is never reported
+  as provider availability.
+- The bounded Docker/Groq/NVIDIA/Blender evidence from 2026-09-14, together
+  with its limits and runtime-reset boundary, is recorded once in
+  [`docs/PROJECT_SOURCE_OF_TRUTH.md`](docs/PROJECT_SOURCE_OF_TRUTH.md).
+- Current test commands and proof levels are defined in
+  [`docs/QA_STRATEGY.md`](docs/QA_STRATEGY.md); frozen suite counts are not used
+  as current-tree evidence.

@@ -273,7 +273,7 @@ la vue est `available && qa_status == "passed"`.
 `POST /memory/vector/reindex` reconstruit uniquement la projection Qdrant à
 partir de SQLite. La réponse typée expose les volumes source,
 `skipped_source_counts` pour les lignes legacy invalides préservées mais non
-indexées, les candidats après compaction, le provider/dimension, le fingerprint
+indexées, les candidats après compaction, le provider/modèle/dimension, le fingerprint
 source et confirme que SQLite et les collections legacy sont préservés. Cette route de maintenance ne
 crée ni `project`, ni `run`, ni nouvelle source d'état produit.
 
@@ -298,6 +298,8 @@ interprété ni certifié comme contrainte spatiale.
 Pour restaurer les pièces jointes après rechargement, le frontend peut
 conserver uniquement un pointeur versionné `{version, packId}` dans le stockage
 local. Le résumé compact est relu depuis `GET /document-packs/{pack_id}`. Les
+`document_names` sont des basenames issus des enregistrements réels du pack;
+leur absence sur un ancien résumé conserve le libellé générique par compteur.
 extractions et diagnostics restent des preuves backend et ne sont pas rendus
 dans le chat. Le stockage navigateur n'est jamais une source de vérité
 documentaire et son indisponibilité ne doit pas interrompre le studio.
@@ -477,7 +479,7 @@ Le frontend doit rendre:
 - exécution spécialisée depuis `payload.human_label`,
   `payload.progress_message`, `payload.actor_kind` et
   `payload.decision_authority`; ne pas appeler Blender/QA/services « agents LLM »;
-- drawers QA, timeline, scene plan, livrables, assets, versions;
+- drawers produit Composition, Livrables et Versions;
 - la provenance composant via `component_proofs_url`, avec état de chargement,
   erreur et retry indépendants des autres drawers;
 - intent hors catalogue avant génération, puis modèle, mode de sortie, enveloppe,
@@ -490,13 +492,9 @@ documents et versions ont des états de chargement/erreur/retry indépendants. L
 frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
 mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
 ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
-La suite courante compte 225 tests Vitest et passe le typecheck/build. Le smoke
-HTTP du 2026-09-14 confirme l'upload lié au chat, le contexte hashé, l'absence de
-workflow créé par l'import, le rejet de l'ancienne route de génération autonome
-et la suppression avec détachement. Un Chrome neuf charge le GLB courant sans
-erreur ni alerte console et montre le compositeur compact. Ce contrôle ne prouve
-pas une nouvelle génération Blender; les mutations navigateur exhaustives
-restent une gate distincte ouverte.
+L’authentification du propriétaire local est une couche distincte, décrite
+ci-dessous. La preuve runtime datée et ses limites sont centralisées dans
+[PROJECT_SOURCE_OF_TRUTH.md](PROJECT_SOURCE_OF_TRUTH.md).
 
 `/designs/{id}/edit` expose, en cas de succès:
 
@@ -569,9 +567,15 @@ de chaque version sont des URLs versionnées.
 - `is_running`
 - `is_terminal`
 - `last_event_at`
+- `task_started_at`
+- `task_finished_at`
 - `runtime_capabilities`
 - `unsupported_actions`
 - `available_actions`
+
+Les bornes `task_*` sont dérivées du journal complet. Elles décrivent la
+dernière génération ou édition réellement demandée; pour une édition, la fin
+doit porter le même `edit_id` lorsque cet identifiant est disponible.
 
 `runtime_capabilities` expose `streaming_transport=push_sse`,
 `workflow_id_source=workflow_id`, `local_process_only=true` et les flags
@@ -707,3 +711,35 @@ validation d'installation.
 Artifact additionnel:
 
 - `tower_access_evidence` → `tower_access_evidence.json`
+## Local owner authentication
+
+The product uses one local owner and an opaque server session. `GET /auth/status`
+is the frontend bootstrap authority. A fresh local store returns
+`setup_required=true`; `POST /auth/register` accepts `display_name`, `username`
+and the user-chosen `password` only from loopback, then creates the sole owner
+plus the first session. Registration closes once that owner exists. The legacy
+`POST /auth/setup` password-only contract remains accepted for existing clients
+and migrated databases remain able to log in without a username. New profiled
+accounts use `POST /auth/login` with `username` and `password`.
+
+`GET /auth/status` exposes `requires_username` without exposing the identifier
+to an anonymous caller. It includes `profile={display_name, username}` only for
+an authenticated profiled owner. `POST /auth/logout` revokes the current session.
+
+The session is transported only in an `HttpOnly`, `SameSite=Strict` cookie.
+Frontend requests send credentials and return to the authentication gate after
+HTTP 401. `/health` and the five authentication endpoints are public. Workspace,
+design, document, asset, memory, RAG, SSE, downloads, OpenAPI and documentation
+routes require an authenticated session. Test suites that exercise legacy API
+contracts disable authentication explicitly and use an isolated database; this
+is not a product mode exposed by the UI.
+
+### Elapsed chat task time (2026-09-14)
+
+The chat activity shows elapsed seconds while analysis, generation or an edit is
+actually pending. Before a server start event arrives it uses the local submission
+start. Once recorded, `design_created` or the latest `edit_requested` timestamp
+is authoritative; terminal events freeze that task's duration. Reloading a running
+workflow restores its recorded start, and an edit never uses the original design's
+age. No percentage, remaining-time estimate or fabricated completion is displayed.
+A historical task without usable timestamps has no invented duration.

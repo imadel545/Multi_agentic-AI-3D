@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentFileComposer, documentSelectionError } from "./DocumentFileComposer";
+import { DocumentPackIntake } from "./StudioDocumentIntake";
 
 const capabilities = {
   document_pack_status: "limited",
@@ -85,5 +86,53 @@ describe("DocumentFileComposer", () => {
         capabilities
       )
     ).toContain("Deux pièces portent le nom");
+  });
+
+  it("uses neutral busy copy because the same state also covers removal", () => {
+    render(
+      <DocumentFileComposer
+        busy
+        capabilities={capabilities}
+        onSubmit={vi.fn().mockResolvedValue(true)}
+      />
+    );
+
+    expect(screen.getByText("Traitement en cours…")).toBeInTheDocument();
+    expect(screen.queryByText("Ajout en cours…")).not.toBeInTheDocument();
+  });
+
+  it("shows a confirmed removal as information instead of a synchronization error", () => {
+    render(
+      <DocumentPackIntake
+        busy={false}
+        capabilities={capabilities}
+        message="Le retrait est confirmé. Vous pouvez joindre d’autres pièces."
+        messageStatus="removal_confirmed"
+        onRetry={vi.fn()}
+        onUpload={vi.fn().mockResolvedValue(true)}
+        summary={null}
+      />
+    );
+
+    expect(screen.getByText(/Le retrait est confirmé/)).toBeInTheDocument();
+    expect(screen.queryByText(/n’ont pas pu être synchronisées/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Réessayer/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed removal in recovery even if its copy resembles a confirmation", () => {
+    render(
+      <DocumentPackIntake
+        busy={false}
+        capabilities={capabilities}
+        message="Cahier de charge retiré impossible pour le moment."
+        messageStatus="error"
+        onRetry={vi.fn()}
+        onUpload={vi.fn().mockResolvedValue(true)}
+        summary={null}
+      />
+    );
+
+    expect(screen.getByText(/n’ont pas pu être synchronisées/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Réessayer/ })).toBeInTheDocument();
   });
 });

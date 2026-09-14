@@ -231,7 +231,12 @@ describe("frontend contract schemas", () => {
           instance_id: "antenna_1",
           object_role: "antenna",
           semantic_root: "antenna_S1_REAL_1",
-          geometry_source: "asset_glb"
+          geometry_source: "asset_glb",
+          bounding_box_m: {
+            minimum_m: [-0.15, -0.06, 0],
+            maximum_m: [0.15, 0.06, 1.4],
+            dimensions_m: [0.3, 0.12, 1.4]
+          }
         }]
       }],
       geometry_programs: []
@@ -254,6 +259,7 @@ describe("frontend contract schemas", () => {
     });
 
     expect(proofs.components[0]?.instances[0]?.semantic_root).toBe("antenna_S1_REAL_1");
+    expect(proofs.components[0]?.instances[0]?.bounding_box_m?.dimensions_m).toEqual([0.3, 0.12, 1.4]);
     expect(plan.components[0]?.candidate_scores[0]?.total_score).toBe(0.95);
     expect(() => ComponentProofsSchema.parse({
       schema_version: "1.0",
@@ -587,7 +593,8 @@ describe("frontend contract schemas", () => {
     const summary = parseContract("DocumentPackSummary", DocumentPackSummarySchema, {
       pack_id: "pack_1",
       status: "processed",
-      document_count: 2
+      document_count: 2,
+      document_names: ["APD_radio.pdf", "fondation.pdf"]
     });
     const capabilities = parseContract(
       "DocumentPackCapabilities",
@@ -601,6 +608,12 @@ describe("frontend contract schemas", () => {
     );
 
     expect(summary.document_count).toBe(2);
+    expect(summary.document_names).toEqual(["APD_radio.pdf", "fondation.pdf"]);
+    expect(DocumentPackSummarySchema.parse({
+      pack_id: "pack_historical",
+      status: "processed",
+      document_count: 1
+    }).document_names).toBeUndefined();
     expect(capabilities.supported_extensions).toContain(".pdf");
     expect(capabilities.limits?.max_zip_size_mb).toBe(80);
     expect(() => DocumentPackSummarySchema.parse({

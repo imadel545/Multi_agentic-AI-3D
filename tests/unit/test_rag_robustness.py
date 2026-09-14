@@ -370,6 +370,36 @@ def test_nvidia_embedding_constructor_is_network_free_and_batches(monkeypatch) -
     assert [call["dimensions"] for call in create_calls] == [1024, 1024, 1024]
 
 
+def test_runtime_collection_identity_separates_models_with_the_same_dimensions(
+    tmp_path: Path,
+) -> None:
+    first_provider = _SwitchableEmbeddingProvider()
+    first_provider.name = "nvidia:nvidia/model-a"
+    second_provider = _SwitchableEmbeddingProvider()
+    second_provider.name = "nvidia:nvidia/model-b"
+    first = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant-first",
+        embedding_provider=first_provider,
+        reranker_provider_name="passthrough",
+    )
+    second = RagService(
+        project_root=tmp_path / "project",
+        qdrant_path=tmp_path / "qdrant-second",
+        embedding_provider=second_provider,
+        reranker_provider_name="passthrough",
+    )
+
+    assert first_provider.dimensions == second_provider.dimensions
+    assert first._runtime_collection_base_name("design_memory") != (
+        second._runtime_collection_base_name("design_memory")
+    )
+    assert first._runtime_index_identity() != second._runtime_index_identity()
+    assert first._static_index_identity() != second._static_index_identity()
+    first.close()
+    second.close()
+
+
 def test_rag_service_uses_passage_embeddings_for_index_and_query_embedding_for_search(
     tmp_path: Path,
     monkeypatch,

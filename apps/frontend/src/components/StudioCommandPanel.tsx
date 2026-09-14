@@ -11,6 +11,7 @@ import type {
   UserIssue
 } from "../api/schemas";
 import type { WorkflowPhase } from "../state/workflowMachine";
+import type { DocumentPackMessageStatus } from "../hooks/studioAppTypes";
 import { ConversationTray } from "./ConversationTray";
 import { ConversationHistory, RequirementsUnderstanding } from "./StudioConversationContext";
 import { DocumentPackIntake, MultimodalConsentControl } from "./StudioDocumentIntake";
@@ -33,6 +34,7 @@ export function ChatCommandPanel({
   phase,
   error,
   failureIssue = null,
+  workflowInterrupted = false,
   canEdit,
   revisionPrompt,
   revisionBusy,
@@ -43,6 +45,7 @@ export function ChatCommandPanel({
   documentCapabilitiesLoading,
   documentPackSummary,
   documentPackMessage,
+  documentPackMessageStatus,
   documentPackBusy,
   multimodalConsent = "disabled",
   multimodalIntelligence = null,
@@ -75,6 +78,7 @@ export function ChatCommandPanel({
   phase: WorkflowPhase;
   error: string | null;
   failureIssue?: UserIssue | null;
+  workflowInterrupted?: boolean;
   canEdit: boolean;
   revisionPrompt: string;
   revisionBusy: boolean;
@@ -85,6 +89,7 @@ export function ChatCommandPanel({
   documentCapabilitiesLoading?: boolean;
   documentPackSummary: DocumentPackSummary | null;
   documentPackMessage: string | null;
+  documentPackMessageStatus?: DocumentPackMessageStatus | null;
   documentPackBusy: boolean;
   multimodalConsent?: MultimodalConsent;
   multimodalIntelligence?: MultimodalIntelligence | null;
@@ -172,6 +177,12 @@ export function ChatCommandPanel({
   const failedIssue = phase === "failed" && failureIssue
     ? humanizeUserIssue(failureIssue)
     : null;
+  const interruptedFailure = phase === "failed" && (
+    workflowInterrupted || failedIssue?.technical_code === "WORKFLOW_INTERRUPTED"
+  );
+  const attachedDocumentName = documentPackSummary?.document_count === 1
+    ? documentPackSummary.document_names?.[0]?.replace(/\\/g, "/").split("/").at(-1)?.trim()
+    : null;
   const submitCurrentCommand = () => {
     if (phase === "failed" && onNewChat) {
       onNewChat(prompt);
@@ -222,7 +233,7 @@ export function ChatCommandPanel({
             <div className="workflow-recovery-heading">
               <AlertTriangle size={18} aria-hidden="true" />
               <div>
-                <strong>La construction 3D n’a pas abouti</strong>
+                <strong>{interruptedFailure ? "La génération a été interrompue" : "La construction 3D n’a pas abouti"}</strong>
                 <p>
                   {failureRecoveryMessage(failedIssue)}
                 </p>
@@ -235,7 +246,7 @@ export function ChatCommandPanel({
                   onClick={() => composerRef.current?.focus()}
                   type="button"
                 >
-                  Corriger la demande
+                  {interruptedFailure ? "Reprendre la demande" : "Corriger la demande"}
                 </button>
               </div>
             ) : null}
@@ -327,6 +338,7 @@ export function ChatCommandPanel({
               capabilitiesError={documentCapabilitiesError}
               capabilitiesLoading={documentCapabilitiesLoading}
               message={documentPackMessage}
+              messageStatus={documentPackMessageStatus}
               onCapabilitiesRetry={onDocumentCapabilitiesRetry}
               onRetry={onDocumentPackRetry}
               onUpload={onDocumentPackUpload}
@@ -346,7 +358,7 @@ export function ChatCommandPanel({
               <FileArchive size={16} aria-hidden="true" />
               <span>
                 <strong>
-                  {documentPackSummary.document_count} {documentPackSummary.document_count === 1 ? "pièce jointe" : "pièces jointes"}
+                  {attachedDocumentName || `${documentPackSummary.document_count} ${documentPackSummary.document_count === 1 ? "pièce jointe" : "pièces jointes"}`}
                 </strong>
                 <small>Contexte de la prochaine demande</small>
               </span>
@@ -440,5 +452,3 @@ export function ChatCommandPanel({
     </section>
   );
 }
-
-

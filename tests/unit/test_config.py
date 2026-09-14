@@ -36,11 +36,13 @@ def test_embedding_strict_quality_is_part_of_typed_settings(monkeypatch) -> None
     assert settings.embedding_strict_quality is True
 
 
-def test_product_embedding_defaults_to_multilingual_nemotron_1024() -> None:
+def test_product_embedding_defaults_to_multilingual_nemotron_3() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.embedding_model == "nvidia/llama-nemotron-embed-1b-v2"
-    assert settings.embedding_dimensions == 1024
+    assert settings.embedding_model == "nvidia/nemotron-3-embed-1b"
+    assert settings.embedding_dimensions == 2048
+    assert settings.embedding_timeout_s == 30.0
+    assert settings.reranker_provider == "passthrough"
 
 
 def test_groq_defaults_match_bounded_gpt_oss_runtime_policy() -> None:
@@ -121,7 +123,8 @@ def test_groq_remote_base_url_must_use_https() -> None:
         Settings(_env_file=None, groq_base_url="http://api.groq.com/openai/v1")
 
 
-def test_local_http_boundary_defaults_are_explicit() -> None:
+def test_local_http_boundary_defaults_are_explicit(monkeypatch) -> None:
+    monkeypatch.delenv("TELECOM_STUDIO_AUTH_ENABLED")
     settings = Settings(_env_file=None)
 
     assert settings.resolved_cors_origins == [
@@ -129,6 +132,14 @@ def test_local_http_boundary_defaults_are_explicit() -> None:
         "http://localhost:5173",
     ]
     assert settings.resolved_trusted_hosts == ["127.0.0.1", "localhost", "testserver"]
+    assert settings.auth_enabled is True
+    assert settings.auth_cookie_name == "telecom_studio_session"
+    assert settings.auth_session_ttl_seconds == 28_800
+
+
+def test_auth_cookie_name_rejects_cookie_header_metacharacters() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, auth_cookie_name="studio; Path=/")
 
 
 def test_trusted_hosts_can_be_configured_for_a_local_dns_name() -> None:

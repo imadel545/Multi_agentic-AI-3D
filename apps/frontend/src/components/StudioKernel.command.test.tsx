@@ -138,6 +138,7 @@ describe("studio kernel conversation command", () => {
           pack_id: "pack_attached",
           status: "processed",
           document_count: 1,
+          document_names: ["imports\\APD_radio.pdf"],
           high_priority_count: 1,
           missing_blocking_count: 2,
           blocking_fields: ["tower.tower_height_m"],
@@ -157,9 +158,31 @@ describe("studio kernel conversation command", () => {
     expect(removeButton).toBeEnabled();
     fireEvent.click(removeButton);
     expect(onDocumentPackDetach).toHaveBeenCalledOnce();
-    expect(screen.getByText("1 pièce jointe")).toBeInTheDocument();
+    expect(screen.getByText("APD_radio.pdf")).toBeInTheDocument();
     expect(screen.queryByText(/informations extraites/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Générer le design" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the generic attachment label for historical summaries without names", () => {
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        documentPackSummary={{
+          pack_id: "pack_historical",
+          status: "processed",
+          document_count: 1,
+          high_priority_count: 0,
+          missing_blocking_count: 0,
+          blocking_fields: [],
+          conflict_count: 0,
+          can_generate_design: false,
+          processing_warning_count: 0,
+          tool_status: {}
+        }}
+      />
+    );
+
+    expect(screen.getByText("1 pièce jointe")).toBeInTheDocument();
   });
 
   it("keeps remote image analysis opt-in and hides it without an eligible capability", () => {
@@ -267,6 +290,32 @@ describe("studio kernel conversation command", () => {
     expect(
       screen.queryByRole("button", { name: "Corriger la demande" })
     ).not.toBeInTheDocument();
+  });
+
+  it("presents a service interruption without blaming the retained request", () => {
+    const onNewChat = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        failureIssue={{
+          title: "Service interrompu pendant la génération",
+          severity: "error",
+          impact: "Le service local s’est interrompu avant la fin.",
+          recommended_action: "Relancez cette demande lorsque le studio est disponible.",
+          technical_code: "WORKFLOW_INTERRUPTED"
+        }}
+        onNewChat={onNewChat}
+        phase="failed"
+        prompt="Créer le site 5G confirmé"
+        workflowInterrupted
+      />
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("La génération a été interrompue");
+    expect(screen.getByRole("alert")).toHaveTextContent("Votre demande est conservée");
+    expect(screen.queryByText(/Corrigez-la avant de relancer/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reprendre dans une nouvelle conversation" }));
+    expect(onNewChat).toHaveBeenCalledWith("Créer le site 5G confirmé");
   });
 
   it("shows new components extracted for typed LLM geometry before generation", () => {

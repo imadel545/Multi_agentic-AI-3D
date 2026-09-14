@@ -180,6 +180,7 @@ class DocumentPackSummary(StrictModel):
     pack_id: str = Field(min_length=1)
     status: Literal["indexed", "processed", "failed"]
     document_count: int = Field(ge=0)
+    document_names: list[str] = Field(default_factory=list)
     high_priority_count: int = Field(ge=0)
     missing_blocking_count: int = Field(ge=0)
     blocking_fields: list[str] = Field(default_factory=list)

@@ -10,7 +10,7 @@ import zipfile
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from core.contracts.document_pack import (
@@ -438,9 +438,11 @@ class DocumentPackService:
         with self._pack_operation(pack_id):
             pack_dir = self._pack_dir(pack_id)
             persisted = DocumentPackSummary.model_validate(_read_json(pack_dir / "summary.json"))
+            document_names = _document_names(_read_json(pack_dir / "index.json"))
             qa_report, _mapping, ready = _evaluate_generation_readiness(self.get_spec(pack_id))
             return persisted.model_copy(
                 update={
+                    "document_names": document_names,
                     "can_generate_design": ready,
                     "qa_score": qa_report.score,
                     "missing_blocking_count": len(qa_report.blocking_issues),
@@ -692,6 +694,7 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
         pack_id=spec.pack_id,
         status="processed",
         document_count=len(spec.document_references),
+        document_names=_document_names(spec.document_references),
         high_priority_count=sum(1 for doc in spec.document_references if doc.priority == "high"),
         missing_blocking_count=len(qa.blocking_issues),
         blocking_fields=qa.blocking_issues,
@@ -704,6 +707,25 @@ def _summary(spec: ProjectDesignSpec, correction_count: int) -> DocumentPackSumm
         tool_status=spec.processing_capabilities,
         memory_summary_available=True,
     )
+
+
+def _document_names(documents: Sequence[DocumentReference] | object) -> list[str]:
+    if not isinstance(documents, list):
+        return []
+    names: list[str] = []
+    for document in documents:
+        if isinstance(document, DocumentReference):
+            value = document.filename
+        elif isinstance(document, dict):
+            value = document.get("filename")
+        else:
+            continue
+        if not isinstance(value, str):
+            continue
+        basename = PurePosixPath(value.replace("\\", "/")).name.strip()
+        if basename:
+            names.append(basename)
+    return names
 
 
 def _qa_report(

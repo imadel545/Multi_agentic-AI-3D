@@ -1,4 +1,5 @@
 import type { DocumentPackCapabilities, DocumentPackSummary, MultimodalConsent, MultimodalIntelligence } from "../api/schemas";
+import type { DocumentPackMessageStatus } from "../hooks/studioAppTypes";
 import { DocumentFileComposer } from "./DocumentFileComposer";
 import { ResourceRecovery } from "./StudioPrimitives";
 
@@ -8,6 +9,7 @@ export function DocumentPackIntake({
   capabilitiesError,
   capabilitiesLoading,
   message,
+  messageStatus,
   onCapabilitiesRetry,
   onRetry,
   onUpload,
@@ -18,11 +20,13 @@ export function DocumentPackIntake({
   capabilitiesError?: string | null;
   capabilitiesLoading?: boolean;
   message: string | null;
+  messageStatus?: DocumentPackMessageStatus | null;
   onCapabilitiesRetry?: () => void;
   onRetry?: () => void;
   onUpload: (files: File[]) => Promise<boolean>;
   summary: DocumentPackSummary | null;
 }) {
+  const removalConfirmed = !summary && messageStatus === "removal_confirmed";
   return (
     <section className="document-intake">
       <div className="document-intake-body">
@@ -65,7 +69,7 @@ export function DocumentPackIntake({
             Ajoutez votre demande dans le champ principal. Les pièces jointes servent de contexte et ne lancent jamais un design seules.
           </p>
         ) : null}
-        {!summary && message ? (
+        {!summary && message && !removalConfirmed ? (
           <ResourceRecovery
             busy={busy}
             label="Les pièces jointes n’ont pas pu être synchronisées."
@@ -73,6 +77,7 @@ export function DocumentPackIntake({
             onRetry={onRetry}
           />
         ) : null}
+        {removalConfirmed ? <p className="muted">{message}</p> : null}
         {summary && message ? <p className="muted">{message}</p> : null}
       </div>
     </section>
@@ -124,4 +129,3 @@ export function MultimodalConsentControl({
     </section>
   );
 }
-

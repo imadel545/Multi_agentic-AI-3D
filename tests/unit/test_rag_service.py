@@ -24,9 +24,7 @@ def test_static_rag_excludes_reference_only_assets_from_planning_context() -> No
     assert "ANT_SIERRA_6001124_REFERENCE" not in asset_ids
     assert "ANT_PANEL_4G_001" in asset_ids
     panel = next(
-        document
-        for document in documents
-        if document.payload.get("asset_id") == "ANT_PANEL_4G_001"
+        document for document in documents if document.payload.get("asset_id") == "ANT_PANEL_4G_001"
     )
     assert "qualification_status: qualified_for_generation" in panel.text
     assert panel.payload["generation_eligible"] is True
@@ -42,10 +40,7 @@ def test_static_rag_excludes_an_exact_asset_when_its_runtime_file_is_missing(
 
     documents = load_rag_documents(tmp_path)
 
-    assert not any(
-        document.payload.get("asset_id") == "ANT_PANEL_4G_001"
-        for document in documents
-    )
+    assert not any(document.payload.get("asset_id") == "ANT_PANEL_4G_001" for document in documents)
 
 
 def test_rag_reindex_and_search_returns_context(tmp_path: Path) -> None:
@@ -283,6 +278,30 @@ def test_nvidia_embedding_provider_never_deletes_user_model_cache(
     assert marker.read_text(encoding="utf-8") == "keep"
 
 
+def test_embedding_provider_builder_forwards_the_bounded_timeout(monkeypatch) -> None:
+    observed: dict[str, object] = {}
+
+    class StubNvidiaProvider:
+        name = "nvidia:nvidia/nemotron-3-embed-1b"
+        dimensions = 2048
+
+        def __init__(self, *args, **kwargs) -> None:
+            observed.update(kwargs)
+
+    monkeypatch.setattr("core.rag.embeddings.NvidiaEmbeddingProvider", StubNvidiaProvider)
+
+    provider = build_embedding_provider(
+        "nvidia",
+        "nvidia/nemotron-3-embed-1b",
+        api_key="test",
+        dimensions=2048,
+        timeout_s=27.0,
+    )
+
+    assert provider.name == "nvidia:nvidia/nemotron-3-embed-1b"
+    assert observed["timeout_s"] == 27.0
+
+
 def test_auto_embedding_provider_can_bootstrap_with_hash(monkeypatch) -> None:
     class FailingNvidiaProvider:
         def __init__(self, *args, **kwargs) -> None:
@@ -319,7 +338,10 @@ def test_local_neural_embedding_provider_is_not_supported() -> None:
 
 
 def test_reranker_defaults_to_passthrough() -> None:
-    assert isinstance(build_reranker(), PassthroughReranker)
+    reranker = build_reranker("nvidia/retired-reranker")
+
+    assert isinstance(reranker, PassthroughReranker)
+    assert reranker.model_name is None
 
 
 def test_local_neural_reranker_is_not_supported() -> None:

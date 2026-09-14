@@ -25,6 +25,7 @@ export class WorkspaceApi {
     try {
       response = await fetch(new URL(`/workspace${path}`, this.baseUrl), {
         method,
+        credentials: "include",
         headers: body ? { "content-type": "application/json" } : undefined,
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(15000),
@@ -37,6 +38,9 @@ export class WorkspaceApi {
       );
     }
     if (!response.ok) {
+      if (response.status === 401) {
+        window.dispatchEvent(new Event("telecom-auth-required"));
+      }
       let detail = "";
       try {
         const payload = await response.json();

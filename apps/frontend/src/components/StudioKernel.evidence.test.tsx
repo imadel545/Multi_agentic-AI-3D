@@ -317,6 +317,11 @@ describe("studio kernel evidence and composition", () => {
               object_role: "antenna",
               semantic_root: "antenna_S1_REAL_1",
               geometry_source: "asset_glb",
+              bounding_box_m: {
+                minimum_m: [-0.15, -0.06, 0],
+                maximum_m: [0.15, 0.06, 1.4],
+                dimensions_m: [0.3, 0.12, 1.4]
+              },
               qa: null
             }],
             qa: null
@@ -379,15 +384,102 @@ describe("studio kernel evidence and composition", () => {
     );
 
     expect(screen.getByText("Modèle source conservé")).toBeInTheDocument();
-    expect(screen.getByText("Créé pour ce projet")).toBeInTheDocument();
+    expect(screen.getByText("Géométrie procédurale générée pour ce projet")).toBeInTheDocument();
+    expect(screen.getByText("Source : Génération procédurale locale")).toBeInTheDocument();
     expect(screen.getByText("Source : Radio Systems · Panel 800")).toBeInTheDocument();
-    expect(screen.getByText("L × P × H : 0,3 × 0,12 × 1,4 m")).toBeInTheDocument();
+    expect(screen.getByText("Encombrement dans le modèle — L × P × H : 0,3 × 0,12 × 1,4 m")).toBeInTheDocument();
     expect(screen.queryByText(/qualification professionnelle/i)).not.toBeInTheDocument();
     expect(screen.queryByText("groq")).not.toBeInTheDocument();
     expect(screen.queryByText("ANT_REAL_1")).not.toBeInTheDocument();
     expect(screen.queryByText(/QA|manifest|hash|agent/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("treeitem", { name: /antenne/i }));
     expect(onSelect).toHaveBeenCalledWith("antenna_S1_REAL_1");
+  });
+
+  it("uses executed procedural provenance and measured dimensions instead of catalog metadata", () => {
+    render(
+      <SceneCompositionPanel
+        componentProofs={{
+          schema_version: "1.0",
+          workflow_id: "wf_parametric_tower",
+          components: [{
+            component_id: "tower_component",
+            role_id: "tower",
+            origin: "catalog",
+            strategy: "adapt",
+            generation_strategy: "internal_project_generated",
+            asset_id: "TOWER_LATTICE_30M_001",
+            quantity: 1,
+            instances: [{
+              instance_id: "tower_1",
+              object_role: "tower",
+              semantic_root: "tower_main",
+              geometry_source: "parametric_generated",
+              bounding_box_m: {
+                minimum_m: [-2.01, -2.01, 0],
+                maximum_m: [2.01, 2.01, 24.02],
+                dimensions_m: [4.02, 4.02, 24.02]
+              }
+            }]
+          }, {
+            component_id: "timing_component",
+            role_id: "timing_antenna",
+            origin: "catalog",
+            strategy: "compose",
+            generation_strategy: "internal_project_generated",
+            asset_id: null,
+            quantity: 1,
+            instances: [{
+              instance_id: "gps_1",
+              object_role: "timing_antenna",
+              semantic_root: "gps_timing",
+              geometry_source: "parametric_generated"
+            }]
+          }],
+          geometry_programs: []
+        }}
+        assetInventory={{
+          status: "qualified",
+          asset_count: 1,
+          missing_file_count: 0,
+          real_glb_asset_count: 1,
+          import_qualified_glb_count: 1,
+          generation_eligible_asset_count: 1,
+          professional_evidence_asset_count: 0,
+          reference_only_asset_count: 0,
+          qualified_integrity_failure_count: 0,
+          entries: [{
+            asset_id: "TOWER_LATTICE_30M_001",
+            type: "tower",
+            source: "cc_by",
+            dimensions_m: { width: 4, depth: 4, height: 30 },
+            generation_eligible: true,
+            qualification_status: "qualified",
+            milestone_evidence_eligible: false,
+            milestone_evidence_failures: [],
+            allowed_generation_modes: ["adapt"],
+            qualification_limitations: [],
+            qualified_file_hash_matches: true,
+            preview_set: [],
+            provenance_url: "/assets/TOWER_LATTICE_30M_001/provenance",
+            visual_review_status: "passed_advisory",
+            fidelity_status: "technical_generic",
+            qualification_version: "1.0"
+          }],
+          missing_files: []
+        }}
+      />
+    );
+
+    expect(screen.getAllByText("Géométrie procédurale générée pour ce projet")).toHaveLength(2);
+    expect(screen.getByText("2 composants principaux")).toBeInTheDocument();
+    expect(screen.queryByText("2 composants principalaux")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Source : Génération procédurale locale")).toHaveLength(2);
+    expect(screen.getByText("Encombrement dans le modèle — L × P × H : 4,02 × 4,02 × 24,02 m")).toBeInTheDocument();
+    expect(screen.getAllByText("antenne GPS de synchronisation").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Modèle source ajusté")).not.toBeInTheDocument();
+    expect(screen.queryByText("Catalogue public avec attribution")).not.toBeInTheDocument();
+    expect(screen.queryByText(/4 × 4 × 30 m/)).not.toBeInTheDocument();
   });
 
 });

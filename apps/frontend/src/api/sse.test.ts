@@ -9,7 +9,10 @@ class FakeEventSource {
   closed = false;
   listeners = new Map<string, EventListener>();
 
-  constructor(public readonly url: string) {
+  constructor(
+    public readonly url: string,
+    public readonly options?: EventSourceInit
+  ) {
     FakeEventSource.instances.push(this);
   }
 
@@ -40,6 +43,7 @@ describe("SSE adapter", () => {
     );
 
     const source = FakeEventSource.instances.at(-1)!;
+    expect(source.options).toEqual({ withCredentials: true });
     source.emit("workflow_completed", {
       event_id: "evt_terminal",
       sequence: 9,

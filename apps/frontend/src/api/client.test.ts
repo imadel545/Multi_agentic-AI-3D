@@ -34,7 +34,7 @@ describe("TelecomStudioApi", () => {
 
     expect(fetcher).toHaveBeenCalledWith(
       new URL("/designs/wf_1", "http://127.0.0.1:8000"),
-      { signal: controller.signal }
+      { credentials: "include", signal: controller.signal }
     );
   });
 
@@ -79,7 +79,8 @@ describe("TelecomStudioApi", () => {
     expect(plan?.selection_authority).toBe("bounded_llm");
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
-      "http://127.0.0.1:8000/designs/wf_1/artifacts/component_proofs.json"
+      "http://127.0.0.1:8000/designs/wf_1/artifacts/component_proofs.json",
+      { credentials: "include" }
     );
   });
   it("rejects inconsistent geometry-program aggregate counts", () => {
@@ -132,7 +133,8 @@ describe("TelecomStudioApi", () => {
     expect(result.catalog_available).toBe(true);
     expect(result.generation_eligible_count).toBe(0);
     expect(fetcher).toHaveBeenCalledWith(
-      new URL("/assets/library/summary", "http://127.0.0.1:8000")
+      new URL("/assets/library/summary", "http://127.0.0.1:8000"),
+      { credentials: "include" }
     );
   });
 
@@ -204,7 +206,8 @@ describe("TelecomStudioApi", () => {
       new URL(
         "/assets/ANT_SIERRA_6001124_REFERENCE/provenance",
         "http://127.0.0.1:8000"
-      )
+      ),
+      { credentials: "include" }
     );
   });
 
@@ -242,7 +245,8 @@ describe("TelecomStudioApi", () => {
       new URL(
         "/assets/library/search?q=pyl%C3%B4ne+Orange+30+m&limit=12",
         "http://127.0.0.1:8000"
-      )
+      ),
+      { credentials: "include" }
     );
   });
 
@@ -284,6 +288,7 @@ describe("TelecomStudioApi", () => {
     expect(fetcher).toHaveBeenCalledWith(
       new URL("/assets/library/lib_rfs_mount/probe", "http://127.0.0.1:8000"),
       {
+        credentials: "include",
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}"
@@ -300,6 +305,7 @@ describe("TelecomStudioApi", () => {
     expect(result.workflow_id).toBe("wf_1");
     expect(fetcher).toHaveBeenCalledWith(new URL("/designs", "http://127.0.0.1:8000"), {
       body: JSON.stringify({ requirements_text: "site 5G" }),
+      credentials: "include",
       headers: { "content-type": "application/json" },
       method: "POST"
     });
@@ -350,6 +356,7 @@ describe("TelecomStudioApi", () => {
       new URL("/requirements/parse", "http://127.0.0.1:8000"),
       {
         body: JSON.stringify({ requirements_text: "site 5G" }),
+        credentials: "include",
         headers: { "content-type": "application/json" },
         method: "POST"
       }
@@ -418,6 +425,7 @@ describe("TelecomStudioApi", () => {
         confirmed_analysis_receipt: confirmedAnalysisReceipt,
         options: { detail_level: "high", multimodal_consent: "allow_input_analysis" }
       }),
+      credentials: "include",
       headers: { "content-type": "application/json" },
       method: "POST"
     });
@@ -433,6 +441,19 @@ describe("TelecomStudioApi", () => {
       name: "ApiClientError",
       status: 503
     });
+  });
+
+  it("signals the authentication gate when a protected request returns 401", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({ detail: "Authentication required." }, { status: 401 })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const onAuthenticationRequired = vi.fn();
+    window.addEventListener("telecom-auth-required", onAuthenticationRequired, { once: true });
+
+    await expect(client.studioSummary()).rejects.toMatchObject({ status: 401 });
+
+    expect(onAuthenticationRequired).toHaveBeenCalledOnce();
   });
 
   it("rejects invalid backend payloads before UI consumption", async () => {
@@ -506,6 +527,7 @@ describe("TelecomStudioApi", () => {
     });
     expect(fetcher).toHaveBeenNthCalledWith(1, new URL("/designs/wf_1/edit", "http://127.0.0.1:8000"), {
       body: JSON.stringify({ edit_prompt: "monte les antennes à 26m" }),
+      credentials: "include",
       headers: { "content-type": "application/json" },
       method: "POST"
     });
@@ -514,6 +536,7 @@ describe("TelecomStudioApi", () => {
       new URL("/designs/wf_1/versions/v1/rollback", "http://127.0.0.1:8000"),
       {
         body: JSON.stringify({}),
+        credentials: "include",
         headers: { "content-type": "application/json" },
         method: "POST"
       }
@@ -538,6 +561,7 @@ describe("TelecomStudioApi", () => {
     expect(result.document_count).toBe(3);
     expect(fetcher).toHaveBeenCalledWith(new URL("/document-packs", "http://127.0.0.1:8000"), {
       body: file,
+      credentials: "include",
       headers: {
         "content-type": "application/zip",
         "x-filename": "cahier-charge.zip"
@@ -566,6 +590,7 @@ describe("TelecomStudioApi", () => {
     expect(result.pack_id).toBe("pack_direct");
     const request = fetcher.mock.calls[0][1];
     expect(request.method).toBe("POST");
+    expect(request.credentials).toBe("include");
     expect(request.headers).toEqual({});
     expect(request.body).toBeInstanceOf(FormData);
     expect(Array.from((request.body as FormData).getAll("files"))).toHaveLength(2);
@@ -590,6 +615,7 @@ describe("TelecomStudioApi", () => {
 
     expect(fetcher).toHaveBeenCalledWith(new URL("/document-packs", "http://127.0.0.1:8000"), {
       body: expect.any(File),
+      credentials: "include",
       headers: {
         "content-type": "application/zip",
         "x-chat-id": chatId,
@@ -617,7 +643,8 @@ describe("TelecomStudioApi", () => {
       document_count: 2
     });
     expect(fetcher).toHaveBeenCalledWith(
-      new URL("/document-packs/pack_1", "http://127.0.0.1:8000")
+      new URL("/document-packs/pack_1", "http://127.0.0.1:8000"),
+      { credentials: "include" }
     );
   });
 
@@ -632,7 +659,7 @@ describe("TelecomStudioApi", () => {
         `/document-packs/pack_1?chat_id=${encodeURIComponent(chatId)}`,
         "http://127.0.0.1:8000"
       ),
-      { method: "DELETE" }
+      { credentials: "include", method: "DELETE" }
     );
   });
 
@@ -648,11 +675,13 @@ describe("TelecomStudioApi", () => {
 
     expect(fetcher).toHaveBeenNthCalledWith(
       1,
-      new URL("/designs/wf_1/events", "http://127.0.0.1:8000")
+      new URL("/designs/wf_1/events", "http://127.0.0.1:8000"),
+      { credentials: "include" }
     );
     expect(fetcher).toHaveBeenNthCalledWith(
       2,
-      new URL("/designs/wf_1/events?after_sequence=42", "http://127.0.0.1:8000")
+      new URL("/designs/wf_1/events?after_sequence=42", "http://127.0.0.1:8000"),
+      { credentials: "include" }
     );
   });
 

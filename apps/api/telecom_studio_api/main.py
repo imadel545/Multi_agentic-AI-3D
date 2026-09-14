@@ -12,6 +12,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from apps.api.telecom_studio_api.auth import (
+    LocalAuthMiddleware,
+    LocalAuthStore,
+    create_auth_router,
+)
 from apps.api.telecom_studio_api.config import settings
 from apps.api.telecom_studio_api.conversation import ConversationView, project_conversation
 from apps.api.telecom_studio_api.models import (
@@ -140,7 +145,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.resolved_cors_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Content-Type", "X-Chat-ID", "X-Filename", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
@@ -148,6 +153,29 @@ app.add_middleware(
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=settings.resolved_trusted_hosts,
+)
+auth_store = LocalAuthStore(
+    settings.local_sqlite_path,
+    session_ttl_seconds=settings.auth_session_ttl_seconds,
+    login_window_seconds=settings.auth_login_window_seconds,
+    login_max_failures=settings.auth_login_max_failures,
+    login_lock_seconds=settings.auth_login_lock_seconds,
+)
+app.add_middleware(
+    LocalAuthMiddleware,
+    store=auth_store,
+    enabled=lambda: settings.auth_enabled,
+    allowed_origins=settings.resolved_cors_origins,
+    cookie_name=settings.auth_cookie_name,
+)
+app.include_router(
+    create_auth_router(
+        auth_store,
+        enabled=lambda: settings.auth_enabled,
+        cookie_secure=settings.auth_cookie_secure,
+        allowed_origins=settings.resolved_cors_origins,
+        cookie_name=settings.auth_cookie_name,
+    )
 )
 
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
@@ -215,6 +243,7 @@ rag_embedding_provider = build_embedding_provider(
     settings.embedding_model,
     api_key=settings.resolved_nvidia_api_key,
     dimensions=settings.embedding_dimensions,
+    timeout_s=settings.embedding_timeout_s,
     strict_quality=settings.embedding_strict_quality,
 )
 rag_reranker = build_reranker(

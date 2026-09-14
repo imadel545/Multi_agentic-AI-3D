@@ -45,6 +45,7 @@
     "platform_tower_clearance_m": 0.2,
     "platform_support_radius_m": 0.025,
     "platform_support_tangent_offset_ratio": 0.3,
+    "platform_support_drop_m": 0.75,
     "ladder_width_m": 0.45,
     "ladder_rail_radius_m": 0.018,
     "ladder_rung_radius_m": 0.014,

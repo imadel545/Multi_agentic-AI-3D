@@ -154,6 +154,7 @@ class ProductService:
         )
         backend_status = status.get("status", "unknown")
         current_operation = _current_operation(status, events)
+        task_started_at, task_finished_at = _task_event_bounds(events)
         terminal_statuses = {
             "completed",
             "failed",
@@ -198,6 +199,8 @@ class ProductService:
             "is_running": backend_status in {"pending", "running"},
             "is_terminal": backend_status in terminal_statuses,
             "last_event_at": runtime.get("timestamp"),
+            "task_started_at": task_started_at,
+            "task_finished_at": task_finished_at,
             "generation_mode": status.get("generation_mode"),
             "generation_strategy": status.get("generation_strategy"),
             "geometry_source": status.get("geometry_source"),
@@ -454,7 +457,11 @@ class ProductService:
             "rag_context_count": status.get("rag_context_count"),
             "rag_planning_summary": status.get("rag_planning_summary"),
             "rag_reranker_provider": status.get("rag_reranker_provider"),
-            "rag_reranker_model": status.get("rag_reranker_model"),
+            "rag_reranker_model": _public_rag_reranker_model(
+                provider=status.get("rag_reranker_provider"),
+                status=status.get("rag_reranker_status"),
+                model=status.get("rag_reranker_model"),
+            ),
             "rag_reranker_status": status.get("rag_reranker_status"),
             "rag_reranker_degraded_reason": status.get("rag_reranker_degraded_reason"),
             "rag_retrieval_status": status.get("rag_retrieval_status"),
@@ -652,11 +659,22 @@ def _rag_reranker_provider(rag_service: Any) -> str | None:
 
 def _rag_reranker_model(rag_service: Any) -> str | None:
     reranker = getattr(rag_service, "_reranker", None)
-    value = getattr(reranker, "model_name", None)
-    if value:
-        return str(value)
+    if reranker is not None:
+        value = getattr(reranker, "model_name", None)
+        return str(value) if value else None
     value = getattr(rag_service, "_reranker_model", None)
     return str(value) if value else None
+
+
+def _public_rag_reranker_model(
+    *,
+    provider: Any,
+    status: Any,
+    model: Any,
+) -> str | None:
+    if provider in {"passthrough", "disabled", "none"} or status == "passthrough_no_rerank":
+        return None
+    return str(model) if model else None
 
 
 def _rag_reranker_degraded_reason(rag_service: Any) -> str | None:
@@ -781,6 +799,49 @@ def _current_runtime_state(events: list[dict]) -> dict:
                 "timestamp": event.get("timestamp"),
             }
     return {"source": "status"}
+
+
+def _task_event_bounds(events: list[dict]) -> tuple[str | None, str | None]:
+    """Return the latest generation/edit bounds from the complete event journal."""
+
+    start_index: int | None = None
+    start_event: dict[str, Any] | None = None
+    for index, event in enumerate(events):
+        if event.get("event_type") in {"design_created", "edit_requested"}:
+            start_index = index
+            start_event = event
+
+    if start_index is None or start_event is None:
+        return None, None
+
+    started_at = start_event.get("timestamp")
+    started_at = started_at if isinstance(started_at, str) and started_at else None
+    start_payload = start_event.get("payload")
+    edit_id = (
+        start_payload.get("edit_id")
+        if start_event.get("event_type") == "edit_requested"
+        and isinstance(start_payload, dict)
+        and isinstance(start_payload.get("edit_id"), str)
+        else None
+    )
+    terminal_types = {
+        "workflow_completed",
+        "workflow_failed",
+        "edit_outcome",
+        "edit_patch_applied",
+        "edit_patch_rejected",
+    }
+    for event in events[start_index + 1 :]:
+        if event.get("event_type") not in terminal_types:
+            continue
+        payload = event.get("payload")
+        if edit_id is not None and (
+            not isinstance(payload, dict) or payload.get("edit_id") != edit_id
+        ):
+            continue
+        finished_at = event.get("timestamp")
+        return started_at, finished_at if isinstance(finished_at, str) else None
+    return started_at, None
 
 
 def _next_operation_after_node(node: str, payload: dict) -> str:
@@ -1675,6 +1736,17 @@ def _runtime_node_recommended_action(node: str) -> str:
 
 
 _KNOWN_ISSUE_MAPPINGS: dict[str, dict[str, Any]] = {
+    "WORKFLOW_INTERRUPTED": {
+        "title": "Service interrompu pendant la génération",
+        "impact": (
+            "Le service local s'est interrompu avant la fin. Votre demande est conservée, "
+            "mais aucun nouveau modèle validé n'a été publié."
+        ),
+        "recommended_action": (
+            "Relancez cette demande lorsque le studio est disponible ou reprenez-la dans "
+            "une nouvelle conversation."
+        ),
+    },
     "GEOMETRY_PROGRAM_GENERATION_FAILED": {
         "title": "Composant personnalisé non généré",
         "impact": (

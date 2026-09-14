@@ -66,16 +66,27 @@ class Settings(BaseSettings):
     min_free_disk_mb: int = Field(default=256, ge=64, le=16_384)
     checkpoint_retention_threads: int = Field(default=16, ge=0, le=4096)
     embedding_provider: str = "nvidia"
-    embedding_model: str = "nvidia/llama-nemotron-embed-1b-v2"
-    embedding_dimensions: int = Field(default=1024, ge=128, le=4096)
+    embedding_model: str = "nvidia/nemotron-3-embed-1b"
+    embedding_dimensions: int = Field(default=2048, ge=128, le=4096)
+    embedding_timeout_s: float = Field(default=30.0, ge=1.0, le=120.0)
     embedding_strict_quality: bool = False
     nvidia_api_key: str | None = Field(default=None, repr=False, exclude=True)
-    reranker_provider: str = "nvidia"
+    reranker_provider: str = "passthrough"
     reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2"
     reranker_base_url: str = "https://ai.api.nvidia.com/v1"
     allow_blender_fallback: bool = False
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
     trusted_hosts: str = "127.0.0.1,localhost,testserver"
+    auth_enabled: bool = True
+    auth_session_ttl_seconds: int = Field(default=28_800, ge=300, le=604_800)
+    auth_login_window_seconds: int = Field(default=900, ge=60, le=86_400)
+    auth_login_max_failures: int = Field(default=5, ge=2, le=20)
+    auth_login_lock_seconds: int = Field(default=300, ge=30, le=86_400)
+    auth_cookie_secure: bool = False
+    auth_cookie_name: str = Field(
+        default="telecom_studio_session",
+        pattern=r"^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+    )
 
     @field_validator("groq_model")
     @classmethod
@@ -94,9 +105,7 @@ class Settings(BaseSettings):
         expected = (self.project_root / "assets" / "manifests").resolve()
         configured = self.asset_manifests_dir.resolve()
         if configured != expected:
-            raise ValueError(
-                "asset_manifests_dir must resolve to project_root/assets/manifests"
-            )
+            raise ValueError("asset_manifests_dir must resolve to project_root/assets/manifests")
         return self
 
     @field_validator("groq_text_model")

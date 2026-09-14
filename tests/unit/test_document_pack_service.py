@@ -19,6 +19,14 @@ def test_document_pack_ingestion_classifies_extracts_and_maps(tmp_path: Path) ->
     documents = service.get_documents(summary.pack_id)
 
     assert summary.document_count == 6
+    assert summary.document_names == [
+        "APD_plan_antennes.txt",
+        "Bail_administratif.txt",
+        "plan_antennes.dwg",
+        "APD_copy.txt",
+        "site_photo.jpg",
+        "Plan_antennes.txt",
+    ]
     assert summary.can_generate_design is True
     assert summary.missing_blocking_count == 0
     assert any(doc["category"] == "antenna_plan" for doc in documents)
@@ -42,6 +50,21 @@ def test_document_pack_ingestion_classifies_extracts_and_maps(tmp_path: Path) ->
     assert mapping.requirements["tower_type"] == "lattice_tower"
     assert mapping.requirements["tower_height_m"] == 30.0
     assert mapping.requirements["azimuths_deg"] == [0.0, 120.0, 240.0]
+
+
+def test_restored_summary_recovers_real_names_from_pack_index(tmp_path: Path) -> None:
+    service = DocumentPackService(tmp_path)
+    created = service.ingest_files(
+        [("APD_radio.txt", b"Hauteur pylone: 30m"), ("fondation.txt", b"Fondation: beton")]
+    )
+    summary_path = service.packs_dir / created.pack_id / "summary.json"
+    legacy_summary = document_pack_service_module._read_json(summary_path)
+    legacy_summary.pop("document_names", None)
+    document_pack_service_module._write_json(summary_path, legacy_summary)
+
+    restored = service.get_summary(created.pack_id)
+
+    assert restored["document_names"] == ["APD_radio.txt", "fondation.txt"]
 
 
 def test_direct_file_ingestion_rejects_unsafe_and_duplicate_names(tmp_path: Path) -> None:

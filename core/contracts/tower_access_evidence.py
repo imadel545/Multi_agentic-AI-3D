@@ -67,6 +67,18 @@ class TowerAccessPlatformMeasurement(StrictModel):
     guardrail_mesh_count: int = Field(ge=0, le=128)
     toe_board_mesh_count: int = Field(ge=0, le=32)
     support_mesh_count: int = Field(ge=0, le=32)
+    support_tower_attachment_count: int | None = Field(
+        default=None, ge=0, le=32, exclude_if=lambda value: value is None
+    )
+    support_deck_attachment_count: int | None = Field(
+        default=None, ge=0, le=32, exclude_if=lambda value: value is None
+    )
+    minimum_support_radial_span_m: float | None = Field(
+        default=None, ge=0, le=20, exclude_if=lambda value: value is None
+    )
+    minimum_support_vertical_drop_m: float | None = Field(
+        default=None, ge=0, le=20, exclude_if=lambda value: value is None
+    )
     passed: bool
 
     @model_validator(mode="after")
@@ -81,6 +93,25 @@ class TowerAccessPlatformMeasurement(StrictModel):
                 self.observed_depth_m,
             )
         )
+        support_shape = (
+            self.support_tower_attachment_count,
+            self.support_deck_attachment_count,
+            self.minimum_support_radial_span_m,
+            self.minimum_support_vertical_drop_m,
+        )
+        if any(value is not None for value in support_shape) and not all(
+            value is not None for value in support_shape
+        ):
+            raise ValueError("platform support measurements must be complete")
+        support_shape_valid = True
+        if all(value is not None for value in support_shape):
+            support_shape_valid = bool(
+                self.support_tower_attachment_count >= 2
+                and self.support_deck_attachment_count >= 2
+                and self.minimum_support_radial_span_m >= self.expected_depth_m * 0.3
+                and self.minimum_support_vertical_drop_m
+                >= min(max(self.expected_depth_m * 0.15, 0.2), 0.5)
+            )
         expected = (
             observed
             and self.elevation_error_m <= tolerance
@@ -89,6 +120,7 @@ class TowerAccessPlatformMeasurement(StrictModel):
             and self.guardrail_mesh_count >= 7
             and self.toe_board_mesh_count >= 3
             and self.support_mesh_count >= 2
+            and support_shape_valid
         )
         if self.passed != expected:
             raise ValueError("platform result does not match its exported measurements")

@@ -81,6 +81,15 @@ class SceneAssetPlacement(StrictModel):
             raise ValueError("tower_access_geometry_profile requires a lattice tower")
         if any(level >= self.height_m for level in self.characteristics.platform_levels_m):
             raise ValueError("platform_levels_m must remain below tower height_m")
+        support_drop = (
+            self.tower_access_geometry_profile.platform_support_drop_m
+            if self.tower_access_geometry_profile is not None
+            else None
+        )
+        if support_drop is not None and any(
+            level <= support_drop for level in self.characteristics.platform_levels_m
+        ):
+            raise ValueError("platform support drop must remain above ground")
         return self
 
 

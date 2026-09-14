@@ -14,7 +14,7 @@ FastAPI
        -> GPT-OSS text decision (strict JSON Schema)
        -> opt-in Qwen visual evidence (advisory JSON + Pydantic)
      or visible deterministic/local-only path
-  -> NVIDIA API Nemotron query/passage retrieval + NVIDIA reranker evidence
+  -> NVIDIA API Nemotron query/passage retrieval + explicit passthrough ranking evidence
      or visible lexical retrieval over the real local corpus
   -> bounded GPT-OSS planning decision over validated RAG candidates
   -> SQLite memory recall
@@ -83,8 +83,9 @@ des événements ne dépend plus de ces services.
   selection tuples and certification. Asset selection schema 1.2 exposes only
   `role_id -> choice_id`; one immediate retry is permitted only after
   `model_output_rejected`, never after auth/quota/timeout/transport failures.
-- `core/rag`: Qdrant, NVIDIA API multilingual embeddings, NVIDIA reranker with visible
-  degraded passthrough, deterministic test/bootstrap mode, explicit local override.
+- `core/rag`: Qdrant, NVIDIA API multilingual embeddings, explicit passthrough
+  ranking while hosted rerankers are unavailable, deterministic test/bootstrap
+  mode, explicit local override.
 - `core/memory`: SQLite workflow/document-pack memory.
 - `core/services`: assets, events, versioning, Blender runner, cleanup.
 - `core/services/qualified_asset_retriever.py`: common qualified-manifest

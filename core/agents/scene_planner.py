@@ -16,6 +16,7 @@ from core.contracts.scene import (
 )
 from core.contracts.tower import TowerAccessGeometryProfile, TowerCharacteristics
 from core.rag.planning import RagPlanningResolution, resolve_planning_hints
+from core.services.accessory_placement import default_gps_position
 from core.services.assembly_compiler import resolve_scene_assembly
 
 
@@ -300,22 +301,16 @@ def _accessory_placements(
             )
         )
     if requirements.include_gps_antenna and (gps := assets_by_type.get("gps")):
-        gps_height = max(0.5, requirements.tower_height_m - 0.5)
-        mount_radius = (
-            _tower_width_at_height(
-                height_m=gps_height,
-                tower_height_m=requirements.tower_height_m,
-                base_width_m=base_width,
-                top_width_m=float(characteristics.top_width_m or base_width),
-            )
-            / 2
-            + 0.1
-        )
         placements.append(
             _accessory_placement(
                 gps,
                 asset_type="gps",
-                position=[0.0, mount_radius, gps_height],
+                position=default_gps_position(
+                    tower_height_m=requirements.tower_height_m,
+                    tower_base_width_m=base_width,
+                    tower_top_width_m=float(characteristics.top_width_m or base_width),
+                    gps_depth_m=float(gps.dimensions_m.depth),
+                ),
                 rotation_deg=[0.0, 0.0, 0.0],
                 generation_strategy=_assembly_generation_strategy(
                     assembly_plan,
@@ -447,14 +442,3 @@ def _tower_access_profile_for_scene(
     if characteristics.structure != "lattice":
         return None
     return tower.tower_access_geometry_profile
-
-
-def _tower_width_at_height(
-    *,
-    height_m: float,
-    tower_height_m: float,
-    base_width_m: float,
-    top_width_m: float,
-) -> float:
-    ratio = min(max(float(height_m) / max(float(tower_height_m), 1e-6), 0.0), 1.0)
-    return float(base_width_m) + (float(top_width_m) - float(base_width_m)) * ratio

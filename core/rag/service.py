@@ -18,7 +18,6 @@ from qdrant_client.models import (
     Distance,
     FieldCondition,
     Filter,
-    FilterSelector,
     MatchAny,
     MatchValue,
     PointStruct,
@@ -96,7 +95,7 @@ class RagService:
         embedding_provider_name: str = "nvidia",
         embedding_model: str = DEFAULT_MODEL,
         reranker: Reranker | None = None,
-        reranker_provider_name: str = "nvidia",
+        reranker_provider_name: str = "passthrough",
         reranker_model: str = "nvidia/llama-nemotron-rerank-1b-v2",
         reranker_api_key: str | None = None,
         reranker_base_url: str = "https://ai.api.nvidia.com/v1",
@@ -502,52 +501,6 @@ class RagService:
             raise
         self._record_success(f"runtime_upsert:{collection}")
 
-    def replace_runtime_documents(
-        self,
-        *,
-        collection: str,
-        owner_filters: dict[str, str | int | float | bool | None],
-        documents: Sequence[RagDocument],
-    ) -> int:
-        """Replace one logical owner's derived vectors without touching SQLite truth."""
-        if collection not in RUNTIME_MEMORY_COLLECTIONS:
-            raise ValueError(f"unsupported runtime collection: {collection}")
-        if any(document.collection != collection for document in documents):
-            raise ValueError("runtime replacement documents must use the requested collection")
-        try:
-            points = self._points_for_documents(documents)
-            with self._runtime_collection_lock:
-                physical_collection = self._runtime_collection_name(collection)
-                if not self.client.collection_exists(physical_collection):
-                    self.client.create_collection(
-                        collection_name=physical_collection,
-                        vectors_config=VectorParams(
-                            size=self.embedding_provider.dimensions,
-                            distance=Distance.COSINE,
-                        ),
-                    )
-                owner_filter = _build_filter(owner_filters)
-                if owner_filter is None:
-                    raise ValueError("runtime replacement requires at least one owner filter")
-                self.client.delete(
-                    collection_name=physical_collection,
-                    points_selector=FilterSelector(filter=owner_filter),
-                    wait=True,
-                )
-                if points:
-                    self.client.upsert(
-                        collection_name=physical_collection,
-                        points=points,
-                        wait=True,
-                    )
-            with self._cache_lock:
-                self.query_cache.clear()
-        except Exception as exc:
-            self._record_failure(f"runtime_replace:{collection}", exc)
-            raise
-        self._record_success(f"runtime_replace:{collection}")
-        return len(points)
-
     def reindex_runtime_documents(
         self,
         documents_by_collection: dict[str, Sequence[RagDocument]],
@@ -633,30 +586,6 @@ class RagService:
             total_documents=sum(indexed_counts.values()),
             embedding_provider=self.embedding_provider.name,
         )
-
-    def update_runtime_source_fingerprint(self, source_fingerprint: str) -> bool:
-        """Advance sync proof after a successful incremental SQLite/Qdrant write."""
-        with self._runtime_collection_lock:
-            state = self._read_runtime_index_state()
-            identity = self._runtime_index_identity()
-            if not _runtime_index_matches(state, identity):
-                return False
-            mapping = _runtime_physical_collection_map(state)
-            counts = state.get("indexed_counts") if state else None
-            if set(mapping) != set(RUNTIME_MEMORY_COLLECTIONS) or not isinstance(counts, dict):
-                return False
-            indexed_counts = {
-                name: int(self.client.get_collection(mapping[name]).points_count or 0)
-                for name in RUNTIME_MEMORY_COLLECTIONS
-            }
-            self._write_runtime_index_state(
-                indexed_counts=indexed_counts,
-                physical_collections=mapping,
-                source_fingerprint=source_fingerprint,
-                index_identity=identity,
-                obsolete_collections=_runtime_obsolete_collections(state),
-            )
-            return True
 
     def invalidate_runtime_memory(self) -> dict[str, object]:
         """Remove the complete derived memory projection without touching SQLite."""

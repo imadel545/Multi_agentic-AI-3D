@@ -17,9 +17,9 @@ from core.rag.text import normalized_tokens
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "nvidia/llama-nemotron-embed-1b-v2"
+DEFAULT_MODEL = "nvidia/nemotron-3-embed-1b"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-DEFAULT_NVIDIA_TIMEOUT_S = 8.0
+DEFAULT_NVIDIA_TIMEOUT_S = 30.0
 DEFAULT_NVIDIA_MAX_RETRIES = 0
 DEFAULT_NVIDIA_BATCH_SIZE = 32
 NVIDIA_INPUT_PROFILE = "query_passage_v1"
@@ -29,6 +29,7 @@ NVIDIA_INPUT_PROFILE = "query_passage_v1"
 NVIDIA_MODEL_DIMENSIONS = {
     "nvidia/nv-embedqa-e5-v5": 1024,
     "nvidia/llama-nemotron-embed-1b-v2": 2048,
+    "nvidia/nemotron-3-embed-1b": 2048,
 }
 
 
@@ -187,6 +188,7 @@ def build_embedding_provider(
     *,
     api_key: str | None = None,
     dimensions: int | None = None,
+    timeout_s: float = DEFAULT_NVIDIA_TIMEOUT_S,
     strict_quality: bool | None = None,
 ) -> EmbeddingProvider:
     """Build the embedding provider.
@@ -209,6 +211,7 @@ def build_embedding_provider(
                 model_name,
                 api_key=api_key,
                 dimensions=dimensions,
+                timeout_s=timeout_s,
             )
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
             return provider
@@ -224,6 +227,7 @@ def build_embedding_provider(
                 model_name,
                 api_key=api_key,
                 dimensions=dimensions,
+                timeout_s=timeout_s,
             )
             logger.info("Using NVIDIA API embedding provider: %s", provider.name)
             return provider

@@ -14,7 +14,13 @@ export function sceneInstanceCount(proofs: ComponentProofs): number {
     proofs.geometry_programs.reduce((count, program) => count + program.quantity, 0);
 }
 
-function constructionLabel(strategy: string): string {
+function constructionLabel(strategy: string, proceduralExecution: boolean, exactImport: boolean): string {
+  if (proceduralExecution) {
+    return "Géométrie procédurale générée pour ce projet";
+  }
+  if (exactImport) {
+    return "Modèle source conservé";
+  }
   const labels: Record<string, string> = {
     reuse: "Modèle source conservé",
     adapt: "Modèle source ajusté",
@@ -24,7 +30,12 @@ function constructionLabel(strategy: string): string {
   return labels[strategy] ?? "Créé pour ce projet";
 }
 
-function sourceLabel(asset: QualifiedAssetInventoryEntry | undefined, hasCatalogSource: boolean): string {
+function sourceLabel(
+  asset: QualifiedAssetInventoryEntry | undefined,
+  hasCatalogSource: boolean,
+  proceduralExecution: boolean
+): string {
+  if (proceduralExecution) return "Génération procédurale locale";
   if (asset?.manufacturer || asset?.reference) {
     return [asset.manufacturer, asset.reference].filter(Boolean).join(" · ");
   }
@@ -51,20 +62,26 @@ function formatMeters(value: number): string {
   return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 3 }).format(value);
 }
 
-function formatDimensions(dimensions: Record<string, unknown> | null | undefined): string | null {
-  if (!dimensions) return null;
-  const width = dimensionValue(dimensions.width ?? dimensions.x);
-  const depth = dimensionValue(dimensions.depth ?? dimensions.y);
-  const height = dimensionValue(dimensions.height ?? dimensions.z);
-  if (width && depth && height) {
-    return `L × P × H : ${formatMeters(width)} × ${formatMeters(depth)} × ${formatMeters(height)} m`;
-  }
-  const available = [
-    width ? `largeur ${formatMeters(width)} m` : null,
-    depth ? `profondeur ${formatMeters(depth)} m` : null,
-    height ? `hauteur ${formatMeters(height)} m` : null
-  ].filter((value): value is string => Boolean(value));
-  return available.length ? available.join(" · ") : null;
+function formatMeasuredExtent(dimensions: readonly number[] | null | undefined): string | null {
+  if (!dimensions || dimensions.length !== 3) return null;
+  const [width, depth, height] = dimensions.map(dimensionValue);
+  if (!width || !depth || !height) return null;
+  return `L × P × H : ${formatMeters(width)} × ${formatMeters(depth)} × ${formatMeters(height)} m`;
+}
+
+function isProceduralExecution(
+  strategy: string,
+  generationStrategy: string,
+  geometrySources: string[]
+): boolean {
+  return generationStrategy === "internal_project_generated" ||
+    strategy === "procedural_generate" ||
+    geometrySources.some((source) => source.includes("parametric") || source.includes("procedural"));
+}
+
+function isExactImport(generationStrategy: string, geometrySources: string[]): boolean {
+  return generationStrategy === "imported_glb_exact" ||
+    geometrySources.some((source) => source === "asset_glb" || source === "imported_glb_exact");
 }
 
 export function SceneCompositionPanel({
@@ -109,8 +126,8 @@ export function SceneCompositionPanel({
 
       {componentProofs ? (
         <div className="composition-overview" aria-label="Résumé de la composition">
-          <strong>{elementCount} élément{elementCount > 1 ? "s" : ""} présent{elementCount > 1 ? "s" : ""}</strong>
-          <small>Sélectionnez un élément pour le retrouver dans la vue 3D et le modifier depuis le chat.</small>
+          <strong>{elementCount} {elementCount > 1 ? "composants principaux" : "composant principal"}</strong>
+          <small>Les accès et éléments auxiliaires sont présentés séparément. Sélectionnez un composant pour le retrouver dans la vue 3D.</small>
         </div>
       ) : null}
 
@@ -174,20 +191,26 @@ export function SceneCompositionPanel({
         <div className="scene-tree" role="tree" aria-label="Éléments présents dans le modèle 3D">
           {componentProofs.components.map((component) => {
             const asset = component.asset_id ? inventoryByAssetId.get(component.asset_id) : undefined;
-            const dimensions = formatDimensions(asset?.dimensions_m);
+            const geometrySources = component.instances.map((instance) => instance.geometry_source);
+            const proceduralExecution = isProceduralExecution(
+              component.strategy,
+              component.generation_strategy,
+              geometrySources
+            );
+            const exactImport = isExactImport(component.generation_strategy, geometrySources);
             return (
               <div className="scene-tree-group" key={component.component_id} role="group">
                 <div className="scene-tree-heading">
                   <div>
                     <strong>{humanSemanticRole(component.role_id)}</strong>
-                    <small>{constructionLabel(component.strategy)}</small>
+                    <small>{constructionLabel(component.strategy, proceduralExecution, exactImport)}</small>
                   </div>
                   <span>{component.quantity}</span>
                 </div>
-                <p>Source : {sourceLabel(asset, Boolean(component.asset_id))}</p>
-                {dimensions ? <small>{dimensions}</small> : null}
-                {component.instances.map((instance) => (
-                  <button
+                <p>Source : {sourceLabel(asset, Boolean(component.asset_id), proceduralExecution)}</p>
+                {component.instances.map((instance) => {
+                  const dimensions = formatMeasuredExtent(instance.bounding_box_m?.dimensions_m);
+                  return <button
                     aria-current={selectedSemanticRoot === instance.semantic_root ? "true" : undefined}
                     className={`scene-tree-item${selectedSemanticRoot === instance.semantic_root ? " selected" : ""}`}
                     key={instance.instance_id}
@@ -197,26 +220,32 @@ export function SceneCompositionPanel({
                   >
                     <span>{humanComponentInstanceLabel(componentProofs, instance.semantic_root)}</span>
                     <small>{selectedSemanticRoot === instance.semantic_root ? "Sélectionné" : "Sélectionner pour modifier"}</small>
+                    {dimensions ? <small>Encombrement dans le modèle — {dimensions}</small> : null}
                   </button>
-                ))}
+                })}
               </div>
             );
           })}
           {componentProofs.geometry_programs.map((program) => {
             const sourceAssetId = program.exact_asset_sources?.[0]?.asset_id;
             const sourceAsset = sourceAssetId ? inventoryByAssetId.get(sourceAssetId) : undefined;
-            const dimensions = formatDimensions(sourceAsset?.dimensions_m);
+            const proceduralExecution = isProceduralExecution(
+              program.strategy,
+              program.generation_strategy,
+              []
+            );
+            const dimensions = formatMeasuredExtent(program.bounding_box_m?.dimensions_m);
             return (
               <div className="scene-tree-group" key={program.component_id} role="group">
                 <div className="scene-tree-heading">
                   <div>
                     <strong>{humanSemanticRole(program.role_id)}</strong>
-                    <small>{constructionLabel(program.strategy)}</small>
+                    <small>{constructionLabel(program.strategy, proceduralExecution, program.origin === "catalog_asset")}</small>
                   </div>
                   <span>{program.quantity}</span>
                 </div>
-                <p>Source : {sourceLabel(sourceAsset, program.origin === "catalog_asset")}</p>
-                {dimensions ? <small>{dimensions}</small> : null}
+                <p>Source : {sourceLabel(sourceAsset, program.origin === "catalog_asset", proceduralExecution)}</p>
+                {dimensions ? <small>Encombrement dans le modèle — {dimensions}</small> : null}
               </div>
             );
           })}

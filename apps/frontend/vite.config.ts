@@ -27,7 +27,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: Object.fromEntries(
-      ["/health", "/studio", "/workspace", "/assets", "/document-packs", "/requirements", "/designs"].map(
+      ["/health", "/auth", "/studio", "/workspace", "/assets", "/document-packs", "/requirements", "/designs"].map(
         (path) => [
           path,
           {

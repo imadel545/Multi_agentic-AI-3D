@@ -4,8 +4,8 @@ Re-ranking takes the initial vector/keyword retrieval results and re-orders them
 with a cross-encoder that understands query-document relevance much better than
 dense similarity alone. This is especially useful for short French telecom queries.
 
-Product default: NVIDIA API reranker.
-Bootstrap/test mode: explicit passthrough.
+Product default: explicit passthrough with no reranking model.
+NVIDIA API reranking is available only when explicitly configured.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class Reranker(Protocol):
 
 
 class PassthroughReranker:
-    """No-op re-ranker. Used when the local model is not available."""
+    """Explicit no-op reranker that preserves vector-search order."""
 
     def __init__(
         self,
@@ -395,7 +395,7 @@ def build_reranker(
     """
     provider_name = provider_name.strip().lower()
     if provider_name in {"", "none", "passthrough", "disabled"}:
-        return PassthroughReranker(provider=provider_name or "passthrough", model_name=model_name)
+        return PassthroughReranker(provider=provider_name or "passthrough", model_name=None)
     if provider_name == "nvidia":
         return NvidiaReranker(model_name, api_key=api_key, base_url=base_url)
     raise RuntimeError(

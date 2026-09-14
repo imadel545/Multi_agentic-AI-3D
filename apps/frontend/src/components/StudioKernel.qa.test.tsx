@@ -11,6 +11,30 @@ import { bundle, parsedRequirements } from "./StudioKernel.testFixtures";
 afterEach(() => cleanup());
 
 describe("studio kernel QA and design truth", () => {
+  it("reports passed 3D controls without claiming professional model verification", () => {
+    render(
+      <BackendStatusBar
+        health={{
+          status: "ok",
+          service: "agentic_telecom_3d_studio_api",
+          version: "1.0.0",
+          api_contract_version: "2026-07-29"
+        }}
+        phase="completed"
+        bundle={{
+          ...bundle,
+          mesh_qa_passed: true,
+          completion_certificate_status: "issued"
+        }}
+        issues={null}
+      />
+    );
+
+    const globalStatus = screen.getByLabelText("Studio runtime status");
+    expect(globalStatus).toHaveTextContent("Contrôles 3D passés");
+    expect(globalStatus).not.toHaveTextContent("Modèle vérifié");
+  });
+
   it("keeps technical fidelity and issue totals out of the global status bar", () => {
     render(
       <BackendStatusBar

@@ -635,7 +635,13 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
         commands.append(command)
         attempt_directories.append(Path(command[-1]))
         if attempts == 1:
-            return subprocess.CompletedProcess(command, 42, stdout="", stderr="")
+            (Path(command[-1]) / "preview_front.png").write_bytes(b"partial-preview")
+            return subprocess.CompletedProcess(
+                command,
+                42,
+                stdout="rendered primary view",
+                stderr="Traceback: close-up render failed",
+            )
         output_dir = Path(command[-1])
         (output_dir / "design.glb").write_bytes(b"x" * 64)
         (output_dir / "preview.png").write_bytes(b"x" * 64)
@@ -689,6 +695,16 @@ def test_blender_runner_retries_transient_blender_error(tmp_path: Path, monkeypa
         Path(result.artifacts[name]).is_file()
         for name in ("preview_front", "preview_side", "preview_top", "preview_closeup")
     )
+    diagnostic_files = list((tmp_path / ".blender_attempt_diagnostics").glob("*.json"))
+    assert len(diagnostic_files) == 1
+    diagnostic = json.loads(diagnostic_files[0].read_text(encoding="utf-8"))
+    assert diagnostic["attempt_number"] == 1
+    assert diagnostic["phase"] == "blender_process"
+    assert diagnostic["process_returncode"] == 42
+    assert "close-up render failed" in diagnostic["command_output_tail"]
+    assert diagnostic["staged_files"] == [
+        {"name": "preview_front.png", "size_bytes": len(b"partial-preview")}
+    ]
     assert not any(path.exists() for path in attempt_directories)
 
 
@@ -742,6 +758,12 @@ def test_blender_runner_retries_build_lock_preparation_failure_then_falls_back(
     assert result.error is not None
     assert result.error.count("BLENDER_BUILD_LOCK_PREPARATION_ERROR") == 3
     assert "ValueError:ASSET_MANIFEST_SOURCE_HASH_MISMATCH" in result.error
+    diagnostic_files = sorted((tmp_path / ".blender_attempt_diagnostics").glob("*.json"))
+    assert len(diagnostic_files) == 3
+    diagnostics = [json.loads(path.read_text(encoding="utf-8")) for path in diagnostic_files]
+    assert [item["attempt_number"] for item in diagnostics] == [1, 2, 3]
+    assert {item["phase"] for item in diagnostics} == {"build_lock_validation"}
+    assert all("BLENDER_BUILD_LOCK_PREPARATION_ERROR" in item["reason"] for item in diagnostics)
     assert not Path(result.artifacts["build_lock"]).exists()
     assert all(not path.exists() for path in attempt_directories)
 

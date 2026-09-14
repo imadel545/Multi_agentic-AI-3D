@@ -672,6 +672,8 @@ class CurrentOperation(BaseModel):
     is_running: bool = False
     is_terminal: bool = False
     last_event_at: str | None = None
+    task_started_at: str | None = None
+    task_finished_at: str | None = None
     generation_mode: str | None = None
     generation_strategy: str | None = None
     geometry_source: str | None = None

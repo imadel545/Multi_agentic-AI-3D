@@ -81,7 +81,11 @@ class TowerAccessInspector:
         )
         if requested_ladder and (ladder is None or not ladder.passed):
             errors.append("TOWER_ACCESS_LADDER_GEOMETRY_INVALID")
-        platforms = _platform_measurements(features, profile_payload, expected_platforms)
+        platforms = _platform_measurements(
+            features,
+            profile_payload,
+            expected_platforms,
+        )
         if len(platforms) != len(expected_platforms) or any(not item.passed for item in platforms):
             errors.append("TOWER_ACCESS_PLATFORM_GEOMETRY_INVALID")
 
@@ -96,6 +100,19 @@ class TowerAccessInspector:
             and all(item.passed for item in platforms),
             "primary_equipment_deck_clearance": overlap_count == 0,
         }
+        if profile.platform_support_drop_m is not None:
+            checks["platform_support_geometry_verified"] = all(
+                item.support_tower_attachment_count is not None
+                and item.support_tower_attachment_count >= 2
+                and item.support_deck_attachment_count is not None
+                and item.support_deck_attachment_count >= 2
+                and item.minimum_support_radial_span_m is not None
+                and item.minimum_support_radial_span_m >= profile.platform_depth_m * 0.3
+                and item.minimum_support_vertical_drop_m is not None
+                and item.minimum_support_vertical_drop_m
+                >= min(max(profile.platform_depth_m * 0.15, 0.2), 0.5)
+                for item in platforms
+            )
         evidence_payload = {
             "schema_version": "1.0.0",
             "scene_id": scene.scene_id,
@@ -299,6 +316,33 @@ def _platform_measurements(
             else (None, None)
         )
         elevation_error = abs(observed_top - level) if observed_top is not None else None
+        enhanced_supports = profile.get("platform_support_drop_m") is not None
+        tower_attachments: int | None = None
+        deck_attachments: int | None = None
+        minimum_radial_span: float | None = None
+        minimum_vertical_drop: float | None = None
+        support_shape_valid = True
+        if enhanced_supports:
+            (
+                tower_attachments,
+                deck_attachments,
+                minimum_radial_span,
+                minimum_vertical_drop,
+            ) = _support_geometry_measurement(
+                supports,
+                decks[0] if len(decks) == 1 else None,
+                profile,
+                level,
+            )
+            support_shape_valid = bool(
+                tower_attachments >= 2
+                and deck_attachments >= 2
+                and minimum_radial_span is not None
+                and minimum_radial_span >= float(profile["platform_depth_m"]) * 0.3
+                and minimum_vertical_drop is not None
+                and minimum_vertical_drop
+                >= min(max(float(profile["platform_depth_m"]) * 0.15, 0.2), 0.5)
+            )
         passed = bool(
             len(decks) == 1
             and observed_top is not None
@@ -311,6 +355,7 @@ def _platform_measurements(
             and len(rails) >= 7
             and len(toes) >= 3
             and len(supports) >= 2
+            and support_shape_valid
         )
         result.append(
             TowerAccessPlatformMeasurement(
@@ -325,10 +370,67 @@ def _platform_measurements(
                 guardrail_mesh_count=len(rails),
                 toe_board_mesh_count=len(toes),
                 support_mesh_count=len(supports),
+                support_tower_attachment_count=tower_attachments,
+                support_deck_attachment_count=deck_attachments,
+                minimum_support_radial_span_m=minimum_radial_span,
+                minimum_support_vertical_drop_m=minimum_vertical_drop,
                 passed=passed,
             )
         )
     return result
+
+
+def _support_geometry_measurement(
+    supports: list[dict[str, Any]],
+    deck: dict[str, Any] | None,
+    profile: dict[str, Any],
+    level: float,
+) -> tuple[int, int, float | None, float | None]:
+    """Measure whether support meshes bridge the tower side and deck underside.
+
+    This is a projected mesh measurement, not proof of fastening or load
+    capacity.  It catches short horizontal rods hidden inside the deck.
+    """
+
+    if deck is None or not supports:
+        return 0, 0, None, None
+    face = math.radians(float(profile["access_face_azimuth_deg"]))
+    outward = (math.sin(face), math.cos(face))
+
+    def radial(point: tuple[float, float, float]) -> float:
+        return point[0] * outward[0] + point[1] * outward[1]
+
+    deck_radials = [radial(point) for point in deck["points"]]
+    deck_inner = min(deck_radials)
+    clearance = float(profile["platform_tower_clearance_m"])
+    depth = float(profile["platform_depth_m"])
+    thickness = float(profile["platform_thickness_m"])
+    tower_attachments = 0
+    deck_attachments = 0
+    radial_spans: list[float] = []
+    vertical_drops: list[float] = []
+    for support in supports:
+        radials = [radial(point) for point in support["points"]]
+        heights = [point[2] for point in support["points"]]
+        minimum_radial = min(radials)
+        maximum_radial = max(radials)
+        minimum_height = min(heights)
+        maximum_height = max(heights)
+        radial_spans.append(maximum_radial - minimum_radial)
+        vertical_drops.append(maximum_height - minimum_height)
+        if minimum_radial <= deck_inner - max(clearance * 0.5, 0.05):
+            tower_attachments += 1
+        if (
+            maximum_radial >= deck_inner + depth * 0.3
+            and abs(maximum_height - (level - thickness)) <= 0.04
+        ):
+            deck_attachments += 1
+    return (
+        tower_attachments,
+        deck_attachments,
+        min(radial_spans),
+        min(vertical_drops),
+    )
 
 
 def _mesh_nodes(glb_path: Path, errors: list[str]) -> list[dict[str, Any]]:
@@ -429,10 +531,18 @@ def _node_points(
         )
         for vertex in vertices or []:
             x, y, z = _apply(transform, (float(vertex[0]), float(vertex[1]), float(vertex[2])))
-            # glTF is Y-up; SceneSpec and user levels are Z-up.
             if all(math.isfinite(value) for value in (x, y, z)):
-                points.append((x, z, y))
+                points.append(_gltf_to_scene_point((x, y, z)))
     return points
+
+
+def _gltf_to_scene_point(
+    point: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """Undo Blender's (x, y, z) to glTF (x, z, -y) axis mapping."""
+
+    x, y, z = point
+    return (x, -z, y)
 
 
 def _primary_equipment_deck_overlap_count(

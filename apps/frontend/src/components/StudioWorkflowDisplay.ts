@@ -360,6 +360,9 @@ export function humanizeUserIssue(issue: UserIssue): UserIssue {
 }
 
 export function failureRecoveryMessage(issue: UserIssue | null): string {
+  if (issue?.technical_code === "WORKFLOW_INTERRUPTED") {
+    return "Le service local s’est interrompu avant la fin. Votre demande est conservée et aucun nouveau modèle n’a été publié. Relancez-la lorsque le studio est disponible ou reprenez-la dans une nouvelle conversation.";
+  }
   if (!issue) {
     return "Votre demande est conservée. Corrigez-la avant de relancer la conception.";
   }
@@ -535,5 +538,4 @@ export function summarizeAdaptationCapabilityGroups(
 export function yesNo(value: boolean): string {
   return value ? "oui" : "non";
 }
-
 

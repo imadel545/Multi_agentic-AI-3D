@@ -33,6 +33,12 @@ class TowerAccessGeometryProfile(StrictModel):
     platform_tower_clearance_m: float = Field(default=0.2, ge=0.05, le=2.0)
     platform_support_radius_m: float = Field(default=0.025, ge=0.008, le=0.08)
     platform_support_tangent_offset_ratio: float = Field(default=0.3, ge=0.1, le=0.5)
+    platform_support_drop_m: float | None = Field(
+        default=None,
+        ge=0.1,
+        le=3.0,
+        exclude_if=lambda value: value is None,
+    )
     ladder_width_m: float = Field(default=0.45, ge=0.3, le=1.2)
     ladder_rail_radius_m: float = Field(default=0.018, ge=0.008, le=0.08)
     ladder_rung_radius_m: float = Field(default=0.014, ge=0.006, le=0.06)

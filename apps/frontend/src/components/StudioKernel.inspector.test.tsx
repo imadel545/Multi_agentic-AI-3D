@@ -168,10 +168,11 @@ describe("studio kernel contextual inspection", () => {
       />
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("Assemblage Blender");
+    expect(screen.getByRole("status")).toHaveTextContent("Construction du modèle 3D");
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Positionnement des composants sélectionnés."
+      "Le modèle est construit puis vérifié avant de devenir la version active."
     );
+    expect(screen.getByRole("status")).not.toHaveTextContent("Blender");
     expect(screen.getByRole("status")).not.toHaveTextContent("%");
   });
 

@@ -26,7 +26,7 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 │  - current operation │                                      │
 │                      │                                      │
 ├──────────────────────┴──────────────────────────────────────┤
-│  Context drawers (QA / Composition / Assets / Versions)     │
+│  Context drawers (Composition / Livrables / Versions)     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,8 +35,8 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 - **Chat-first** : la conversation est la zone de commande principale.
 - **3D-first** : le viewer occupe la majorité de l'écran.
 - **Simple** : l'utilisateur comprend quoi faire en moins de 5 secondes.
-- **Drawers contextuels** : les détails utiles du résultat (QA, composition,
-  assets, versions) sont dans des drawers, jamais en panneaux fixes vides. Les
+- **Drawers contextuels** : les détails utiles du résultat (composition, livrables,
+  versions) sont dans des drawers, jamais en panneaux fixes vides. Les
   extractions documentaires et diagnostics d'ingestion restent hors de la
   surface produit.
 - **No dashboard** : pas de 4 zones fixes, pas de grids resizable comme IDE.
@@ -103,3 +103,32 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
   post-export mesure 3/3 liaisons mécaniques et observe un support mesh; la
   route RF exportée reste explicitement non évaluée. Ce smoke ne rejoue pas
   l'édition, le rollback, l'upload ou la génération avec contexte documentaire.
+
+## Accès Circet et inscription locale
+
+La page d'accès est une surface de formulaire, pas une présentation marketing.
+`AuthGate.tsx` possède le parcours inscription/connexion/expiration/déconnexion;
+`auth.py` reste l'autorité pour l'existence du compte et la session. Le premier
+compte est un propriétaire unique local, avec nom, identifiant et mot de passe.
+Il n'existe ni inscription multi-utilisateur ni vérification d'e-mail distante.
+
+L'identité reprend exactement `public/brand/circet-logo.jpg`, fourni par
+l'utilisateur; aucune redéfinition du logo. `styles/auth.css` est la source des
+tokens de cette surface: orange Circet `--brand-orange`, texte sombre
+`--brand-ink`, fond clair `--auth-background`, focus contrasté `--auth-focus`.
+Le texte des boutons orange reste sombre pour le contraste. Les couleurs de
+statut et le viewer du studio gardent leur sémantique indépendante.
+
+Le formulaire possède un seul défilement, deux colonnes sur ordinateur et une
+colonne sous 760 px. Le logo conserve ses proportions. Les champs restent
+nommés en français; aide avant saisie, erreurs associées au champ, focus sur la
+première erreur, collage et gestionnaires de mots de passe autorisés. L'action
+principale est gardée contre la double soumission. Les secrets ne sont pas
+persistés dans le navigateur. Afficher/masquer le mot de passe est une action
+accessible, masquée par défaut. Les requêtes d'accès sont bornées à 15 secondes;
+un résultat incertain invite à actualiser avant une nouvelle tentative.
+
+La validation de référence est `AuthGate.test.tsx`, puis le smoke navigateur aux
+largeurs ordinateur et étroite. Elle ne remplace pas les contrôles serveur de
+`test_local_auth.py`. La création du vrai compte est effectuée par l'utilisateur,
+sans mot de passe ni identité prédéfinis dans le produit.

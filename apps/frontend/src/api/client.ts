@@ -379,7 +379,7 @@ export class TelecomStudioApi {
     if (!url) {
       return null;
     }
-    const response = await this.fetcher(url);
+    const response = await this.fetcher(url, { credentials: "include" });
     return this.responseJson(response, relativeUrl);
   }
 
@@ -407,13 +407,14 @@ export class TelecomStudioApi {
 
   private async getJson(endpoint: string, options?: RequestOptions): Promise<unknown> {
     const url = new URL(endpoint, this.baseUrl);
-    const response = options ? await this.fetcher(url, options) : await this.fetcher(url);
+    const response = await this.fetcher(url, { ...options, credentials: "include" });
     return this.responseJson(response, endpoint);
   }
 
   private async postJson(endpoint: string, payload: unknown): Promise<unknown> {
     const response = await this.fetcher(new URL(endpoint, this.baseUrl), {
       method: "POST",
+      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
@@ -427,6 +428,7 @@ export class TelecomStudioApi {
   ): Promise<unknown> {
     const response = await this.fetcher(new URL(endpoint, this.baseUrl), {
       method: "POST",
+      credentials: "include",
       headers,
       body
     });
@@ -435,13 +437,17 @@ export class TelecomStudioApi {
 
   private async deleteJson(endpoint: string): Promise<unknown> {
     const response = await this.fetcher(new URL(endpoint, this.baseUrl), {
-      method: "DELETE"
+      method: "DELETE",
+      credentials: "include"
     });
     return this.responseJson(response, endpoint);
   }
 
   private async responseJson(response: Response, endpoint: string): Promise<unknown> {
     if (!response.ok) {
+      if (response.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("telecom-auth-required"));
+      }
       let detail = response.statusText;
       try {
         const payload = await response.json();

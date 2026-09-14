@@ -74,6 +74,23 @@ it("updates chat activity from observed events without claiming completion while
   expect(screen.getByRole("status")).not.toHaveTextContent("disponible");
   rerender(<ChatProgress events={[event]} phase="failed" editing={false} />);
   expect(screen.getByRole("status")).toHaveTextContent("correction");
+  const interrupted = normalizeWorkflowEvent({
+    event_id: "evt_interrupted",
+    workflow_id: "wf_one",
+    timestamp: "2026-09-14T01:01:00Z",
+    event_type: "workflow_failed",
+    payload: {
+      phase: "runtime",
+      status: "failed",
+      error: "WORKFLOW_INTERRUPTED",
+      warnings: [],
+      errors: [],
+      artifact_refs: []
+    }
+  });
+  rerender(<ChatProgress events={[event, interrupted]} phase="failed" editing={false} />);
+  expect(screen.getByRole("status")).toHaveTextContent("génération a été interrompue");
+  expect(screen.getByRole("status")).not.toHaveTextContent("correction");
   rerender(<ChatProgress events={[event]} phase="completed" editing />);
   expect(screen.getByRole("status")).toHaveTextContent("Modification du modèle en cours");
 });

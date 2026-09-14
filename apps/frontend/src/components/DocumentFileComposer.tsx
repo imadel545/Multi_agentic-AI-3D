@@ -70,7 +70,7 @@ export function DocumentFileComposer({
         <UploadCloud size={18} aria-hidden="true" />
         <span>
           {busy
-            ? "Ajout en cours…"
+            ? "Traitement en cours…"
             : "Déposez des PDF, images, plans, tableaux ou un ZIP"}
         </span>
         <small>Plusieurs fichiers peuvent être joints ensemble.</small>
@@ -123,7 +123,7 @@ export function DocumentFileComposer({
             onClick={() => void submit()}
             type="button"
           >
-            {busy ? "Ajout en cours…" : `Joindre ${files.length} pièce(s)`}
+            {busy ? "Traitement en cours…" : `Joindre ${files.length} pièce(s)`}
           </button>
         </div>
       ) : null}

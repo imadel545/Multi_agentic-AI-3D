@@ -409,6 +409,7 @@ def test_document_pack_accepts_multiple_direct_files(tmp_path: Path) -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["document_count"] == 2
+        assert payload["document_names"] == ["APD_radio.txt", "fondation.txt"]
         documents = client.get(f"/document-packs/{payload['pack_id']}/documents").json()
         assert {document["filename"] for document in documents} == {
             "APD_radio.txt",

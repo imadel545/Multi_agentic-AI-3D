@@ -12,9 +12,10 @@ def test_workspace_mutations_reach_api_in_both_frontend_servers() -> None:
     vite = (root / "apps/frontend/vite.config.ts").read_text()
     nginx = (root / "infra/docker/nginx.conf").read_text()
     assert '"/workspace"' in vite.split("proxy:", 1)[1]
-    route = re.search(r"location ~ (\^/\(studio[^ ]+) \{", nginx)
+    route = re.search(r"location ~ (\^/\(auth[^ ]+) \{", nginx)
     assert route is not None
     for path in (
+        "/auth/status",
         "/workspace/projects",
         "/workspace/projects/project_abc/chats",
         "/workspace/chats/chat_abc",
@@ -112,7 +113,7 @@ def test_cors_preflight_advertises_only_required_surface() -> None:
     assert "content-type" in allowed_headers
     assert "x-filename" in allowed_headers
     assert "x-request-id" in allowed_headers
-    assert "access-control-allow-credentials" not in response.headers
+    assert response.headers["access-control-allow-credentials"] == "true"
 
 
 def test_sse_route_still_streams_terminal_event(tmp_path: Path) -> None:

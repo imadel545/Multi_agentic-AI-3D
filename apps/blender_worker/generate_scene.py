@@ -508,6 +508,50 @@ def _tower_radius_at_height(scene: dict, height_m: float, azimuth_rad: float = 0
     )
 
 
+def _platform_support_segments(
+    scene: dict,
+    *,
+    face: float,
+    level: float,
+    width: float,
+    thickness: float,
+    support_radius: float,
+    support_offset: float,
+    support_drop: float,
+    deck_center_radius: float,
+) -> tuple[tuple[tuple[float, float, float], tuple[float, float, float]], ...]:
+    """Return two visible struts from tower legs to the deck underside.
+
+    These remain bounded, project-authored access geometry.  Their placement
+    proves geometric continuity only; it does not claim a structural design.
+    """
+
+    start_z = level - support_drop
+    if start_z <= support_radius:
+        raise RuntimeError("TOWER_ACCESS_PLATFORM_SUPPORT_BELOW_GROUND")
+    end_z = level - thickness - support_radius
+    tower_radius = _tower_radius_at_height(scene, start_z, face)
+    start_radius = tower_radius + support_radius
+    start_tangent = min(tower_radius, width / 2 - support_radius)
+    outward = (math.sin(face), math.cos(face))
+    tangent = (math.cos(face), -math.sin(face))
+
+    def point(radial: float, tangential: float, z: float) -> tuple[float, float, float]:
+        return (
+            outward[0] * radial + tangent[0] * tangential,
+            outward[1] * radial + tangent[1] * tangential,
+            z,
+        )
+
+    return tuple(
+        (
+            point(start_radius, sign * start_tangent, start_z),
+            point(deck_center_radius, sign * support_offset, end_z),
+        )
+        for sign in (-1.0, 1.0)
+    )
+
+
 def _create_semantic_group(
     bpy,
     name: str,
@@ -955,16 +999,41 @@ def _create_profiled_tower_access_assembly(
                     platform_index=platform_index,
                     level=level,
                 )
-            for tangential in (-support_offset, support_offset):
-                cylinder(
-                    point(tower_radius + 0.02, tangential, deck_center_z),
-                    point(inner_radius, tangential, deck_center_z),
-                    support_radius,
-                    f"tower_access_platform_support_{platform_index}_{tangential:.3f}",
-                    "platform_support",
-                    platform_index=platform_index,
+            support_drop = profile.get("platform_support_drop_m")
+            if support_drop is not None:
+                support_segments = _platform_support_segments(
+                    scene,
+                    face=face,
                     level=level,
+                    width=width,
+                    thickness=thickness,
+                    support_radius=support_radius,
+                    support_offset=support_offset,
+                    support_drop=float(support_drop),
+                    deck_center_radius=center_radius,
                 )
+                for support_index, (start, end) in enumerate(support_segments, start=1):
+                    cylinder(
+                        start,
+                        end,
+                        support_radius,
+                        f"tower_access_platform_support_{platform_index}_{support_index}",
+                        "platform_support",
+                        platform_index=platform_index,
+                        level=level,
+                    )
+            else:
+                # Preserve the established geometry for historical profiles.
+                for tangential in (-support_offset, support_offset):
+                    cylinder(
+                        point(tower_radius + 0.02, tangential, deck_center_z),
+                        point(inner_radius, tangential, deck_center_z),
+                        support_radius,
+                        f"tower_access_platform_support_{platform_index}_{tangential:.3f}",
+                        "platform_support",
+                        platform_index=platform_index,
+                        level=level,
+                    )
             procedural_objects.append(f"tower_access:platform:{platform_index}")
 
     if access_objects:
@@ -2240,7 +2309,9 @@ def _create_gps_antenna(
     height = float(scene["tower"]["height_m"])
     # GPS typically mounted near tower top
     z = height - 0.5
-    mount_radius = _tower_radius_at_height(scene, z) + 0.1
+    # The fallback procedural radome is 0.32 m deep.  Offset its centre by the
+    # half-depth as well as the clearance so the mesh stays outside the tower.
+    mount_radius = _tower_radius_at_height(scene, z) + 0.16 + 0.1
     accessory = _accessory_asset(scene, "gps")
     strategy = (
         accessory.get("generation_strategy", "internal_project_generated")

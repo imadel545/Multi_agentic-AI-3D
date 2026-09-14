@@ -322,13 +322,15 @@ export default function WorkspaceShell() {
         {newProject && (
           <form
             id="workspace-new-project-form"
+            noValidate
             className="workspace-project-form"
             onSubmit={(e) => {
               e.preventDefault();
+              if (navigationLocked || !projectTitle.trim()) return;
               void perform(async () => {
                 await saveDraft();
                 ++epoch.current;
-                const value = await client.createProject(projectTitle);
+                const value = await client.createProject(projectTitle.trim());
                 setProjects((items) => [value, ...items]);
                 setProjectId(value.project_id);
                 setChats([]);

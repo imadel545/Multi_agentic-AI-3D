@@ -4,6 +4,8 @@ import type { WorkflowMachineAction } from "../state/workflowMachine";
 
 export type WorkflowDispatch = Dispatch<WorkflowMachineAction>;
 
+export type DocumentPackMessageStatus = "info" | "removal_confirmed" | "error";
+
 export type LoadSurfaceResource = <T>(
   resource: string,
   loader: () => Promise<T>,

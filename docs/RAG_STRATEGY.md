@@ -6,14 +6,15 @@ generation source of truth remains `RequirementSpec -> SceneSpec -> Blender`.
 ## Product Provider
 
 - Product embedding provider: NVIDIA API
-  `nvidia/llama-nemotron-embed-1b-v2`, requested at 1024 dimensions.
+  `nvidia/nemotron-3-embed-1b`, at its native 2048 dimensions.
 - Configure with `NVIDIA_API_KEY` or `TELECOM_STUDIO_NVIDIA_API_KEY`.
 - Default API config:
 
 ```text
 TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia
-TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/llama-nemotron-embed-1b-v2
-TELECOM_STUDIO_EMBEDDING_DIMENSIONS=1024
+TELECOM_STUDIO_EMBEDDING_MODEL=nvidia/nemotron-3-embed-1b
+TELECOM_STUDIO_EMBEDDING_DIMENSIONS=2048
+TELECOM_STUDIO_EMBEDDING_TIMEOUT_S=30
 ```
 
 If `TELECOM_STUDIO_EMBEDDING_PROVIDER=nvidia` lacks a key, startup fails instead
@@ -28,12 +29,6 @@ query embedding fails, the backend ranks the real local documents lexically,
 then still offers those candidates to the configured reranker. This path is
 published as `rag_retrieval_status=degraded_local_lexical` with a sanitized
 reason; it is not vector retrieval and does not use hash embeddings.
-
-The 2026-08-11 browser smoke on convergence commit `19791be`, workflow
-`wf_0843599873e7`, retrieved five
-contexts with `primary_vector` and `primary_nvidia_reranker` in 1.620 s.
-Provider configuration and this point-in-time success remain insufficient;
-retrieval quality still requires a controlled French telecom evaluation set.
 
 Construction of the provider is network-free and therefore is not an
 operational health proof. `/studio/summary` reports `configured_unverified`
@@ -51,17 +46,22 @@ until a real index/search/write succeeds, and
 
 ## Reranker
 
-- Product reranker provider: NVIDIA API.
-- Default API config:
+The hosted NVIDIA text rerankers checked on 2026-09-14 returned HTTP 410 or
+404. The default is therefore explicit passthrough; the API exposes that state
+and does not label it as neural reranking.
+
+Default API config:
 
 ```text
-TELECOM_STUDIO_RERANKER_PROVIDER=nvidia
-TELECOM_STUDIO_RERANKER_MODEL=nvidia/llama-nemotron-rerank-1b-v2
+TELECOM_STUDIO_RERANKER_PROVIDER=passthrough
 ```
 
-If the NVIDIA reranker is unavailable, retrieval falls back to vector order and
-the API exposes `degraded_passthrough` plus `rag_reranker_degraded_reason`.
-This is a visible degraded state, not a silent success.
+If a future NVIDIA reranker is explicitly configured and becomes unavailable,
+retrieval falls back to vector order and the API exposes
+`degraded_passthrough` plus `rag_reranker_degraded_reason`. Explicit passthrough
+reports `rag_reranker_provider=passthrough`, `rag_reranker_model=null` and
+`rag_reranker_status=passthrough_no_rerank`; neither state is a silent neural
+success.
 
 The backend exposes `rag_retrieval_status`, `rag_retrieval_degraded_reason`,
 `rag_reranker_provider`, `rag_reranker_model`, `rag_reranker_status`, and
@@ -75,7 +75,7 @@ Requirement extraction
 -> structured RAG query from RequirementSpec + original text
 -> NVIDIA Nemotron query embedding against passage-embedded controlled corpus
 -> Qdrant search over knowledge files and asset manifests
--> NVIDIA reranker
+-> explicit passthrough ranking while hosted NVIDIA rerankers are unavailable
 -> bounded GPT-OSS decision over validated candidate hints
 -> ScenePlanner consumes only accepted payload.planning_hints
 -> deterministic validation and quality gates remain mandatory
@@ -101,9 +101,9 @@ RAG retrieval are separate surfaces.
 - Runtime collections: design memory, error memory, document-pack memory.
 - Runtime collection dimensions are checked before use. If a legacy collection
   is incompatible, it is preserved and new writes are routed to a
-  provider/dimension-versioned physical collection. SQLite remains the durable
+  provider/model/dimension-versioned physical collection. SQLite remains the durable
   local memory source during this migration.
-- Rebuild after provider/dimension/knowledge changes with `POST /rag/reindex`.
+- Rebuild after provider/model/dimension/knowledge changes with `POST /rag/reindex`.
 
 ## What Can Influence SceneSpec
 
@@ -160,8 +160,8 @@ the design.
 - RAG does not yet run conflict resolution against document-pack evidence.
 - Out-of-catalog GeometryProgram nodes are not directly grounded in retrieved
   passages or vendor citations.
-- Reranker is fail-open: if NVIDIA reranking fails, retrieval preserves the
-  incoming vector or lexical order and the degraded status is visible.
+- An explicitly configured remote reranker is fail-open: if it fails, retrieval
+  preserves the incoming vector or lexical order and exposes degraded status.
 - Embedding retrieval is not fail-open as a product-quality success: a provider
   failure produces real local lexical candidates but remains visibly degraded.
 - The lexical continuity path is token overlap, not a trained sparse/BM25
@@ -179,20 +179,16 @@ RAG can be called advanced only after:
 - Contradictions between documents, memory, and user prompt are surfaced as
   warnings or conflicts, not hidden.
 
-## Recovery and provider availability — 2026-09-10
+## Verified Runtime Boundary — 2026-09-14
 
-SQLite memory now persists origin/eligibility under an idempotent migration.
-Historical rows become UNKNOWN/ineligible. Product recall and runtime documents
-filter PRODUCT plus eligibility; the source fingerprint includes this policy and
-row provenance. An ID cannot cross origin through normal writeback. The host
-runtime memory projection has been rebuilt with zero eligible historic documents.
+A bounded host probe sent one synthetic French telecom query to
+`nvidia/nemotron-3-embed-1b` and received one 2048-dimensional vector. The
+Docker runtime then indexed the 25 controlled static documents and returned
+five vector results for one French query. `/studio/summary` reported the NVIDIA
+embedding path as operational and the reranker as explicit passthrough. These
+checks establish provider transport plus index/search execution for that corpus;
+they do not establish representative retrieval quality.
 
-Actual static rebuild failed with NVIDIA HTTP410 for
-`nvidia/llama-nemotron-embed-1b-v2`, retired on 2026-08-25 per the response. The
-[official retrieval API list](https://docs.api.nvidia.com/nim/re/reference/retrieval-apis)
-contains Nemotron 3 and VL alternatives, also returned by live model discovery.
-Both timed out on a 25-document/six-query bounded comparison; one separate
-Nemotron 3 query returned 2,048 dimensions in 19.58 seconds. No quality comparison
-completed, so default configuration has not been changed. Static vectors remain
-subject to compatibility checks and visible lexical degradation. This is an
-external availability limitation, not successful provider qualification.
+The replaced embedding model and the hosted rerankers tested that day returned
+HTTP 410 or 404. Those retirement diagnostics remain in
+`docs/KNOWN_LIMITATIONS.md`; they are not active provider alternatives.

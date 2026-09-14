@@ -21,7 +21,10 @@ export type NormalizedWorkflowEvent = {
   raw: WorkflowEvent;
 };
 
-type EventSourceConstructor = new (url: string) => EventSource;
+type EventSourceConstructor = new (
+  url: string,
+  eventSourceInitDict?: EventSourceInit,
+) => EventSource;
 
 export type StreamCallbacks = {
   onEvent: (event: NormalizedWorkflowEvent) => void;
@@ -101,7 +104,7 @@ export function openWorkflowEventStream(
   callbacks: StreamCallbacks,
   EventSourceImpl: EventSourceConstructor = EventSource
 ) {
-  const source = new EventSourceImpl(url);
+  const source = new EventSourceImpl(url, { withCredentials: true });
   let closed = false;
   let consecutiveErrors = 0;
   let lastSequence: number | null = null;

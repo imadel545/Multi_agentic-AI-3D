@@ -24,6 +24,7 @@ export const DocumentPackSummarySchema = publicSchema(
   UnknownRecord.extend({
     pack_id: z.string(),
     status: z.string(),
-    document_count: z.number().int().nonnegative().default(0)
+    document_count: z.number().int().nonnegative().default(0),
+    document_names: z.array(z.string()).optional()
   })
 );

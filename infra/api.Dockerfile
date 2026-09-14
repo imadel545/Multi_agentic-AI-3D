@@ -32,14 +32,17 @@ RUN apt-get update \
         tesseract-ocr-eng \
         tesseract-ocr-fra \
         xz-utils \
-    && curl --fail --show-error --silent --location \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --fail --show-error --silent --location \
+        --retry 3 --retry-all-errors --retry-delay 2 \
+        --connect-timeout 20 --max-time 600 \
         "https://download.blender.org/release/Blender4.5/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
         --output /tmp/blender.tar.xz \
     && echo "${BLENDER_ARCHIVE_SHA256}  /tmp/blender.tar.xz" | sha256sum --check --strict \
     && mkdir -p /opt/blender \
     && tar --extract --xz --file /tmp/blender.tar.xz --directory /opt/blender --strip-components=1 \
-    && rm -f /tmp/blender.tar.xz \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -f /tmp/blender.tar.xz
 
 WORKDIR /app
 

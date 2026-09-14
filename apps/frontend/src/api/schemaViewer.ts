@@ -314,6 +314,15 @@ export const ComponentProofInstanceSchema = publicSchema(
     object_role: z.string(),
     semantic_root: z.string(),
     geometry_source: z.string(),
+    bounding_box_m: UnknownRecord.extend({
+      minimum_m: z.tuple([z.number(), z.number(), z.number()]),
+      maximum_m: z.tuple([z.number(), z.number(), z.number()]),
+      dimensions_m: z.tuple([
+        z.number().nonnegative(),
+        z.number().nonnegative(),
+        z.number().nonnegative()
+      ])
+    }).nullish(),
     qa: UnknownRecord.nullish()
   })
 );
@@ -348,6 +357,15 @@ export const GeometryProgramProofSchema = publicSchema(
     })).optional(),
     quantity: z.number().int().positive(),
     geometry_program: UnknownRecord.nullish(),
+    bounding_box_m: UnknownRecord.extend({
+      minimum_m: z.tuple([z.number(), z.number(), z.number()]),
+      maximum_m: z.tuple([z.number(), z.number(), z.number()]),
+      dimensions_m: z.tuple([
+        z.number().nonnegative(),
+        z.number().nonnegative(),
+        z.number().nonnegative()
+      ])
+    }).nullish(),
     qa: UnknownRecord.nullish()
   }).superRefine((proof, ctx) => {
     const exact = proof.origin === "catalog_asset";
@@ -437,6 +455,8 @@ export const CurrentOperationSchema = publicSchema(
     workflow_id: z.string(),
     status: z.string(),
     current_operation: z.string(),
+    task_started_at: z.string().nullish(),
+    task_finished_at: z.string().nullish(),
     phase: z.string().nullish(),
     current_phase: z.string().nullish(),
     current_node: z.string().nullish(),

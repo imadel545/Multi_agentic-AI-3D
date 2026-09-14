@@ -64,6 +64,7 @@ from core.rag.planning import (
 )
 from core.repair.scene_repair import repair_scene_spec
 from core.rules import RuleEngine
+from core.services.accessory_placement import default_gps_position
 from core.services.assembly_compiler import resolve_scene_assembly
 from core.services.assembly_planner import AssetAssemblyPlanner, BoundedAssemblyDecisionClient
 from core.services.asset_registry import AssetRegistry
@@ -2897,16 +2898,17 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
         )
         if gps.compatible_tower_types and tower_type not in gps.compatible_tower_types:
             gps = registry.select_asset("gps", scene.network_type, tower_type)
-        gps_height = max(0.5, scene.tower.height_m - 0.5)
-        tower_width = base_width + (top_width - base_width) * (
-            gps_height / max(scene.tower.height_m, 1e-6)
-        )
         accessories.append(
             _rebind_revision_accessory(
                 scene,
                 gps,
                 asset_type="gps",
-                default_position=[0.0, tower_width / 2 + 0.1, gps_height],
+                default_position=default_gps_position(
+                    tower_height_m=scene.tower.height_m,
+                    tower_base_width_m=base_width,
+                    tower_top_width_m=top_width,
+                    gps_depth_m=float(gps.dimensions_m.depth),
+                ),
             )
         )
     accessories.extend(

@@ -1,7 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import type { TelecomStudioApi } from "./api/client";
-import { ChatProgress } from "./components/ChatProgress";
+import { ChatProgress, workflowWasInterrupted } from "./components/ChatProgress";
 import { DurableConversation } from "./components/DurableConversation";
 import {
   ActiveWorkflowContext,
@@ -179,7 +179,7 @@ export function StudioApp({
       <main className="studio-layout">
         <aside className="left-rail">
           <ChatCommandPanel
-            activity={<ChatProgress events={state.events} phase={state.phase} editing={revisions.revisionBusy} />}
+            activity={<ChatProgress events={state.events} phase={state.phase} editing={revisions.revisionBusy} analyzing={documents.analysisBusy} operation={state.currentOperation} />}
             onNewChat={onNewChat}
             conversation={state.workflowId ? (
               <DurableConversation
@@ -207,6 +207,7 @@ export function StudioApp({
             documentCapabilitiesLoading={state.resourceLoads.document_capabilities?.status === "loading"}
             documentPackBusy={documents.documentPackBusy}
             documentPackMessage={documents.documentPackMessage}
+            documentPackMessageStatus={documents.documentPackMessageStatus}
             documentPackSummary={documents.documentPackSummary}
             editMessage={revisions.revisionMessage}
             error={state.error}
@@ -231,6 +232,7 @@ export function StudioApp({
             revisionBusy={revisions.revisionBusy}
             revisionPrompt={revisions.revisionPrompt}
             versions={workflow.versions}
+            workflowInterrupted={workflowWasInterrupted(state.events)}
           />
           {workflowActive && operationNotice ? (
             <CurrentOperationStrip notice={operationNotice} operation={state.currentOperation} phase={state.phase} runtimeMode={state.runtimeMode} />

@@ -156,7 +156,7 @@ function ModelScene({
   onSelectSemanticRoot?: (root: string | null) => void;
   showTechnicalAids: boolean;
 }) {
-  const gltf = useGLTF(url);
+  const gltf = useGLTF(url, undefined, undefined, (loader) => loader.setWithCredentials(true));
   const scene = useMemo(() => gltf.scene.clone(true), [gltf.scene]);
   const { camera, invalidate, size } = useThree();
   const fitted = useRef(false);
