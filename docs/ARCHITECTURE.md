@@ -182,8 +182,8 @@ des événements ne dépend plus de ces services.
   specialists, services, quality gates and external tools. A routed specialist
   registry exists, but its domains and dependencies remain declared
   deterministically; it is not an autonomous supervisor.
-- The active inventory has 15 manifests: 13 internal/technical runtime
-  manifests and two real-source reference candidates. Exact imports remain
+- The active inventory has 14 manifests: 13 internal/technical runtime
+  manifests and one manufacturer reference candidate. Exact imports remain
   hash-pinned and every fallback is visible, but none of the 13 generation-
   eligible internal/technical manifests passes the stronger professional M1
   evidence gate. The public flag is owned

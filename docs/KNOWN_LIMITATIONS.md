@@ -480,10 +480,10 @@ frontend.
 - Five scene-level Blender views now include a close-up. Only the primary view
   has the current framing gate; role-specific close-up visibility/contrast and
   per-asset previews remain future work.
-- The curated manifest catalog is intentionally small: it contains 15 manifests,
+- The curated manifest catalog is intentionally small: it contains 14 manifests,
   of which 13 are generation-eligible, with 3 GLBs qualified for exact import,
   10 component/tower profiles qualified for controlled parametric generation and
-  two real STEP candidates kept `reference_only`. The 5G panel and RRU
+  one real STEP candidate kept `reference_only`. The 5G panel and RRU
   companion GLBs have not passed orientation qualification and are therefore
   never imported by the product path.
 - Asset qualification proves file identity, basic mesh integrity, declared
@@ -536,22 +536,6 @@ frontend.
   runtime GLB present, hash-matched and structurally valid before registry
   selection or RAG indexing. Missing or altered bytes no longer remain planning
   candidates.
-- OpenCellular Connect-1 part 227-001258 is a real cast chassis STEP, locally
-  tessellated and measured with Blender. It remains `reference_only`: the bare
-  part has no demonstrated remote-radio function, RF/cable ports or mounting
-  mating; the source drawing also bears CONFIDENTIAL/DRAFT RELEASE markings
-  despite the public CC BY 4.0 hardware licence. Its local evidence is ignored
-  by Git and may be absent from another checkout. No before/after generated
-  design improvement is claimed from this reference observation.
-- A bounded extraction of the full Connect-1 assembly STEP 233-000021 stopped
-  at an invalid B-Rep leaf, `213-000150_SWITCH`. The extractor rejected the
-  whole assembly; no part was silently removed or treated as repaired. The
-  drawing depicts a pole clamp and lower connectors, but it does not by itself
-  establish the RF identity or mating dimensions required by `remote_radio`.
-- Telecom ranking now excludes an exact `remote_radio` candidate lacking the
-  declared role or required connector IDs before it reaches bounded selection.
-  This is a software contract check, not independent proof that a declared RF
-  interface or mechanical joint exists in the source geometry.
 - A manifest catalog outside `<project_root>/assets/manifests` is rejected at
   configuration time. External catalog roots are not propagated through the
   current SceneSpec, trusted-input hashing and worker boundary.

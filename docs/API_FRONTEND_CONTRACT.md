@@ -237,7 +237,7 @@ Les entrées qui ont une identité externe exposent également `family`, `subtyp
 la preuve disponible et ne confèrent aucun droit de réutilisation.
 Les entrées M1 peuvent aussi exposer `preview_set`, `provenance_url`,
 `geometry_status`, `fidelity_status`, `milestone_evidence_eligible` et
-`milestone_evidence_failures`. Le catalogue courant contient 15 assets
+`milestone_evidence_failures`. Le catalogue courant contient 14 assets
 runtime mais 0 preuve professionnelle M1; le frontend ne doit donc pas les
 présenter comme composants constructeur qualifiés.
 
@@ -490,7 +490,7 @@ documents et versions ont des états de chargement/erreur/retry indépendants. L
 frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
 mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
 ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
-La suite courante compte 233 tests Vitest et passe le typecheck/build. Le smoke
+La suite courante compte 225 tests Vitest et passe le typecheck/build. Le smoke
 HTTP du 2026-09-14 confirme l'upload lié au chat, le contexte hashé, l'absence de
 workflow créé par l'import, le rejet de l'ancienne route de génération autonome
 et la suppression avec détachement. Un Chrome neuf charge le GLB courant sans
