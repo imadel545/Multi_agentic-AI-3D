@@ -102,9 +102,12 @@ ou si elle présente une preview ou un fallback comme un modèle 3D vérifié.
 ## Authentification et durée de tâche
 
 - [x] La page Circet permet l’inscription du propriétaire local avec nom,
-  identifiant et mot de passe; erreurs de champs, focus et affichage du mot de
+  adresse e-mail et mot de passe; erreurs de champs, focus et affichage du mot de
   passe vérifiés sur desktop et écran étroit.
 - [x] Les routes produit refusent une session absente; la déconnexion révoque
   la session serveur. Aucun identifiant par défaut n’est livré.
 - [x] Le temps écoulé repose sur le début réel de l’opération, continue pendant
   son exécution puis se fige à la fin; le rechargement conserve les bornes serveur.
+
+- [x] `/login` présente les deux champs e-mail et mot de passe; `/register`
+  permet de rejoindre la connexion sans soumettre l’inscription.

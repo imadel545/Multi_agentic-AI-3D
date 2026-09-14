@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local-first agentic AI pipeline for controlled telecom 3D scene generation."
 requires-python = ">=3.12"
 dependencies = [
+  "email-validator>=2.3.0",
   "fastapi>=0.111.0",
   "httpx>=0.28.0",
   "langgraph>=1.2.0",

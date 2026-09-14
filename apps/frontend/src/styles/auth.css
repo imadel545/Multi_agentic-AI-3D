@@ -38,8 +38,6 @@
 .auth-brand h2 { font-size: clamp(32px, 3.7vw, 48px); line-height: 1.12; letter-spacing: -0.035em; font-weight: 750; margin: 0; max-width: 12ch; text-wrap: balance; }
 .auth-brand h2 span { color: var(--auth-focus); }
 .auth-brand p { max-width: 32ch; margin: 24px 0 0; font-size: 17px; line-height: 1.65; color: var(--auth-muted); }
-.auth-brand-note { margin-top: 48px; display: flex; align-items: center; gap: 9px; color: var(--auth-muted); font-size: 13px; }
-.auth-brand-note svg { color: var(--auth-focus); flex: 0 0 auto; }
 
 .auth-card { min-width: 0; padding: 36px; background: var(--auth-surface); border: 1px solid var(--auth-line); border-radius: 20px; box-shadow: 0 12px 40px rgb(27 24 30 / 5%); }
 .auth-card h1 { margin: 0 0 10px; font-size: 27px; line-height: 1.2; letter-spacing: -0.025em; }
@@ -63,6 +61,9 @@
 .auth-submit:active:not(:disabled) { transform: translateY(1px); }
 .auth-submit:disabled, .auth-reveal:disabled { cursor: wait; opacity: 0.7; }
 .auth-refresh { margin-top: 16px; padding: 8px 0; color: var(--auth-focus); background: transparent; border: 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font: inherit; font-size: 13px; }
+.auth-switch { color: var(--auth-muted); font-size: 13px; margin: 22px 0 0; }
+.auth-switch a { color: var(--auth-focus); font-weight: 600; text-underline-offset: 3px; }
+.auth-switch a:focus-visible { outline: 2px solid var(--auth-focus); outline-offset: 3px; }
 .auth-footer { margin: 22px 0 0; }
 .auth-loading { display: flex; align-items: center; gap: 10px; color: var(--auth-muted); font-size: 14px; }
 .auth-spinner { animation: auth-turn 1s linear infinite; }
@@ -77,7 +78,7 @@
   .auth-gate { padding: 28px 20px; }
   .auth-layout { grid-template-columns: minmax(0, 440px); justify-content: center; gap: 24px; }
   .auth-logo { width: 162px; margin: 0; }
-  .auth-brand h2, .auth-brand p, .auth-brand-note { display: none; }
+  .auth-brand h2, .auth-brand p { display: none; }
   .auth-card { padding: 26px; border-radius: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { .auth-spinner { animation: none; } .auth-submit:active:not(:disabled) { transform: none; } }

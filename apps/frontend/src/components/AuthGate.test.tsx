@@ -4,6 +4,7 @@ import { AuthGate } from "./AuthGate";
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState(null, "", "/");
   vi.unstubAllGlobals();
 });
 
@@ -29,7 +30,7 @@ describe("AuthGate", () => {
     expect(await screen.findByRole("heading", { name: "Créer mon compte" })).toBeInTheDocument();
     expect(screen.queryByText("Studio privé")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Votre nom"), { target: { value: "Alice Martin" } });
-    fireEvent.change(screen.getByLabelText("Identifiant"), { target: { value: "alice.circet" } });
+    fireEvent.change(screen.getByLabelText("Adresse e-mail"), { target: { value: "alice@circet.example" } });
     fireEvent.change(screen.getByLabelText("Mot de passe"), {
       target: { value: "correct horse battery staple" }
     });
@@ -43,7 +44,7 @@ describe("AuthGate", () => {
     expect(String(setupCall[0])).toMatch(/\/auth\/register$/);
     expect(setupCall[1]).toMatchObject({ method: "POST", credentials: "include" });
     expect(JSON.parse(String(setupCall[1].body))).toEqual({
-      password: "correct horse battery staple", username: "alice.circet", display_name: "Alice Martin"
+      password: "correct horse battery staple", email: "alice@circet.example", display_name: "Alice Martin"
     });
   });
 
@@ -69,12 +70,13 @@ describe("AuthGate", () => {
     vi.stubGlobal("fetch", fetcher);
     render(<AuthGate><p>Studio privé</p></AuthGate>);
     await screen.findByRole("heading", { name: "Se connecter" });
+    fireEvent.change(screen.getByLabelText("Adresse e-mail"), { target: { value: "alice@circet.example" } });
     fireEvent.change(screen.getByLabelText("Mot de passe"), {
       target: { value: "incorrect password" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Se connecter" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Identifiant ou mot de passe incorrect");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Adresse e-mail ou mot de passe incorrect");
     expect(screen.queryByText("Studio privé")).not.toBeInTheDocument();
   });
 
@@ -121,16 +123,62 @@ it("validates signup fields before contacting the API and focuses the first inva
   expect(screen.getByLabelText("Mot de passe")).toHaveAttribute("type", "text");
 });
 
-it("keeps username login after a successful logout from a named account", async () => {
+it("keeps email login after a successful logout from a named account", async () => {
   const fetcher = vi.fn().mockImplementationOnce(() => jsonResponse({
-    enabled: true, setup_required: false, authenticated: true, requires_username: true,
-    profile: { display_name: "Alice Martin", username: "alice" }
+    enabled: true, setup_required: false, authenticated: true, requires_email: true, requires_username: false,
+    profile: { display_name: "Alice Martin", email: "alice@circet.example" }
   })).mockImplementationOnce(() => jsonResponse({ authenticated: false }));
   vi.stubGlobal("fetch", fetcher);
   render(<AuthGate><p>Studio privé</p></AuthGate>);
   expect(await screen.findByText("Alice Martin")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Se déconnecter" }));
   expect(await screen.findByRole("heading", { name: "Se connecter" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Identifiant")).toBeInTheDocument();
+  expect(screen.getByLabelText("Adresse e-mail")).toBeInTheDocument();
   expect(screen.queryByText("Studio privé")).not.toBeInTheDocument();
+});
+
+
+it("shows an email/password login page and a real signup link on an empty studio", async () => {
+  window.history.replaceState(null, "", "/login");
+  const fetcher = vi.fn().mockImplementationOnce(() => jsonResponse({
+    enabled: true, setup_required: true, authenticated: false, requires_email: false
+  })).mockImplementationOnce(() => jsonResponse({
+    enabled: true, setup_required: false, authenticated: true, requires_email: true
+  }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AuthGate><p>Studio privé</p></AuthGate>);
+  expect(await screen.findByRole("heading", { name: "Se connecter" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Votre nom")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Confirmer le mot de passe")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Créer mon compte" })).toHaveAttribute("href", "/register");
+  fireEvent.change(screen.getByLabelText("Adresse e-mail"), { target: { value: "alice@circet.example" } });
+  fireEvent.change(screen.getByLabelText("Mot de passe"), { target: { value: "correct horse battery staple" } });
+  fireEvent.click(screen.getByRole("button", { name: "Se connecter" }));
+  await screen.findByText("Studio privé");
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({email:"alice@circet.example",password:"correct horse battery staple"});
+  expect(window.location.pathname).toBe("/");
+});
+
+it("rejects a malformed email before registration and removes the unwanted brand note", async () => {
+  const fetcher = vi.fn(() => jsonResponse({ enabled:true, setup_required:true, authenticated:false }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<AuthGate><p>Studio privé</p></AuthGate>);
+  await screen.findByRole("heading", { name:"Créer mon compte" });
+  expect(screen.getByRole("link", { name:"Se connecter" })).toHaveAttribute("href","/login");
+  expect(screen.queryByText("Un accès personnel à votre studio.")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Votre nom"), {target:{value:"Alice Martin"}});
+  fireEvent.change(screen.getByLabelText("Adresse e-mail"), {target:{value:"bad-email"}});
+  fireEvent.click(screen.getByRole("button",{name:"Créer mon compte"}));
+  expect(screen.getByLabelText("Adresse e-mail")).toHaveFocus();
+  expect(screen.getByText("Indiquez une adresse e-mail valide.")).toBeInTheDocument();
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it("preserves login for a historical username owner without fabricating an email", async () => {
+  vi.stubGlobal("fetch",vi.fn(() => jsonResponse({enabled:true,setup_required:false,authenticated:false,requires_email:false,requires_username:true})));
+  render(<AuthGate><p>Studio privé</p></AuthGate>);
+  await screen.findByRole("heading",{name:"Se connecter"});
+  expect(screen.getByLabelText("Identifiant existant")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Adresse e-mail")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link",{name:"Créer mon compte"})).not.toBeInTheDocument();
 });

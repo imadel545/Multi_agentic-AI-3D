@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import re
 import secrets
 import sqlite3
 import time
@@ -8,8 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from email_validator import EmailNotValidError, validate_email
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, SecretStr, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 SESSION_COOKIE = "telecom_studio_session"
@@ -34,20 +34,13 @@ class PasswordRequest(BaseModel):
 
 
 class LoginRequest(PasswordRequest):
+    email: str | None = Field(default=None, max_length=254)
     username: str | None = Field(default=None, max_length=128)
 
 
 class RegistrationRequest(PasswordRequest):
-    username: str = Field(min_length=3, max_length=64)
+    email: EmailStr
     display_name: str = Field(min_length=2, max_length=80)
-
-    @field_validator("username")
-    @classmethod
-    def validate_username(cls, value: str) -> str:
-        username = value.strip()
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,63}", username):
-            raise ValueError("username must use letters, numbers, dots, dashes or underscores")
-        return username
 
     @field_validator("display_name")
     @classmethod
@@ -98,7 +91,12 @@ class LocalAuthStore:
                     password_salt BLOB NOT NULL,
                     password_hash BLOB NOT NULL,
                     created_at INTEGER NOT NULL,
-                    updated_at INTEGER NOT NULL
+                    updated_at INTEGER NOT NULL,
+                    username TEXT,
+                    username_normalized TEXT,
+                    display_name TEXT,
+                    email TEXT,
+                    email_normalized TEXT
                 );
                 CREATE TABLE IF NOT EXISTS local_auth_sessions (
                     token_hash TEXT PRIMARY KEY,
@@ -125,6 +123,10 @@ class LocalAuthStore:
                 db.execute("ALTER TABLE local_auth_owner ADD COLUMN username_normalized TEXT")
             if "display_name" not in owner_columns:
                 db.execute("ALTER TABLE local_auth_owner ADD COLUMN display_name TEXT")
+            if "email" not in owner_columns:
+                db.execute("ALTER TABLE local_auth_owner ADD COLUMN email TEXT")
+            if "email_normalized" not in owner_columns:
+                db.execute("ALTER TABLE local_auth_owner ADD COLUMN email_normalized TEXT")
 
     def setup_required(self) -> bool:
         with self._connect() as db:
@@ -137,10 +139,14 @@ class LocalAuthStore:
         self,
         password: str,
         *,
+        email: str | None = None,
         username: str | None = None,
         display_name: str | None = None,
     ) -> str:
         password_bytes = _validated_password(password)
+        normalized_email = _normalize_email(email)
+        if email is not None and normalized_email is None:
+            raise ValueError("invalid_email")
         salt = secrets.token_bytes(16)
         password_hash = _derive_password(password_bytes, salt)
         now = int(self._clock())
@@ -150,8 +156,8 @@ class LocalAuthStore:
                     """
                     INSERT INTO local_auth_owner (
                         singleton_id, password_salt, password_hash, created_at, updated_at,
-                        username, username_normalized, display_name
-                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+                        username, username_normalized, display_name, email, email_normalized
+                    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         salt,
@@ -161,6 +167,8 @@ class LocalAuthStore:
                         username,
                         _normalize_username(username),
                         display_name,
+                        email,
+                        normalized_email,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -170,6 +178,7 @@ class LocalAuthStore:
     def login(
         self,
         password: str,
+        email: str | None = None,
         username: str | None = None,
         throttle_key: str = "local_owner",
     ) -> str:
@@ -183,7 +192,7 @@ class LocalAuthStore:
                 raise PermissionError("login_throttled")
             owner = db.execute(
                 """
-                SELECT password_salt, password_hash, username_normalized
+                SELECT password_salt, password_hash, email_normalized, username_normalized
                 FROM local_auth_owner WHERE singleton_id = 1
                 """
             ).fetchone()
@@ -193,12 +202,20 @@ class LocalAuthStore:
             _derive_password(password_bytes, bytes(16))
             raise LookupError("owner_not_configured")
         candidate = _derive_password(password_bytes, owner["password_salt"])
+        stored_email = owner["email_normalized"]
         stored_username = owner["username_normalized"]
-        username_matches = stored_username is None or hmac.compare_digest(
-            (_normalize_username(username) or "").encode("utf-8"),
-            str(stored_username).encode("utf-8"),
-        )
-        if not username_matches or not hmac.compare_digest(candidate, owner["password_hash"]):
+        identity_matches = True
+        if stored_email is not None:
+            identity_matches = hmac.compare_digest(
+                (_normalize_email(email) or "").encode("utf-8"),
+                str(stored_email).encode("utf-8"),
+            )
+        elif stored_username is not None:
+            identity_matches = hmac.compare_digest(
+                (_normalize_username(username) or "").encode("utf-8"),
+                str(stored_username).encode("utf-8"),
+            )
+        if not identity_matches or not hmac.compare_digest(candidate, owner["password_hash"]):
             self._record_failed_login(throttle_key, now)
             raise PermissionError("invalid_credentials")
         with self._connect() as db:
@@ -208,24 +225,33 @@ class LocalAuthStore:
             )
         return self._create_session(now)
 
-    def requires_username(self) -> bool:
+    def required_identity(self) -> tuple[bool, bool]:
         with self._connect() as db:
             row = db.execute(
-                "SELECT username_normalized FROM local_auth_owner WHERE singleton_id = 1"
+                """
+                SELECT email_normalized, username_normalized FROM local_auth_owner
+                WHERE singleton_id = 1
+                """
             ).fetchone()
-        return bool(row and row["username_normalized"])
+        requires_email = bool(row and row["email_normalized"])
+        requires_username = bool(row and not requires_email and row["username_normalized"])
+        return requires_email, requires_username
 
     def owner_profile(self) -> dict[str, str] | None:
         with self._connect() as db:
             row = db.execute(
                 """
-                SELECT username, display_name FROM local_auth_owner
+                SELECT email, username, display_name FROM local_auth_owner
                 WHERE singleton_id = 1
                 """
             ).fetchone()
-        if row is None or not row["username"] or not row["display_name"]:
+        if row is None or not row["display_name"]:
             return None
-        return {"username": str(row["username"]), "display_name": str(row["display_name"])}
+        if row["email"]:
+            return {"email": str(row["email"]), "display_name": str(row["display_name"])}
+        if row["username"]:
+            return {"username": str(row["username"]), "display_name": str(row["display_name"])}
+        return None
 
     def session_expiry(self, token: str | None) -> int | None:
         if not token:
@@ -352,12 +378,14 @@ def create_auth_router(
         if not auth_enabled:
             return {"enabled": False, "setup_required": False, "authenticated": True}
         expiry = store.session_expiry(request.cookies.get(cookie_name))
+        requires_email, requires_username = store.required_identity()
         payload = {
             "enabled": True,
             "setup_required": store.setup_required(),
             "authenticated": expiry is not None,
             "expires_at": expiry,
-            "requires_username": store.requires_username(),
+            "requires_email": requires_email,
+            "requires_username": requires_username,
         }
         if expiry is not None:
             profile = store.owner_profile()
@@ -382,7 +410,7 @@ def create_auth_router(
         try:
             token = store.create_owner(
                 payload.password.get_secret_value(),
-                username=payload.username,
+                email=str(payload.email),
                 display_name=payload.display_name,
             )
         except ValueError as exc:
@@ -403,7 +431,8 @@ def create_auth_router(
             "enabled": True,
             "setup_required": False,
             "authenticated": True,
-            "requires_username": True,
+            "requires_email": True,
+            "requires_username": False,
             "profile": store.owner_profile(),
         }
 
@@ -438,7 +467,11 @@ def create_auth_router(
         if not auth_enabled:
             raise HTTPException(status_code=404, detail="Local authentication is disabled.")
         try:
-            token = store.login(payload.password.get_secret_value(), payload.username)
+            token = store.login(
+                payload.password.get_secret_value(),
+                email=payload.email,
+                username=payload.username,
+            )
         except LookupError as exc:
             raise HTTPException(
                 status_code=409,
@@ -458,11 +491,13 @@ def create_auth_router(
             cookie_secure,
             cookie_name,
         )
+        requires_email, requires_username = store.required_identity()
         result = {
             "enabled": True,
             "setup_required": False,
             "authenticated": True,
-            "requires_username": store.requires_username(),
+            "requires_email": requires_email,
+            "requires_username": requires_username,
         }
         profile = store.owner_profile()
         if profile is not None:
@@ -493,6 +528,16 @@ def _normalize_username(username: str | None) -> str | None:
         return None
     normalized = username.strip().casefold()
     return normalized or None
+
+
+def _normalize_email(email: str | None) -> str | None:
+    if email is None:
+        return None
+    try:
+        normalized = validate_email(email.strip(), check_deliverability=False).normalized
+    except EmailNotValidError:
+        return None
+    return normalized.casefold()
 
 
 def _derive_password(password: bytes, salt: bytes) -> bytes:

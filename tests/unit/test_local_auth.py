@@ -57,6 +57,7 @@ def test_first_local_owner_setup_issues_hashed_revocable_session(tmp_path: Path)
         "setup_required": True,
         "authenticated": False,
         "expires_at": None,
+        "requires_email": False,
         "requires_username": False,
     }
     assert client.get("/designs").status_code == 401
@@ -84,7 +85,7 @@ def test_first_local_owner_setup_issues_hashed_revocable_session(tmp_path: Path)
     assert client.get("/designs").status_code == 401
 
 
-def test_local_registration_creates_profile_and_requires_username_for_login(
+def test_local_registration_creates_profile_and_requires_email_for_login(
     tmp_path: Path,
 ) -> None:
     store = _store(tmp_path)
@@ -94,7 +95,7 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         client.post(
             "/auth/register",
             json={
-                "username": "bad username",
+                "email": "not-an-email",
                 "display_name": "Alice Martin",
                 "password": "a sufficiently long password",
             },
@@ -105,7 +106,7 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         client.post(
             "/auth/register",
             json={
-                "username": "alice",
+                "email": "alice@example.com",
                 "display_name": " A ",
                 "password": "a sufficiently long password",
             },
@@ -116,7 +117,7 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
     response = client.post(
         "/auth/register",
         json={
-            "username": "Alice.Circet",
+            "email": "Alice.Circet@Example.COM",
             "display_name": "  Alice Martin  ",
             "password": "a sufficiently long password",
         },
@@ -126,9 +127,10 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         "enabled": True,
         "setup_required": False,
         "authenticated": True,
-        "requires_username": True,
+        "requires_email": True,
+        "requires_username": False,
         "profile": {
-            "username": "Alice.Circet",
+            "email": "Alice.Circet@example.com",
             "display_name": "Alice Martin",
         },
     }
@@ -136,7 +138,7 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         client.post(
             "/auth/register",
             json={
-                "username": "someone-else",
+                "email": "someone-else@example.com",
                 "display_name": "Someone Else",
                 "password": "another sufficiently long password",
             },
@@ -146,9 +148,10 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
 
     assert client.post("/auth/logout").status_code == 200
     anonymous_status = client.get("/auth/status").json()
-    assert anonymous_status["requires_username"] is True
+    assert anonymous_status["requires_email"] is True
+    assert anonymous_status["requires_username"] is False
     assert "profile" not in anonymous_status
-    assert "Alice.Circet" not in str(anonymous_status)
+    assert "Alice.Circet@example.com" not in str(anonymous_status)
     assert (
         client.post(
             "/auth/login",
@@ -160,7 +163,7 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         client.post(
             "/auth/login",
             json={
-                "username": "wrong-user",
+                "email": "wrong-user@example.com",
                 "password": "a sufficiently long password",
             },
         ).status_code
@@ -170,14 +173,14 @@ def test_local_registration_creates_profile_and_requires_username_for_login(
         client.post(
             "/auth/login",
             json={
-                "username": "ALICE.CIRCET",
+                "email": "alice.circet@EXAMPLE.COM",
                 "password": "a sufficiently long password",
             },
         ).status_code
         == 200
     )
     assert client.get("/auth/status").json()["profile"] == {
-        "username": "Alice.Circet",
+        "email": "Alice.Circet@example.com",
         "display_name": "Alice Martin",
     }
     assert client.get("/designs").status_code == 200
@@ -209,13 +212,101 @@ def test_legacy_password_only_owner_migrates_without_requiring_username(tmp_path
     status = client.get("/auth/status").json()
 
     assert status["setup_required"] is False
+    assert status["requires_email"] is False
     assert status["requires_username"] is False
     assert "profile" not in status
     assert client.post("/auth/login", json={"password": password}).status_code == 200
     assert client.get("/designs").status_code == 200
     with sqlite3.connect(database) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(local_auth_owner)").fetchall()}
-    assert {"username", "username_normalized", "display_name"} <= columns
+    assert {
+        "username",
+        "username_normalized",
+        "display_name",
+        "email",
+        "email_normalized",
+    } <= columns
+
+
+def test_username_owner_migrates_without_fake_email_and_keeps_session(tmp_path: Path) -> None:
+    database = tmp_path / "auth.db"
+    salt = b"0123456789abcdef"
+    password = "legacy username owner password"
+    existing_token = "existing-opaque-session-token"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            """
+            CREATE TABLE local_auth_owner (
+                singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                password_salt BLOB NOT NULL,
+                password_hash BLOB NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                username TEXT,
+                username_normalized TEXT,
+                display_name TEXT
+            )
+            """
+        )
+        db.execute(
+            "INSERT INTO local_auth_owner VALUES (1, ?, ?, 1000, 1000, ?, ?, ?)",
+            (
+                salt,
+                _derive_password(password.encode("utf-8"), salt),
+                "Legacy.Owner",
+                "legacy.owner",
+                "Legacy Owner",
+            ),
+        )
+        db.execute(
+            """
+            CREATE TABLE local_auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL,
+                revoked_at INTEGER
+            )
+            """
+        )
+        db.execute(
+            "INSERT INTO local_auth_sessions VALUES (?, 1000, 1600, NULL)",
+            (hashlib.sha256(existing_token.encode("utf-8")).hexdigest(),),
+        )
+
+    store = _store(tmp_path)
+    anonymous = TestClient(_auth_app(store), base_url="http://127.0.0.1")
+    status = anonymous.get("/auth/status").json()
+    assert status["requires_email"] is False
+    assert status["requires_username"] is True
+    assert "profile" not in status
+
+    existing_session = TestClient(_auth_app(store), base_url="http://127.0.0.1")
+    existing_session.cookies.set("telecom_studio_session", existing_token)
+    assert existing_session.get("/auth/status").json()["profile"] == {
+        "username": "Legacy.Owner",
+        "display_name": "Legacy Owner",
+    }
+
+    response = anonymous.post(
+        "/auth/login",
+        json={"username": "LEGACY.OWNER", "password": password},
+    )
+    assert response.status_code == 200
+    assert response.json()["profile"] == {
+        "username": "Legacy.Owner",
+        "display_name": "Legacy Owner",
+    }
+    assert "email" not in response.json()["profile"]
+    token = anonymous.cookies.get("telecom_studio_session")
+
+    restarted_store = _store(tmp_path)
+    assert restarted_store.session_expiry(existing_token) == 1_600
+    assert restarted_store.session_expiry(token) == 1_600
+    with sqlite3.connect(database) as db:
+        owner_email = db.execute(
+            "SELECT email, email_normalized FROM local_auth_owner WHERE singleton_id = 1"
+        ).fetchone()
+    assert owner_email == (None, None)
 
 
 def test_initial_setup_rejects_a_non_local_origin(tmp_path: Path) -> None:
@@ -232,7 +323,7 @@ def test_initial_setup_rejects_a_non_local_origin(tmp_path: Path) -> None:
         client.post(
             "/auth/register",
             json={
-                "username": "alice",
+                "email": "alice@example.com",
                 "display_name": "Alice",
                 "password": "a sufficiently long password",
             },

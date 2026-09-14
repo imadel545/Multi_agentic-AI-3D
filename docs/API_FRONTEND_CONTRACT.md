@@ -715,16 +715,19 @@ Artifact additionnel:
 
 The product uses one local owner and an opaque server session. `GET /auth/status`
 is the frontend bootstrap authority. A fresh local store returns
-`setup_required=true`; `POST /auth/register` accepts `display_name`, `username`
+`setup_required=true`; `POST /auth/register` accepts `display_name`, `email`
 and the user-chosen `password` only from loopback, then creates the sole owner
 plus the first session. Registration closes once that owner exists. The legacy
 `POST /auth/setup` password-only contract remains accepted for existing clients
-and migrated databases remain able to log in without a username. New profiled
-accounts use `POST /auth/login` with `username` and `password`.
+and migrated password-only databases remain able to log in without an identity.
+Previously created username accounts keep username login without an invented
+email. New profiled accounts use `POST /auth/login` with `email` and `password`.
 
-`GET /auth/status` exposes `requires_username` without exposing the identifier
-to an anonymous caller. It includes `profile={display_name, username}` only for
-an authenticated profiled owner. `POST /auth/logout` revokes the current session.
+`GET /auth/status` exposes `requires_email` and the legacy
+`requires_username` flag without exposing either identifier to an anonymous
+caller. It includes `profile={display_name, email}` for an authenticated email
+owner, or the existing username profile for an authenticated legacy owner.
+`POST /auth/logout` revokes the current session.
 
 The session is transported only in an `HttpOnly`, `SameSite=Strict` cookie.
 Frontend requests send credentials and return to the authentication gate after

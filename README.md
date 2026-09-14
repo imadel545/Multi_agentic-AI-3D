@@ -120,7 +120,7 @@ Trusted hosts default to `127.0.0.1`, `localhost`, and `testserver`; configure
 state-changing browser request with a foreign `Origin` is rejected before the
 service runs. A separate local owner account protects data and artifacts with
 a revocable, expiring `HttpOnly` session cookie. Registration asks for a name,
-identifier and password; it does not introduce a multi-user SaaS or JWT storage
+email address and password; it does not introduce a multi-user SaaS or JWT storage
 in the browser.
 
 ### Optional: Blender

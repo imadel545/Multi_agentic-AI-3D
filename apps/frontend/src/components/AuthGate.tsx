@@ -1,4 +1,4 @@
-import { ArrowRight, Eye, EyeOff, LoaderCircle, LockKeyhole, LogOut } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, LoaderCircle, LogOut } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api/client";
 
@@ -7,10 +7,11 @@ type AuthStatus = {
   setup_required: boolean;
   authenticated: boolean;
   requires_username?: boolean;
+  requires_email?: boolean;
   expires_at?: number | null;
-  profile?: { display_name: string; username: string };
+  profile?: { display_name: string; email?: string; username?: string };
 };
-type FieldName = "display_name" | "username" | "password" | "confirmation";
+type FieldName = "display_name" | "email" | "username" | "password" | "confirmation";
 type FieldErrors = Partial<Record<FieldName, string>>;
 
 async function authRequest(path: string, body?: Record<string, string>, method?: string): Promise<AuthStatus> {
@@ -25,9 +26,11 @@ async function authRequest(path: string, body?: Record<string, string>, method?:
       signal: controller.signal
     });
     if (!response.ok) {
-      if (response.status === 401) throw new Error("Identifiant ou mot de passe incorrect.");
+      if (response.status === 401) throw new Error("Adresse e-mail ou mot de passe incorrect.");
       if (response.status === 429) throw new Error("Trop de tentatives. Réessayez dans quelques minutes.");
-      if (response.status === 409) throw new Error("Un compte existe déjà pour ce studio. Actualisez pour vous connecter.");
+      if (response.status === 409) throw new Error(path === "/auth/login"
+        ? "Aucun compte n’est encore créé dans ce studio. Utilisez le lien de création de compte."
+        : "Un compte existe déjà pour ce studio. Actualisez pour vous connecter.");
       if (response.status === 403) throw new Error("Ouvrez le studio depuis ce poste pour créer votre compte.");
       if (response.status === 422) throw new Error("Vérifiez les informations saisies avant de réessayer.");
       throw new Error("Le studio ne peut pas confirmer cette opération. Réessayez dans un instant.");
@@ -43,7 +46,7 @@ async function authRequest(path: string, body?: Record<string, string>, method?:
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus | null>(null);
-  const [values, setValues] = useState<Record<FieldName, string>>({ display_name: "", username: "", password: "", confirmation: "" });
+  const [values, setValues] = useState<Record<FieldName, string>>({ display_name: "", email: "", username: "", password: "", confirmation: "" });
   const [errors, setErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,7 +71,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const requireAuthentication = () => {
       setStatus((current) => ({
         enabled: true, setup_required: current?.setup_required ?? false,
-        requires_username: current?.requires_username, authenticated: false
+        requires_username: current?.requires_username, requires_email: current?.requires_email, authenticated: false
       }));
       clearSecrets();
       setErrors({});
@@ -78,14 +81,18 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("telecom-auth-required", requireAuthentication);
   }, [refresh]);
 
-  const setup = status?.setup_required === true;
-  const withUsername = setup || status?.requires_username === true;
+  const setup = status?.setup_required === true && window.location.pathname !== "/login";
+  // Existing password/username owners remain reachable without inventing an email.
+  const legacyLogin = status?.setup_required === false && status.requires_email === false;
+  const withUsername = legacyLogin && status?.requires_username === true;
+  const withEmail = !legacyLogin;
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (pending.current) return;
     const nextErrors: FieldErrors = {};
     if (setup && (values.display_name.trim().length < 2 || values.display_name.trim().length > 80)) nextErrors.display_name = "Indiquez un nom de 2 à 80 caractères.";
-    if (withUsername && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,63}$/.test(values.username.trim())) nextErrors.username = "Utilisez 3 à 64 lettres, chiffres, points, tirets ou traits de soulignement.";
+    if (withEmail && (!values.email.trim() || inputs.current.email?.validity.typeMismatch)) nextErrors.email = "Indiquez une adresse e-mail valide.";
+    if (withUsername && !values.username.trim()) nextErrors.username = "Indiquez l’identifiant de votre compte existant.";
     if (values.password.length < 12 || values.password.length > 256) nextErrors.password = "Utilisez entre 12 et 256 caractères.";
     if (setup && values.password !== values.confirmation) nextErrors.confirmation = "Les deux mots de passe ne correspondent pas.";
     setErrors(nextErrors);
@@ -95,8 +102,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     pending.current = true;
     setBusy(true);
     try {
-      const body = { password: values.password, ...(withUsername ? { username: values.username.trim() } : {}), ...(setup ? { display_name: values.display_name.trim() } : {}) };
+      const body = { password: values.password, ...(withEmail ? { email: values.email.trim() } : {}), ...(withUsername ? { username: values.username.trim() } : {}), ...(setup ? { display_name: values.display_name.trim() } : {}) };
       setStatus(await authRequest(setup ? "/auth/register" : "/auth/login", body));
+      if (["/login", "/register"].includes(window.location.pathname)) window.history.replaceState(null, "", `/${window.location.search}${window.location.hash}`);
       clearSecrets();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Connexion au studio impossible.");
@@ -113,7 +121,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setError(null);
     try {
       await authRequest("/auth/logout", undefined, "POST");
-      setStatus({ enabled: true, authenticated: false, setup_required: false, requires_username: status?.requires_username });
+      setStatus({ enabled: true, authenticated: false, setup_required: false, requires_username: status?.requires_username, requires_email: status?.requires_email });
       clearSecrets();
     } catch {
       setError("La déconnexion n’a pas pu être confirmée par le studio. Réessayez.");
@@ -141,10 +149,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <label htmlFor={id}>{label}</label>
       <div className={secret ? "auth-password" : undefined}>
         <input id={id} name={name} ref={(node) => { inputs.current[name] = node; }}
-          type={secret && !showPassword ? "password" : "text"}
-          autoComplete={name === "display_name" ? "name" : name === "username" ? "username" : setup ? "new-password" : "current-password"}
-          autoCapitalize={name === "username" ? "none" : undefined} spellCheck={false}
-          required disabled={busy} value={values[name]} maxLength={secret ? 256 : name === "username" ? 64 : 80}
+          type={secret && !showPassword ? "password" : name === "email" ? "email" : "text"}
+          autoComplete={name === "display_name" ? "name" : (name === "username" || name === "email") ? "username" : setup ? "new-password" : "current-password"}
+          autoCapitalize={name === "username" || name === "email" ? "none" : undefined} spellCheck={false}
+          required disabled={busy} value={values[name]} maxLength={secret ? 256 : name === "email" ? 254 : name === "username" ? 64 : 80}
           aria-invalid={Boolean(errors[name])}
           aria-describedby={[help ? `${id}-help` : "", errors[name] ? `${id}-error` : ""].filter(Boolean).join(" ") || undefined}
           onChange={(event) => {
@@ -167,14 +175,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <img className="auth-logo" src="/brand/circet-logo.jpg" alt="Circet — Créateur de réseaux" width="1280" height="688" />
         <h2>Vos projets télécom, <span>en trois dimensions.</span></h2>
         <p>Décrivez votre site, joignez vos plans et affinez votre modèle depuis la conversation.</p>
-        <div className="auth-brand-note"><LockKeyhole size={16} aria-hidden="true" /> Un accès personnel à votre studio.</div>
       </aside>
       <section className="auth-card" aria-labelledby="auth-title">
         <h1 id="auth-title">{setup ? "Créer mon compte" : "Se connecter"}</h1>
         <p className="auth-intro">{setup ? "Configurez votre accès pour commencer un premier projet." : "Retrouvez vos projets et poursuivez votre conception."}</p>
         {status ? <form onSubmit={(event) => void submit(event)} noValidate aria-busy={busy}>
           {setup ? field("display_name", "Votre nom") : null}
-          {withUsername ? field("username", "Identifiant", setup ? "3 à 64 caractères, sans espace." : undefined) : null}
+          {withEmail ? field("email", "Adresse e-mail") : null}
+          {withUsername ? field("username", "Identifiant existant") : null}
           {field("password", "Mot de passe", setup ? "12 caractères minimum. Une phrase de passe est acceptée." : undefined)}
           {setup ? field("confirmation", "Confirmer le mot de passe") : null}
           {error ? <p className="auth-error" role="alert">{error}</p> : null}
@@ -185,6 +193,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           </button>
         </form> : error ? <p className="auth-error" role="alert">{error}</p> : <p className="auth-loading" role="status"><LoaderCircle className="auth-spinner" size={18} aria-hidden="true" /> Connexion au studio…</p>}
         {error ? <button type="button" className="auth-refresh" disabled={busy} onClick={() => void refresh()}>Actualiser la connexion</button> : null}
+        {status?.setup_required ? <p className="auth-switch">{setup ? <>Déjà un compte ? <a href="/login">Se connecter</a></> : <>Première visite ? <a href="/register">Créer mon compte</a></>}</p> : null}
         <p className="auth-footer">{setup ? "Un compte pour ce studio local. Aucun e-mail de confirmation n’est nécessaire." : "Votre compte et vos projets restent dans ce studio local."}</p>
       </section>
     </div>

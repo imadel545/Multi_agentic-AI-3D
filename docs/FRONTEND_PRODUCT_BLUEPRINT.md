@@ -78,39 +78,22 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 - Les endpoints produit backend sont prêts pour une construction frontend:
   `push_sse`, current operation, timeline lisible, viewer bundle, user issues,
   edit/version/rollback, document-pack capabilities.
-- Le smoke visuel/runtime du 2026-07-24 est passé sur un GLB Blender réel avec
-  drawers agentique, QA, alertes, livrables et bibliothèque branchés au backend.
-  Le smoke Product API couvre aussi génération Groq/Blender, édition,
-  version/rollback et contexte document-pack. Le replay de
-  toutes ces mutations depuis les contrôles navigateur reste nécessaire avant
-  l'acceptation frontend finale.
-- Le smoke du 2026-07-28 prouve le composeur multi-fichiers réel: sélection
-  multiple, file d'attente, retrait individuel, limites backend et envoi
-  multipart. L'analyse complète depuis le navigateur reste une mutation à
-  rejouer avec un pack métier dédié avant la Gate finale. La surface active ne
-  rend plus les extractions, contrôles ou formulaires de correction du pack.
-- Le chemin backend réel `wf_ead2456914b2` puis révision `v2e0a4faf` prouve la
-  génération et la modification d'un composant GeometryProgram avec
-  `real_blender`, QA 1.0, certificat, GLB et preview. Le frontend rend désormais
-  l'intent, l'enveloppe et la provenance. Le smoke navigateur a confirmé ce
-  résumé et la distinction des sorties réparées; la mutation complète depuis
-  le contrôle navigateur reste ouverte.
-- Le smoke du commit de convergence `19791be` le 2026-08-11
-  (`wf_0843599873e7`, version
-  `v8995acb1`) prouve depuis le frontend réel une création chat-first, la
-  progression SSE, le chargement du GLB Blender réel et les drawers RAG,
-  Bibliothèque, Intelligence et QA, sans warning/error console. La preuve
-  post-export mesure 3/3 liaisons mécaniques et observe un support mesh; la
-  route RF exportée reste explicitement non évaluée. Ce smoke ne rejoue pas
-  l'édition, le rollback, l'upload ou la génération avec contexte documentaire.
+- Les preuves runtime et leurs limites sont centralisées dans
+  [PROJECT_SOURCE_OF_TRUTH.md](PROJECT_SOURCE_OF_TRUTH.md). Les anciens workflows
+  ont été sauvegardés hors dépôt puis retirés du runtime à la demande du propriétaire.
+  Les gates navigateur restantes sont suivies dans
+  [FRONTEND_ACCEPTANCE_CRITERIA.md](FRONTEND_ACCEPTANCE_CRITERIA.md).
 
 ## Accès Circet et inscription locale
 
 La page d'accès est une surface de formulaire, pas une présentation marketing.
 `AuthGate.tsx` possède le parcours inscription/connexion/expiration/déconnexion;
 `auth.py` reste l'autorité pour l'existence du compte et la session. Le premier
-compte est un propriétaire unique local, avec nom, identifiant et mot de passe.
-Il n'existe ni inscription multi-utilisateur ni vérification d'e-mail distante.
+compte est un propriétaire unique local, avec nom, adresse e-mail et mot de passe.
+`/register` propose l’inscription et un lien vers `/login`; la connexion d’un
+compte e-mail ne demande que l’adresse et le mot de passe. Les anciens comptes
+sans e-mail conservent leur mode de connexion explicite, sans adresse inventée.
+Il n’existe ni inscription multi-utilisateur ni vérification d’e-mail distante.
 
 L'identité reprend exactement `public/brand/circet-logo.jpg`, fourni par
 l'utilisateur; aucune redéfinition du logo. `styles/auth.css` est la source des
