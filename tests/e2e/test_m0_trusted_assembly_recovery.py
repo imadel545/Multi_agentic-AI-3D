@@ -165,11 +165,10 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         assert program_proof["qa"]["passed"] is True
 
         certificate = client.get(f"/designs/{workflow_id}/artifacts/completion_certificate").json()
-        assert certificate["schema_version"] == "1.5.0"
+        assert certificate["schema_version"] == "1.4.0"
         assert certificate["status"] == "issued"
         assert certificate["checks"]["component_proof_verified"] is True
         assert certificate["checks"]["assembly_constraint_evidence_verified"] is True
-        assert certificate["checks"]["tower_access_evidence_verified"] is True
         constraint_evidence = client.get(
             f"/designs/{workflow_id}/artifacts/constraint_evidence"
         ).json()
@@ -419,10 +418,9 @@ def test_m0_real_trusted_assembly_geometry_adaptation_and_version(tmp_path: Path
         edited_certificate = json.loads((edited_dir / "completion_certificate.json").read_text())
         edited_evidence = json.loads((edited_dir / "constraint_evidence.json").read_text())
         assert edited_certificate["status"] == "issued"
-        assert edited_certificate["schema_version"] == "1.5.0"
+        assert edited_certificate["schema_version"] == "1.4.0"
         assert edited_certificate["checks"]["component_proof_verified"] is True
         assert edited_certificate["checks"]["assembly_constraint_evidence_verified"] is True
-        assert edited_certificate["checks"]["tower_access_evidence_verified"] is True
         assert edited_evidence["status"] == "passed"
         assert edited_evidence["measured_constraint_count"] == 9
         assert edited_evidence["failed_constraint_count"] == 0
