@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi import Path as ApiPath
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -55,6 +55,7 @@ from apps.api.telecom_studio_api.workflow import (
     WorkflowService,
     WorkflowStorageError,
 )
+from apps.api.telecom_studio_api.workspace import WorkspaceStore, create_workspace_router
 from core.agents.cognitive_domain_router import (
     ConservativeDesignDomainRouter,
     GroqDesignDomainRouter,
@@ -64,7 +65,7 @@ from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import SceneAdaptationCapabilities
 from core.contracts.document_pack import DocumentPackCorrection
-from core.contracts.identifiers import VERSION_ID_PATTERN, WORKFLOW_ID_PATTERN
+from core.contracts.identifiers import CHAT_ID_PATTERN, VERSION_ID_PATTERN, WORKFLOW_ID_PATTERN
 from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
@@ -130,8 +131,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.resolved_cors_origins,
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Filename", "X-Request-ID"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type", "X-Chat-ID", "X-Filename", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
 )
 app.add_middleware(
@@ -410,6 +411,11 @@ workflow_service = WorkflowService(
 )
 product_service = ProductService(workflow_service, asset_inventory_service)
 
+workspace_store = WorkspaceStore(
+    settings.local_sqlite_path, workflow_service.get_status, document_pack_service.get_summary
+)
+app.include_router(create_workspace_router(workspace_store))
+
 
 @app.get("/health")
 def health() -> dict[str, Any]:
@@ -443,6 +449,12 @@ def get_studio_summary() -> dict:
 
 @app.post("/designs", response_model=CreateDesignResponse)
 def create_design(request: CreateDesignRequest) -> dict:
+    if request.chat_id:
+        return workspace_store.create_for_chat(request.chat_id, lambda: _create_design(request))
+    return _create_design(request)
+
+
+def _create_design(request: CreateDesignRequest) -> dict:
     try:
         if request.confirmed_requirements is not None:
             receipt = request.confirmed_analysis_receipt
@@ -589,15 +601,21 @@ def list_designs(
 
 @app.delete("/designs/{workflow_id}")
 def delete_design(workflow_id: WorkflowId) -> dict:
-    try:
-        workflow_service.delete_design(workflow_id)
-        return {"workflow_id": workflow_id, "deleted": True}
-    except WorkflowBusyError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except WorkflowMemoryPurgeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="workflow not found") from exc
+    with workspace_store.creation_lock:
+        if workspace_store.workflow_is_linked(workflow_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Ce design appartient à une conversation. Supprimez d’abord son classement.",
+            )
+        try:
+            workflow_service.delete_design(workflow_id)
+            return {"workflow_id": workflow_id, "deleted": True}
+        except WorkflowBusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except WorkflowMemoryPurgeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="workflow not found") from exc
 
 
 @app.post("/requirements/parse", response_model=ParseRequirementsResponse)
@@ -813,9 +831,7 @@ def get_asset_provenance(asset_id: str) -> dict:
         "conversion_method": asset.conversion_method,
         "generation_eligible": inventory_entry["generation_eligible"],
         "dimensions_m": (
-            asset.dimensions_m.model_dump(mode="json")
-            if asset.dimensions_m is not None
-            else None
+            asset.dimensions_m.model_dump(mode="json") if asset.dimensions_m is not None else None
         ),
         "bounding_box_m": (
             asset.bounding_box_m.model_dump(mode="json")
@@ -872,13 +888,21 @@ def get_asset_preview(asset_id: str, view: str) -> FileResponse:
     ):
         raise HTTPException(status_code=409, detail="asset preview integrity check failed")
     return FileResponse(
-        path, media_type="image/png", filename=f"{asset_id}-{view}.png",
+        path,
+        media_type="image/png",
+        filename=f"{asset_id}-{view}.png",
         content_disposition_type="inline",
     )
 
 
 @app.post("/document-packs")
-async def create_document_pack(request: Request) -> dict:
+async def create_document_pack(
+    request: Request,
+    chat_id: Annotated[
+        str | None,
+        Header(alias="X-Chat-ID", pattern=CHAT_ID_PATTERN),
+    ] = None,
+) -> dict:
     limits = document_pack_service.archive_limits()
     content_type = request.headers.get("content-type", "").lower()
     multipart_upload = content_type.startswith("multipart/form-data")
@@ -897,6 +921,10 @@ async def create_document_pack(request: Request) -> dict:
                 )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="invalid content-length header") from exc
+    reservation_active = False
+    if chat_id:
+        workspace_store.begin_document_pack_ingest(chat_id)
+        reservation_active = True
     try:
         if multipart_upload:
             form = await request.form(
@@ -922,9 +950,15 @@ async def create_document_pack(request: Request) -> dict:
                 content,
                 filename=request.headers.get("x-filename"),
             )
+        if chat_id:
+            workspace_store.complete_document_pack_ingest(chat_id, summary.pack_id)
+            reservation_active = False
         return summary.model_dump()
     except (ValueError, OSError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        if chat_id and reservation_active:
+            workspace_store.cancel_document_pack_ingest(chat_id)
 
 
 async def _read_limited_request_body(request: Request, max_bytes: int) -> bytes:
@@ -1144,6 +1178,18 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
 def generate_design_from_document_pack(
     pack_id: str,
     request: DocumentPackGenerateDesignRequest | None = None,
+) -> dict:
+    if request and request.chat_id:
+        return workspace_store.create_for_chat(
+            request.chat_id,
+            lambda: _generate_design_from_document_pack(pack_id, request),
+            document_pack_id=pack_id,
+        )
+    return _generate_design_from_document_pack(pack_id, request)
+
+
+def _generate_design_from_document_pack(
+    pack_id: str, request: DocumentPackGenerateDesignRequest | None = None
 ) -> dict:
     multimodal_consent = request.multimodal_consent if request else "disabled"
     try:

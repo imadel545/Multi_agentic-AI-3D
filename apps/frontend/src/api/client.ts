@@ -83,6 +83,7 @@ export class ApiClientError extends Error {
 }
 
 export type CreateDesignPayload = {
+  chat_id?: string;
   requirements_text: string;
   confirmed_requirements?: RequirementSpec;
   confirmed_requirements_hash?: string;
@@ -205,8 +206,10 @@ export class TelecomStudioApi {
     );
   }
 
-  async createDocumentPack(files: File[]): Promise<DocumentPackSummary> {
+  async createDocumentPack(files: File[], chatId?: string): Promise<DocumentPackSummary> {
     assertDocumentPackFiles(files);
+    const chatHeaders: Record<string, string> = {};
+    if (chatId) chatHeaders["x-chat-id"] = chatId;
     if (files.length === 1 && files[0].name.toLowerCase().endsWith(".zip")) {
       const file = files[0];
       return parseContract(
@@ -214,7 +217,8 @@ export class TelecomStudioApi {
         DocumentPackSummarySchema,
         await this.postBinary("/document-packs", file, {
           "content-type": "application/zip",
-          "x-filename": file.name
+          "x-filename": file.name,
+          ...chatHeaders
         })
       );
     }
@@ -225,7 +229,7 @@ export class TelecomStudioApi {
     return parseContract(
       "DocumentPackSummary",
       DocumentPackSummarySchema,
-      await this.postBinary("/document-packs", form)
+      await this.postBinary("/document-packs", form, chatHeaders)
     );
   }
 
@@ -326,19 +330,24 @@ export class TelecomStudioApi {
 
   async generateDesignFromDocumentPack(
     packId: string,
-    multimodalConsent: MultimodalConsent = "disabled"
+    multimodalConsent: MultimodalConsent = "disabled",
+    chatId?: string
   ): Promise<DocumentPackGenerateDesignResponse> {
     return parseContract(
       "DocumentPackGenerateDesignResponse",
       DocumentPackGenerateDesignResponseSchema,
       await this.postJson(`/document-packs/${packId}/generate-design`, {
-        multimodal_consent: multimodalConsent
+        multimodal_consent: multimodalConsent,
+        chat_id: chatId
       })
     );
   }
 
-  async listDesigns(): Promise<WorkflowStatus[]> {
-    const payload = await this.getJson("/designs");
+  async listDesigns(limit?: number, offset = 0): Promise<WorkflowStatus[]> {
+    const endpoint = limit === undefined
+      ? "/designs"
+      : `/designs?${new URLSearchParams({ limit: String(limit), offset: String(offset) })}`;
+    const payload = await this.getJson(endpoint);
     return parseContract("DesignList", WorkflowStatusSchema.array(), payload);
   }
 

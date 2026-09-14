@@ -139,6 +139,39 @@ describe("TelecomGlbViewer fallbacks", () => {
     expect(onSelectSemanticRoot).toHaveBeenCalledWith(null);
   });
 
+  it("exposes an explicit viewport expansion control without remounting the model", () => {
+    const onToggleExpanded = vi.fn();
+    const { rerender } = render(
+      <TelecomGlbViewer
+        bundle={null}
+        expanded={false}
+        onToggleExpanded={onToggleExpanded}
+        toAbsoluteUrl={(url) => url ?? null}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Afficher le viewer 3D en plein écran",
+      }),
+    );
+    expect(onToggleExpanded).toHaveBeenCalledOnce();
+
+    rerender(
+      <TelecomGlbViewer
+        bundle={null}
+        expanded
+        onToggleExpanded={onToggleExpanded}
+        toAbsoluteUrl={(url) => url ?? null}
+      />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Quitter le plein écran du viewer 3D",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("invalidates demand rendering until the visibility sample is ready", () => {
     const invalidate = vi.fn();
     const sample = vi.fn(() => true);

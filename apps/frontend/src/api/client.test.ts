@@ -571,6 +571,34 @@ describe("TelecomStudioApi", () => {
     expect(Array.from((request.body as FormData).getAll("files"))).toHaveLength(2);
   });
 
+  it("binds an uploaded pack to the active chat before returning", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      jsonResponse({
+        pack_id: "pack_1",
+        status: "ready",
+        document_count: 1,
+        can_generate_design: true
+      })
+    );
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const chatId = `chat_${"a".repeat(32)}`;
+
+    await client.createDocumentPack(
+      [new File(["zip-bytes"], "brief.zip", { type: "application/zip" })],
+      chatId
+    );
+
+    expect(fetcher).toHaveBeenCalledWith(new URL("/document-packs", "http://127.0.0.1:8000"), {
+      body: expect.any(File),
+      headers: {
+        "content-type": "application/zip",
+        "x-chat-id": chatId,
+        "x-filename": "brief.zip"
+      },
+      method: "POST"
+    });
+  });
+
   it("loads the real document-pack review and submits a bounded correction", async () => {
     const fetcher = vi
       .fn()

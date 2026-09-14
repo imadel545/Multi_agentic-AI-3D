@@ -63,6 +63,7 @@ import {
   writeDocumentPackSession
 } from "./state/documentPackSession";
 import { sectorMechanicalFocusRoots } from "./features/three-viewer/sectorFocus";
+import { useViewerExpansion } from "./features/three-viewer/useViewerExpansion";
 
 const ActivePromptDetail = "high" as const;
 const TelecomGlbViewer = lazy(() =>
@@ -73,10 +74,21 @@ const TelecomGlbViewer = lazy(() =>
 
 type AppProps = {
   apiClient?: TelecomStudioApi;
+  chatId?: string;
+  initialWorkflowId?: string | null;
+  initialPrompt?: string;
+  initialDocumentPackId?: string | null;
+  onDraftChange?: (value: string) => void;
+  onWorkflowCreated?: (id: string, submittedPrompt: string) => Promise<void>;
+  onDocumentPackLinked?: (id: string) => Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
+  onMutationBusyChange?: (busy: boolean) => void;
+  onNewChat?: (draft?: string) => void;
 };
 
-export default function App({ apiClient = api }: AppProps) {
-  const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState);
+export default function App({ apiClient = api, chatId, initialWorkflowId, initialPrompt = "", initialDocumentPackId,
+  onDraftChange, onWorkflowCreated, onDocumentPackLinked, onBusyChange, onMutationBusyChange, onNewChat }: AppProps) {
+  const [state, dispatch] = useReducer(workflowReducer, { ...initialWorkflowState, prompt: initialPrompt });
   const [health, setHealth] = useState<Health | null>(null);
   const [assetLibrarySummary, setAssetLibrarySummary] =
     useState<AssetLibrarySummary | null>(null);
@@ -99,6 +111,10 @@ export default function App({ apiClient = api }: AppProps) {
   const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
   const [selectedSemanticRoot, setSelectedSemanticRoot] = useState<string | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [viewerExpanded, setViewerExpanded] = useState(false);
+  const workbenchRef = useRef<HTMLElement | null>(null);
+  const closeExpandedViewer = useCallback(() => setViewerExpanded(false), []);
+  useViewerExpansion(workbenchRef, viewerExpanded, closeExpandedViewer);
   const towerAccess = state.viewerBundle?.tower_access_summary ?? null;
   const sectorFocusSemanticRoots = useMemo(
     () => sectorMechanicalFocusRoots(componentProofs, selectedSemanticRoot),
@@ -128,13 +144,14 @@ export default function App({ apiClient = api }: AppProps) {
   const [analyzedPrompt, setAnalyzedPrompt] = useState<string | null>(null);
   const [submittedRequirementsHash, setSubmittedRequirementsHash] = useState<string | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [submissionBusy, setSubmissionBusy] = useState(false);
   const [creationPath, setCreationPath] = useState<"telecom" | "free">("telecom");
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [multimodalConsent, setMultimodalConsent] =
     useState<MultimodalConsent>("disabled");
   const [versions, setVersions] = useState<PublicVersionInfo[]>([]);
   const [lastCertifiedBundle, setLastCertifiedBundle] = useState<ViewerBundle | null>(null);
-  const [revisionPrompt, setRevisionPrompt] = useState("");
+  const [revisionPrompt, setRevisionPrompt] = useState(initialWorkflowId ? initialPrompt : "");
   const [revisionMessage, setRevisionMessage] = useState<string | null>(null);
   const [revisionBusy, setRevisionBusy] = useState(false);
   const [rollbackBusyVersionId, setRollbackBusyVersionId] = useState<string | null>(null);
@@ -734,7 +751,9 @@ export default function App({ apiClient = api }: AppProps) {
     [apiClient, isActiveWorkflow, loadTerminalBundle, receiveWorkflowEvents]
   );
 
+  const restoreTarget = useRef(initialWorkflowId);
   const restoreLatestDesign = useCallback(async () => {
+    if (restoreTarget.current === null) return;
     if (restoredWorkflowRef.current || state.workflowId || state.phase !== "idle") {
       return;
     }
@@ -747,15 +766,8 @@ export default function App({ apiClient = api }: AppProps) {
     if (!restoreRequestIsCurrent()) {
       return;
     }
-    await loadSurfaceResource(
-      "design_list",
-      () => apiClient.listDesigns(),
-      (designs) => {
+    const restoreWorkflow = (latest: WorkflowStatus) => {
         if (!restoreRequestIsCurrent()) {
-          return;
-        }
-        const latest = selectWorkflowToRestore(designs);
-        if (!latest) {
           return;
         }
         restoredWorkflowRef.current = true;
@@ -785,6 +797,22 @@ export default function App({ apiClient = api }: AppProps) {
               });
           });
         }
+    };
+    if (restoreTarget.current) {
+      await loadSurfaceResource(
+        "workflow_status",
+        () => apiClient.workflowStatus(restoreTarget.current as string),
+        restoreWorkflow,
+        "bootstrap"
+      );
+      return;
+    }
+    await loadSurfaceResource(
+      "design_list",
+      () => apiClient.listDesigns(),
+      (designs) => {
+        const latest = selectWorkflowToRestore(designs);
+        if (latest) restoreWorkflow(latest);
       },
       "bootstrap"
     );
@@ -813,7 +841,7 @@ export default function App({ apiClient = api }: AppProps) {
             setDocumentPackSummary(review.summary);
           }
           const storage = documentPackBrowserStorage();
-          if (storage) writeDocumentPackSession(storage, review.summary?.pack_id ?? packId);
+          if (storage && initialWorkflowId === undefined) writeDocumentPackSession(storage, review.summary?.pack_id ?? packId);
         },
         "documents"
       );
@@ -823,7 +851,7 @@ export default function App({ apiClient = api }: AppProps) {
 
   useEffect(() => {
     const storage = documentPackBrowserStorage();
-    const packId = storage ? readDocumentPackSession(storage) : null;
+    const packId = initialWorkflowId !== undefined ? initialDocumentPackId : storage ? readDocumentPackSession(storage) : null;
     if (!packId) return;
     let cancelled = false;
     setDocumentPackBusy(true);
@@ -888,6 +916,7 @@ export default function App({ apiClient = api }: AppProps) {
     if (submissionInFlightRef.current || !state.prompt.trim()) return;
     invalidateBootstrapRestore();
     submissionInFlightRef.current = true;
+    setSubmissionBusy(true);
     streamRef.current?.close();
     dispatch({ type: "SUBMIT_STARTED" });
     setRequirementsAnalysis(null);
@@ -895,10 +924,12 @@ export default function App({ apiClient = api }: AppProps) {
     setAnalysisError(null);
     try {
       const created = await apiClient.createDesign({
+        chat_id: chatId,
         requirements_text: state.prompt.trim(),
         options: { detail_level: ActivePromptDetail, use_llm: true,
           multimodal_consent: multimodalConsentAvailable ? multimodalConsent : "disabled" }
       });
+      await onWorkflowCreated?.(created.workflow_id, state.prompt.trim());
       setVersions([]);
       eventSequenceCursorRef.current = null;
       activateWorkflow(created.workflow_id);
@@ -909,9 +940,10 @@ export default function App({ apiClient = api }: AppProps) {
       dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "generation") });
     } finally {
       submissionInFlightRef.current = false;
+      setSubmissionBusy(false);
     }
-  }, [activateWorkflow, apiClient, invalidateBootstrapRestore, loadLiveStatus, loadTerminalBundle, multimodalConsent,
-    multimodalConsentAvailable, state.prompt]);
+  }, [activateWorkflow, apiClient, chatId, invalidateBootstrapRestore, loadLiveStatus, loadTerminalBundle,
+    multimodalConsent, multimodalConsentAvailable, onWorkflowCreated, state.prompt]);
 
   const analyzePrompt = useCallback(async () => {
     if (!state.prompt.trim()) {
@@ -930,7 +962,7 @@ export default function App({ apiClient = api }: AppProps) {
       setRequirementsAnalysis(analysis);
       setAnalyzedPrompt(prompt);
       if (!analysis.requirements) {
-        setAnalysisError("Le backend n’a pas produit de RequirementSpec confirmable.");
+        setAnalysisError("La demande n’a pas pu être structurée pour confirmation. Précisez les contraintes puis réessayez.");
       }
     } catch (error) {
       setRequirementsAnalysis(null);
@@ -978,12 +1010,14 @@ export default function App({ apiClient = api }: AppProps) {
     }
     invalidateBootstrapRestore();
     submissionInFlightRef.current = true;
+    setSubmissionBusy(true);
     streamRef.current?.close();
     setRevisionMessage(null);
     setVersionMessage(null);
     dispatch({ type: "SUBMIT_STARTED" });
     try {
       const created = await apiClient.createDesign({
+        chat_id: chatId,
         requirements_text: prompt,
         confirmed_requirements: requirementsAnalysis.requirements,
         confirmed_requirements_hash: requirementsAnalysis.requirements_hash,
@@ -995,6 +1029,7 @@ export default function App({ apiClient = api }: AppProps) {
         }
       });
       setSubmittedRequirementsHash(requirementsAnalysis.requirements_hash);
+      await onWorkflowCreated?.(created.workflow_id, prompt);
       setVersions([]);
       eventSequenceCursorRef.current = null;
       activateWorkflow(created.workflow_id);
@@ -1007,6 +1042,7 @@ export default function App({ apiClient = api }: AppProps) {
       dispatch({ type: "REQUEST_FAILED", message: userFacingError(error, "generation") });
     } finally {
       submissionInFlightRef.current = false;
+      setSubmissionBusy(false);
     }
   }, [
     analyzedPrompt,
@@ -1017,6 +1053,8 @@ export default function App({ apiClient = api }: AppProps) {
     loadTerminalBundle,
     multimodalConsent,
     multimodalConsentAvailable,
+    chatId,
+    onWorkflowCreated,
     requirementsAnalysis,
     state.phase,
     state.prompt,
@@ -1028,8 +1066,9 @@ export default function App({ apiClient = api }: AppProps) {
     setAnalyzedPrompt(null);
     setSubmittedRequirementsHash(null);
     setAnalysisError(null);
+    onDraftChange?.(prompt);
     dispatch({ type: "PROMPT_CHANGED", prompt });
-  }, []);
+  }, [onDraftChange]);
 
   const uploadDocumentPack = useCallback(
     async (files: File[]) => {
@@ -1042,7 +1081,8 @@ export default function App({ apiClient = api }: AppProps) {
       setDocumentPackMessage(null);
       setDocumentPackReview(null);
       try {
-        const summary = await apiClient.createDocumentPack(files);
+        const summary = await apiClient.createDocumentPack(files, chatId);
+        await onDocumentPackLinked?.(summary.pack_id);
         setDocumentPackSummary(summary);
         const review = await loadDocumentPackReview(summary.pack_id);
         setDocumentPackMessage(
@@ -1060,7 +1100,7 @@ export default function App({ apiClient = api }: AppProps) {
         setDocumentPackBusy(false);
       }
     },
-    [apiClient, documentCapabilities, loadDocumentPackReview]
+    [apiClient, chatId, documentCapabilities, loadDocumentPackReview, onDocumentPackLinked]
   );
 
   const applyDocumentPackCorrection = useCallback(
@@ -1115,17 +1155,19 @@ export default function App({ apiClient = api }: AppProps) {
     try {
       const generated = await apiClient.generateDesignFromDocumentPack(
         documentPackSummary.pack_id,
-        multimodalConsentAvailable ? multimodalConsent : "disabled"
+        multimodalConsentAvailable ? multimodalConsent : "disabled",
+        chatId
       );
       if (!generated.workflow_id) {
         dispatch({
           type: "REQUEST_FAILED",
-          message: `Document-pack bloqué: ${generated.status}`
+          message: "Les pièces jointes nécessitent encore une vérification avant de lancer le design."
         });
         setDocumentPackMessage("Le backend a refusé la génération depuis ce pack.");
         return;
       }
-      setDocumentPackMessage("Workflow lancé depuis le pack documentaire.");
+      await onWorkflowCreated?.(generated.workflow_id, state.prompt.trim());
+      setDocumentPackMessage("Design lancé depuis les pièces jointes.");
       setVersions([]);
       eventSequenceCursorRef.current = null;
       activateWorkflow(generated.workflow_id);
@@ -1149,7 +1191,10 @@ export default function App({ apiClient = api }: AppProps) {
     loadLiveStatus,
     loadTerminalBundle,
     multimodalConsent,
-    multimodalConsentAvailable
+    multimodalConsentAvailable,
+    chatId,
+    onWorkflowCreated,
+    state.prompt
   ]);
 
   const submitRevision = useCallback(async () => {
@@ -1208,6 +1253,7 @@ export default function App({ apiClient = api }: AppProps) {
         return;
       }
       setRevisionPrompt("");
+      onDraftChange?.("");
       setRequirementsAnalysis(null);
       setAnalyzedPrompt(null);
       setSubmittedRequirementsHash(null);
@@ -1226,6 +1272,7 @@ export default function App({ apiClient = api }: AppProps) {
     apiClient,
     loadTerminalBundle,
     rememberEventSequence,
+    onDraftChange,
     revisionBusy,
     revisionPrompt,
     selectedSemanticRoot,
@@ -1523,6 +1570,17 @@ export default function App({ apiClient = api }: AppProps) {
     }
   }, [state.viewerBundle]);
 
+  const busyCallback = useRef(onBusyChange);
+  busyCallback.current = onBusyChange;
+  const mutationBusyCallback = useRef(onMutationBusyChange);
+  mutationBusyCallback.current = onMutationBusyChange;
+  const mutationBusy = submissionBusy || revisionBusy || analysisBusy ||
+    documentPackBusy || documentCorrectionBusy || Boolean(rollbackBusyVersionId);
+  useEffect(() => {
+    busyCallback.current?.(workflowActive || mutationBusy);
+    mutationBusyCallback.current?.(mutationBusy);
+  }, [workflowActive, mutationBusy]);
+
   return (
     <div className="studio-root">
       <BackendStatusBar
@@ -1537,6 +1595,7 @@ export default function App({ apiClient = api }: AppProps) {
       <main className="studio-layout">
         <aside className="left-rail">
           <ChatCommandPanel
+            onNewChat={onNewChat}
             conversation={
               state.workflowId ? (
                 <DurableConversation
@@ -1611,7 +1670,7 @@ export default function App({ apiClient = api }: AppProps) {
             multimodalIntelligence={multimodalIntelligence}
             onMultimodalConsentChange={setMultimodalConsent}
             onPromptChange={changePrompt}
-            onRevisionPromptChange={setRevisionPrompt}
+            onRevisionPromptChange={(value) => { setRevisionPrompt(value); onDraftChange?.(value); }}
             onRevisionSubmit={submitRevision}
             onRetryBootstrap={() => void retryBootstrap()}
             phase={state.phase}
@@ -1630,7 +1689,11 @@ export default function App({ apiClient = api }: AppProps) {
             />
           ) : null}
         </aside>
-        <section className="workbench" aria-label="Studio 3D">
+        <section
+          ref={workbenchRef}
+          className={`workbench${viewerExpanded ? " viewer-expanded" : ""}`}
+          aria-label="Studio 3D"
+        >
           <Suspense fallback={<ViewerLoadingFallback />}>
             <TelecomGlbViewer
               bundle={displayedViewerBundle}
@@ -1642,6 +1705,8 @@ export default function App({ apiClient = api }: AppProps) {
               focusSemanticRoots={sectorFocusSemanticRoots}
               knownSemanticRoots={knownSemanticRoots}
               onSelectSemanticRoot={selectSemanticRoot}
+              expanded={viewerExpanded}
+              onToggleExpanded={() => setViewerExpanded((value) => !value)}
               toAbsoluteUrl={toArtifactUrl}
             />
           </Suspense>

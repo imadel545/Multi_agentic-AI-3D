@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.telecom_studio_api.main import app, workflow_service
+from apps.api.telecom_studio_api.main import app, workflow_service, workspace_store
 from apps.api.telecom_studio_api.models import ViewerBundle, WorkflowStatus
 from apps.api.telecom_studio_api.workflow import (
     WorkflowBusyError,
@@ -267,6 +267,38 @@ def test_create_design_api_exposes_temporary_capacity_pressure(monkeypatch) -> N
     assert response.status_code == 429
     assert response.headers["retry-after"] == "5"
     assert "capacité locale" in response.json()["detail"]
+
+
+def test_create_design_api_binds_accepted_workflow_to_chat(monkeypatch) -> None:
+    chat_id = "chat_" + "a" * 32
+    workflow_id = "wf_a11cedde1e7e"
+    calls: list[tuple[str, str]] = []
+
+    def create_for_chat(current_chat_id, create, *, document_pack_id=None):
+        calls.append(("chat", current_chat_id))
+        assert document_pack_id is None
+        result = create()
+        calls.append(("workflow", result["workflow_id"]))
+        return result
+
+    monkeypatch.setattr(workspace_store, "create_for_chat", create_for_chat)
+    monkeypatch.setattr(
+        workflow_service,
+        "create_design",
+        lambda **_kwargs: {"workflow_id": workflow_id, "status": "pending"},
+    )
+
+    response = TestClient(app).post(
+        "/designs",
+        json={
+            "chat_id": chat_id,
+            "requirements_text": "Créer un pylône treillis 30m.",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"workflow_id": workflow_id, "status": "pending"}
+    assert calls == [("chat", chat_id), ("workflow", workflow_id)]
 
 
 def test_create_design_api_exposes_insufficient_local_storage(monkeypatch) -> None:
@@ -1606,6 +1638,25 @@ def test_delete_active_workflow_returns_conflict(tmp_path: Path) -> None:
 
     assert response.status_code == 409
     assert "active workflow" in response.json()["detail"]
+
+
+def test_delete_chat_linked_workflow_returns_conflict(monkeypatch) -> None:
+    workflow_id = "wf_a11cedde1e7e"
+    monkeypatch.setattr(
+        workspace_store,
+        "workflow_is_linked",
+        lambda value: value == workflow_id,
+    )
+    monkeypatch.setattr(
+        workflow_service,
+        "delete_design",
+        lambda _value: pytest.fail("linked design must not be deleted"),
+    )
+
+    response = TestClient(app).delete(f"/designs/{workflow_id}")
+
+    assert response.status_code == 409
+    assert "conversation" in response.json()["detail"]
 
 
 @pytest.mark.blender_runtime

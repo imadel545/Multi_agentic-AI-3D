@@ -321,9 +321,10 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 - FastAPI exposes design workflow, document-pack, RAG, memory, asset, and
   Product APIs.
-- `/designs` and `workflow_id` are the stable product contract for the next
-  frontend. Do not add `/projects`, `/runs`, `job_id`, or a new state model
-  unless a later architecture decision proves it necessary.
+- `/designs` and `workflow_id` remain the authority for execution, artifacts,
+  QA and versions. `/workspace` persists local projects, conversations, drafts
+  and their optional workflow/document links without becoming another runtime
+  state model. There is no `/runs` or `job_id` abstraction.
 - LangGraph is used for prompt workflows, document-pack generated requirements,
   scene revision generation, and bounded asset adaptation. `SceneEditAgent`
   executes a checkpointed four-node adaptation graph: discover declared
@@ -416,6 +417,31 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current frontend
 
+- 2026-09-14 verification: 833 backend tests passed (1 skipped, 55 deselected),
+  223 frontend tests passed, TypeScript/build and changed Python lint passed.
+  The restarted local API and Vite serve the same-origin project/chat/draft
+  lifecycle successfully. The temporary verification project was deleted;
+  the two projects created after the historical reset were preserved. The
+  database is therefore not currently empty. Expanded-view interaction now
+  isolates outside controls, restores focus on exit and lets the inspector
+  handle Escape first. Closing attachments preserves their unsubmitted queue.
+  These interaction checks do not establish new professional geometry quality
+  or a new Blender/WebGL acceptance.
+- On 2026-09-13 the local workspace gained persistent projects, multiple chats,
+  per-chat drafts and exact workflow restoration. The same-origin `/workspace`
+  proxy is required in both Vite and Nginx; direct API-only checks miss this
+  boundary. Project/chat creation, draft PATCH/reload and deletion were checked
+  through port 5173 with its actual Origin header. Mutation promises block
+  navigation; an accepted durable Blender workflow allows changing chats.
+- At the user's explicit request, all local runtime history was permanently
+  removed on 2026-09-13: workspace projects/chats, workflow and document-pack
+  records, checkpoints, Qdrant runtime indexes, generated workflow outputs and
+  CAD inspection outputs. The temporary recovery archive was also deleted; the
+  reset is not recoverable from this checkout. Raw corpus sources, provenance,
+  manifests and executable catalog files were preserved because they are input
+  capabilities rather than generated user history. Historical evidence below
+  describes previous checkpoints, not designs available in the reset runtime.
+
 - `apps/frontend` is a Vite + React + TypeScript product rework connected to the
   real FastAPI backend with Zod contract validation.
 - The rejected dashboard kernel has been removed from the active layout. The
@@ -423,8 +449,13 @@ not manufacturer fidelity, physical fastening or collision certification.
   drawers for agent history, QA, alerts, deliverables, and versions.
 - Raw workflow ids, runtime capability counts, permanent stage grids, and raw
   QA/RAG JSON are not part of the primary product surface.
-- It consumes `/designs` + `workflow_id`, not `/projects`, `/runs`, `job_id`, or
-  a new state model.
+- It consumes `/designs` + `workflow_id` for all runtime truth and `/workspace`
+  for local project/conversation organization. Deleting workspace organization
+  preserves design artifacts and history.
+- Projects own their visible conversation branch. Destructive organization
+  actions live in per-item three-dot menus, the inspector uses one collapsible
+  right-side panel, attachments open from the composer, and the viewer can fill
+  the browser viewport without remounting its 3D scene.
 - The command field starts empty and never injects demo content. When a verified
   design is restored, the same composer switches to bounded design adaptation;
   the user can explicitly switch back to a new design.

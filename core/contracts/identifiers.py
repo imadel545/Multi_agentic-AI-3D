@@ -2,6 +2,8 @@ import re
 
 WORKFLOW_ID_PATTERN = r"^wf_[0-9a-f]{12}$"
 VERSION_ID_PATTERN = r"^v[0-9a-f]{8}$"
+CHAT_ID_PATTERN = r"^chat_[0-9a-f]{32}$"
+DOCUMENT_PACK_ID_PATTERN = r"^pack_[A-Za-z0-9_-]{1,64}$"
 
 _WORKFLOW_ID_RE = re.compile(WORKFLOW_ID_PATTERN)
 _VERSION_ID_RE = re.compile(VERSION_ID_PATTERN)

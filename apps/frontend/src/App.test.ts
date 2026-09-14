@@ -144,6 +144,7 @@ describe("frontend runtime selection", () => {
     });
     render(createElement(App, { apiClient }));
     await waitFor(() => expect(screen.getByLabelText("Revision prompt")).toBeEnabled());
+    fireEvent.click(await screen.findByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     fireEvent.click(await screen.findByRole("button", { name: /Composition/ }));
     fireEvent.click(await screen.findByRole("treeitem"));
     fireEvent.keyDown(window, { key: "Escape" });
@@ -163,9 +164,11 @@ describe("frontend runtime selection", () => {
   });
 
   it("submits free intent directly without manufacturing telecom requirements", async () => {
-    const createDesign = vi.fn().mockRejectedValue(new ApiClientError(503, "/designs", "unavailable"));
+    const pendingCreation = deferredPromise<never>();
+    const createDesign = vi.fn().mockReturnValue(pendingCreation.promise);
+    const onMutationBusyChange = vi.fn();
     const parseRequirements = vi.fn();
-    render(createElement(App, { apiClient: bootstrapApi({ createDesign, parseRequirements }) }));
+    render(createElement(App, { apiClient: bootstrapApi({ createDesign, parseRequirements }), onMutationBusyChange }));
     fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
     fireEvent.change(screen.getByLabelText("Design prompt"), { target: { value: "Un escalier avec deux paliers" } });
     fireEvent.click(screen.getByRole("button", { name: "Concevoir depuis cette intention" }));
@@ -174,6 +177,9 @@ describe("frontend runtime selection", () => {
       options: { detail_level: "high", use_llm: true, multimodal_consent: "disabled" }
     }));
     expect(parseRequirements).not.toHaveBeenCalled();
+    await waitFor(() => expect(onMutationBusyChange).toHaveBeenLastCalledWith(true));
+    await act(async () => pendingCreation.reject(new ApiClientError(503, "/designs", "unavailable")));
+    await waitFor(() => expect(onMutationBusyChange).toHaveBeenLastCalledWith(false));
     await waitFor(() => expect(screen.getByLabelText("Design prompt")).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Télécom avec validation" }));
     expect(screen.getByRole("button", { name: "Analyser la demande" })).toBeEnabled();
@@ -225,6 +231,53 @@ describe("frontend runtime selection", () => {
     ]);
 
     expect(selected?.workflow_id).toBe("wf_completed_new");
+  });
+
+  it("restores a chat-linked workflow directly without the paginated design list", async () => {
+    const linked = workflow("wf_123456abcdef", "failed", "2026-07-15T08:00:00Z");
+    const listDesigns = vi.fn().mockResolvedValue([]);
+    const workflowStatus = vi.fn().mockResolvedValue(linked);
+    const terminalResource = {
+      ...linked,
+      available_actions: [],
+      unsupported_actions: []
+    };
+    const apiClient = bootstrapApi({
+      listDesigns,
+      workflowStatus,
+      currentOperation: vi.fn().mockResolvedValue({
+        ...terminalResource,
+        is_running: false,
+        is_terminal: true
+      }),
+      viewerBundle: vi.fn().mockResolvedValue({
+        ...terminalResource,
+        viewer_artifacts: [],
+        limitations: []
+      }),
+      timelineSummary: vi.fn().mockResolvedValue({
+        ...terminalResource,
+        timeline_steps: []
+      }),
+      userIssues: vi.fn().mockResolvedValue({
+        ...terminalResource,
+        human_readable_issues: []
+      }),
+      versions: vi.fn().mockResolvedValue([]),
+      workflowEvents: vi.fn().mockResolvedValue([])
+    });
+
+    render(
+      createElement(App, {
+        apiClient,
+        initialWorkflowId: linked.workflow_id
+      })
+    );
+
+    await waitFor(() =>
+      expect(workflowStatus).toHaveBeenCalledWith(linked.workflow_id)
+    );
+    expect(listDesigns).not.toHaveBeenCalled();
   });
 
   it("keeps the last certified model visible when a new workflow fails", () => {
@@ -673,7 +726,10 @@ describe("frontend runtime selection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Réessayer la connexion" }));
 
-    await waitFor(() => expect(screen.getByText("Studio local connecté")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByText("Studio indisponible")).not.toBeInTheDocument()
+    );
+    expect(screen.queryByText("Studio local connecté")).not.toBeInTheDocument();
     expect(health).toHaveBeenCalledTimes(2);
     expect(
       screen.queryByRole("button", { name: "Réessayer la connexion" })

@@ -70,6 +70,18 @@ frontend.
 
 ## Visible during frontend build
 
+- The workspace shell passes automated component/API checks and a
+  same-origin HTTP project/chat/draft lifecycle. A bounded browser check covered
+  the project/chat tree, contextual menus, inspector and expanded empty viewer.
+  This is not a WebGL or professional-design acceptance. Uploads support initial design input;
+  the current edit endpoint does not consume a newly attached document pack.
+- Runtime history was reset by explicit user request on 2026-09-13. Old outputs,
+  projects, conversations, document packs, checkpoints and indexes were
+  permanently deleted together with the temporary recovery archive. Static
+  knowledge sources and catalog assets remain, but no historical runtime index
+  is an active neural retrieval proof. Resetting history does not improve source
+  geometry quality.
+
 - `apps/frontend` has a visually verified historical real-backend product
   baseline and 151 passing M0 Vitest tests plus green typecheck/build. The
   2026-08-04 Docker smoke restored a certified real GLB and two-version design
@@ -83,8 +95,12 @@ frontend.
   chunk below 371 kB uncompressed, but the complete 3D dependency set remains
   substantial and still benefits from browser caching.
 - Old dashboard patterns remain rejected.
-- No `/projects` or `/runs` API is added in v1. The frontend maps its "run"
-  concept to `workflow_id` and "scene plan" to `scene_spec`.
+- `/workspace` now provides local projects, conversations and draft recovery.
+  It remains an organization layer over `/designs`; there is no `/runs`,
+  `job_id`, account or multi-user ownership model. SQLite serializes normal
+  creation and linking, but workflow files and the workspace link cannot form
+  one ACID transaction across a process crash at their filesystem/database
+  boundary. The workflow remains independently recoverable in that edge case.
 - `events/stream` is `push_sse` inside the local FastAPI process, with JSONL
   replay and queue live events. It is not a cross-process broker.
 - Runtime timeline depends on node events + trace file; robust cancellation,

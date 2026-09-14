@@ -1,6 +1,6 @@
 import { Grid, Html, OrbitControls, useGLTF } from "@react-three/drei";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { AlertTriangle, Box, Image as ImageIcon, Layers3, Loader2, RotateCcw } from "lucide-react";
+import { AlertTriangle, Box, Image as ImageIcon, Layers3, Loader2, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 import { Component, Suspense, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { ACESFilmicToneMapping, Box3, Box3Helper, Color, SRGBColorSpace, WebGLRenderTarget } from "three";
 import type { Camera, Object3D, PerspectiveCamera, Scene, WebGLRenderer } from "three";
@@ -35,6 +35,8 @@ type TelecomGlbViewerProps = {
   focusSemanticRoots?: readonly string[];
   knownSemanticRoots?: readonly string[];
   onSelectSemanticRoot?: (root: string | null) => void;
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
   toAbsoluteUrl: (url: string | null | undefined) => string | null;
 };
 
@@ -58,6 +60,8 @@ export function TelecomGlbViewer({
   focusSemanticRoots = EMPTY_FOCUS_SEMANTIC_ROOTS,
   knownSemanticRoots = [],
   onSelectSemanticRoot,
+  expanded = false,
+  onToggleExpanded,
   toAbsoluteUrl
 }: TelecomGlbViewerProps) {
   const source = resolveViewerSource(bundle, toAbsoluteUrl);
@@ -131,6 +135,19 @@ export function TelecomGlbViewer({
           <h2>{bundle ? "Design 3D telecom" : "En attente d'un design"}</h2>
         </div>
         <div className="badge-row">
+          {onToggleExpanded ? (
+            <button
+              aria-label={expanded ? "Quitter le plein écran du viewer 3D" : "Afficher le viewer 3D en plein écran"}
+              aria-pressed={expanded}
+              data-viewer-expansion
+              className="icon-action"
+              onClick={onToggleExpanded}
+              title={expanded ? "Quitter le plein écran" : "Plein écran"}
+              type="button"
+            >
+              {expanded ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
+            </button>
+          ) : null}
           <button
             className="icon-action"
             disabled={source.kind !== "glb"}

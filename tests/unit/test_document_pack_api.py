@@ -44,6 +44,76 @@ def test_document_pack_events_normalize_legacy_payload(tmp_path: Path) -> None:
         document_pack_service.outputs_dir = original_outputs
 
 
+def test_document_pack_upload_binds_chat_before_success_response(monkeypatch) -> None:
+    chat_id = "chat_" + "a" * 32
+    pack_id = "pack_" + "b" * 12
+    calls: list[tuple[str, str]] = []
+
+    class Summary:
+        def __init__(self) -> None:
+            self.pack_id = pack_id
+
+        def model_dump(self) -> dict:
+            return {"pack_id": pack_id, "status": "ready"}
+
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "begin_document_pack_ingest",
+        lambda value: calls.append(("reserve", value)),
+    )
+    monkeypatch.setattr(
+        document_pack_service,
+        "ingest_zip",
+        lambda *_args, **_kwargs: calls.append(("ingest", pack_id)) or Summary(),
+    )
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "complete_document_pack_ingest",
+        lambda current_chat, current_pack: calls.append(
+            ("complete", f"{current_chat}:{current_pack}")
+        ),
+    )
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "cancel_document_pack_ingest",
+        lambda current_chat: calls.append(("cancel", current_chat)),
+    )
+
+    response = TestClient(app).post(
+        "/document-packs",
+        content=b"zip",
+        headers={
+            "content-type": "application/zip",
+            "x-chat-id": chat_id,
+            "x-filename": "brief.zip",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pack_id"] == pack_id
+    assert calls == [
+        ("reserve", chat_id),
+        ("ingest", pack_id),
+        ("complete", f"{chat_id}:{pack_id}"),
+    ]
+
+
+def test_document_pack_upload_rejects_invalid_chat_identity_before_ingest(monkeypatch) -> None:
+    monkeypatch.setattr(
+        document_pack_service,
+        "ingest_zip",
+        lambda *_args, **_kwargs: pytest.fail("invalid chat must be rejected before ingest"),
+    )
+
+    response = TestClient(app).post(
+        "/document-packs",
+        content=b"zip",
+        headers={"content-type": "application/zip", "x-chat-id": "chat_invalid"},
+    )
+
+    assert response.status_code == 422
+
+
 def test_document_pack_api_endpoints_and_generate_design_mapping(
     tmp_path: Path,
     monkeypatch,

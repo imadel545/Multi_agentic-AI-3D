@@ -1,9 +1,25 @@
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.main import app, rag_service, workflow_service
+
+
+def test_workspace_mutations_reach_api_in_both_frontend_servers() -> None:
+    root = Path(__file__).resolve().parents[2]
+    vite = (root / "apps/frontend/vite.config.ts").read_text()
+    nginx = (root / "infra/docker/nginx.conf").read_text()
+    assert '"/workspace"' in vite.split("proxy:", 1)[1]
+    route = re.search(r"location ~ (\^/\(studio[^ ]+) \{", nginx)
+    assert route is not None
+    for path in (
+        "/workspace/projects",
+        "/workspace/projects/project_abc/chats",
+        "/workspace/chats/chat_abc",
+    ):
+        assert re.match(route.group(1), path), path
 
 
 def _install_reindex_probe(monkeypatch):
@@ -90,8 +106,9 @@ def test_cors_preflight_advertises_only_required_surface() -> None:
     )
 
     assert response.status_code == 200
-    assert response.headers["access-control-allow-methods"] == "GET, POST, DELETE"
+    assert response.headers["access-control-allow-methods"] == "GET, POST, PATCH, DELETE"
     allowed_headers = response.headers["access-control-allow-headers"].lower()
+    assert "x-chat-id" in allowed_headers
     assert "content-type" in allowed_headers
     assert "x-filename" in allowed_headers
     assert "x-request-id" in allowed_headers

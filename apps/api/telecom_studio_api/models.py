@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from core.contracts.identifiers import CHAT_ID_PATTERN
 from core.contracts.requirement_analysis import InputAnalysisStatus, RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 
@@ -19,6 +20,7 @@ class DesignOptions(BaseModel):
 
 
 class CreateDesignRequest(BaseModel):
+    chat_id: str | None = Field(default=None, pattern=CHAT_ID_PATTERN)
     requirements_text: str = Field(min_length=1, max_length=5000)
     options: DesignOptions = Field(default_factory=DesignOptions)
     confirmed_requirements: RequirementSpec | None = None
@@ -385,6 +387,7 @@ class DocumentPackCapabilitiesView(BaseModel):
 class DocumentPackGenerateDesignRequest(BaseModel):
     """Optional generation controls; an omitted body remains backward compatible."""
 
+    chat_id: str | None = Field(default=None, pattern=CHAT_ID_PATTERN)
     multimodal_consent: MultimodalConsent = "disabled"
 
 
@@ -492,9 +495,7 @@ class AssetQualificationReviewAction(BaseModel):
 
 
 class AssetQualificationReview(BaseModel):
-    status: Literal[
-        "technical_asset", "reference_only", "blocked", "evidence_invalid", "admitted"
-    ]
+    status: Literal["technical_asset", "reference_only", "blocked", "evidence_invalid", "admitted"]
     summary: str
     checks: list[AssetQualificationReviewCheck] = Field(default_factory=list)
     blockers: list[AssetQualificationReviewBlocker] = Field(default_factory=list)

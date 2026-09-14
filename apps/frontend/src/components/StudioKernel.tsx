@@ -10,6 +10,9 @@ import {
   LibraryBig,
   Loader2,
   MessageSquareText,
+  PanelRightOpen,
+  Paperclip,
+  Plus,
   RadioTower,
   RotateCcw,
   Send,
@@ -89,6 +92,17 @@ export function BackendStatusBar({
     bundle.generation_mode === "real_blender" &&
     bundle.mesh_qa_passed === true &&
     bundle.completion_certificate_status === "issued";
+  const showRuntimeProblem =
+    healthLoading || Boolean(healthError) || health?.status !== "ok";
+  if (
+    !showRuntimeProblem &&
+    !workflowActive &&
+    !bundle &&
+    phase === "idle" &&
+    !issueCount
+  ) {
+    return null;
+  }
   return (
     <header className="topbar">
       <div className="brand-lockup">
@@ -99,14 +113,12 @@ export function BackendStatusBar({
         </div>
       </div>
       <div className="topbar-status" aria-label="Studio runtime status">
-        <span className={health?.status === "ok" ? "runtime-presence ok" : "runtime-presence warn"}>
-          <span aria-hidden="true" />
-          {health?.status === "ok"
-            ? "Studio local connecté"
-            : healthLoading
-              ? "Connexion au studio…"
-              : "Studio indisponible"}
-        </span>
+        {showRuntimeProblem ? (
+          <span className="runtime-presence warn">
+            <span aria-hidden="true" />
+            {healthLoading ? "Connexion au studio…" : "Studio indisponible"}
+          </span>
+        ) : null}
         {healthError && onRetryHealth ? (
           <button className="topbar-retry" onClick={onRetryHealth} type="button">
             Réessayer la connexion
@@ -124,7 +136,7 @@ export function BackendStatusBar({
         ) : bundle ? (
           <span className={integrityVerified ? "topbar-proof ok" : "topbar-proof warn"}>
             {integrityVerified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
-            {integrityVerified ? "Intégrité vérifiée" : workflowStatusLabel(bundle.status)}
+            {integrityVerified ? "Modèle vérifié" : workflowStatusLabel(bundle.status)}
           </span>
         ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
         {fidelityBadge ? (
@@ -194,8 +206,10 @@ export function ChatCommandPanel({
   onPromptChange,
   onRevisionPromptChange,
   onRevisionSubmit,
-  onRetryBootstrap
+  onRetryBootstrap,
+  onNewChat
 }: {
+  onNewChat?: (draft?: string) => void;
   conversation?: ReactNode;
   creationPath?: "telecom" | "free";
   onCreationPathChange?: (path: "telecom" | "free") => void;
@@ -246,8 +260,11 @@ export function ChatCommandPanel({
   const [commandMode, setCommandMode] = useState<"new" | "revision">(
     canEdit ? "revision" : "new"
   );
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const previousCanEdit = useRef(canEdit);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachmentButtonRef = useRef<HTMLButtonElement | null>(null);
+  const attachmentCloseRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!canEdit && commandMode === "revision") {
@@ -258,6 +275,22 @@ export function ChatCommandPanel({
     }
     previousCanEdit.current = canEdit;
   }, [canEdit, commandMode]);
+  useEffect(() => {
+    if (documentPackReviewError || documentPackSummary) {
+      setAttachmentsOpen(true);
+    }
+  }, [documentPackReviewError, documentPackSummary]);
+  useEffect(() => {
+    if (!attachmentsOpen) return;
+    attachmentCloseRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setAttachmentsOpen(false);
+      window.requestAnimationFrame(() => attachmentButtonRef.current?.focus());
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [attachmentsOpen]);
 
   const revisionMode = commandMode === "revision" && canEdit;
   const composerValue = revisionMode ? revisionPrompt : prompt;
@@ -294,6 +327,10 @@ export function ChatCommandPanel({
     ? humanizeUserIssue(failureIssue)
     : null;
   const submitCurrentCommand = () => {
+    if (phase === "failed" && onNewChat) {
+      onNewChat(prompt);
+      return;
+    }
     if (revisionMode) {
       if (!revisionBusy && revisionPrompt.trim()) onRevisionSubmit();
       return;
@@ -319,11 +356,13 @@ export function ChatCommandPanel({
       </div>
 
       <div className="conversation-feed" aria-label="Conversation et cahier des charges">
+        <details className="chat-history-disclosure"><summary><MessageSquareText size={15} /> Conversation</summary>
         {conversation ?? <ConversationHistory
           activeRequirements={prompt.trim() ? null : activeRequirements ?? null}
           currentPrompt={analysis || analysisSubmitted ? prompt : ""}
           versions={versions ?? []}
         />}
+        </details>
 
         {phase === "failed" ? (
           <article className="workflow-recovery" role="alert">
@@ -336,15 +375,17 @@ export function ChatCommandPanel({
                 </p>
               </div>
             </div>
-            <div className="workflow-recovery-actions">
-              <button
-                className="secondary-action"
-                onClick={() => composerRef.current?.focus()}
-                type="button"
-              >
-                Corriger la demande
-              </button>
-            </div>
+            {!onNewChat ? (
+              <div className="workflow-recovery-actions">
+                <button
+                  className="secondary-action"
+                  onClick={() => composerRef.current?.focus()}
+                  type="button"
+                >
+                  Corriger la demande
+                </button>
+              </div>
+            ) : null}
           </article>
         ) : null}
 
@@ -372,34 +413,6 @@ export function ChatCommandPanel({
         ) : null}
         {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
 
-        {!revisionMode ? (
-          <>
-            <DocumentPackIntake
-              busy={documentPackBusy}
-              capabilities={documentCapabilities}
-              capabilitiesError={documentCapabilitiesError}
-              capabilitiesLoading={documentCapabilitiesLoading}
-              correctionBusy={correctionBusy}
-              message={documentPackMessage}
-              onCorrect={onDocumentPackCorrection}
-              onGenerate={onDocumentPackGenerate}
-              onCapabilitiesRetry={onDocumentCapabilitiesRetry}
-              onReviewRetry={onDocumentPackReviewRetry}
-              onUpload={onDocumentPackUpload}
-              review={documentPackReview}
-              reviewError={documentPackReviewError}
-              reviewLoading={documentPackReviewLoading}
-              summary={documentPackSummary}
-            />
-            <MultimodalConsentControl
-              capability={multimodalIntelligence}
-              consent={multimodalConsent}
-              disabled={disabled || documentPackBusy}
-              onChange={onMultimodalConsentChange}
-            />
-          </>
-        ) : null}
-
         {editMessage ? (
           <p
             aria-live="polite"
@@ -424,15 +437,76 @@ export function ChatCommandPanel({
             <button type="button" aria-pressed={creationPath === "free"} disabled={disabled || analysisBusy} onClick={() => onCreationPathChange("free")}>Intention libre</button>
           </div>
         ) : null}
-        {!revisionMode && creationPath === "free" ? <p className="composer-hint">Décrivez un objet ou un aménagement. La demande sera envoyée directement au moteur de conception, qui choisit le domaine. Ce parcours expérimental dépend des capacités disponibles et lance la génération sans revue télécom préalable.</p> : null}
-        {canEdit ? (
+        {!revisionMode && creationPath === "free" ? <p className="composer-hint">Objets et aménagements — parcours expérimental, sans confirmation télécom préalable.</p> : null}
+        {canEdit && !onNewChat ? (
           <div className="command-mode" role="group" aria-label="Type de commande">
             <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
             <button className={revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("revision")} type="button">Modifier le design</button>
           </div>
         ) : null}
 
+        {!revisionMode ? (
+          <section
+            aria-label="Pièces jointes et cahier de charge"
+            className="attachment-popover"
+            hidden={!attachmentsOpen}
+            id="studio-attachment-popover"
+          >
+            <div className="attachment-popover-header">
+              <strong>Pièces jointes</strong>
+              <button
+                aria-label="Fermer les pièces jointes"
+                onClick={() => {
+                  setAttachmentsOpen(false);
+                  attachmentButtonRef.current?.focus();
+                }}
+                ref={attachmentCloseRef}
+                type="button"
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+            <DocumentPackIntake
+              busy={documentPackBusy}
+              capabilities={documentCapabilities}
+              capabilitiesError={documentCapabilitiesError}
+              capabilitiesLoading={documentCapabilitiesLoading}
+              correctionBusy={correctionBusy}
+              message={documentPackMessage}
+              onCorrect={onDocumentPackCorrection}
+              onGenerate={onDocumentPackGenerate}
+              onCapabilitiesRetry={onDocumentCapabilitiesRetry}
+              onReviewRetry={onDocumentPackReviewRetry}
+              onUpload={onDocumentPackUpload}
+              review={documentPackReview}
+              reviewError={documentPackReviewError}
+              reviewLoading={documentPackReviewLoading}
+              summary={documentPackSummary}
+            />
+            <MultimodalConsentControl
+              capability={multimodalIntelligence}
+              consent={multimodalConsent}
+              disabled={disabled || documentPackBusy}
+              onChange={onMultimodalConsentChange}
+            />
+          </section>
+        ) : null}
         <div className="command-composer">
+          {!revisionMode ? (
+            <button
+              aria-controls="studio-attachment-popover"
+              aria-expanded={attachmentsOpen}
+              aria-label="Ajouter des pièces jointes"
+              className="composer-attachment"
+              disabled={disabled || documentPackBusy}
+              onClick={() => setAttachmentsOpen((value) => !value)}
+              ref={attachmentButtonRef}
+              title="Ajouter des PDF, images, plans, tableaux ou ZIP"
+              type="button"
+            >
+              <Paperclip size={18} aria-hidden="true" />
+            </button>
+          ) : null}
           <textarea
             aria-label={revisionMode ? "Revision prompt" : "Design prompt"}
             placeholder={revisionMode
@@ -453,11 +527,27 @@ export function ChatCommandPanel({
             rows={3}
           />
           <button
-            aria-label={revisionMode ? "Appliquer la révision" : creationPath === "free" ? "Concevoir depuis cette intention" : "Analyser la demande"}
+            aria-label={
+              phase === "failed" && onNewChat
+                ? "Reprendre dans une nouvelle conversation"
+                : revisionMode
+                  ? "Appliquer la révision"
+                  : creationPath === "free"
+                    ? "Concevoir depuis cette intention"
+                    : "Analyser la demande"
+            }
             className="composer-submit"
             disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
-            onClick={revisionMode ? onRevisionSubmit : onAnalyze}
-            title={revisionMode ? "Appliquer la modification" : creationPath === "free" ? "Concevoir depuis cette intention" : "Analyser les contraintes"}
+            onClick={submitCurrentCommand}
+            title={
+              phase === "failed" && onNewChat
+                ? "Conserver cette demande dans une nouvelle conversation"
+                : revisionMode
+                  ? "Appliquer la modification"
+                  : creationPath === "free"
+                    ? "Concevoir depuis cette intention"
+                    : "Analyser les contraintes"
+            }
             type="button"
           >
             {revisionMode ? (
@@ -785,27 +875,8 @@ function DocumentPackIntake({
 }) {
   const reviewComplete = review ? documentReviewComplete(review) : false;
   const canGenerate = summary?.can_generate_design === true && reviewComplete;
-  const [expanded, setExpanded] = useState(false);
-  useEffect(() => {
-    if (reviewError) {
-      setExpanded(true);
-    }
-  }, [reviewError]);
   return (
-    <details
-      className="document-intake"
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-      open={expanded}
-    >
-      <summary>
-        <FileArchive size={17} aria-hidden="true" />
-        <span>Documents techniques</span>
-        {summary ? (
-          <small>
-            {summary.document_count} pièce(s) · {summary.can_generate_design ? "prêt" : "revue requise"}
-          </small>
-        ) : null}
-      </summary>
+    <section className="document-intake">
       <div className="document-intake-body">
         <div className="document-intake-copy">
           <span className="eyebrow">Cahier de charge</span>
@@ -814,7 +885,7 @@ function DocumentPackIntake({
             {capabilitiesError
               ? "Les limites d’import ne sont pas disponibles; aucun fichier n’est envoyé sans ce contrat."
               : capabilities?.document_pack_status === "limited"
-              ? "Joignez directement plusieurs PDF, images, plans et tableaux, ou déposez un ZIP. Le backend local inventorie, déduplique et conserve la provenance avant de construire le design."
+              ? "Joignez directement plusieurs PDF, images, plans et tableaux, ou déposez un ZIP. Les informations utiles seront extraites et présentées pour confirmation avant la conception."
               : capabilitiesLoading
                 ? "Capacités documentaires en cours de chargement."
                 : "Capacités documentaires indisponibles."}
@@ -823,7 +894,7 @@ function DocumentPackIntake({
         {capabilitiesError ? (
           <ResourceRecovery
             busy={capabilitiesLoading}
-            label="Le contrat d’import documentaire n’a pas été chargé."
+            label="Les options d’import n’ont pas pu être chargées."
             message={capabilitiesError}
             onRetry={onCapabilitiesRetry}
           />
@@ -874,7 +945,7 @@ function DocumentPackIntake({
         ) : null}
         {message ? <p className="muted">{message}</p> : null}
       </div>
-    </details>
+    </section>
   );
 }
 
@@ -1545,45 +1616,25 @@ export function InspectorDock({
     drawers.push({ id: "library", label: "Bibliothèque", icon: <LibraryBig size={16} /> });
   }
   if (bundle?.rag_evidence_url || bundle?.llm_decision_provenance_url || summary) {
-    drawers.push({ id: "system", label: "Intelligence", icon: <Cpu size={16} /> });
+    drawers.push({ id: "system", label: "Détails avancés", icon: <Cpu size={16} /> });
   }
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
+  const drawerOpen = activeDrawer !== null;
   useEffect(() => {
-    if (!activeDrawer) {
+    if (!drawerOpen) {
       return;
     }
     closeButtonRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         setActiveDrawer(null);
-        lastTriggerRef.current?.focus();
-        return;
-      }
-      if (event.key !== "Tab" || !drawerRef.current) {
-        return;
-      }
-      const focusable = Array.from(
-        drawerRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        )
-      );
-      if (!focusable.length) {
-        event.preventDefault();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+        window.requestAnimationFrame(() => lastTriggerRef.current?.focus());
       }
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [activeDrawer]);
+  }, [drawerOpen]);
 
   const closeDrawer = () => {
     setActiveDrawer(null);
@@ -1591,41 +1642,52 @@ export function InspectorDock({
   };
   return (
     <aside className="context-dock" aria-label="Drawers contextuels">
-      <div className="drawer-launcher">
-        {drawers.map((drawer) => (
-          <button
-            aria-controls="studio-context-drawer"
-            aria-expanded={activeDrawer === drawer.id}
-            className={activeDrawer === drawer.id ? "drawer-action active" : "drawer-action"}
-            key={drawer.id}
-            onClick={(event) => {
-              lastTriggerRef.current = event.currentTarget;
-              if (activeDrawer === drawer.id) {
-                closeDrawer();
-              } else {
-                setActiveDrawer(drawer.id);
-              }
-            }}
-            type="button"
-          >
-            {drawer.icon}
-            <span>{drawer.label}</span>
-            {drawer.badge ? <small>{drawer.badge}</small> : null}
-          </button>
-        ))}
-      </div>
+      {!activeDrawer && drawers.length ? (
+        <button
+          aria-controls="studio-context-drawer"
+          aria-expanded="false"
+          aria-label="Ouvrir le panneau d’inspection"
+          className="drawer-launcher"
+          ref={lastTriggerRef}
+          onClick={(event) => {
+            lastTriggerRef.current = event.currentTarget;
+            setActiveDrawer(drawers[0].id);
+          }}
+          title="Ouvrir les détails du design"
+          type="button"
+        >
+          <PanelRightOpen size={18} aria-hidden="true" />
+        </button>
+      ) : null}
       {activeDrawer ? (
         <div
-          aria-label={`Détails ${activeDrawer}`}
-          aria-modal="true"
+          aria-label={`Détails : ${drawers.find((drawer) => drawer.id === activeDrawer)?.label ?? "Design"}`}
           className="context-drawer"
           id="studio-context-drawer"
           ref={drawerRef}
           role="dialog"
         >
-          <button aria-label="Fermer les détails" className="drawer-close" onClick={closeDrawer} ref={closeButtonRef} title="Fermer" type="button">
-            <X size={16} aria-hidden="true" />
-          </button>
+          <header className="drawer-header">
+            <nav aria-label="Sections du panneau" className="drawer-navigation">
+              {drawers.map((drawer) => (
+                <button
+                  aria-current={activeDrawer === drawer.id ? "page" : undefined}
+                  className={activeDrawer === drawer.id ? "drawer-action active" : "drawer-action"}
+                  key={drawer.id}
+                  onClick={() => setActiveDrawer(drawer.id)}
+                  type="button"
+                >
+                  {drawer.icon}
+                  <span>{drawer.label}</span>
+                  {drawer.badge ? <small>{drawer.badge}</small> : null}
+                </button>
+              ))}
+            </nav>
+            <button aria-label="Fermer les détails" className="drawer-close" onClick={closeDrawer} ref={closeButtonRef} title="Fermer" type="button">
+              <X size={16} aria-hidden="true" />
+            </button>
+          </header>
+          <div className="drawer-content">
           {activeDrawer === "summary" ? (
             <>
               {viewerBundleError ? <ResourceRecovery busy={viewerBundleLoading} label="Le résumé vérifié du design n’a pas été resynchronisé." message={viewerBundleError} onRetry={onRetryViewerBundle} /> : null}
@@ -1731,6 +1793,7 @@ export function InspectorDock({
               versions={versions}
             />
           ) : null}
+          </div>
         </div>
       ) : null}
     </aside>

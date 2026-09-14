@@ -468,6 +468,30 @@ describe("studio kernel components", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("preserves queued attachments when closing the panel and keeps free-intention creation available in a chat", () => {
+    const upload = vi.fn().mockResolvedValue(true);
+    const choosePath = vi.fn();
+    render(<ChatCommandPanel {...commandDefaults}
+      onNewChat={vi.fn()} onCreationPathChange={choosePath}
+      onDocumentPackUpload={upload}
+      documentCapabilities={{
+        document_pack_status: "limited", supported_upload_format: "zip_or_multiple_files",
+        supported_extensions: [".pdf"], limitations: [], limits: {}, truth: {}, capabilities: {}
+      }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
+    expect(choosePath).toHaveBeenCalledWith("free");
+    const trigger = screen.getByRole("button", { name: "Ajouter des pièces jointes" });
+    fireEvent.click(trigger);
+    const files = [new File(["document"], "plan.pdf", { type: "application/pdf" })];
+    fireEvent.change(screen.getByLabelText("Ajouter des pièces techniques"), { target: { files } });
+    fireEvent.click(screen.getByRole("button", { name: "Fermer les pièces jointes" }));
+    expect(trigger).toHaveFocus();
+    expect(screen.queryByRole("button", { name: "Analyser 1 pièce(s)" })).not.toBeInTheDocument();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Analyser 1 pièce(s)" }));
+    expect(upload).toHaveBeenCalledWith(files);
+  });
+
   it("keeps remote image analysis opt-in and hides it without an eligible capability", () => {
     const onConsentChange = vi.fn();
     const { rerender } = render(
@@ -487,6 +511,7 @@ describe("studio kernel components", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter des pièces jointes" }));
     const consent = screen.getByRole("checkbox", {
       name: /Autoriser l’analyse assistée des images jointes/i
     });
@@ -540,6 +565,36 @@ describe("studio kernel components", () => {
     expect(screen.queryByRole("button", { name: "Relancer cette demande" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Corriger la demande" }));
     expect(screen.getByRole("textbox", { name: "Design prompt" })).toHaveFocus();
+  });
+
+  it("starts a new conversation after a workspace design fails", () => {
+    const onNewChat = vi.fn();
+    render(
+      <ChatCommandPanel
+        {...commandDefaults}
+        failureIssue={{
+          title: "La construction a échoué",
+          severity: "error",
+          impact: "Aucun modèle vérifié n’est disponible.",
+          recommended_action: "Précisez la demande.",
+          technical_code: "GENERATION_FAILED"
+        }}
+        onNewChat={onNewChat}
+        phase="failed"
+        prompt="Corriger la hauteur et relancer"
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Reprendre dans une nouvelle conversation"
+      })
+    );
+
+    expect(onNewChat).toHaveBeenCalledWith("Corriger la hauteur et relancer");
+    expect(
+      screen.queryByRole("button", { name: "Corriger la demande" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows new components extracted for typed LLM geometry before generation", () => {
@@ -915,7 +970,7 @@ describe("studio kernel components", () => {
     expect(
       screen.getByText(/Le pack conservé n’est pas présenté comme vide/)
     ).toBeInTheDocument();
-    expect(screen.getByText("Documents techniques").closest("details")).toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Ajouter des pièces jointes" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("button", { name: "Générer depuis le pack" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
     expect(onReviewRetry).toHaveBeenCalledOnce();
@@ -2366,8 +2421,8 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Vue" }));
-    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
+    expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-modal");
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
     fireEvent.click(screen.getByRole("button", { name: /Progression/ }));
     expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Progression du design");
@@ -2411,8 +2466,9 @@ describe("studio kernel components", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     expect(screen.getByRole("button", { name: "Bibliothèque" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Intelligence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Détails avancés" }));
     expect(screen.getByText("Sources et décisions")).toBeInTheDocument();
     expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
   });
@@ -2462,6 +2518,7 @@ describe("studio kernel components", () => {
     );
 
     expect(screen.queryByText(repeatedFailure)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     fireEvent.click(screen.getByRole("button", { name: /Vérification/ }));
     expect(screen.getAllByText(repeatedFailure)).toHaveLength(1);
     expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();

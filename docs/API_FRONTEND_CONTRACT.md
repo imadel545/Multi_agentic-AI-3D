@@ -1,15 +1,17 @@
 # API — Frontend Contract
 
-Contrat minimal entre le backend FastAPI et le futur frontend React. Le contrat
-stable actuel est `/designs` + `workflow_id`.
+Contrat entre le backend FastAPI et le frontend React. `/designs` +
+`workflow_id` restent l'autorité sur l'exécution, les artefacts, les preuves et
+les versions. `/workspace` ajoute uniquement l'organisation locale durable en
+projets et conversations.
 
 `workflow_id` doit respecter `wf_[0-9a-f]{12}` et `version_id`
 `v[0-9a-f]{8}`. La validation HTTP rejette aussi les traversées encodées avant
 toute lecture locale. Un workflow bien formé mais inconnu retourne `404` pour
 le statut, la conversation, les événements et les versions.
 
-> `apps/frontend` est une rework connectée au backend réel, non encore acceptée
-> comme produit. Ce contrat reste la frontière stable `/designs` + `workflow_id`.
+> `apps/frontend` est connecté au backend réel. Un projet ou une conversation
+> ne remplace jamais un workflow et ne possède pas ses artefacts.
 
 ---
 
@@ -24,9 +26,10 @@ le bundle, les versions et les ressources associées. Une réponse tardive ne do
 jamais remplacer le viewer, la timeline, les issues ou le curseur SSE du design
 actif.
 
-Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
-"project", c'est un contexte frontend local. Si l'UI parle de "run", c'est le
-`workflow_id`. Si l'UI parle de "scene plan", c'est l'artefact `scene_spec`.
+Un projet workspace classe des conversations. Une conversation contient un
+brouillon, un pack documentaire optionnel et au plus un `workflow_id` immuable.
+Supprimer ce classement conserve le design et son historique. Aucun modèle
+`run`, `job_id` ou nouvelle autorité d'exécution n'est introduit.
 
 | Méthode | Endpoint | Usage frontend |
 |---|---|---|
@@ -42,6 +45,11 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | Méthode | Endpoint | Usage frontend |
 |---|---|---|
 | `GET` | `/health` | Vérifier que le backend est en ligne; expose aussi un résumé mémoire agrégé du pool Groq sans probe réseau ni identité de clé. |
+| `GET`, `POST` | `/workspace/projects` | Lister ou créer les projets locaux. |
+| `PATCH`, `DELETE` | `/workspace/projects/{project_id}` | Renommer ou supprimer le classement d'un projet sans supprimer ses designs. |
+| `GET`, `POST` | `/workspace/projects/{project_id}/chats` | Lister ou créer les conversations d'un projet. |
+| `GET`, `PATCH`, `DELETE` | `/workspace/chats/{chat_id}` | Restaurer, mettre à jour ou retirer une conversation. |
+| `GET` | `/workspace/linked-workflow-ids` | Exclure de la récupération les workflows déjà classés dans une conversation. |
 | `GET` | `/designs` | Lister les designs récents. |
 | `POST` | `/designs` | Créer un design depuis un prompt. |
 | `GET` | `/designs/{id}` | Statut complet public: artefacts en URLs backend, pas en chemins locaux. |
@@ -67,7 +75,13 @@ Ne pas créer `/projects` ou `/runs` dans cette phase. Si l'UI parle de
 | `POST` | `/document-packs/{pack_id}/corrections` | Appliquer une correction manuelle. |
 | `POST` | `/document-packs/{pack_id}/generate-design` | Générer un design depuis le pack. |
 
-`POST /designs` accepte `options.multimodal_consent` et
+`POST /designs` accepte un `chat_id` optionnel. Lorsque présent, le backend
+sérialise la création et lie tout workflow accepté à la conversation avant de
+répondre. Une conversation déjà liée refuse une seconde création. `POST
+/document-packs` accepte le même rattachement via `X-Chat-ID`; la réservation
+empêche la suppression concurrente de la conversation pendant l'ingestion.
+
+`POST /designs` accepte aussi `options.multimodal_consent` et
 `POST /document-packs/{pack_id}/generate-design` accepte le même consentement
 dans son body optionnel. Les valeurs publiques sont `disabled`,
 `allow_input_analysis` et `allow_input_and_visual_review`; la valeur par défaut
@@ -146,7 +160,8 @@ ces données existent. `history_status=recorded` signifie que l’origine de
 création du workflow a été enregistrée; `legacy_partial` indique que seuls les
 événements historiques réellement présents peuvent être montrés; `damaged`
 signale une portion de journal illisible tout en préservant les messages lus.
-Le contrat ne crée ni projet, ni session de compte, ni transcript assistant.
+Le contrat workspace classe cette projection par conversation. Il ne crée ni
+session de compte, ni transcript assistant inventé.
 
 ## Champs clés du statut workflow
 
