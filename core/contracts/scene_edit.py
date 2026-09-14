@@ -34,6 +34,7 @@ class ScenePatch(StrictModel):
     adaptation_tools: list[str] = Field(default_factory=list)
     unsupported_requests: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    derived_assumptions: list[str] = Field(default_factory=list)
 
 
 class SceneEditResult(StrictModel):

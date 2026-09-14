@@ -35,6 +35,7 @@ from core.performance import issue_requirement_analysis_receipt, requirements_co
 from core.rag.planning import SUPPORTED_PLANNING_HINT_FIELDS
 from core.services.asset_registry import AssetRegistry
 from core.services.cleanup_service import CleanupService
+from core.services.dependent_constraints import edit_failure_user_text
 from core.services.diff_engine import DiffEngine
 from core.services.event_log import EventLogService
 from core.services.patch_applier import PatchApplier
@@ -91,10 +92,25 @@ class VerifiedViewerSnapshot:
 def _conversation_outcome_payload(result: SceneEditResult, edit_id: str) -> dict:
     if result.status == "applied":
         message = "La modification a été appliquée et vérifiée."
+        assumptions = list(result.patch.derived_assumptions) if result.patch is not None else []
+        if assumptions:
+            message = f"{message} {' '.join(assumptions)}"
     elif result.status == "rejected":
         message = "La modification a été refusée. La version précédente est conservée."
+        if result.errors:
+            message = (
+                "La modification a été refusée : "
+                f"{edit_failure_user_text(result.errors[0].message)} "
+                "La version précédente est conservée."
+            )
     else:
         message = "La modification n’a pas abouti. Vérifiez la version active avant de réessayer."
+        if result.errors:
+            message = (
+                "La modification n’a pas pu être appliquée : "
+                f"{edit_failure_user_text(result.errors[0].message)} "
+                "La version précédente est conservée."
+            )
     return {
         "status": "completed" if result.status == "applied" else "failed",
         "edit_result_status": result.status,

@@ -20,6 +20,7 @@ from core.contracts.validation import ValidationReport
 from core.llm.groq import GroqStructuredClient
 from core.llm.groq_policy import GroqRequestPolicy
 from core.services.adaptation_capabilities import AdaptationCapabilityService
+from core.services.dependent_constraints import with_dependent_operations
 from core.services.patch_applier import PatchApplier
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,8 @@ class SceneEditAgent:
         edit_prompt: str,
     ) -> int | None:
         editable_indices = [
-            index for index, program in enumerate(scene.geometry_programs)
+            index
+            for index, program in enumerate(scene.geometry_programs)
             if not any(node.kind == "exact_asset" for node in program.nodes)
         ]
         if not editable_indices:
@@ -390,7 +392,7 @@ class SceneEditAgent:
         fallback_reason = "groq_edit_client_unavailable"
         if self.groq is not None:
             try:
-                return self._llm_patch(scene, edit_prompt)
+                return with_dependent_operations(scene, self._llm_patch(scene, edit_prompt))
             except Exception as exc:
                 fallback_reason = f"groq_edit_failed:{type(exc).__name__}"
                 logger.warning(
@@ -398,7 +400,9 @@ class SceneEditAgent:
                     workflow_id,
                     exc_info=True,
                 )
-        return self._fallback_patch(scene, edit_prompt, fallback_reason=fallback_reason)
+        return with_dependent_operations(
+            scene, self._fallback_patch(scene, edit_prompt, fallback_reason=fallback_reason)
+        )
 
     def _discover_capabilities(self, state: AdaptationGraphState) -> dict[str, Any]:
         if self.capability_service is None:
@@ -457,13 +461,17 @@ class SceneEditAgent:
                     exc_info=True,
                 )
                 patch = self._fallback_patch(
-                    state["scene"], state["edit_prompt"], fallback_reason=fallback_reason,
+                    state["scene"],
+                    state["edit_prompt"],
+                    fallback_reason=fallback_reason,
                     capabilities=state["capabilities"],
                 )
                 plan = _plan_from_patch(patch, state["capabilities"])
         else:
             patch = self._fallback_patch(
-                state["scene"], state["edit_prompt"], fallback_reason=fallback_reason,
+                state["scene"],
+                state["edit_prompt"],
+                fallback_reason=fallback_reason,
                 capabilities=state["capabilities"],
             )
             plan = _plan_from_patch(patch, state["capabilities"])
@@ -500,6 +508,11 @@ class SceneEditAgent:
             ),
         )
         _validate_patch_alignment(state["scene"], state["edit_prompt"], patch)
+        patch = with_dependent_operations(
+            state["scene"],
+            patch,
+            allowed_paths=state["capabilities"].allowed_paths,
+        )
         return {
             "patch": patch,
             "graph_trace": [
