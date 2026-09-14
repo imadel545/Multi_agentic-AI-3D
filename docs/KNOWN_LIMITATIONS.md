@@ -71,25 +71,29 @@ frontend.
 ## Visible during frontend build
 
 - The document-pack action is intentionally user initiated. A retained pack is
-  summarized in the composer and its detailed review is collapsed until the
-  user asks to inspect it; this prevents raw extraction diagnostics from taking
-  over the 3D workspace. The review still reflects the real document-pack API,
-  and it can report missing evidence, OCR limits or provider fallback in plain
-  language. The composer and conversation tray show workflow events and phases,
+  represented by a compact attachment chip in the composer. Extraction fields,
+  QA diagnostics and provider internals are not exposed in the product UI. The
+  composer and conversation tray show workflow events and phases,
   not provider tokens or a fabricated assistant transcript.
 - The main inspector no longer exposes developer-only Progression or Détails
   avancés panels. Their underlying evidence remains available through the
-  product endpoints and the focused QA/assets/documents/versions/composition
-  drawers. This surface change does not improve the current technical generic
+  product endpoints and the focused QA/assets/versions/composition drawers.
+  This surface change does not improve the current technical generic
   geometry or qualify the reference-only manufacturer asset.
+
+- A loaded document pack can be deleted with the attachment `×`. Deletion is
+  local, guarded by chat references, and also removes its canonical document
+  memory. Derived vector projection is refreshed asynchronously through the
+  existing outbox; a transient projection delay can therefore remain visible.
 
 - Telecom confirmation requires at least one explicit, non-default site
   identity/layout field in extraction provenance. An image question with an
   all-default site returns `TELECOM_BRIEF_REQUIRED`, no requirements/hash/receipt,
   and cannot be replayed through the confirmed-design endpoint. This is a bounded
   admission rule for telecom confirmation, not a conversational intent classifier
-  or image analysis. Free-intention and document-pack routes retain their own
-  admission contracts.
+  or image analysis. Free-intention keeps its own admission contract; a
+  document pack can only enrich a non-empty prompt and cannot start generation
+  by itself.
 - The workspace shell passes automated component/API checks and a
   same-origin HTTP project/chat/draft lifecycle. A bounded browser check covered
   the project/chat tree, contextual menus, inspector and expanded empty viewer.
@@ -105,8 +109,13 @@ frontend.
 - `apps/frontend` has a visually verified historical real-backend product
   baseline and 151 passing M0 Vitest tests plus green typecheck/build. The
   2026-08-04 Docker smoke restored a certified real GLB and two-version design
-  without browser console errors. Document-pack generation, rollback and
+  without browser console errors. Document-context generation, rollback and
   relevant degraded/retry paths still need a recorded browser acceptance pass.
+- The 2026-09-14 current-tree frontend suite passes 225 Vitest tests, typecheck
+  and production build. The attachment HTTP smoke proves upload, chat binding,
+  bounded context hashing, absence of import-only workflow creation and guarded
+  deletion. A fresh Chrome tab loaded the current GLB with no console warning or
+  error. This did not trigger or certify a new Blender generation.
 - The first technical kernel was rejected as too dashboard-like; permanent
   stage grids, capability counters, raw workflow ids, and raw JSON surfaces must
   not come back.
@@ -334,9 +343,10 @@ frontend.
   A correction still spans several compatibility files, so a host/process crash
   between replacements can leave a mixed revision. A single revision envelope
   or write-ahead journal remains required for crash-level transactions.
-- Document-pack generation requires a foundation compatible with the confirmed
-  tower type. If evidence is missing, the pack is blocked until a user
-  correction supplies the value; the backend does not invent a concrete pad.
+- A document pack cannot generate a design alone. Confirmed supported facts are
+  combined with a non-empty user prompt during analysis and generation. Missing
+  facts still use the explicitly reported deterministic fallback rules; no
+  foundation or technical value is invented from unsupported document prose.
 - `/document-packs/capabilities` is honest and reports
   `document_pack_status=limited`.
 - OCR is limited and depends on installed Tesseract + languages.

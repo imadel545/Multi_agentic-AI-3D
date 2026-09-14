@@ -27,6 +27,10 @@ class RequirementAnalysisReceipt(StrictModel):
     extraction_provider: str = Field(min_length=1, max_length=40)
     fallback_used: bool
     fallback_reason: str | None = Field(default=None, min_length=1, max_length=240)
+    document_pack_id: str | None = Field(default=None, pattern=r"^pack_[A-Za-z0-9_-]+$")
+    document_context_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    confirmed_document_fact_count: int | None = Field(default=None, ge=0, le=64)
+    document_sha256: list[str] = Field(default_factory=list, max_length=256)
 
     @model_validator(mode="after")
     def validate_fallback_truth(self) -> "RequirementAnalysisReceipt":
@@ -34,4 +38,11 @@ class RequirementAnalysisReceipt(StrictModel):
             raise ValueError("fallback input analysis receipt requires fallback_reason")
         if not self.fallback_used and self.fallback_reason is not None:
             raise ValueError("primary input analysis receipt cannot contain fallback_reason")
+        has_document_context = self.document_pack_id is not None
+        if has_document_context != (self.document_context_sha256 is not None):
+            raise ValueError("document pack receipt requires its context hash")
+        if has_document_context != (self.confirmed_document_fact_count is not None):
+            raise ValueError("document pack receipt requires its confirmed fact count")
+        if not has_document_context and self.document_sha256:
+            raise ValueError("document digests require a document pack receipt")
         return self

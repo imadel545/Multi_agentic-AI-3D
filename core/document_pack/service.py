@@ -417,6 +417,23 @@ class DocumentPackService:
                 packs.append(self.get_summary(pack_dir.name))
         return packs
 
+    def delete_pack(self, pack_id: str) -> dict:
+        """Delete an imported pack after its workspace references are cleared."""
+
+        with self._pack_operation(pack_id):
+            pack_dir = self._pack_dir(pack_id)
+            tombstone = self.outputs_dir / f".deleting_{pack_id}_{uuid.uuid4().hex}"
+            os.replace(pack_dir, tombstone)
+            try:
+                if self.memory_service is not None:
+                    self.memory_service.purge_document_pack(pack_id)
+                shutil.rmtree(tombstone)
+            except Exception:
+                if tombstone.exists() and not pack_dir.exists():
+                    os.replace(tombstone, pack_dir)
+                raise
+        return {"pack_id": pack_id, "deleted": True}
+
     def get_summary(self, pack_id: str) -> dict:
         with self._pack_operation(pack_id):
             pack_dir = self._pack_dir(pack_id)

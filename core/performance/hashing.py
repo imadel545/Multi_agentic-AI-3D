@@ -82,6 +82,10 @@ def issue_requirement_analysis_receipt(
     extraction_provider: str,
     fallback_used: bool,
     fallback_reason: str | None,
+    document_pack_id: str | None = None,
+    document_context_sha256: str | None = None,
+    confirmed_document_fact_count: int | None = None,
+    document_sha256: list[str] | None = None,
 ) -> RequirementAnalysisReceipt:
     """Build one server-side analysis receipt before a user confirms input."""
 
@@ -97,6 +101,10 @@ def issue_requirement_analysis_receipt(
         extraction_provider=extraction_provider,
         fallback_used=fallback_used,
         fallback_reason=fallback_reason,
+        document_pack_id=document_pack_id,
+        document_context_sha256=document_context_sha256,
+        confirmed_document_fact_count=confirmed_document_fact_count,
+        document_sha256=document_sha256 or [],
     )
 
 

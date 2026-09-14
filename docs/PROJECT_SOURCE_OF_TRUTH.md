@@ -403,11 +403,11 @@ not manufacturer fidelity, physical fastening or collision certification.
   vectors are routed to provider/dimension-versioned collections.
 - Document-pack: synchronous direct multi-file or ZIP intake with bounded
   archive assembly, limited PDF/OCR/DXF extraction, consolidation, conflicts,
-  corrections, and QA. A missing or tower-incompatible foundation blocks
-  generation before a workflow is created; the user must confirm a supported
-  foundation instead of receiving a predictably failed Blender workflow. The
-  summary, QA response, generation gate, and correction UI consume the same
-  blocking-field list.
+  corrections, and QA. It is an attachment context for a non-empty chat prompt;
+  it cannot create a workflow by itself. Confirmed, sourced technical facts are
+  projected into a bounded instruction-safe context that both Groq and the
+  deterministic fallback consume. The analysis receipt binds the pack, source
+  document hashes, selected fact count and context hash.
 - Blender: real generation when Blender is found; Blender fallback is rejected
   by default for quality (`TELECOM_STUDIO_ALLOW_BLENDER_FALLBACK=0`).
   "Found" means a real background/factory-startup smoke succeeds, not merely
@@ -417,22 +417,28 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current frontend
 
-- 2026-09-14 conversation and intake hardening: the attachment action now opens
-  a bounded brief-intake surface on demand; a retained document pack or its
-  review never opens over the viewer by itself. The primary surface shows a
-  human summary (document count, confirmation points and QA percentage), while
-  pack identifiers, backend enum values and detailed extraction evidence stay
-  behind an explicit, scrollable review disclosure. The conversation history is
+- 2026-09-14 conversation and intake hardening: the attachment action now uses
+  the chat composer. A retained pack appears only as a compact attachment chip
+  with its document count and a `×` removal action. Pack identifiers, backend
+  enums, extraction fields, QA internals and provenance are not rendered. The
+  conversation history is
   kept in a bounded tray that can be opened or folded without changing the
   viewer layout. Progress labels are derived from the observed workflow phase
   and SSE events; the UI does not claim token streaming. The developer-facing
   Progression and Détails avancés entries were removed from the main inspector;
-  QA, documents, assets, composition and versions remain contextual surfaces.
+  QA, assets, composition and versions remain contextual surfaces.
   The project sidebar remains collapsible and destructive project/chat actions
-  remain in their per-item menus. Current verification is 226 frontend tests,
+  remain in their per-item menus. Current verification is 225 frontend tests,
   typecheck and production build passed, plus a real local-browser check of the
   intake popover on port 5173. This is a presentation and interaction fix; it
   does not promote an unqualified CAD source or claim a new professional GLB.
+
+- 2026-09-14 document removal: `×` calls the guarded DELETE endpoint. The backend
+  clears the conversation link, purges canonical document memory and deletes
+  local pack files; it restores the link if storage deletion fails and refuses
+  deletion while another chat references the pack. There is no pack-only
+  generation endpoint. The imported evidence affects a design only when the
+  user submits a non-empty prompt in the same conversation.
 
 - The 2026-09-14 input follow-up closes a reproduced mismatch: the image-analysis
   question associated with `wf_f615060277a7` had produced a confirmed telecom site
@@ -916,10 +922,10 @@ not manufacturer fidelity, physical fastening or collision certification.
   terminal message is not reused as the status of the active revision. Rapid
   duplicate submissions are synchronously blocked and every failure exits the
   busy state.
-- The duplicated lower workflow-status card was removed. The left rail owns one
-  readable scroll surface, changes its guidance for design versus revision,
-  and keeps document intake collapsed under a compact `Documents techniques`
-  disclosure. QA limitations and long issue lists are collapsed until opened.
+- The duplicated lower workflow-status card was removed. The command surface
+  owns one readable conversation scroll, changes its guidance for design versus
+  revision, and keeps document intake behind the compact composer attachment
+  action. QA limitations and long issue lists are collapsed until opened.
 - Fidelity counts now say `modèles sélectionnés`; the viewer separately reports
   instantiated semantic equipment and GLB nodes. These counts measure different
   things and are no longer presented with the same `composants` wording.
@@ -1078,7 +1084,7 @@ certification, or acceptance of every generic 3D scenario.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 209 passing
+frontend now has a verified chat-first/3D-first product baseline and 225 passing
 component/contract tests. Current-tree connected creation, real GLB picking,
 targeted edit/version, durable conversation restoration and explicit rollback
 have each passed in the isolated product path. The 2026-09-12 current-tree smoke

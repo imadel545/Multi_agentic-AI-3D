@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from fastapi import FastAPI
+import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api.workspace import WorkspaceStore, create_workspace_router
@@ -35,6 +36,10 @@ def test_workspace_survives_restart_and_deletion_preserves_external_design(tmp_p
     restarted = client_for(path)
     assert restarted.get(f"/workspace/chats/{cid}").json()["draft_prompt"] == "Ajouter une radio"
     assert restarted.get(f"/workspace/chats/{cid}").json()["document_pack_id"] == PACK_ID
+    detached = restarted.patch(f"/workspace/chats/{cid}", json={"document_pack_id": None})
+    assert detached.status_code == 200
+    assert detached.json()["document_pack_id"] is None
+    assert restarted.get(f"/workspace/chats/{cid}").json()["document_pack_id"] is None
     assert restarted.delete(f"/workspace/projects/{pid}").status_code == 204
     assert restarted.get(f"/workspace/chats/{cid}").status_code == 404
     # Organization deletion leaves workflow authority untouched: it can be linked again.
@@ -138,6 +143,37 @@ def test_document_pack_creation_binds_source_and_touches_project(tmp_path):
     assert bound["document_pack_id"] == PACK_ID
     assert bound["draft_prompt"] == ""
     assert refreshed_project["updated_at"] == bound["updated_at"]
+
+
+def test_document_pack_ingest_rejects_replacement_before_reserving(tmp_path):
+    path = tmp_path / "state.sqlite"
+    client = client_for(path)
+    project_id = client.post("/workspace/projects", json={"title": "Projet"}).json()["project_id"]
+    chat_id = client.post(
+        f"/workspace/projects/{project_id}/chats",
+        json={"title": "Pièces jointes"},
+    ).json()["chat_id"]
+    assert (
+        client.patch(
+            f"/workspace/chats/{chat_id}",
+            json={"document_pack_id": PACK_ID},
+        ).status_code
+        == 200
+    )
+    store = WorkspaceStore(path, lambda _: True, lambda value: value == PACK_ID)
+
+    with pytest.raises(HTTPException) as error:
+        store.begin_document_pack_ingest(chat_id)
+
+    assert error.value.status_code == 409
+    with store.connection() as db:
+        assert (
+            db.execute(
+                "SELECT 1 FROM studio_pending_pack_links WHERE chat_id=?",
+                (chat_id,),
+            ).fetchone()
+            is None
+        )
 
 
 def test_creation_preserves_existing_pack_and_blocked_result_preserves_draft(tmp_path):

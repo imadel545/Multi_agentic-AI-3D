@@ -1,8 +1,8 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from core.contracts.identifiers import CHAT_ID_PATTERN
+from core.contracts.identifiers import CHAT_ID_PATTERN, DOCUMENT_PACK_ID_PATTERN
 from core.contracts.requirement_analysis import InputAnalysisStatus, RequirementAnalysisReceipt
 from core.contracts.requirements import RequirementSpec
 
@@ -21,6 +21,8 @@ class DesignOptions(BaseModel):
 
 class CreateDesignRequest(BaseModel):
     chat_id: str | None = Field(default=None, pattern=CHAT_ID_PATTERN)
+    document_pack_id: str | None = Field(default=None, pattern=DOCUMENT_PACK_ID_PATTERN)
+    document_context_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     requirements_text: str = Field(min_length=1, max_length=5000)
     options: DesignOptions = Field(default_factory=DesignOptions)
     confirmed_requirements: RequirementSpec | None = None
@@ -30,13 +32,30 @@ class CreateDesignRequest(BaseModel):
     )
     confirmed_analysis_receipt: RequirementAnalysisReceipt | None = None
 
+    @field_validator("requirements_text")
+    @classmethod
+    def validate_nonblank_requirements_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("requirements_text must contain a written request")
+        return value
+
     @model_validator(mode="after")
     def validate_confirmed_requirements_pair(self) -> "CreateDesignRequest":
+        if self.document_pack_id is not None and self.chat_id is None:
+            raise ValueError("document_pack_id requires chat_id")
+        if self.document_context_hash is not None and self.document_pack_id is None:
+            raise ValueError("document_context_hash requires document_pack_id")
         if (self.confirmed_requirements is None) != (self.confirmed_requirements_hash is None):
             raise ValueError(
                 "confirmed_requirements and confirmed_requirements_hash must be provided together"
             )
         confirmed = self.confirmed_requirements
+        if (
+            confirmed is not None
+            and self.document_pack_id is not None
+            and self.document_context_hash is None
+        ):
+            raise ValueError("confirmed document-aware requirements require document_context_hash")
         if self.confirmed_analysis_receipt is not None and confirmed is None:
             raise ValueError(
                 "confirmed_analysis_receipt requires confirmed_requirements and its hash"
@@ -206,9 +225,24 @@ class WorkflowStatus(BaseModel):
 
 
 class ParseRequirementsRequest(BaseModel):
+    chat_id: str | None = Field(default=None, pattern=CHAT_ID_PATTERN)
+    document_pack_id: str | None = Field(default=None, pattern=DOCUMENT_PACK_ID_PATTERN)
     requirements_text: str = Field(min_length=1, max_length=5000)
     detail_level: Literal["low", "medium", "high"] = "high"
     use_llm: bool | None = None
+
+    @field_validator("requirements_text")
+    @classmethod
+    def validate_nonblank_requirements_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("requirements_text must contain a written request")
+        return value
+
+    @model_validator(mode="after")
+    def validate_document_pack_binding(self) -> "ParseRequirementsRequest":
+        if self.document_pack_id is not None and self.chat_id is None:
+            raise ValueError("document_pack_id requires chat_id")
+        return self
 
 
 class ParseRequirementsResponse(BaseModel):
@@ -221,6 +255,7 @@ class ParseRequirementsResponse(BaseModel):
     fallback_used: bool | None
     llm_fallback_reason: str | None = None
     analysis_receipt: RequirementAnalysisReceipt | None = None
+    document_context_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
 
 
 class RagSearchResponse(BaseModel):
@@ -382,21 +417,6 @@ class DocumentPackCapabilitiesView(BaseModel):
     truth: dict[str, Any]
     next_action: str
     capabilities: dict[str, DocumentToolCapabilityView]
-
-
-class DocumentPackGenerateDesignRequest(BaseModel):
-    """Optional generation controls; an omitted body remains backward compatible."""
-
-    chat_id: str | None = Field(default=None, pattern=CHAT_ID_PATTERN)
-    multimodal_consent: MultimodalConsent = "disabled"
-
-
-class DocumentPackGenerateDesignResponse(BaseModel):
-    pack_id: str
-    status: str
-    mapping: dict[str, Any]
-    extraction_report: dict[str, Any] | None = None
-    workflow_id: str | None = None
 
 
 # Product-oriented response models

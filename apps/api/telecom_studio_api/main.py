@@ -26,8 +26,6 @@ from apps.api.telecom_studio_api.models import (
     CurrentOperation,
     DesignListSummary,
     DocumentPackCapabilitiesView,
-    DocumentPackGenerateDesignRequest,
-    DocumentPackGenerateDesignResponse,
     EditDesignRequest,
     EditDesignResponse,
     MemoryVectorReindexResponse,
@@ -55,7 +53,11 @@ from apps.api.telecom_studio_api.workflow import (
     WorkflowService,
     WorkflowStorageError,
 )
-from apps.api.telecom_studio_api.workspace import WorkspaceStore, create_workspace_router
+from apps.api.telecom_studio_api.workspace import (
+    ChatUpdate,
+    WorkspaceStore,
+    create_workspace_router,
+)
 from core.agents.cognitive_domain_router import (
     ConservativeDesignDomainRouter,
     GroqDesignDomainRouter,
@@ -66,10 +68,14 @@ from core.agents.scene_edit_agent import SceneEditAgent
 from core.contracts.adaptation import SceneAdaptationCapabilities
 from core.contracts.document_pack import DocumentPackCorrection
 from core.contracts.identifiers import CHAT_ID_PATTERN, VERSION_ID_PATTERN, WORKFLOW_ID_PATTERN
-from core.contracts.requirements import RequirementSpec
 from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationReport
-from core.document_pack import DocumentPackService
+from core.document_pack import (
+    DocumentPackService,
+    DocumentPromptContext,
+    build_document_prompt_context,
+    combine_prompt_with_document_context,
+)
 from core.llm import (
     GroqStructuredClient,
     GroqTransport,
@@ -454,18 +460,43 @@ def get_studio_summary() -> dict:
 @app.post("/designs", response_model=CreateDesignResponse)
 def create_design(request: CreateDesignRequest) -> dict:
     if request.chat_id:
-        return workspace_store.create_for_chat(request.chat_id, lambda: _create_design(request))
+        _validate_chat_document_pack_binding(request.chat_id, request.document_pack_id)
+        return workspace_store.create_for_chat(
+            request.chat_id,
+            lambda: _create_design(request),
+            document_pack_id=request.document_pack_id,
+        )
     return _create_design(request)
 
 
 def _create_design(request: CreateDesignRequest) -> dict:
     try:
+        effective_requirements_text, _document_context = _document_aware_requirements_text(
+            request.requirements_text,
+            request.document_pack_id,
+            expected_hash=request.document_context_hash,
+        )
         if request.confirmed_requirements is not None:
             receipt = request.confirmed_analysis_receipt
+            if (
+                receipt is not None
+                and _document_context is not None
+                and (
+                    receipt.document_pack_id != _document_context.pack_id
+                    or receipt.document_context_sha256 != _document_context.sha256
+                )
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Les pièces jointes ne correspondent plus à l’analyse confirmée. "
+                        "Relancez l’analyse avant de générer le design."
+                    ),
+                )
             if receipt is not None and not analysis_receipt_matches_confirmation(
                 receipt,
                 request.confirmed_requirements,
-                requirements_text=request.requirements_text,
+                requirements_text=effective_requirements_text,
                 detail_level=request.options.detail_level,
             ):
                 raise HTTPException(
@@ -474,7 +505,7 @@ def _create_design(request: CreateDesignRequest) -> dict:
                 )
             actual_hash = requirements_confirmation_hash(
                 request.confirmed_requirements,
-                requirements_text=request.requirements_text,
+                requirements_text=effective_requirements_text,
                 detail_level=request.options.detail_level,
                 analysis_receipt=receipt,
             )
@@ -494,10 +525,11 @@ def _create_design(request: CreateDesignRequest) -> dict:
                 input_analysis_receipt=receipt,
             )
         return workflow_service.create_design(
-            requirements_text=request.requirements_text,
+            requirements_text=effective_requirements_text,
             detail_level=request.options.detail_level,
             use_llm=request.options.use_llm,
             multimodal_consent=request.options.multimodal_consent,
+            conversation_text=request.requirements_text,
         )
     except WorkflowBusyError as exc:
         raise HTTPException(
@@ -626,12 +658,67 @@ def delete_design(workflow_id: WorkflowId) -> dict:
 
 @app.post("/requirements/parse", response_model=ParseRequirementsResponse)
 def parse_requirements(request: ParseRequirementsRequest) -> dict:
+    if request.chat_id:
+        _validate_chat_document_pack_binding(request.chat_id, request.document_pack_id)
+    requirements_text, document_context = _document_aware_requirements_text(
+        request.requirements_text,
+        request.document_pack_id,
+    )
     result = workflow_service.parse_requirements(
-        requirements_text=request.requirements_text,
+        requirements_text=requirements_text,
         detail_level=request.detail_level,
         use_llm=request.use_llm,
+        document_context=(
+            {
+                "pack_id": document_context.pack_id,
+                "sha256": document_context.sha256,
+                "confirmed_fact_count": document_context.confirmed_fact_count,
+                "document_sha256": list(document_context.document_sha256),
+            }
+            if document_context is not None
+            else None
+        ),
+    )
+    result["document_context_hash"] = (
+        document_context.sha256 if document_context is not None else None
     )
     return result
+
+
+def _validate_chat_document_pack_binding(chat_id: str, pack_id: str | None) -> None:
+    chat = workspace_store.get_chat(chat_id)
+    if chat["document_pack_id"] != pack_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Les pièces jointes de cette conversation ont changé. "
+                "Rechargez la conversation avant de continuer."
+            ),
+        )
+
+
+def _document_aware_requirements_text(
+    user_prompt: str,
+    pack_id: str | None,
+    *,
+    expected_hash: str | None = None,
+) -> tuple[str, DocumentPromptContext | None]:
+    if pack_id is None:
+        return user_prompt, None
+    try:
+        spec = document_pack_service.get_spec(pack_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="document pack not found") from exc
+    context = build_document_prompt_context(spec)
+    if expected_hash is not None and expected_hash != context.sha256:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Les pièces jointes ont changé depuis l’analyse. "
+                "Relancez l’analyse avant de générer le design."
+            ),
+        )
+    return combine_prompt_with_document_context(user_prompt, context), context
 
 
 @app.post("/designs/{workflow_id}/edit", response_model=EditDesignResponse)
@@ -978,6 +1065,45 @@ async def _read_limited_request_body(request: Request, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+@app.delete("/document-packs/{pack_id}")
+def delete_document_pack(
+    pack_id: str,
+    chat_id: Annotated[str | None, Query(pattern=CHAT_ID_PATTERN)] = None,
+) -> dict:
+    with workspace_store.creation_lock:
+        linked_chats = workspace_store.chats_linked_to_document_pack(pack_id)
+        if linked_chats and (chat_id is None or linked_chats != [chat_id]):
+            raise HTTPException(
+                status_code=409,
+                detail="Ces pièces jointes sont encore utilisées par une autre conversation.",
+            )
+        if chat_id is not None:
+            chat = workspace_store.get_chat(chat_id)
+            if chat["document_pack_id"] != pack_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Ces pièces jointes ne sont plus liées à cette conversation.",
+                )
+            workspace_store.update_chat(chat_id, ChatUpdate(document_pack_id=None))
+        try:
+            return document_pack_service.delete_pack(pack_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="document pack not found") from exc
+        except Exception:
+            try:
+                document_pack_service.get_summary(pack_id)
+            except KeyError:
+                pass
+            else:
+                if chat_id is None:
+                    raise
+                workspace_store.update_chat(
+                    chat_id,
+                    ChatUpdate(document_pack_id=pack_id),
+                )
+            raise
+
+
 @app.get("/document-packs")
 def list_document_packs() -> list[dict]:
     return document_pack_service.list_packs()
@@ -1053,7 +1179,10 @@ def get_document_pack_capabilities() -> dict:
                 "Docling est détecté en import seulement, pas actif par défaut.",
                 "OCR dépend de Tesseract et des langues installées localement.",
                 "DXF extrait texte/couches ; DWG exige un convertisseur local.",
-                "La génération depuis pack peut rester bloquée si des champs essentiels manquent.",
+                (
+                    "Une pièce jointe enrichit une demande écrite; "
+                    "elle ne lance jamais un design seule."
+                ),
             ],
             "truth": {
                 "advanced_ingestion": False,
@@ -1061,11 +1190,13 @@ def get_document_pack_capabilities() -> dict:
                 "ocr_requires_local_tesseract_languages": True,
                 "dwg_requires_local_converter": True,
                 "processing_mode": "synchronous_local",
-                "generation_from_pack": "available_when_qa_ready_and_mapping_mapped",
+                "generation_from_pack": "not_supported",
+                "prompt_required": True,
+                "deletion": "local_pack_and_canonical_memory",
             },
             "next_action": (
-                "Joindre des documents techniques ou un ZIP, vérifier les champs manquants, "
-                "corriger si nécessaire, puis générer le design."
+                "Joignez des documents techniques ou un ZIP, puis décrivez le design attendu "
+                "dans la conversation."
             ),
             "capabilities": payload.copy(),
         }
@@ -1175,87 +1306,6 @@ def apply_document_pack_correction(pack_id: str, correction: DocumentPackCorrect
         return document_pack_service.apply_correction(pack_id, correction).model_dump()
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="document pack not found") from exc
-
-
-@app.post(
-    "/document-packs/{pack_id}/generate-design",
-    response_model=DocumentPackGenerateDesignResponse,
-)
-def generate_design_from_document_pack(
-    pack_id: str,
-    request: DocumentPackGenerateDesignRequest | None = None,
-) -> dict:
-    if request and request.chat_id:
-        return workspace_store.create_for_chat(
-            request.chat_id,
-            lambda: _generate_design_from_document_pack(pack_id, request),
-            document_pack_id=pack_id,
-        )
-    return _generate_design_from_document_pack(pack_id, request)
-
-
-def _generate_design_from_document_pack(
-    pack_id: str, request: DocumentPackGenerateDesignRequest | None = None
-) -> dict:
-    multimodal_consent = request.multimodal_consent if request else "disabled"
-    try:
-        with document_pack_service.generation_readiness_snapshot(pack_id) as (
-            _spec,
-            qa_report,
-            mapping,
-            ready,
-        ):
-            if not ready:
-                return {
-                    "pack_id": pack_id,
-                    "status": "blocked",
-                    "mapping": mapping.model_dump(),
-                    "extraction_report": {
-                        "source": "project_design_spec",
-                        "prompt_text_reparse": False,
-                        "qa_status": qa_report.status,
-                        "qa_ready_to_generate": qa_report.ready_to_generate,
-                        "qa_blocking_issues": qa_report.blocking_issues,
-                        "mapping_loss_report": mapping.mapping_loss_report,
-                        "multimodal_consent": multimodal_consent,
-                        "remote_vision_analysis": "not_executed",
-                    },
-                }
-            requirements = RequirementSpec.model_validate(mapping.requirements)
-            try:
-                design = workflow_service.create_design_from_requirements(
-                    requirements=requirements,
-                    detail_level="high",
-                    source_label="project_design_spec",
-                    multimodal_consent=multimodal_consent,
-                )
-            except WorkflowBusyError as exc:
-                raise HTTPException(
-                    status_code=429,
-                    detail=str(exc),
-                    headers={"Retry-After": "5"},
-                ) from exc
-            except WorkflowStorageError as exc:
-                raise HTTPException(status_code=507, detail=str(exc)) from exc
-            if design.get("workflow_id"):
-                document_pack_service.mark_generated_workflow(pack_id, design["workflow_id"])
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="document pack not found") from exc
-    return {
-        "pack_id": pack_id,
-        "status": "pending",
-        "mapping": mapping.model_dump(),
-        "extraction_report": {
-            "source": "project_design_spec",
-            "prompt_text_reparse": False,
-            "provider": "project_design_spec",
-            "fallback_used": False,
-            "mapping_loss_report": mapping.mapping_loss_report,
-            "multimodal_consent": multimodal_consent,
-            "remote_vision_analysis": "not_executed",
-        },
-        **design,
-    }
 
 
 @app.get("/memory/stats")

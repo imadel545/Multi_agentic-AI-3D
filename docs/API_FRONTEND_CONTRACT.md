@@ -77,10 +77,7 @@ Supprimer ce classement conserve le design et son historique. Aucun modèle
 | `POST` | `/assets/library/{file_id}/probe` | Action explicite du drawer Bibliothèque. Retourne unités, entités, présence ACIS/maillage et route de conversion; ne promeut pas le fichier. |
 | `POST` | `/document-packs` | Uploader un ZIP brut ou plusieurs fichiers via `multipart/form-data`. |
 | `GET` | `/document-packs/{pack_id}` | Résumé du pack. |
-| `GET` | `/document-packs/{pack_id}/consolidated-spec` | Spec consolidée. |
-| `GET` | `/document-packs/{pack_id}/qa` | QA du pack. |
-| `POST` | `/document-packs/{pack_id}/corrections` | Appliquer une correction manuelle. |
-| `POST` | `/document-packs/{pack_id}/generate-design` | Générer un design depuis le pack. |
+| `DELETE` | `/document-packs/{pack_id}?chat_id=...` | Détacher puis supprimer les pièces locales de la conversation. |
 
 `POST /designs` accepte un `chat_id` optionnel. Lorsque présent, le backend
 sérialise la création et lie tout workflow accepté à la conversation avant de
@@ -88,14 +85,11 @@ répondre. Une conversation déjà liée refuse une seconde création. `POST
 /document-packs` accepte le même rattachement via `X-Chat-ID`; la réservation
 empêche la suppression concurrente de la conversation pendant l'ingestion.
 
-`POST /designs` accepte aussi `options.multimodal_consent` et
-`POST /document-packs/{pack_id}/generate-design` accepte le même consentement
-dans son body optionnel. Les valeurs publiques sont `disabled`,
+`POST /designs` accepte aussi `options.multimodal_consent`. Les valeurs publiques sont `disabled`,
 `allow_input_analysis` et `allow_input_and_visual_review`; la valeur par défaut
 est toujours `disabled`. Le consentement est persisté avec le workflow. Le
-contrat actuel du document pack retourne `remote_vision_analysis=not_executed`:
-cocher le consentement n'envoie pas encore automatiquement une pièce jointe à
-Qwen.
+document joint reste un contexte de la demande; il ne possède aucune route de
+génération autonome.
 
 `GET /health` est aussi un contrôle d'identité du service, pas seulement un
 ping. Le frontend exige `status=ok`,
@@ -301,17 +295,12 @@ compilable du programme; un adaptateur uniforme borné peut uniquement corriger
 ce dépassement. `placement_context` est conservé comme provenance, pas encore
 interprété ni certifié comme contrainte spatiale.
 
-Le résumé document-pack expose `blocking_fields`; son compteur de champs
-bloquants, le rapport QA, le gate de génération et le formulaire de correction
-doivent rester cohérents.
-
-Pour restaurer une revue documentaire après rechargement, le frontend peut
+Pour restaurer les pièces jointes après rechargement, le frontend peut
 conserver uniquement un pointeur versionné `{version, packId}` dans le stockage
-local. Le contenu du pack, ses conflits, ses champs manquants, sa QA, ses
-documents, extractions, provenances, étapes de traitement et sa spec consolidée
-doivent être relus depuis `/document-packs/{pack_id}/*`. Le stockage navigateur
-n'est jamais une source de vérité documentaire et son indisponibilité ne doit
-pas interrompre le studio.
+local. Le résumé compact est relu depuis `GET /document-packs/{pack_id}`. Les
+extractions et diagnostics restent des preuves backend et ne sont pas rendus
+dans le chat. Le stockage navigateur n'est jamais une source de vérité
+documentaire et son indisponibilité ne doit pas interrompre le studio.
 
 Mutating generation routes can return HTTP `507` when local storage is below
 the configured safe threshold. The frontend must keep the current valid design
@@ -449,15 +438,19 @@ comme une sortie strictement décodée.
 
 ## Séquence frontend recommandée
 
-La commande d'ajout de pièces jointes ouvre une surface d'intake explicitement
-déclenchée par l'utilisateur. Le résumé principal peut indiquer le nombre de
-documents, les points à confirmer et le score QA, mais il ne doit pas publier le
-`pack_id`, les enums internes ou les messages bruts d'extraction. Une revue
-détaillée est une divulgation secondaire et repliable; elle reste alimentée par
-`GET /document-packs/{pack_id}`, `/consolidated-spec` et `/qa`. La conversation
+La commande d'ajout de pièces jointes se comporte comme une pièce jointe de
+chat. Le compositeur affiche seulement une pastille compacte avec le nombre de
+fichiers et une action `×`. Le `pack_id`, les champs extraits, les scores, les
+enums et les messages techniques restent hors de l'interface. La conversation
 et la progression affichent les demandes enregistrées et les événements/phase
 observés; elles ne doivent pas inventer une réponse assistant ni présenter un
 flux de tokens lorsqu'aucun endpoint de token streaming n'existe.
+
+L'action `×` appelle `DELETE /document-packs/{pack_id}?chat_id=...`. Le backend
+détache la référence de la conversation, purge la mémoire documentaire et
+supprime les fichiers locaux sous verrou. Si la suppression physique échoue, le
+lien conversation est restauré. Un pack partagé est refusé. Une conception
+exige toujours un prompt non vide; l'import seul ne crée jamais de workflow.
 
 1. `GET /health`.
 2. `GET /studio/summary` pour backend, Blender, Groq, RAG NVIDIA, assets et warnings.
@@ -484,7 +477,7 @@ Le frontend doit rendre:
 - exécution spécialisée depuis `payload.human_label`,
   `payload.progress_message`, `payload.actor_kind` et
   `payload.decision_authority`; ne pas appeler Blender/QA/services « agents LLM »;
-- drawers QA, timeline, scene plan, documents, assets, versions;
+- drawers QA, timeline, scene plan, livrables, assets, versions;
 - la provenance composant via `component_proofs_url`, avec état de chargement,
   erreur et retry indépendants des autres drawers;
 - intent hors catalogue avant génération, puis modèle, mode de sortie, enveloppe,
@@ -497,12 +490,13 @@ documents et versions ont des états de chargement/erreur/retry indépendants. L
 frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
 mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
 ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
-La suite courante compte 180 tests Vitest et passe le typecheck/build. Un smoke
-layout current-tree en lecture seule a chargé le GLB certifié à 1440 x 1000 et
-1047 x 2748. Le smoke connecté de l'arbre de convergence immédiatement
-précédent a confirmé la création, le flux SSE, le GLB/WebGL réel, le RAG et les
-drawers; les mutations navigateur exhaustives restent une gate distincte
-ouverte.
+La suite courante compte 225 tests Vitest et passe le typecheck/build. Le smoke
+HTTP du 2026-09-14 confirme l'upload lié au chat, le contexte hashé, l'absence de
+workflow créé par l'import, le rejet de l'ancienne route de génération autonome
+et la suppression avec détachement. Un Chrome neuf charge le GLB courant sans
+erreur ni alerte console et montre le compositeur compact. Ce contrôle ne prouve
+pas une nouvelle génération Blender; les mutations navigateur exhaustives
+restent une gate distincte ouverte.
 
 `/designs/{id}/edit` expose, en cas de succès:
 

@@ -520,7 +520,7 @@ describe("TelecomStudioApi", () => {
     );
   });
 
-  it("uploads document-pack ZIPs without creating a new product entity", async () => {
+  it("uploads a ZIP as chat attachment context", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       jsonResponse({
         pack_id: "pack_1",
@@ -535,7 +535,7 @@ describe("TelecomStudioApi", () => {
     const result = await client.createDocumentPack([file]);
 
     expect(result.pack_id).toBe("pack_1");
-    expect(result.can_generate_design).toBe(true);
+    expect(result.document_count).toBe(3);
     expect(fetcher).toHaveBeenCalledWith(new URL("/document-packs", "http://127.0.0.1:8000"), {
       body: file,
       headers: {
@@ -599,272 +599,40 @@ describe("TelecomStudioApi", () => {
     });
   });
 
-  it("loads the real document-pack review and submits a bounded correction", async () => {
-    const fetcher = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          pack_id: "pack_1",
-          status: "processed",
-          document_count: 2,
-          missing_blocking_count: 1,
-          conflict_count: 0,
-          can_generate_design: false,
-          qa_score: 0.6
-        })
-      )
-      .mockResolvedValueOnce(jsonResponse([]))
-      .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            field: "radio.hba_m",
-            value: null,
-            status: "missing",
-            confidence: 0,
-            severity: "blocking"
-          }
-        ])
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          pack_id: "pack_1",
-          status: "warning",
-          score: 0.6,
-          checks: [],
-          blocking_issues: ["radio.hba_m"],
-          ready_to_generate: false,
-          ready_confidence: 0.49
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            document_id: "doc_1",
-            path: "plans/elevation.pdf",
-            filename: "elevation.pdf",
-            extension: ".pdf",
-            size_bytes: 1200,
-            sha256: "a".repeat(64),
-            category: "elevation_plan",
-            relevance_score: 0.98,
-            confidence: 0.95,
-            reason: "Contient les hauteurs radio",
-            extractability: "text",
-            priority: "high",
-            purpose: "needed_for_design",
-            used_for_design: true,
-            why_used_or_ignored: "Source principale HBA",
-            cad_status: "not_cad",
-            extraction_status: "extracted",
-            processing_tools: ["pdf_text"],
-            processing_warnings: [],
-            duplicate_of: null
-          }
-        ])
-      )
-      .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            field: "radio.hba_m",
-            value: 24,
-            confidence: 0.95,
-            source: {
-              document_id: "doc_1",
-              file: "elevation.pdf",
-              source_type: "text",
-              page: 3,
-              evidence: "HBA antennes: 24 m"
-            }
-          }
-        ])
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          "radio.hba_m": [
-            {
-              document_id: "doc_1",
-              file: "elevation.pdf",
-              source_type: "text",
-              page: 3,
-              evidence: "HBA antennes: 24 m"
-            }
-          ]
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          pack_id: "pack_1",
-          documents: [
-            {
-              document_id: "doc_1",
-              path: "plans/elevation.pdf",
-              extension: ".pdf",
-              category: "elevation_plan",
-              extractability: "text",
-              extraction_status: "extracted",
-              cad_status: "not_cad",
-              processing_tools: ["pdf_text"],
-              processing_warnings: []
-            }
-          ],
-          warnings: [],
-          tool_status: { pdf: "available" },
-          groq_rejected_fields: []
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          pack_id: "pack_1",
-          source_mode: "mixed",
-          llm_provider: "groq",
-          llm_fallback_used: false,
-          confidence_summary: { overall: 0.8 },
-          processing_warnings: [],
-          document_references: [],
-          provenance_map: {}
-        })
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          pack_id: "pack_1",
-          status: "processed",
-          document_count: 2,
-          missing_blocking_count: 0,
-          conflict_count: 0,
-          can_generate_design: true,
-          qa_score: 1
-        })
-      );
-    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
-
-    const review = await client.documentPackReview("pack_1");
-    expect(review.missingFields?.[0]?.field).toBe("radio.hba_m");
-    await client.applyDocumentPackCorrection("pack_1", {
-      field: "radio.hba_m",
-      value: [24, 24, 24],
-      reason: "Plan d’élévation vérifié"
-    });
-
-    expect(fetcher).toHaveBeenNthCalledWith(
-      10,
-      new URL("/document-packs/pack_1/corrections", "http://127.0.0.1:8000"),
-      {
-        body: JSON.stringify({
-          field: "radio.hba_m",
-          value: [24, 24, 24],
-          reason: "Plan d’élévation vérifié"
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST"
-      }
-    );
-  });
-
-  it("keeps successful document-review sections and recovers the failed section on retry", async () => {
-    let qaAvailable = false;
-    const fetcher = vi.fn(async (request: RequestInfo | URL) => {
-      const requestUrl =
-        request instanceof URL
-          ? request
-          : new URL(typeof request === "string" ? request : request.url);
-      const path = requestUrl.pathname;
-      if (path.endsWith("/qa")) {
-        if (!qaAvailable) {
-          return jsonResponse({ detail: "temporary QA outage" }, { status: 503 });
-        }
-        return jsonResponse({
-          pack_id: "pack_retry",
-          status: "passed",
-          score: 1,
-          checks: [],
-          warnings: [],
-          blocking_issues: [],
-          ready_to_generate: true,
-          ready_confidence: 1,
-          recommended_user_actions: [],
-          tool_failures: [],
-          memory_writeback: {}
-        });
-      }
-      if (path.endsWith("/conflicts") || path.endsWith("/missing-fields")) {
-        return jsonResponse([]);
-      }
-      if (path.endsWith("/documents") || path.endsWith("/extractions")) {
-        return jsonResponse([]);
-      }
-      if (path.endsWith("/provenance")) {
-        return jsonResponse({});
-      }
-      if (path.endsWith("/processing")) {
-        return jsonResponse({
-          pack_id: "pack_retry",
-          documents: [],
-          warnings: [],
-          tool_status: {},
-          groq_rejected_fields: []
-        });
-      }
-      if (path.endsWith("/consolidated-spec")) {
-        return jsonResponse({
-          pack_id: "pack_retry",
-          source_mode: "deterministic",
-          llm_provider: null,
-          llm_fallback_used: true,
-          confidence_summary: {},
-          processing_warnings: [],
-          document_references: [],
-          provenance_map: {}
-        });
-      }
-      return jsonResponse({
-        pack_id: "pack_retry",
-        status: "processed",
-        document_count: 1,
-        missing_blocking_count: 0,
-        conflict_count: 0,
-        can_generate_design: true,
-        qa_score: 1
-      });
-    });
-    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
-
-    const partial = await client.documentPackReview("pack_retry");
-    expect(partial.summary?.pack_id).toBe("pack_retry");
-    expect(partial.documents).toEqual([]);
-    expect(partial.qa).toBeNull();
-    expect(partial.sectionErrors?.qa).toEqual({ status: 503, retryable: true });
-
-    qaAvailable = true;
-    const recovered = await client.documentPackReview("pack_retry");
-    expect(recovered.qa?.ready_to_generate).toBe(true);
-    expect(recovered.sectionErrors).toEqual({});
-    expect(
-      fetcher.mock.calls.filter(([request]) => (request as URL).pathname.endsWith("/qa"))
-    ).toHaveLength(2);
-  });
-
-  it("starts document-pack generation through the existing workflow_id contract", async () => {
+  it("loads the compact attachment summary", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       jsonResponse({
         pack_id: "pack_1",
-        status: "started",
-        workflow_id: "wf_from_pack"
+        status: "processed",
+        document_count: 2,
+        missing_blocking_count: 4,
+        can_generate_design: true
       })
     );
     const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
 
-    await expect(
-      client.generateDesignFromDocumentPack("pack_1", "allow_input_analysis")
-    ).resolves.toMatchObject({
-      workflow_id: "wf_from_pack"
+    await expect(client.documentPackSummary("pack_1")).resolves.toMatchObject({
+      pack_id: "pack_1",
+      status: "processed",
+      document_count: 2
     });
     expect(fetcher).toHaveBeenCalledWith(
-      new URL("/document-packs/pack_1/generate-design", "http://127.0.0.1:8000"),
-      {
-        body: JSON.stringify({ multimodal_consent: "allow_input_analysis" }),
-        headers: { "content-type": "application/json" },
-        method: "POST"
-      }
+      new URL("/document-packs/pack_1", "http://127.0.0.1:8000")
+    );
+  });
+
+  it("deletes the attachment and unlinks it from the active chat", async () => {
+    const fetcher = vi.fn().mockResolvedValue(jsonResponse({ status: "deleted" }));
+    const client = new TelecomStudioApi("http://127.0.0.1:8000", fetcher);
+    const chatId = `chat_${"a".repeat(32)}`;
+
+    await expect(client.deleteDocumentPack("pack_1", chatId)).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL(
+        `/document-packs/pack_1?chat_id=${encodeURIComponent(chatId)}`,
+        "http://127.0.0.1:8000"
+      ),
+      { method: "DELETE" }
     );
   });
 

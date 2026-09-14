@@ -1,4 +1,4 @@
-import { FilePlus2, Files, Trash2, UploadCloud } from "lucide-react";
+import { FilePlus2, Files, UploadCloud, X } from "lucide-react";
 import { useMemo, useState, type ChangeEvent, type DragEvent } from "react";
 import type { DocumentPackCapabilities } from "../api/schemas";
 
@@ -70,7 +70,7 @@ export function DocumentFileComposer({
         <UploadCloud size={18} aria-hidden="true" />
         <span>
           {busy
-            ? "Analyse locale en cours…"
+            ? "Ajout en cours…"
             : "Déposez des PDF, images, plans, tableaux ou un ZIP"}
         </span>
         <small>Plusieurs fichiers peuvent être joints ensemble.</small>
@@ -90,7 +90,7 @@ export function DocumentFileComposer({
         <div className="document-file-queue">
           <div>
             <Files size={16} aria-hidden="true" />
-            <strong>{files.length} pièce(s) prête(s) à analyser</strong>
+            <strong>{files.length} pièce(s) prête(s) à joindre</strong>
             <small>{formatFileSize(files.reduce((total, file) => total + file.size, 0))}</small>
           </div>
           <ul>
@@ -103,6 +103,7 @@ export function DocumentFileComposer({
                 <small>{formatFileSize(file.size)}</small>
                 <button
                   aria-label={`Retirer ${file.name}`}
+                  title={`Retirer ${file.name}`}
                   disabled={busy}
                   onClick={() =>
                     setFiles((current) =>
@@ -111,7 +112,7 @@ export function DocumentFileComposer({
                   }
                   type="button"
                 >
-                  <Trash2 size={14} aria-hidden="true" />
+                  <X size={14} aria-hidden="true" />
                 </button>
               </li>
             ))}
@@ -122,7 +123,7 @@ export function DocumentFileComposer({
             onClick={() => void submit()}
             type="button"
           >
-            {busy ? "Analyse en cours…" : `Analyser ${files.length} pièce(s)`}
+            {busy ? "Ajout en cours…" : `Joindre ${files.length} pièce(s)`}
           </button>
         </div>
       ) : null}
@@ -144,7 +145,7 @@ export function documentSelectionError(
   }
   const zipFiles = files.filter((file) => file.name.toLowerCase().endsWith(".zip"));
   if (zipFiles.length && files.length > 1) {
-    return "Un ZIP doit être analysé seul. Retirez les autres fichiers ou décompressez le ZIP.";
+    return "Un ZIP doit être joint seul. Retirez les autres fichiers ou décompressez le ZIP.";
   }
   const seenNames = new Set<string>();
   const duplicateName = files.find((file) => {
@@ -156,7 +157,7 @@ export function documentSelectionError(
     return false;
   });
   if (duplicateName) {
-    return `Deux pièces portent le nom ${duplicateName.name}. Renommez-en une avant l’analyse.`;
+    return `Deux pièces portent le nom ${duplicateName.name}. Renommez-en une avant de les joindre.`;
   }
   const limits = capabilities?.limits;
   const maxCount = limits?.max_member_count;

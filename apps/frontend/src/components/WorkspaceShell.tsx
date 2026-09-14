@@ -5,19 +5,20 @@ import {
   MessageSquare,
   ArrowUpRight,
   MoreHorizontal,
-  RadioTower,
-  PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
 import App from "../App";
 import { api } from "../api/client";
 import { WorkspaceApi, type Chat, type Project } from "../api/workspace";
 import type { WorkflowStatus } from "../api/schemas";
+import {
+  WorkspaceBrand,
+  WorkspaceHistory,
+  WorkspaceWelcome,
+} from "./WorkspacePresentation";
 import "../workspace.css";
-
 const DRAFT_SAVE_ERROR =
   "Le brouillon n’a pas pu être enregistré. Votre texte reste affiché; réessayez avant de changer de conversation.";
-
 export default function WorkspaceShell() {
   const client = useMemo(() => new WorkspaceApi(api.baseUrl), []);
   const [initialSelection] = useState(() => {
@@ -302,17 +303,11 @@ export default function WorkspaceShell() {
   return (
     <div className={`product-shell${sidebarOpen ? "" : " sidebar-collapsed"}`} aria-busy={navigationLocked || !restored}>
       <aside className="project-sidebar" id="workspace-sidebar" hidden={!sidebarOpen} aria-label="Projets et conversations">
-        <div className="workspace-brand">
-          <RadioTower size={22} />
-          <strong>
-            Telecom Studio<span>Conception assistée par IA</span>
-          </strong>
-          <button ref={sidebarControl} className="sidebar-toggle" type="button" aria-label="Replier les projets"
-            aria-controls="workspace-sidebar" aria-expanded={sidebarOpen}
-            onClick={toggleSidebar}>
-            <PanelLeftClose size={18} />
-          </button>
-        </div>
+        <WorkspaceBrand
+          sidebarControl={sidebarControl}
+          sidebarOpen={sidebarOpen}
+          onToggle={toggleSidebar}
+        />
         <button
           type="button"
           className="workspace-new"
@@ -374,6 +369,7 @@ export default function WorkspaceShell() {
             <div className="workspace-project-node" key={project.project_id}>
               <div className="workspace-project-row">
                 <button
+                  aria-controls={`workspace-project-chats-${project.project_id}`}
                   aria-expanded={projectId === project.project_id}
                   className={
                     projectId === project.project_id
@@ -385,14 +381,28 @@ export default function WorkspaceShell() {
                   aria-current={
                     projectId === project.project_id ? "page" : undefined
                   }
-                  onClick={() =>
-                    void perform(() => selectProject(project.project_id))
-                  }
+                  onClick={() => {
+                    if (projectId !== project.project_id)
+                      void perform(() => selectProject(project.project_id));
+                  }}
                 >
-                  <Folder size={16} />
+                  <Folder size={16} aria-hidden="true" />
                   <span>{project.title}</span>
                 </button>
-                <div className="workspace-item-menu">
+                <div className="workspace-project-actions">
+                  {projectId === project.project_id ? (
+                    <button
+                      aria-label="Nouvelle conversation"
+                      className="workspace-new-chat"
+                      disabled={navigationLocked}
+                      onClick={() => void perform(createChat)}
+                      title="Nouvelle conversation"
+                      type="button"
+                    >
+                      <Plus size={17} aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  <div className="workspace-item-menu">
                   <button
                     aria-controls={`workspace-project-actions-${project.project_id}`}
                     aria-expanded={openMenu === `project:${project.project_id}`}
@@ -411,7 +421,7 @@ export default function WorkspaceShell() {
                     }}
                     type="button"
                   >
-                    <MoreHorizontal size={17} />
+                    <MoreHorizontal aria-hidden="true" size={17} />
                   </button>
                   {openMenu === `project:${project.project_id}` ? (
                     <div
@@ -470,24 +480,17 @@ export default function WorkspaceShell() {
                       </button>
                     </div>
                   ) : null}
+                  </div>
                 </div>
               </div>
               {projectId === project.project_id ? (
                 <section
                   aria-label={`Conversations du projet ${project.title}`}
                   className="workspace-chats"
+                  id={`workspace-project-chats-${project.project_id}`}
                 >
                   <div className="workspace-section-title">
                     <span>Conversations</span>
-                    <button
-                      aria-label="Nouvelle conversation"
-                      disabled={navigationLocked}
-                      onClick={() => void perform(createChat)}
-                      title="Nouvelle conversation"
-                      type="button"
-                    >
-                      <Plus size={17} />
-                    </button>
                   </div>
                   {chats.map((item) => (
                     <div className="workspace-chat-row" key={item.chat_id}>
@@ -502,7 +505,7 @@ export default function WorkspaceShell() {
                         onClick={() => void perform(() => chooseChat(item))}
                         type="button"
                       >
-                        <MessageSquare size={15} />
+                        <MessageSquare aria-hidden="true" size={15} />
                         <span>{item.title}</span>
                       </button>
                       <div className="workspace-item-menu">
@@ -524,7 +527,7 @@ export default function WorkspaceShell() {
                           }}
                           type="button"
                         >
-                          <MoreHorizontal size={17} />
+                          <MoreHorizontal aria-hidden="true" size={17} />
                         </button>
                         {openMenu === `chat:${item.chat_id}` ? (
                           <div
@@ -597,53 +600,27 @@ export default function WorkspaceShell() {
           </div>
         )}
         {history ? (
-          <section className="workspace-history">
-            <h1>Retrouver un design</h1>
-            <p>
-              Rattachez un résultat existant à une conversation de ce projet.
-              Ses versions et messages sont conservés.
-            </p>
-            <button type="button" onClick={() => setHistory(null)}>
-              Fermer
-            </button>
-            {history.map((design) => (
-              <button
-                type="button"
-                disabled={navigationLocked}
-                key={design.workflow_id}
-                onClick={() =>
-                  void perform(async () => {
-                    if (!projectId) return;
-                    await saveDraft();
-                    const value = await client.createChat(
-                      projectId,
-                      `Design du ${new Date(design.created_at ?? "").toLocaleDateString("fr-FR")}`,
-                      design.workflow_id,
-                    );
-                    setChats((items) => [value, ...items]);
-                    setChat(value);
-                    draft.current = "";
-                    setHistory(null);
-                    setRestored(true);
-                  })
-                }
-              >
-                <span>
-                  {new Date(design.created_at ?? "").toLocaleString("fr-FR")}
-                </span>
-                <span>
-                  {design.status === "completed"
-                    ? "Résultat disponible"
-                    : design.status === "running"
-                      ? "En cours"
-                      : "À examiner"}
-                </span>
-              </button>
-            ))}
-            {history.length === 0 ? (
-              <p>Aucun design non classé n’est disponible.</p>
-            ) : null}
-          </section>
+          <WorkspaceHistory
+            designs={history}
+            navigationLocked={navigationLocked}
+            onClose={() => setHistory(null)}
+            onAttach={(design) =>
+              void perform(async () => {
+                if (!projectId) return;
+                await saveDraft();
+                const value = await client.createChat(
+                  projectId,
+                  `Design du ${new Date(design.created_at ?? "").toLocaleDateString("fr-FR")}`,
+                  design.workflow_id,
+                );
+                setChats((items) => [value, ...items]);
+                setChat(value);
+                draft.current = "";
+                setHistory(null);
+                setRestored(true);
+              })
+            }
+          />
         ) : chat ? (
           <App
             key={chat.chat_id}
@@ -687,6 +664,20 @@ export default function WorkspaceShell() {
                   : current,
               );
             }}
+            onDocumentPackDetached={async () => {
+              setChats((items) =>
+                items.map((item) =>
+                  item.chat_id === chat.chat_id
+                    ? { ...item, document_pack_id: null }
+                    : item,
+                ),
+              );
+              setChat((current) =>
+                current?.chat_id === chat.chat_id
+                  ? { ...current, document_pack_id: null }
+                  : current,
+              );
+            }}
             onBusyChange={setWorking}
             onMutationBusyChange={setMutationBusy}
             onNewChat={(failedPrompt = "") =>
@@ -694,32 +685,13 @@ export default function WorkspaceShell() {
             }
           />
         ) : (
-          <section className="workspace-welcome">
-            <RadioTower size={42} />
-            <p>Votre espace de conception</p>
-            <h1>
-              {projectId
-                ? "Une conversation, un design."
-                : "Du projet au modèle 3D."}
-            </h1>
-            <p>
-              {projectId
-                ? "Décrivez votre intention, ajoutez vos documents et faites évoluer le modèle au fil de la conversation."
-                : "Organisez vos sites et vos échanges, puis concevez et modifiez vos modèles dans un même espace."}
-            </p>
-            <button
-              type="button"
-              disabled={navigationLocked}
-              onClick={() =>
-                projectId ? void perform(createChat) : setNewProject(true)
-              }
-            >
-              <Plus size={18} />
-              {projectId
-                ? "Commencer une conversation"
-                : "Créer mon premier projet"}
-            </button>
-          </section>
+          <WorkspaceWelcome
+            hasProject={Boolean(projectId)}
+            navigationLocked={navigationLocked}
+            onStart={() =>
+              projectId ? void perform(createChat) : setNewProject(true)
+            }
+          />
         )}
       </div>
     </div>

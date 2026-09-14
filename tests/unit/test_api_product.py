@@ -1208,6 +1208,10 @@ def test_document_pack_capabilities_expose_limited_frontend_contract() -> None:
     payload = client.get("/document-packs/capabilities").json()
 
     assert payload["document_pack_status"] == "limited"
+    assert payload["truth"]["generation_from_pack"] == "not_supported"
+    assert payload["truth"]["prompt_required"] is True
+    assert payload["truth"]["deletion"] == "local_pack_and_canonical_memory"
+    assert "conversation" in payload["next_action"]
     assert payload["supported_upload_format"] == "zip_or_multiple_files"
     assert payload["supported_inputs"]["upload"] == "zip_or_multiple_files"
     assert ".pdf" in payload["supported_extensions"]
@@ -1318,12 +1322,8 @@ def test_frontend_v1_openapi_contract_has_typed_public_surfaces() -> None:
         ]["anyOf"][0]["$ref"]
         == "#/components/schemas/AssemblyConstraintSummary"
     )
-    assert (
-        schema["paths"]["/document-packs/{pack_id}/generate-design"]["post"]["responses"]["200"][
-            "content"
-        ]["application/json"]["schema"]["$ref"]
-        == "#/components/schemas/DocumentPackGenerateDesignResponse"
-    )
+    assert "/document-packs/{pack_id}/generate-design" not in schema["paths"]
+    assert "delete" in schema["paths"]["/document-packs/{pack_id}"]
 
 
 @pytest.mark.blender_runtime

@@ -486,6 +486,7 @@ class WorkflowService:
         use_llm: bool | None = None,
         _synchronous: bool = False,
         multimodal_consent: str = "disabled",
+        conversation_text: str | None = None,
     ) -> dict:
         self._sync_output_services()
         self._ensure_storage_capacity()
@@ -505,7 +506,10 @@ class WorkflowService:
             workflow_id,
             "design_created",
             {
-                "conversation_message": {"role": "user", "text": requirements_text},
+                "conversation_message": {
+                    "role": "user",
+                    "text": conversation_text or requirements_text,
+                },
                 "detail_level": detail_level,
                 "use_llm": use_llm,
                 "multimodal_consent": multimodal_consent,
@@ -1293,6 +1297,7 @@ class WorkflowService:
         requirements_text: str,
         detail_level: str,
         use_llm: bool | None = None,
+        document_context: dict | None = None,
     ) -> dict:
         extraction = self.orchestrator.extractor.extract(
             requirements_text, detail_level, enabled=use_llm
@@ -1329,6 +1334,10 @@ class WorkflowService:
                 extraction_provider=extraction_provider or "unavailable",
                 fallback_used=extraction.fallback_used,
                 fallback_reason=fallback_reason,
+                document_pack_id=(document_context or {}).get("pack_id"),
+                document_context_sha256=(document_context or {}).get("sha256"),
+                confirmed_document_fact_count=(document_context or {}).get("confirmed_fact_count"),
+                document_sha256=(document_context or {}).get("document_sha256"),
             )
             if extraction.requirements is not None
             else None

@@ -6,8 +6,8 @@ import {
   AssetLibraryProbeSchema,
   AssetLibrarySearchSchema,
   ComponentProofsSchema,
-  DocumentPackFieldSchema,
-  DocumentPackQASchema,
+  DocumentPackCapabilitiesSchema,
+  DocumentPackSummarySchema,
   MultimodalIntelligenceSchema,
   ParseRequirementsResponseSchema,
   SceneAdaptationCapabilitiesSchema,
@@ -583,30 +583,32 @@ describe("frontend contract schemas", () => {
     })).toThrow();
   });
 
-  it("validates document-pack review fields and QA without requiring raw specs", () => {
-    const field = parseContract("DocumentPackField", DocumentPackFieldSchema, {
-      field: "radio.hba_m",
-      value: null,
-      status: "missing",
-      confidence: 0,
-      severity: "blocking"
-    });
-    const qa = parseContract("DocumentPackQA", DocumentPackQASchema, {
+  it("validates the compact attachment summary and upload capabilities", () => {
+    const summary = parseContract("DocumentPackSummary", DocumentPackSummarySchema, {
       pack_id: "pack_1",
-      status: "warning",
-      score: 0.75,
-      checks: [
-        { name: "no_blocking_missing_fields", passed: false, reason: "HBA is required." }
-      ],
-      blocking_issues: ["radio.hba_m"],
-      ready_to_generate: false,
-      ready_confidence: 0.49,
-      recommended_user_actions: ["Confirm HBA"]
+      status: "processed",
+      document_count: 2
     });
+    const capabilities = parseContract(
+      "DocumentPackCapabilities",
+      DocumentPackCapabilitiesSchema,
+      {
+        document_pack_status: "operational",
+        supported_upload_format: "zip_or_multiple_files",
+        supported_extensions: [".pdf", ".jpg", ".zip"],
+        limits: { max_zip_size_mb: 80 }
+      }
+    );
 
-    expect(field.severity).toBe("blocking");
-    expect(qa.ready_to_generate).toBe(false);
-    expect(qa.checks[0]?.passed).toBe(false);
+    expect(summary.document_count).toBe(2);
+    expect(capabilities.supported_extensions).toContain(".pdf");
+    expect(capabilities.limits?.max_zip_size_mb).toBe(80);
+    expect(() => DocumentPackSummarySchema.parse({
+      pack_id: "pack_2",
+      status: "processed",
+      document_count: 1,
+      local_path: "/tmp/private-pack"
+    })).toThrow();
   });
 
   it("validates resolved adaptation capabilities from the active SceneSpec", () => {

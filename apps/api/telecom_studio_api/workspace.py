@@ -157,6 +157,16 @@ class WorkspaceStore:
                 is not None
             )
 
+    def chats_linked_to_document_pack(self, pack_id: str) -> list[str]:
+        with self.connection() as db:
+            return [
+                row["chat_id"]
+                for row in db.execute(
+                    "SELECT chat_id FROM studio_chats WHERE document_pack_id=? ORDER BY chat_id",
+                    (pack_id,),
+                )
+            ]
+
     def attach_document_pack(self, chat_id: str, pack_id: str) -> dict:
         """Persist an ingested pack before its successful response reaches the client."""
         return self.update_chat(
@@ -167,7 +177,12 @@ class WorkspaceStore:
     def begin_document_pack_ingest(self, chat_id: str) -> None:
         with self.creation_lock, self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
-            self.require(db, "studio_chats", "chat_id", chat_id)
+            current = self.require(db, "studio_chats", "chat_id", chat_id)
+            if current["document_pack_id"]:
+                raise HTTPException(
+                    409,
+                    "Retirez les pièces jointes actuelles avant d’en importer de nouvelles.",
+                )
             try:
                 db.execute(
                     "INSERT INTO studio_pending_pack_links VALUES (?,?)",

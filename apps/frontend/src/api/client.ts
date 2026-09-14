@@ -11,15 +11,7 @@ import {
   ConversationSchema,
   CurrentOperationSchema,
   DocumentPackCapabilitiesSchema,
-  DocumentExtractionSchema,
-  DocumentPackConsolidatedSpecSchema,
-  DocumentPackFieldSchema,
-  DocumentPackGenerateDesignResponseSchema,
-  DocumentPackProvenanceSchema,
-  DocumentPackProcessingSchema,
-  DocumentPackQASchema,
   DocumentPackSummarySchema,
-  DocumentReferenceSchema,
   EditDesignResponseSchema,
   HealthSchema,
   LLMDecisionProvenanceSchema,
@@ -47,10 +39,6 @@ import {
   type Conversation,
   type CurrentOperation,
   type DocumentPackCapabilities,
-  type DocumentPackReview,
-  type DocumentPackReviewSection,
-  type DocumentPackReviewSectionError,
-  type DocumentPackGenerateDesignResponse,
   type DocumentPackSummary,
   type EditDesignResponse,
   type Health,
@@ -84,6 +72,8 @@ export class ApiClientError extends Error {
 
 export type CreateDesignPayload = {
   chat_id?: string;
+  document_pack_id?: string;
+  document_context_hash?: string;
   requirements_text: string;
   confirmed_requirements?: RequirementSpec;
   confirmed_requirements_hash?: string;
@@ -103,17 +93,11 @@ export type EditDesignPayload = {
 );
 
 export type ParseRequirementsPayload = {
+  chat_id?: string;
+  document_pack_id?: string;
   requirements_text: string;
   detail_level?: "low" | "medium" | "high";
   use_llm?: boolean | null;
-};
-
-export type DocumentPackCorrectionPayload = {
-  field: string;
-  value: string | number | boolean | number[] | string[];
-  reason: string;
-  confidence?: number;
-  corrected_by?: string;
 };
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -233,114 +217,19 @@ export class TelecomStudioApi {
     );
   }
 
-  async documentPackReview(packId: string): Promise<DocumentPackReview> {
-    const [
-      summaryResult,
-      conflictsResult,
-      missingFieldsResult,
-      qaResult,
-      documentsResult,
-      extractionsResult,
-      provenanceResult,
-      processingResult,
-      consolidatedSpecResult
-    ] = await Promise.allSettled([
-      this.getJson(`/document-packs/${packId}`),
-      this.getJson(`/document-packs/${packId}/conflicts`),
-      this.getJson(`/document-packs/${packId}/missing-fields`),
-      this.getJson(`/document-packs/${packId}/qa`),
-      this.getJson(`/document-packs/${packId}/documents`),
-      this.getJson(`/document-packs/${packId}/extractions`),
-      this.getJson(`/document-packs/${packId}/provenance`),
-      this.getJson(`/document-packs/${packId}/processing`),
-      this.getJson(`/document-packs/${packId}/consolidated-spec`)
-    ]);
-    const sectionErrors: Partial<
-      Record<DocumentPackReviewSection, DocumentPackReviewSectionError>
-    > = {};
-    const failures: unknown[] = [];
-    const section = <T,>(
-      name: DocumentPackReviewSection,
-      result: PromiseSettledResult<unknown>,
-      parse: (payload: unknown) => T
-    ): T | null => {
-      if (result.status === "rejected") {
-        failures.push(result.reason);
-        sectionErrors[name] = documentPackSectionError(result.reason);
-        return null;
-      }
-      try {
-        return parse(result.value);
-      } catch (error) {
-        failures.push(error);
-        sectionErrors[name] = documentPackSectionError(error);
-        return null;
-      }
-    };
-    const review: DocumentPackReview = {
-      packId,
-      summary: section("summary", summaryResult, (payload) =>
-        parseContract("DocumentPackSummary", DocumentPackSummarySchema, payload)
-      ),
-      conflicts: section("conflicts", conflictsResult, (payload) =>
-        parseContract("DocumentPackConflicts", DocumentPackFieldSchema.array(), payload)
-      ),
-      missingFields: section("missingFields", missingFieldsResult, (payload) =>
-        parseContract("DocumentPackMissingFields", DocumentPackFieldSchema.array(), payload)
-      ),
-      qa: section("qa", qaResult, (payload) =>
-        parseContract("DocumentPackQA", DocumentPackQASchema, payload)
-      ),
-      documents: section("documents", documentsResult, (payload) =>
-        parseContract("DocumentPackDocuments", DocumentReferenceSchema.array(), payload)
-      ),
-      extractions: section("extractions", extractionsResult, (payload) =>
-        parseContract("DocumentPackExtractions", DocumentExtractionSchema.array(), payload)
-      ),
-      provenance: section("provenance", provenanceResult, (payload) =>
-        parseContract("DocumentPackProvenance", DocumentPackProvenanceSchema, payload)
-      ),
-      processing: section("processing", processingResult, (payload) =>
-        parseContract("DocumentPackProcessing", DocumentPackProcessingSchema, payload)
-      ),
-      consolidatedSpec: section("consolidatedSpec", consolidatedSpecResult, (payload) =>
-        parseContract("DocumentPackConsolidatedSpec", DocumentPackConsolidatedSpecSchema, payload)
-      ),
-      sectionErrors
-    };
-    const loadedSectionCount = Object.entries(review).filter(
-      ([name, value]) => !["packId", "sectionErrors"].includes(name) && value !== null
-    ).length;
-    if (loadedSectionCount === 0) {
-      throw failures[0] ?? new ApiClientError(0, `/document-packs/${packId}`, "Review unavailable.");
-    }
-    return review;
-  }
-
-  async applyDocumentPackCorrection(
-    packId: string,
-    correction: DocumentPackCorrectionPayload
-  ): Promise<DocumentPackSummary> {
+  async documentPackSummary(packId: string): Promise<DocumentPackSummary> {
     return parseContract(
       "DocumentPackSummary",
       DocumentPackSummarySchema,
-      await this.postJson(`/document-packs/${packId}/corrections`, correction)
+      await this.getJson(`/document-packs/${encodeURIComponent(packId)}`)
     );
   }
 
-  async generateDesignFromDocumentPack(
-    packId: string,
-    multimodalConsent: MultimodalConsent = "disabled",
-    chatId?: string
-  ): Promise<DocumentPackGenerateDesignResponse> {
-    return parseContract(
-      "DocumentPackGenerateDesignResponse",
-      DocumentPackGenerateDesignResponseSchema,
-      await this.postJson(`/document-packs/${packId}/generate-design`, {
-        multimodal_consent: multimodalConsent,
-        chat_id: chatId
-      })
-    );
+  async deleteDocumentPack(packId: string, chatId?: string): Promise<void> {
+    const query = chatId
+      ? `?${new URLSearchParams({ chat_id: chatId }).toString()}`
+      : "";
+    await this.deleteJson(`/document-packs/${encodeURIComponent(packId)}${query}`);
   }
 
   async listDesigns(limit?: number, offset = 0): Promise<WorkflowStatus[]> {
@@ -544,6 +433,13 @@ export class TelecomStudioApi {
     return this.responseJson(response, endpoint);
   }
 
+  private async deleteJson(endpoint: string): Promise<unknown> {
+    const response = await this.fetcher(new URL(endpoint, this.baseUrl), {
+      method: "DELETE"
+    });
+    return this.responseJson(response, endpoint);
+  }
+
   private async responseJson(response: Response, endpoint: string): Promise<unknown> {
     if (!response.ok) {
       let detail = response.statusText;
@@ -557,14 +453,6 @@ export class TelecomStudioApi {
     }
     return response.json();
   }
-}
-
-function documentPackSectionError(error: unknown): DocumentPackReviewSectionError {
-  const status = error instanceof ApiClientError ? error.status : 0;
-  return {
-    status,
-    retryable: status === 0 || status === 408 || status === 429 || status >= 500
-  };
 }
 
 export function defaultApiBaseUrl(): string {

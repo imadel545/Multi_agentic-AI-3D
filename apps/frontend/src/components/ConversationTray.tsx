@@ -1,24 +1,37 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, MessageSquareText, X } from "lucide-react";
 
 /** A bounded conversation surface that never changes the canvas dimensions. */
 export function ConversationTray({
   children,
   activity,
-  attention
+  attention,
+  open: controlledOpen,
+  onOpenChange
 }: {
   children: ReactNode;
   activity?: ReactNode;
   attention: unknown;
+  /** Keep the tray coordinated with sibling command surfaces when needed. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(Boolean(attention));
+  const [internalOpen, setInternalOpen] = useState(Boolean(attention));
+  const isControlled = controlledOpen !== undefined;
+  const open = controlledOpen ?? internalOpen;
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const feed = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
+
+  const changeOpen = useCallback((next: boolean) => {
+    if (!isControlled) setInternalOpen(next);
+    onOpenChange?.(next);
+  }, [isControlled, onOpenChange]);
+
   useEffect(() => {
-    if (attention) setOpen(true);
-  }, [attention]);
+    if (attention && !open) changeOpen(true);
+  }, [attention, changeOpen, open]);
   useEffect(() => {
     if (!open) return;
     const scrollToLatest = () => {
@@ -38,7 +51,7 @@ export function ConversationTray({
       if (event.key !== "Escape" || event.defaultPrevented ||
           !panel.current?.contains(document.activeElement)) return;
       event.preventDefault();
-      setOpen(false);
+      changeOpen(false);
       trigger.current?.focus();
     };
     window.addEventListener("keydown", close);
@@ -47,7 +60,7 @@ export function ConversationTray({
       observer.disconnect();
       window.removeEventListener("keydown", close);
     };
-  }, [open]);
+  }, [changeOpen, open]);
   return (
     <div className="conversation-tray">
       <div className="conversation-tray-bar">
@@ -56,7 +69,7 @@ export function ConversationTray({
           type="button"
           aria-expanded={open}
           aria-controls="studio-conversation-panel"
-          onClick={() => setOpen(!open)}
+          onClick={() => changeOpen(!open)}
         >
           <MessageSquareText size={16} aria-hidden="true" />
           <span>Conversation</span>
@@ -76,7 +89,7 @@ export function ConversationTray({
             type="button"
             aria-label="Fermer la conversation"
             onClick={() => {
-              setOpen(false);
+              changeOpen(false);
               trigger.current?.focus();
             }}
           >

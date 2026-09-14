@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentFileComposer, documentSelectionError } from "./DocumentFileComposer";
 
 const capabilities = {
@@ -18,6 +18,7 @@ const capabilities = {
 };
 
 describe("DocumentFileComposer", () => {
+  afterEach(() => cleanup());
   it("queues several technical files and submits them together", async () => {
     const onSubmit = vi.fn().mockResolvedValue(true);
     render(
@@ -36,7 +37,7 @@ describe("DocumentFileComposer", () => {
     fireEvent.change(input, { target: { files } });
     expect(screen.getByText("APD.pdf")).toBeInTheDocument();
     expect(screen.getByText("site.jpg")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Analyser 2 pièce(s)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Joindre 2 pièce(s)" }));
 
     expect(onSubmit).toHaveBeenCalledWith(files);
   });
@@ -50,7 +51,28 @@ describe("DocumentFileComposer", () => {
         ],
         capabilities
       )
-    ).toContain("ZIP doit être analysé seul");
+    ).toContain("ZIP doit être joint seul");
+  });
+
+  it("removes one queued file with its explicit close action", () => {
+    render(
+      <DocumentFileComposer
+        busy={false}
+        capabilities={capabilities}
+        onSubmit={vi.fn().mockResolvedValue(true)}
+      />
+    );
+    fireEvent.change(screen.getByLabelText("Ajouter des pièces techniques"), {
+      target: {
+        files: [
+          new File(["pdf"], "elevation.pdf", { type: "application/pdf" }),
+          new File(["image"], "site.jpg", { type: "image/jpeg" })
+        ]
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Retirer elevation.pdf" }));
+    expect(screen.queryByText("elevation.pdf")).not.toBeInTheDocument();
+    expect(screen.getByText("site.jpg")).toBeInTheDocument();
   });
 
   it("rejects duplicate names before the backend archive is assembled", () => {

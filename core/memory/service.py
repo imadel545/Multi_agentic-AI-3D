@@ -239,8 +239,11 @@ class MemoryService:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             ensure_origin_ownership(
-                conn, ("workflow_memory", "design_memory", "error_memory"),
-                "workflow_id", workflow_id, self.origin,
+                conn,
+                ("workflow_memory", "design_memory", "error_memory"),
+                "workflow_id",
+                workflow_id,
+                self.origin,
             )
             conn.execute("DELETE FROM error_memory WHERE workflow_id = ?", (workflow_id,))
             conn.execute(
@@ -387,6 +390,51 @@ class MemoryService:
             "vector_projection": vector_projection,
         }
 
+    def purge_document_pack(self, pack_id: str) -> dict:
+        """Forget one imported pack and rebuild the derived vector projection."""
+
+        if not pack_id or not pack_id.strip():
+            raise ValueError("pack_id is required")
+        with self._write_lock:
+            with self._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                issue_count = conn.execute(
+                    "SELECT COUNT(*) FROM document_pack_issue_memory WHERE pack_id = ?",
+                    (pack_id,),
+                ).fetchone()[0]
+                pack_count = conn.execute(
+                    "SELECT COUNT(*) FROM document_pack_memory WHERE pack_id = ?",
+                    (pack_id,),
+                ).fetchone()[0]
+                conn.execute(
+                    "DELETE FROM document_pack_issue_memory WHERE pack_id = ?",
+                    (pack_id,),
+                )
+                conn.execute(
+                    "DELETE FROM document_pack_memory WHERE pack_id = ?",
+                    (pack_id,),
+                )
+                if pack_count or issue_count:
+                    _bump_vector_revision(conn)
+                    outbox_enqueued = self._enqueue_vector_projection(
+                        conn,
+                        created_at=int(time.time()),
+                    )
+                else:
+                    outbox_enqueued = False
+        if outbox_enqueued:
+            self.last_index_result = MemoryIndexResult(status="pending")
+            self._schedule_reconciliation()
+        return {
+            "status": "purged",
+            "pack_id": pack_id,
+            "deleted": {
+                "document_pack_memory": pack_count,
+                "document_pack_issue_memory": issue_count,
+            },
+            "vector_projection": self.vector_outbox_status(),
+        }
+
     def write_document_pack_summary(
         self,
         *,
@@ -409,8 +457,11 @@ class MemoryService:
                 self.last_index_result = MemoryIndexResult(
                     status="skipped", errors=["memory_origin_conflict"]
                 )
-                return {"status": "skipped", "pack_id": spec.pack_id,
-                        "errors": ["memory_origin_conflict"]}
+                return {
+                    "status": "skipped",
+                    "pack_id": spec.pack_id,
+                    "errors": ["memory_origin_conflict"],
+                }
 
     def _write_document_pack_summary(
         self,
@@ -427,8 +478,11 @@ class MemoryService:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             ensure_origin_ownership(
-                conn, ("document_pack_memory", "document_pack_issue_memory"),
-                "pack_id", spec.pack_id, self.origin,
+                conn,
+                ("document_pack_memory", "document_pack_issue_memory"),
+                "pack_id",
+                spec.pack_id,
+                self.origin,
             )
             conn.execute(
                 "DELETE FROM document_pack_issue_memory WHERE pack_id = ?",

@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from apps.api.telecom_studio_api import main as api_main
 from apps.api.telecom_studio_api.main import app, document_pack_service, workflow_service
-from apps.api.telecom_studio_api.workflow import WorkflowStorageError
 
 
 def test_document_pack_events_normalize_legacy_payload(tmp_path: Path) -> None:
@@ -114,7 +113,174 @@ def test_document_pack_upload_rejects_invalid_chat_identity_before_ingest(monkey
     assert response.status_code == 422
 
 
-def test_document_pack_api_endpoints_and_generate_design_mapping(
+def test_document_pack_upload_rejects_existing_attachment_before_ingest(monkeypatch) -> None:
+    chat_id = "chat_" + "c" * 32
+
+    def reject_replacement(_chat_id: str) -> None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            409,
+            "Retirez les pièces jointes actuelles avant d’en importer de nouvelles.",
+        )
+
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "begin_document_pack_ingest",
+        reject_replacement,
+    )
+    monkeypatch.setattr(
+        document_pack_service,
+        "ingest_zip",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a replacement upload must be rejected before pack ingestion"
+        ),
+    )
+
+    response = TestClient(app).post(
+        "/document-packs",
+        content=b"zip",
+        headers={
+            "content-type": "application/zip",
+            "x-chat-id": chat_id,
+            "x-filename": "replacement.zip",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Retirez les pièces jointes actuelles avant d’en importer de nouvelles."
+    )
+
+
+def test_document_pack_delete_unlinks_chat_before_removing_files(monkeypatch) -> None:
+    """The workspace must never keep a reference to a successfully deleted pack."""
+
+    chat_id = "chat_" + "c" * 32
+    pack_id = "pack_" + "d" * 12
+    calls: list[tuple[str, object]] = []
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "chats_linked_to_document_pack",
+        lambda current_pack_id: [chat_id] if current_pack_id == pack_id else [],
+    )
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "get_chat",
+        lambda current_chat_id: {
+            "chat_id": current_chat_id,
+            "document_pack_id": pack_id,
+        },
+    )
+
+    def update_chat(current_chat_id, update):
+        calls.append(
+            (
+                "update",
+                (current_chat_id, update.model_dump(exclude_unset=True)),
+            )
+        )
+        return {"chat_id": current_chat_id, **update.model_dump(exclude_unset=True)}
+
+    monkeypatch.setattr(api_main.workspace_store, "update_chat", update_chat)
+    monkeypatch.setattr(
+        document_pack_service,
+        "delete_pack",
+        lambda current_pack_id: (
+            calls.append(("delete", current_pack_id))
+            or {"pack_id": current_pack_id, "deleted": True}
+        ),
+    )
+
+    response = TestClient(app).delete(
+        f"/document-packs/{pack_id}",
+        params={"chat_id": chat_id},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"pack_id": pack_id, "deleted": True}
+    assert calls == [
+        ("update", (chat_id, {"document_pack_id": None})),
+        ("delete", pack_id),
+    ]
+
+
+def test_document_pack_delete_restores_chat_link_when_storage_delete_fails(
+    monkeypatch,
+) -> None:
+    """A recoverable storage failure must not silently orphan an existing pack."""
+
+    chat_id = "chat_" + "e" * 32
+    pack_id = "pack_" + "f" * 12
+    updates: list[dict] = []
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "chats_linked_to_document_pack",
+        lambda _pack_id: [chat_id],
+    )
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "get_chat",
+        lambda current_chat_id: {
+            "chat_id": current_chat_id,
+            "document_pack_id": pack_id,
+        },
+    )
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "update_chat",
+        lambda _chat_id, update: updates.append(update.model_dump(exclude_unset=True)) or {},
+    )
+
+    def fail_delete(_pack_id: str):
+        raise OSError("simulated local storage failure")
+
+    monkeypatch.setattr(document_pack_service, "delete_pack", fail_delete)
+    monkeypatch.setattr(
+        document_pack_service,
+        "get_summary",
+        lambda current_pack_id: {"pack_id": current_pack_id},
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).delete(
+        f"/document-packs/{pack_id}",
+        params={"chat_id": chat_id},
+    )
+
+    assert response.status_code == 500
+    assert updates == [
+        {"document_pack_id": None},
+        {"document_pack_id": pack_id},
+    ]
+
+
+def test_document_pack_delete_rejects_pack_linked_to_another_chat(monkeypatch) -> None:
+    requested_chat_id = "chat_" + "1" * 32
+    other_chat_id = "chat_" + "2" * 32
+    pack_id = "pack_" + "3" * 12
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "chats_linked_to_document_pack",
+        lambda _pack_id: [requested_chat_id, other_chat_id],
+    )
+    monkeypatch.setattr(
+        document_pack_service,
+        "delete_pack",
+        lambda _pack_id: pytest.fail("shared pack must not be deleted"),
+    )
+
+    response = TestClient(app).delete(
+        f"/document-packs/{pack_id}",
+        params={"chat_id": requested_chat_id},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Ces pièces jointes sont encore utilisées par une autre conversation."
+    )
+
+
+def test_document_pack_api_endpoints_keep_generation_out_of_attachment_flow(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -123,23 +289,10 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
     document_pack_service.outputs_dir = tmp_path
     document_pack_service.groq_extractor.enabled = False
 
-    def fake_create_design_from_requirements(
-        requirements,
-        *,
-        detail_level: str,
-        source_label: str,
-        multimodal_consent: str,
-    ) -> dict:
-        assert requirements.azimuths_deg == [0.0, 120.0, 240.0]
-        assert detail_level == "high"
-        assert source_label == "project_design_spec"
-        assert multimodal_consent == "allow_input_analysis"
-        return {"workflow_id": "wf_from_pack", "status": "pending"}
-
     monkeypatch.setattr(
         workflow_service,
         "create_design_from_requirements",
-        fake_create_design_from_requirements,
+        lambda *_args, **_kwargs: pytest.fail("an attachment endpoint must never start a design"),
     )
     client = TestClient(app)
     try:
@@ -213,23 +366,13 @@ def test_document_pack_api_endpoints_and_generate_design_mapping(
         generation = client.post(
             f"/document-packs/{pack_id}/generate-design",
             json={"multimodal_consent": "allow_input_analysis"},
-        ).json()
-        assert generation["status"] == "pending"
-        assert generation["workflow_id"] == "wf_from_pack"
-        assert generation["mapping"]["status"] == "mapped"
-        assert generation["extraction_report"]["prompt_text_reparse"] is False
-        assert generation["extraction_report"]["multimodal_consent"] == "allow_input_analysis"
-        assert generation["extraction_report"]["remote_vision_analysis"] == "not_executed"
-        assert "mapping_loss_report" in generation["mapping"]
-        assert generation["extraction_report"]["mapping_loss_report"]["counts"]["mapped"] >= 4
-        post_generation_events = client.get(f"/document-packs/{pack_id}/events").json()
-        generation_event = next(
-            event
-            for event in post_generation_events
-            if event["event_type"] == "document_pack_design_generation_started"
         )
-        assert generation_event["payload"]["workflow_id"] == "wf_from_pack"
-        assert generation_event["payload"]["human_label"] == "Lancement de la génération 3D"
+        assert generation.status_code == 404
+        post_generation_events = client.get(f"/document-packs/{pack_id}/events").json()
+        assert not any(
+            event["event_type"] == "document_pack_design_generation_started"
+            for event in post_generation_events
+        )
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled
@@ -282,7 +425,7 @@ def test_document_pack_accepts_multiple_direct_files(tmp_path: Path) -> None:
         document_pack_service.groq_extractor.enabled = original_groq_enabled
 
 
-def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
+def test_document_pack_api_correction_rebuilds_spec_without_starting_generation(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -293,10 +436,9 @@ def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
     monkeypatch.setattr(
         workflow_service,
         "create_design_from_requirements",
-        lambda requirements, detail_level, source_label, multimodal_consent: {
-            "workflow_id": "wf_after_correction",
-            "status": "pending",
-        },
+        lambda *_args, **_kwargs: pytest.fail(
+            "correcting attachment metadata must not start a design"
+        ),
     )
     client = TestClient(app)
     try:
@@ -329,9 +471,8 @@ def test_document_pack_api_correction_rebuilds_spec_and_unblocks_generation(
 
         spec = client.get(f"/document-packs/{pack_id}/consolidated-spec").json()
         assert spec["radio_sectors"][0]["hba_m"]["sources"][0]["document_id"] == ("user_correction")
-        generation = client.post(f"/document-packs/{pack_id}/generate-design").json()
-        assert generation["workflow_id"] == "wf_after_correction"
-        assert generation["mapping"]["status"] == "mapped"
+        generation = client.post(f"/document-packs/{pack_id}/generate-design")
+        assert generation.status_code == 404
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled
@@ -385,7 +526,7 @@ def test_document_pack_invalid_zip_returns_422_and_leaves_no_partial_pack(
         document_pack_service.outputs_dir = original_outputs
 
 
-def test_document_pack_generate_design_requires_qa_and_mapping_gate(
+def test_document_pack_generation_endpoint_is_not_exposed(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -394,65 +535,15 @@ def test_document_pack_generate_design_requires_qa_and_mapping_gate(
     document_pack_service.outputs_dir = tmp_path
     document_pack_service.groq_extractor.enabled = False
     summary = document_pack_service.ingest_zip(_pack_zip())
-    original_readiness = document_pack_service.get_generation_readiness
-
-    def qa_blocked_readiness(pack_id: str):
-        spec, qa_report, mapping, _ready = original_readiness(pack_id)
-        return (
-            spec,
-            qa_report.model_copy(
-                update={
-                    "status": "failed",
-                    "ready_to_generate": False,
-                    "blocking_issues": ["forced_qa_gate"],
-                }
-            ),
-            mapping,
-            False,
-        )
-
-    monkeypatch.setattr(
-        document_pack_service,
-        "get_generation_readiness",
-        qa_blocked_readiness,
-    )
     monkeypatch.setattr(
         workflow_service,
         "create_design_from_requirements",
-        lambda *args, **kwargs: pytest.fail("workflow must not start when QA is not ready"),
+        lambda *_args, **_kwargs: pytest.fail("a document pack alone must not start generation"),
     )
     try:
         response = TestClient(app).post(f"/document-packs/{summary.pack_id}/generate-design")
 
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["status"] == "blocked"
-        assert payload["mapping"]["status"] == "mapped"
-        assert payload["extraction_report"]["qa_ready_to_generate"] is False
-        assert payload["extraction_report"]["qa_blocking_issues"] == ["forced_qa_gate"]
-    finally:
-        document_pack_service.outputs_dir = original_outputs
-        document_pack_service.groq_extractor.enabled = original_groq_enabled
-
-
-def test_document_pack_generation_exposes_insufficient_local_storage(
-    tmp_path: Path, monkeypatch
-) -> None:
-    original_outputs = document_pack_service.outputs_dir
-    original_groq_enabled = document_pack_service.groq_extractor.enabled
-    document_pack_service.outputs_dir = tmp_path
-    document_pack_service.groq_extractor.enabled = False
-    summary = document_pack_service.ingest_zip(_pack_zip())
-
-    def reject(*_args, **_kwargs):
-        raise WorkflowStorageError("Espace disque local insuffisant.")
-
-    monkeypatch.setattr(workflow_service, "create_design_from_requirements", reject)
-    try:
-        response = TestClient(app).post(f"/document-packs/{summary.pack_id}/generate-design")
-
-        assert response.status_code == 507
-        assert response.json()["detail"] == "Espace disque local insuffisant."
+        assert response.status_code == 404
     finally:
         document_pack_service.outputs_dir = original_outputs
         document_pack_service.groq_extractor.enabled = original_groq_enabled

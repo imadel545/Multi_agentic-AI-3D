@@ -23,7 +23,7 @@ describe("TelecomGlbViewer fallbacks", () => {
     fireEvent.error(screen.getByRole("img"));
 
     expect(screen.getByRole("status")).toHaveTextContent(
-      "La preview backend n’a pas pu être chargée."
+      "L’aperçu n’a pas pu être chargé."
     );
 
     view.rerender(
@@ -48,7 +48,7 @@ describe("TelecomGlbViewer fallbacks", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Rechercher le GLB" }));
+    fireEvent.click(screen.getByRole("button", { name: "Réessayer la 3D" }));
 
     expect(onRetry).toHaveBeenCalledOnce();
   });
@@ -79,7 +79,7 @@ describe("TelecomGlbViewer fallbacks", () => {
       },
       limitations: []
     } as ViewerBundle;
-    render(
+    const view = render(
       <TelecomGlbViewer
         bundle={bundle}
         probeWebGL={probeWebGL}
@@ -88,10 +88,12 @@ describe("TelecomGlbViewer fallbacks", () => {
     );
     const callsBeforeRetry = probeWebGL.mock.calls.length;
 
-    fireEvent.click(screen.getByRole("button", { name: "Réessayer la 3D" }));
+    const retryButton = view.container.querySelector<HTMLButtonElement>(".viewer-state-banner button");
+    expect(retryButton).not.toBeNull();
+    fireEvent.click(retryButton!);
 
     expect(probeWebGL).toHaveBeenCalledTimes(callsBeforeRetry + 1);
-    expect(screen.getByText(/WebGL indisponible/)).toBeInTheDocument();
+    expect(screen.getByText(/3D interactive n’est pas disponible/)).toBeInTheDocument();
   });
 
   it("returns to the complete design when the toolbar is used after a selection", () => {

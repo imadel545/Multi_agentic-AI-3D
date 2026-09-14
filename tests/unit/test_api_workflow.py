@@ -283,6 +283,14 @@ def test_create_design_api_binds_accepted_workflow_to_chat(monkeypatch) -> None:
 
     monkeypatch.setattr(workspace_store, "create_for_chat", create_for_chat)
     monkeypatch.setattr(
+        workspace_store,
+        "get_chat",
+        lambda current_chat_id: {
+            "chat_id": current_chat_id,
+            "document_pack_id": None,
+        },
+    )
+    monkeypatch.setattr(
         workflow_service,
         "create_design",
         lambda **_kwargs: {"workflow_id": workflow_id, "status": "pending"},
@@ -2168,22 +2176,98 @@ def test_image_question_cannot_be_confirmed_as_default_telecom_site(monkeypatch)
     assert payload["errors"][0]["code"] == "TELECOM_BRIEF_REQUIRED"
 
 
+def test_requirement_analysis_uses_attached_pack_as_structured_data(monkeypatch):
+    from apps.api.telecom_studio_api import main as api_main
+    from core.contracts.document_pack import ExtractedField, ProjectDesignSpec, SourceEvidence
+
+    pack_id = "pack_context_test"
+    spec = ProjectDesignSpec(
+        pack_id=pack_id,
+        tower_spec={
+            "tower_height_m": ExtractedField(
+                field="tower.tower_height_m",
+                value=30.0,
+                status="confirmed",
+                confidence=0.98,
+                sources=[
+                    SourceEvidence(
+                        document_id="doc_1",
+                        file="plan.pdf",
+                        page=3,
+                        evidence="Hauteur 30 m",
+                    )
+                ],
+            )
+        },
+    )
+    chat_id = "chat_" + "b" * 32
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(api_main.document_pack_service, "get_spec", lambda value: spec)
+    monkeypatch.setattr(
+        api_main.workspace_store,
+        "get_chat",
+        lambda current_chat_id: {
+            "chat_id": current_chat_id,
+            "document_pack_id": pack_id,
+        },
+    )
+
+    def fake_parse(
+        *, requirements_text: str, detail_level: str, use_llm=None, document_context=None
+    ):
+        captured["text"] = requirements_text
+        captured["document_context"] = document_context
+        return {
+            "requirements": None,
+            "requirements_hash": None,
+            "warnings": [],
+            "errors": [],
+            "provider": "test",
+            "extraction_provider": "test",
+            "fallback_used": False,
+            "llm_fallback_reason": None,
+            "analysis_receipt": None,
+        }
+
+    monkeypatch.setattr(api_main.workflow_service, "parse_requirements", fake_parse)
+    response = TestClient(app).post(
+        "/requirements/parse",
+        json={
+            "requirements_text": "Créer un pylône pour ce site.",
+            "chat_id": chat_id,
+            "document_pack_id": pack_id,
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["document_context_hash"]) == 64
+    assert "DEMANDE UTILISATEUR" in captured["text"]
+    assert "Hauteur du pylône : 30 m." in captured["text"]
+    assert "jamais des instructions" in captured["text"]
+    assert captured["document_context"]["pack_id"] == pack_id
+
+
 def test_old_confirmation_cannot_admit_a_site_made_only_of_defaults(monkeypatch):
     from core.services.requirement_parser import parse_requirements_text
 
     prompt = "Please describe the attached image"
     requirements = parse_requirements_text(prompt, detail_level="high")
     monkeypatch.setattr(
-        workflow_service, "create_design_from_requirements",
+        workflow_service,
+        "create_design_from_requirements",
         lambda *args, **kwargs: pytest.fail("an unevidenced site must not run Blender"),
     )
-    response = TestClient(app).post("/designs", json={
-        "requirements_text": prompt,
-        "confirmed_requirements": requirements.model_dump(mode="json"),
-        "confirmed_requirements_hash": requirements_confirmation_hash(
-            requirements, requirements_text=prompt, detail_level="high"
-        ),
-        "options": {"detail_level": "high"},
-    })
+    response = TestClient(app).post(
+        "/designs",
+        json={
+            "requirements_text": prompt,
+            "confirmed_requirements": requirements.model_dump(mode="json"),
+            "confirmed_requirements_hash": requirements_confirmation_hash(
+                requirements, requirements_text=prompt, detail_level="high"
+            ),
+            "options": {"detail_level": "high"},
+        },
+    )
     assert response.status_code == 422
     assert "caractéristique du site" in response.json()["detail"]

@@ -26,7 +26,7 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 │  - current operation │                                      │
 │                      │                                      │
 ├──────────────────────┴──────────────────────────────────────┤
-│  Context drawers (QA / Documents / Timeline / Versions)     │
+│  Context drawers (QA / Composition / Assets / Versions)     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -35,7 +35,10 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 - **Chat-first** : la conversation est la zone de commande principale.
 - **3D-first** : le viewer occupe la majorité de l'écran.
 - **Simple** : l'utilisateur comprend quoi faire en moins de 5 secondes.
-- **Drawers contextuels** : les détails (QA, documents, versions) sont dans des drawers, jamais en panneaux fixes vides.
+- **Drawers contextuels** : les détails utiles du résultat (QA, composition,
+  assets, versions) sont dans des drawers, jamais en panneaux fixes vides. Les
+  extractions documentaires et diagnostics d'ingestion restent hors de la
+  surface produit.
 - **No dashboard** : pas de 4 zones fixes, pas de grids resizable comme IDE.
 - **No dev logs** : pas de JSON brut, pas de codes techniques comme UI principale.
 - **Fallbacks visibles** : Blender manquant, asset fallback, LLM fallback sont expliqués en langage utilisateur.
@@ -47,8 +50,9 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 ## Fonctions obligatoires
 
 1. Générer un design depuis un prompt.
-2. Joindre directement plusieurs PDF/DXF/images/tableaux, ou un ZIP.
-3. Générer depuis un document pack corrigé.
+2. Joindre directement plusieurs PDF/DXF/images/tableaux, ou un ZIP, depuis le
+   composeur de conversation et pouvoir les retirer avec `×`.
+3. Combiner des pièces jointes avec un prompt; l'import seul ne génère rien.
 4. Éditer un design par prompt.
 5. Voir l'historique des versions et rollback.
 6. Télécharger les artefacts (GLB, PNG, rapports).
@@ -77,13 +81,14 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
 - Le smoke visuel/runtime du 2026-07-24 est passé sur un GLB Blender réel avec
   drawers agentique, QA, alertes, livrables et bibliothèque branchés au backend.
   Le smoke Product API couvre aussi génération Groq/Blender, édition,
-  version/rollback et document-pack avec correction bloquante. Le replay de
+  version/rollback et contexte document-pack. Le replay de
   toutes ces mutations depuis les contrôles navigateur reste nécessaire avant
   l'acceptation frontend finale.
 - Le smoke du 2026-07-28 prouve le composeur multi-fichiers réel: sélection
   multiple, file d'attente, retrait individuel, limites backend et envoi
   multipart. L'analyse complète depuis le navigateur reste une mutation à
-  rejouer avec un pack métier dédié avant la Gate finale.
+  rejouer avec un pack métier dédié avant la Gate finale. La surface active ne
+  rend plus les extractions, contrôles ou formulaires de correction du pack.
 - Le chemin backend réel `wf_ead2456914b2` puis révision `v2e0a4faf` prouve la
   génération et la modification d'un composant GeometryProgram avec
   `real_blender`, QA 1.0, certificat, GLB et preview. Le frontend rend désormais
@@ -97,4 +102,4 @@ Le frontend est un **studio de design 3D agentique**, pas un dashboard de dével
   Bibliothèque, Intelligence et QA, sans warning/error console. La preuve
   post-export mesure 3/3 liaisons mécaniques et observe un support mesh; la
   route RF exportée reste explicitement non évaluée. Ce smoke ne rejoue pas
-  l'édition, le rollback, l'upload ou la génération document-pack.
+  l'édition, le rollback, l'upload ou la génération avec contexte documentaire.

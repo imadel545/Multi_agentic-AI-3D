@@ -1,7 +1,7 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { createElement, StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClientError, TelecomStudioApi } from "./api/client";
+import { ApiClientError } from "./api/client";
 import type { EditDesignResponse, ViewerBundle, WorkflowStatus } from "./api/schemas";
 import App, {
   documentPackFilesSizeError,
@@ -9,113 +9,23 @@ import App, {
   latestEventCursor,
   latestEventSequence,
   needsPolling,
-  parseCorrectionValue,
   reconcileAfterAmbiguousMutation,
   revisionOutcomeMessage,
   selectViewerBundleForDisplay,
   selectWorkflowToRestore,
-  shouldForgetDocumentPackSession,
-  userFacingError
+  shouldForgetDocumentPackSession
 } from "./App";
-import { writeDocumentPackSession } from "./state/documentPackSession";
+import {
+  bootstrapApi,
+  confirmedAnalysisReceipt,
+  deferredPromise,
+  workflow
+} from "./App.testSupport";
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
 });
-
-function workflow(
-  workflowId: string,
-  status: WorkflowStatus["status"],
-  createdAt: string
-): WorkflowStatus {
-  return {
-    workflow_id: workflowId,
-    status,
-    created_at: createdAt,
-    artifacts: {},
-    warnings: [],
-    errors: [],
-    available_actions: [],
-    unsupported_actions: [],
-    completion_certificate_status: status === "completed" ? "issued" : null
-  };
-}
-
-const confirmedAnalysisReceipt = {
-  schema_version: "1.0.0" as const,
-  receipt_id: `ira_${"a".repeat(32)}`,
-  issued_at: "2026-09-11T10:00:00+00:00",
-  confirmed_prompt_sha256: "b".repeat(64),
-  confirmed_requirements_sha256: "c".repeat(64),
-  detail_level: "high" as const,
-  provider: "deterministic",
-  model: null,
-  extraction_provider: "fallback",
-  fallback_used: true,
-  fallback_reason: "provider_unavailable"
-};
-
-function bootstrapApi(overrides: Record<string, unknown> = {}): TelecomStudioApi {
-  return {
-    health: vi.fn().mockResolvedValue({
-      status: "ok",
-      service: "agentic_telecom_3d_studio_api",
-      version: "1.0.0",
-      api_contract_version: "2026-07-29"
-    }),
-    studioSummary: vi.fn().mockResolvedValue({
-      status: "ok",
-      available_actions: [],
-      unsupported_actions: []
-    }),
-    assetLibrarySummary: vi.fn().mockResolvedValue({
-      status: "catalogued_quarantined",
-      schema_version: "1.1.0",
-      catalog_available: false,
-      file_count: 0,
-      generation_eligible_count: 0,
-      limitations: []
-    }),
-    assetInventory: vi.fn().mockResolvedValue({
-      status: "qualified_mixed_catalog",
-      entries: [],
-      generation_eligible_asset_count: 0,
-      real_glb_asset_count: 0,
-      import_qualified_glb_count: 0,
-      reference_only_asset_count: 0
-    }),
-    adaptationCapabilityCatalog: vi.fn().mockResolvedValue({
-      schema_version: "1.0.0",
-      catalog_hash: "a".repeat(64),
-      profiles: []
-    }),
-    documentPackCapabilities: vi.fn().mockResolvedValue({
-      document_pack_status: "limited",
-      supported_upload_format: "zip_or_multipart",
-      supported_extensions: [".pdf"],
-      limitations: [],
-      truth: {},
-      capabilities: {}
-    }),
-    conversation: vi.fn((workflowId: string) => Promise.resolve({
-      workflow_id: workflowId, history_status: "legacy_partial", messages: []
-    })),
-    listDesigns: vi.fn().mockResolvedValue([]),
-    artifactUrl: vi.fn((url: string | null | undefined) => url ?? null),
-    ...overrides
-  } as unknown as TelecomStudioApi;
-}
-
-function deferredPromise<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, reject, resolve };
-}
 
 describe("frontend runtime selection", () => {
   it("sends the picked component and captured version, then clears targeting for the next revision", async () => {
@@ -281,8 +191,8 @@ describe("frontend runtime selection", () => {
   });
 
   it("keeps the last certified model visible when a new workflow fails", () => {
-    const certified = { workflow_id: "wf_certified", status: "completed" } as ViewerBundle;
-    const failed = { workflow_id: "wf_failed", status: "failed" } as ViewerBundle;
+    const certified = { workflow_id: "wf_certified", status: "completed" } as unknown as ViewerBundle;
+    const failed = { workflow_id: "wf_failed", status: "failed" } as unknown as ViewerBundle;
 
     expect(selectViewerBundleForDisplay("failed", failed, certified)).toBe(certified);
     expect(selectViewerBundleForDisplay("running", null, certified)).toBe(certified);
@@ -630,13 +540,6 @@ describe("frontend runtime selection", () => {
     expect(message).not.toContain("Reduce tower height");
   });
 
-  it("normalizes simple user correction values without inventing structure", () => {
-    expect(parseCorrectionValue("24, 24, 24")).toEqual([24, 24, 24]);
-    expect(parseCorrectionValue("true")).toBe(true);
-    expect(parseCorrectionValue("lattice_tower")).toBe("lattice_tower");
-    expect(() => parseCorrectionValue('{"unsupported":true}')).toThrow(/non supporté/);
-  });
-
   it("rejects an oversized document pack before upload", () => {
     const capabilities = {
       document_pack_status: "limited",
@@ -672,25 +575,6 @@ describe("frontend runtime selection", () => {
     ).toBeNull();
   });
 
-  it("maps backend edit failures to product language without leaking internals", () => {
-    const internal = new ApiClientError(
-      500,
-      "/designs/wf_1/edit",
-      "RuntimeError: blender subprocess exited with code 139"
-    );
-    const message = userFacingError(internal, "edit");
-
-    expect(message).toBe("La modification du design a rencontré un problème interne. Réessayez.");
-    expect(message).not.toContain("RuntimeError");
-    expect(message).not.toContain("139");
-  });
-
-  it("gives an actionable message for local storage pressure", () => {
-    expect(
-      userFacingError(new ApiClientError(507, "/designs", "free disk 10MB"), "generation")
-    ).toContain("Libérez de la place");
-  });
-
   it("keeps the document-pack pointer on transient failures and forgets only a missing pack", () => {
     expect(
       shouldForgetDocumentPackSession(
@@ -703,106 +587,5 @@ describe("frontend runtime selection", () => {
       )
     ).toBe(true);
     expect(shouldForgetDocumentPackSession(new TypeError("network failure"))).toBe(false);
-  });
-
-  it("recovers an initial backend error through the visible retry action", async () => {
-    const health = vi
-      .fn()
-      .mockRejectedValueOnce(new ApiClientError(503, "/health", "temporary outage"))
-      .mockResolvedValue({
-        status: "ok",
-        service: "agentic_telecom_3d_studio_api",
-        version: "1.0.0",
-        api_contract_version: "2026-07-29"
-      });
-    const apiClient = bootstrapApi({ health });
-
-    render(createElement(App, { apiClient }));
-
-    expect(
-      await screen.findByRole("button", { name: "Réessayer la connexion" })
-    ).toBeInTheDocument();
-    expect(screen.getByText("Studio indisponible")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Réessayer la connexion" }));
-
-    await waitFor(() =>
-      expect(screen.queryByText("Studio indisponible")).not.toBeInTheDocument()
-    );
-    expect(screen.queryByText("Studio local connecté")).not.toBeInTheDocument();
-    expect(health).toHaveBeenCalledTimes(2);
-    expect(
-      screen.queryByRole("button", { name: "Réessayer la connexion" })
-    ).not.toBeInTheDocument();
-  });
-
-  it("does not present an empty viewer when design restoration failed and recovers on retry", async () => {
-    const listDesigns = vi
-      .fn()
-      .mockRejectedValueOnce(new ApiClientError(503, "/designs", "temporary outage"))
-      .mockResolvedValue([]);
-    const apiClient = bootstrapApi({ listDesigns });
-
-    render(createElement(App, { apiClient }));
-
-    const viewer = await screen.findByRole(
-      "region",
-      { name: "3D viewer" },
-      { timeout: 5_000 }
-    );
-    expect(within(viewer).getByText(/synchronisation initiale du studio/i)).toBeInTheDocument();
-    expect(within(viewer).queryByText("Aucun design généré pour le moment.")).not.toBeInTheDocument();
-
-    fireEvent.click(within(viewer).getByRole("button", { name: "Réessayer" }));
-
-    await waitFor(() =>
-      expect(within(viewer).getByText("Aucun design généré pour le moment.")).toBeInTheDocument()
-    );
-    expect(listDesigns).toHaveBeenCalledTimes(2);
-    expect(within(viewer).queryByRole("button", { name: "Réessayer" })).not.toBeInTheDocument();
-  });
-
-  it("restores a document review under React strict effects instead of cancelling it silently", async () => {
-    writeDocumentPackSession(window.localStorage, "pack_strict");
-    const summary = {
-      pack_id: "pack_strict",
-      status: "processed",
-      document_count: 1,
-      high_priority_count: 1,
-      missing_blocking_count: 0,
-      blocking_fields: [],
-      conflict_count: 0,
-      can_generate_design: false,
-      qa_score: 0.8,
-      processing_warning_count: 0,
-      tool_status: {}
-    };
-    const documentPackReview = vi.fn().mockResolvedValue({
-      packId: "pack_strict",
-      summary,
-      conflicts: [],
-      missingFields: [],
-      qa: null,
-      documents: [],
-      extractions: [],
-      provenance: {},
-      processing: null,
-      consolidatedSpec: null,
-      sectionErrors: { qa: { status: 503, retryable: true } }
-    });
-    const apiClient = bootstrapApi({ documentPackReview });
-
-    render(
-      createElement(
-        StrictMode,
-        null,
-        createElement(App, { apiClient })
-      )
-    );
-
-    const attachmentButton = await screen.findByRole("button", { name: "Ajouter des pièces jointes" });
-    fireEvent.click(attachmentButton);
-    expect(await screen.findByText("Cahier de charge chargé")).toBeInTheDocument();
-    expect(documentPackReview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

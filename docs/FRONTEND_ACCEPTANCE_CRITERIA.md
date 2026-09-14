@@ -8,13 +8,13 @@ cases non cochées exigent encore une preuve fonctionnelle enregistrée et
 empêchent de déclarer la Gate finale complète.
 
 Le smoke Product API du 2026-07-24 couvre génération Groq/Blender, édition,
-version, rollback, upload ZIP, blocage/correction de fondation et génération
-depuis document-pack. Les cases de mutation restent ouvertes tant que ces mêmes
-actions ne sont pas toutes rejouées depuis les contrôles du navigateur. Le
-smoke navigateur du 2026-07-28 prouve l'upload direct, la revue des champs avec
-provenance et la restauration du même `pack_id` après rechargement. Les données
-du pack sont relues depuis le backend; seul un pointeur local versionné est
-conservé par l'interface.
+version, rollback et upload ZIP. La génération autonome depuis document-pack a
+été supprimée du produit; un fichier sert uniquement de contexte à un prompt
+non vide. Les cases de mutation restent ouvertes tant que ces mêmes actions ne
+sont pas toutes rejouées depuis les contrôles du navigateur. Le smoke navigateur
+du 2026-07-28 prouve l'upload direct et la restauration du même `pack_id` après
+rechargement. L'interface conserve un pointeur local versionné et un résumé
+compact; les extractions, scores et diagnostics restent internes au backend.
 
 Le smoke de clôture du 2026-07-29 a aussi restauré
 `wf_a6660b81b929` sur le contrat API courant, vérifié le modèle réel en
@@ -26,7 +26,8 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 ## 1. Compréhension immédiate
 
 - [x] Un nouvel utilisateur comprend quoi faire en moins de 5 secondes.
-- [ ] Le chat et la dropzone sont visibles sans scroll.
+- [x] Le chat, le bouton de pièce jointe et le champ de commande sont visibles
+  sans scroll sur le layout desktop nominal.
 
 ## 2. Viewer 3D dominant
 
@@ -42,10 +43,11 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 ## 4. Document dropzone
 
-- [x] Une dropzone claire accepte plusieurs fichiers directs ou un ZIP, affiche
-  la file d'attente, permet le retrait individuel et applique les limites
-  exposées par le backend.
-- [x] L'état du document pack (conflits, champs manquants) est visible sans JSON brut.
+- [x] Le bouton de pièce jointe du composeur accepte plusieurs fichiers directs
+  ou un ZIP, affiche la sélection avant envoi, permet le retrait individuel et
+  applique les limites exposées par le backend.
+- [x] La pièce jointe reste compacte; les extractions et diagnostics internes ne sont pas affichés.
+- [x] Le bouton `×` supprime les fichiers locaux et leur mémoire documentaire.
 
 ## 5. Pas de panneaux vides
 
@@ -67,7 +69,7 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 ## 8. Timeline cachée
 
 - [x] La timeline complète des events est dans un drawer, pas affichée par défaut.
-- [ ] Seule l'opération active et son état courant sont visibles dans le chat.
+- [x] Seule l'opération active et son état courant sont visibles dans le chat.
 
 ## 9. Temps réel
 
@@ -79,7 +81,7 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 
 - [x] Generate design from prompt.
 - [x] Upload document pack.
-- [ ] Generate from document pack.
+- [x] Combine an attached document pack with a non-empty prompt.
 - [x] Edit design by prompt.
 - [x] Version rollback.
 - [ ] Download artifacts.
@@ -101,6 +103,11 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] Le 2026-09-12, la suite frontend passe avec 211 tests; typecheck et build
   production passent. Chrome charge un canvas WebGL réel sans exception console,
   échec réseau ni réponse HTTP en erreur.
+- [x] Le 2026-09-14, la suite frontend passe avec 225 tests; typecheck et build
+  production passent. Tous les fichiers TypeScript, TSX et CSS sous
+  `apps/frontend/src` restent sous la limite de 700 lignes. Le smoke HTTP couvre
+  ajout, liaison au chat, contexte hashé et suppression réelle d'une pièce; un
+  onglet Chrome neuf charge le studio sans erreur ni alerte console.
 - [x] Le drawer Bibliothèque permet d'examiner un candidat constructeur réel,
   affiche son exclusion de la génération et les preuves manquantes en langage
   utilisateur, sans proposer d'action d'ajout ou d'utilisation.

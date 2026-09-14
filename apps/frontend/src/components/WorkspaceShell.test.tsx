@@ -182,7 +182,9 @@ it("does not let a delayed deep-link restore replace a newer project choice", as
       screen.getByRole("button", { name: "Projet choisi" }),
     ).toHaveAttribute("aria-current", "page"),
   );
-  expect(window.location.hash).toBe("#project=project_two");
+  await waitFor(() =>
+    expect(window.location.hash).toBe("#project=project_two"),
+  );
 
   delayedChats.resolve(
     new Response(
@@ -336,4 +338,65 @@ it("keeps project and conversation deletion behind the matching three-dot menus"
     }),
   );
   expect(screen.queryByRole("button", { name: "Secteur nord" })).not.toBeInTheDocument();
+});
+
+it("keeps the new conversation action beside the selected project menu", async () => {
+  const project = {
+    project_id: "project_circet",
+    title: "circet",
+    created_at: "2026-09-13T12:00:00Z",
+    updated_at: "2026-09-13T12:00:00Z",
+  };
+  const requests: Array<{ method: string; path: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: URL, options?: RequestInit) => {
+      const path = new URL(input).pathname;
+      const method = options?.method ?? "GET";
+      requests.push({ method, path });
+      if (path === "/workspace/projects") {
+        return new Response(JSON.stringify([project]), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (path === "/workspace/projects/project_circet/chats") {
+        if (method === "POST") {
+          return new Response(
+            JSON.stringify({
+              ...project,
+              chat_id: "chat_created",
+              title: "Nouvelle conversation",
+              draft_prompt: "",
+              workflow_id: null,
+              document_pack_id: null,
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("[]", {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("", { status: 404 });
+    }),
+  );
+
+  render(<WorkspaceShell />);
+  const projectButton = await screen.findByRole("button", { name: "circet" });
+  fireEvent.click(projectButton);
+  const newChatButton = await screen.findByRole("button", { name: "Nouvelle conversation" });
+  expect(newChatButton.parentElement).toHaveClass("workspace-project-actions");
+  expect(
+    screen.getByRole("img", { name: "Circet — Créateur de réseaux" }),
+  ).toHaveAttribute("src", "/brand/circet-logo.jpg");
+  const sectionTitle = screen.getByText("Conversations");
+  expect(sectionTitle.parentElement).not.toContainElement(newChatButton);
+  fireEvent.click(newChatButton);
+  await waitFor(() =>
+    expect(requests).toContainEqual({
+      method: "POST",
+      path: "/workspace/projects/project_circet/chats",
+    }),
+  );
+  expect(await screen.findByText("Conversation vide")).toBeInTheDocument();
 });

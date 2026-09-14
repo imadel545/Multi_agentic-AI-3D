@@ -18,21 +18,37 @@
 }
 .workspace-brand {
   display: flex;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 8px;
   align-items: center;
   padding: 0 6px 12px;
   color: #133e47;
 }
-.workspace-brand strong {
-  font-size: 15px;
-  letter-spacing: -0.3px;
+.workspace-brand-identity {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
 }
-.workspace-brand span {
+.workspace-brand-subtitle {
   display: block;
   font-weight: 400;
-  font-size: 11px;
+  font-size: 10px;
   color: #596873;
-  margin-top: 4px;
+  padding-left: 2px;
+}
+.workspace-brand-logo-frame {
+  width: min(160px, 100%);
+  aspect-ratio: 1280 / 688;
+  display: block;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #fff;
+}
+.workspace-brand-logo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 .project-sidebar button {
   cursor: pointer;
@@ -105,13 +121,30 @@
   padding-left: 10px;
 }
 .workspace-section-title button,
-.workspace-more {
+.workspace-more,
+.workspace-new-chat {
   min-width: 44px;
   min-height: 44px;
   border: 0;
   background: transparent;
   padding: 8px;
   color: #596873;
+}
+.workspace-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.workspace-new-chat {
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.workspace-new-chat:hover {
+  color: #174c50;
+  background: #e6efef;
 }
 .workspace-chat-row > button:first-child {
   min-width: 0;
@@ -344,6 +377,14 @@
   max-height: min(54dvh, 560px);
   z-index: 30;
 }
+.product-workspace .conversation-tray {
+  position: relative;
+  z-index: 40;
+}
+.product-workspace .conversation-tray-bar {
+  position: relative;
+  z-index: 41;
+}
 .product-workspace .command-composer textarea {
   min-height: 60px;
   font-size: 14px;
@@ -400,7 +441,7 @@ button:disabled {
   .project-sidebar {
     padding: 16px 10px;
   }
-  .workspace-brand span {
+  .workspace-brand-subtitle {
     display: none;
   }
   .product-workspace .studio-layout {
@@ -445,11 +486,8 @@ button:disabled {
     border-top: 1px solid #e8ecef;
     padding-top: 7px;
   }
-  .workspace-brand strong {
-    font-size: 12px;
-  }
-  .workspace-brand > svg {
-    display: none;
+  .workspace-brand-logo-frame {
+    width: 118px;
   }
   .workspace-welcome {
     padding: 25px;
@@ -508,9 +546,8 @@ button:disabled {
 .product-workspace .command-composer textarea { resize: none; min-height: 58px; padding-top: 12px; padding-bottom: 12px; }
 .product-workspace .composer-hint { padding-left: 8px; }
 .workspace-brand { gap: 7px; padding: 0; }
-.workspace-brand > svg, .workspace-project > svg, .workspace-chat-row > button > svg { flex-shrink: 0; }
-.workspace-brand strong { min-width: 0; flex: 1; font-size: 14px; }
-.workspace-brand span { font-size: 10px; }
+.workspace-project > svg, .workspace-chat-row > button > svg { flex-shrink: 0; }
+.workspace-brand-subtitle { font-size: 10px; }
 .workspace-chats { border-left: 1px solid #dbe5e7; margin: 2px 0 12px 18px; padding: 0 0 0 5px; }
 .workspace-section-title { letter-spacing: 0; text-transform: none; margin: 0; font-size: 11px; padding-left: 10px; }
 .workspace-chat-row > button:first-child { font-size: 12px; padding: 10px 8px; }
@@ -519,49 +556,45 @@ button:disabled {
 .sidebar-collapsed .product-workspace .topbar { padding-left: 58px; }
 .product-workspace .context-drawer { width: min(420px, calc(100vw - 36px)); }
 .product-workspace .drawer-navigation { gap: 4px; }
-.pack-summary-compact {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid #d8e5e4;
-  border-radius: 10px;
-  background: #f7fbfa;
-}
-.pack-summary-compact > div { display: grid; gap: 3px; min-width: 0; }
-.pack-summary-compact small { color: #5f7378; line-height: 1.35; }
-.pack-summary-compact .secondary-action { white-space: nowrap; }
-.document-review-disclosure {
+.composer-attachment-strip { display: flex; padding: 0 0 8px; }
+.composer-attachment-chip {
   display: grid;
-  gap: 8px;
-  border: 1px solid #d8e5e4;
-  border-radius: 10px;
-  background: #fbfdfd;
-  overflow: hidden;
-}
-.document-review-disclosure > summary {
-  display: flex;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 42px;
-  padding: 9px 12px;
-  color: #2e5960;
+  gap: 9px;
+  width: min(280px, 100%);
+  padding: 8px 8px 8px 10px;
+  border: 1px solid #cfe1df;
+  border-radius: 12px;
+  background: #f5faf9;
+  color: #285d5d;
+}
+.composer-attachment-chip > span { display: grid; gap: 1px; min-width: 0; }
+.composer-attachment-chip strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.composer-attachment-chip small { color: #6c8184; font-size: 10px; }
+.composer-attachment-chip button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #6d7e82;
   cursor: pointer;
-  font-weight: 700;
-  list-style-position: inside;
 }
-.document-review-disclosure > summary::marker { color: #5c8e8d; }
-.document-review-disclosure > summary small { color: #6c8184; font-weight: 500; }
-.document-review-disclosure[open] > summary { border-bottom: 1px solid #e1ebeb; background: #f4faf8; }
-.document-review-content {
-  min-height: 0;
-  max-height: min(42dvh, 430px);
-  overflow: auto;
-  padding: 0 10px 10px;
+.composer-attachment-chip button:hover { background: #e5f0ee; color: #174c50; }
+.composer-attachment-chip button:disabled { cursor: wait; opacity: .55; }
+.document-intake-next-step {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid #79aaa6;
+  border-radius: 0 7px 7px 0;
+  background: #f1f8f6;
+  color: #456a6d;
+  font-size: 11px;
+  line-height: 1.4;
 }
-.document-review-content .document-review-panel { margin: 0; }
-.document-review-content .pack-summary { gap: 8px; }
 @keyframes conversation-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .conversation-popover { animation: none; } .conversation-tray-bar svg { transition: none; } }
 @media (max-width: 640px) { .product-shell.sidebar-collapsed { grid-template-rows: minmax(0, 1fr); } .conversation-tray-bar { gap: 4px; padding: 4px 8px; } .chat-progress { font-size: 10px; } .conversation-popover { height: min(400px, 55dvh); } .product-workspace .attachment-popover { width: 100%; } .workspace-brand { min-width: 0; } }
