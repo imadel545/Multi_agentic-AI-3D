@@ -468,6 +468,16 @@ describe("studio kernel components", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("explains missing site evidence without offering confirmation of a default design", () => {
+    render(<ChatCommandPanel {...commandDefaults} analysis={{
+      requirements: null, requirements_hash: null, analysis_receipt: null,
+      warnings: [], errors: [{ code: "TELECOM_BRIEF_REQUIRED", message: "Site absent" }],
+      provider: "groq", extraction_provider: "groq", fallback_used: false
+    }} />);
+    expect(screen.getByText(/Précisez le site à concevoir/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Confirmer/ })).not.toBeInTheDocument();
+  });
+
   it("preserves queued attachments when closing the panel and keeps free-intention creation available in a chat", () => {
     const upload = vi.fn().mockResolvedValue(true);
     const choosePath = vi.fn();

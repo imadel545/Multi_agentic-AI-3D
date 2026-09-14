@@ -102,6 +102,10 @@ from core.services.blender_runner import BlenderRunner
 from core.services.checkpoint_saver import SqliteCheckpointSaver
 from core.services.cognitive_runtime import build_cognitive_design_planner
 from core.services.cognitive_scene_compiler import CognitiveSceneCompiler
+from core.services.telecom_brief_admission import (
+    TELECOM_BRIEF_MESSAGE,
+    has_site_requirement_evidence,
+)
 
 WorkflowId = Annotated[str, ApiPath(pattern=WORKFLOW_ID_PATTERN)]
 VersionId = Annotated[str, ApiPath(pattern=VERSION_ID_PATTERN)]
@@ -479,6 +483,8 @@ def _create_design(request: CreateDesignRequest) -> dict:
                     status_code=422,
                     detail="confirmed RequirementSpec hash does not match its payload",
                 )
+            if not has_site_requirement_evidence(request.confirmed_requirements):
+                raise HTTPException(status_code=422, detail=TELECOM_BRIEF_MESSAGE)
             return workflow_service.create_design_from_requirements(
                 request.confirmed_requirements,
                 detail_level=request.confirmed_requirements.detail_level,

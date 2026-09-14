@@ -708,7 +708,9 @@ function RequirementsUnderstanding({
     return (
       <div className="understanding-card">
         <strong>Demande non confirmable</strong>
-        <p>La demande n’a pas pu être convertie en exigences exploitables.</p>
+        {analysis.errors.length ? (
+          <ul>{analysis.errors.map((error, index) => <li key={index}>{humanExtractionError(error)}</li>)}</ul>
+        ) : <p>La demande n’a pas pu être convertie en exigences exploitables.</p>}
       </div>
     );
   }
@@ -2997,6 +2999,9 @@ function humanExtractionFallback(reason: string | null | undefined): string {
 }
 
 function humanExtractionError(error: { code: string; message: string }): string {
+  if (error.code === "TELECOM_BRIEF_REQUIRED") {
+    return "Précisez le site à concevoir : réseau, type de support ou dimensions. Une demande d’analyse d’image ne suffit pas pour générer un site. Pour un objet sans site télécom, choisissez Intention libre.";
+  }
   const normalized = `${error.code} ${error.message}`.toLowerCase();
   if (normalized.includes("timeout")) {
     return "Le service d’analyse intelligente n’a pas répondu dans le délai prévu.";

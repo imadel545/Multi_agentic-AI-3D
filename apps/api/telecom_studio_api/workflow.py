@@ -40,6 +40,11 @@ from core.services.event_log import EventLogService
 from core.services.patch_applier import PatchApplier
 from core.services.scene_versioning import SceneVersioningService, verify_persisted_version
 from core.services.targeted_edit import resolve_targeted_edit
+from core.services.telecom_brief_admission import (
+    TELECOM_BRIEF_MESSAGE,
+    TELECOM_BRIEF_REQUIRED,
+    has_site_requirement_evidence,
+)
 from core.validation import validate_scene_spec
 from core.validation.completion_certificate import verify_completion_certificate
 
@@ -1303,6 +1308,18 @@ class WorkflowService:
         extraction_provider = extraction_provider_label(
             extraction.provider, extraction.fallback_used, fallback_reason
         )
+        if not has_site_requirement_evidence(extraction.requirements):
+            return {
+                "requirements": None,
+                "requirements_hash": None,
+                "analysis_receipt": None,
+                "warnings": [w.model_dump() for w in extraction.requirements.warnings],
+                "errors": [{"code": TELECOM_BRIEF_REQUIRED, "message": TELECOM_BRIEF_MESSAGE}],
+                "provider": extraction.provider,
+                "extraction_provider": extraction_provider,
+                "fallback_used": extraction.fallback_used,
+                "llm_fallback_reason": fallback_reason,
+            }
         analysis_receipt = (
             issue_requirement_analysis_receipt(
                 extraction.requirements,

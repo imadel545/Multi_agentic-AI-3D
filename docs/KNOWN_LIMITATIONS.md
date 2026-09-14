@@ -70,6 +70,13 @@ frontend.
 
 ## Visible during frontend build
 
+- Telecom confirmation requires at least one explicit, non-default site
+  identity/layout field in extraction provenance. An image question with an
+  all-default site returns `TELECOM_BRIEF_REQUIRED`, no requirements/hash/receipt,
+  and cannot be replayed through the confirmed-design endpoint. This is a bounded
+  admission rule for telecom confirmation, not a conversational intent classifier
+  or image analysis. Free-intention and document-pack routes retain their own
+  admission contracts.
 - The workspace shell passes automated component/API checks and a
   same-origin HTTP project/chat/draft lifecycle. A bounded browser check covered
   the project/chat tree, contextual menus, inspector and expanded empty viewer.

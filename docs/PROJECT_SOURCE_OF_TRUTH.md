@@ -417,6 +417,15 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current frontend
 
+- The 2026-09-14 input follow-up closes a reproduced mismatch: the image-analysis
+  question associated with `wf_f615060277a7` had produced a confirmed telecom site
+  made of defaults. Parsing now withholds confirmation when no explicit site
+  identity/layout field is evidenced; confirmed creation applies the same rule.
+  Real HTTP checks rejected that image question (fallback extraction reported)
+  and accepted an explicit 18 m monopole brief through Groq GPT-OSS-120B without
+  fallback. No new design was generated in these checks. Final gates: 835 backend
+  tests passed, 1 skipped, 55 deselected; 224 frontend tests passed; typecheck,
+  build and changed Python lint passed. This does not implement image analysis.
 - 2026-09-14 verification: 833 backend tests passed (1 skipped, 55 deselected),
   223 frontend tests passed, TypeScript/build and changed Python lint passed.
   The restarted local API and Vite serve the same-origin project/chat/draft

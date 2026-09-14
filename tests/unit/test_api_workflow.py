@@ -842,16 +842,11 @@ def test_parse_requirements_api_returns_provider_and_fallback_error() -> None:
 
 
 def test_create_design_uses_exact_confirmed_requirements(monkeypatch) -> None:
-    requirements = RequirementSpec(
-        network_type="5G",
-        tower_type="lattice_tower",
-        tower_height_m=30,
-        sector_count=3,
-        antenna_type="panel_5g",
-        antenna_install_height_m=24,
-        azimuths_deg=[0, 120, 240],
-        include_power_cabinet=True,
-        include_gps_antenna=True,
+    from core.services.requirement_parser import parse_requirements_text
+
+    requirements = parse_requirements_text(
+        "Site 5G sur pylône treillis 30 m, trois secteurs à 24 m, "
+        "azimuts 0, 120, 240, armoire énergie et GPS.",
         detail_level="high",
     )
     captured: dict = {}
@@ -2147,3 +2142,48 @@ class RecordingRequirementProvider:
 class FailingRequirementProvider:
     def extract_requirements(self, requirements_text: str, detail_level: str) -> RequirementSpec:
         raise RuntimeError("forced provider failure")
+
+
+def test_image_question_cannot_be_confirmed_as_default_telecom_site(monkeypatch):
+    from core.agents.requirement_extractor import ExtractionResult
+    from core.services.requirement_parser import parse_requirements_text
+
+    prompt = "est ce que tu peux analyser l'image ?"
+    default_site = parse_requirements_text(prompt, detail_level="high")
+    # A successfully returned provider response is not evidence of a design brief.
+    monkeypatch.setattr(
+        workflow_service.orchestrator.extractor,
+        "extract",
+        lambda *args, **kwargs: ExtractionResult(default_site, "groq:test", False),
+    )
+    response = TestClient(app).post(
+        "/requirements/parse", json={"requirements_text": prompt, "use_llm": True}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requirements"] is None
+    assert payload["requirements_hash"] is None
+    assert payload["analysis_receipt"] is None
+    assert payload["fallback_used"] is False
+    assert payload["errors"][0]["code"] == "TELECOM_BRIEF_REQUIRED"
+
+
+def test_old_confirmation_cannot_admit_a_site_made_only_of_defaults(monkeypatch):
+    from core.services.requirement_parser import parse_requirements_text
+
+    prompt = "Please describe the attached image"
+    requirements = parse_requirements_text(prompt, detail_level="high")
+    monkeypatch.setattr(
+        workflow_service, "create_design_from_requirements",
+        lambda *args, **kwargs: pytest.fail("an unevidenced site must not run Blender"),
+    )
+    response = TestClient(app).post("/designs", json={
+        "requirements_text": prompt,
+        "confirmed_requirements": requirements.model_dump(mode="json"),
+        "confirmed_requirements_hash": requirements_confirmation_hash(
+            requirements, requirements_text=prompt, detail_level="high"
+        ),
+        "options": {"detail_level": "high"},
+    })
+    assert response.status_code == 422
+    assert "caractéristique du site" in response.json()["detail"]

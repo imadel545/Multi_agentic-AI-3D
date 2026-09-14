@@ -1,5 +1,12 @@
 # API — Frontend Contract
 
+Telecom analysis may return `requirements=null`, `requirements_hash=null` and
+`analysis_receipt=null` with error `TELECOM_BRIEF_REQUIRED` when no explicit site
+identity/layout requirement is evidenced. The UI explains the missing brief and
+offers no confirmation of a default site. Provider/fallback fields still describe
+the actual extraction attempt. Confirmed creation also rejects these all-default
+requirements, including previously signed confirmations.
+
 Contrat entre le backend FastAPI et le frontend React. `/designs` +
 `workflow_id` restent l'autorité sur l'exécution, les artefacts, les preuves et
 les versions. `/workspace` ajoute uniquement l'organisation locale durable en
