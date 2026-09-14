@@ -22,7 +22,6 @@ _KNOWN_HANDLERS = {
     "cable_route",
     "ground_cabinet",
     "gps_radome",
-    "exact_asset",
 }
 _KNOWN_SECTOR_GEOMETRY_FAMILIES = {"panel", "microwave_dish"}
 

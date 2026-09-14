@@ -157,15 +157,7 @@ def test_capabilities_are_resolved_from_manifest_profiles() -> None:
     assert "/visual_elements/include_sector_beams" in paths
     assert "/tower/characteristics/vendor_secret" not in paths
     assert not capabilities.missing_profiles
-    assert all(
-        asset.adaptation_profile_id
-        or (
-            asset.allows_generation_mode("imported_glb_exact")
-            and not asset.allowed_parameters
-            and asset.compatibility_rules.maximum_adaptation_effort == "none"
-        )
-        for asset in registry.list_assets()
-    )
+    assert all(asset.adaptation_profile_id for asset in registry.list_assets())
 
 
 def test_rru_capabilities_are_resolved_from_the_active_radio_manifest() -> None:

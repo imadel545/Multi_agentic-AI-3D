@@ -123,7 +123,7 @@ describe("frontend contract schemas", () => {
           qa_status: "passed"
         }],
         provenance_url: "/assets/ANT_5011006/provenance",
-        fidelity_status: "technical_generic",
+        fidelity_status: "exact_import",
         visual_review_status: "passed_advisory"
       }]
     });

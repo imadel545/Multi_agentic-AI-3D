@@ -286,9 +286,9 @@ not manufacturer fidelity, physical fastening or collision certification.
   deterministically. The generic cognitive route can expose qualified
   candidates. This earlier compiler limitation was superseded on 2026-09-10
   for opted-in exact `reuse` and bounded rigid `compose`; `adapt` remains open.
-- The current runtime catalog contains 16 manifests: 14 usable
+- The current runtime catalog contains 15 manifests: 13 usable
   internal/technical manifests and two real-source candidates kept as
-  `reference_only`. **0 of 16 passes the professional M1 proof gate**.
+  `reference_only`. **0 of 15 passes the professional M1 proof gate**.
   Generation eligibility is now an effective runtime decision rather than the
   qualification declaration alone: any manifest claiming a vendor source,
   vendor-qualified fidelity, manufacturer or reference must pass
@@ -426,9 +426,9 @@ not manufacturer fidelity, physical fastening or collision certification.
   viewer layout. Progress labels are derived from the observed workflow phase
   and SSE events; the UI does not claim token streaming. The developer-facing
   Progression and Détails avancés entries were removed from the main inspector;
-  Composition, deliverables and versions remain contextual surfaces.
+  QA, assets, composition and versions remain contextual surfaces.
   The project sidebar remains collapsible and destructive project/chat actions
-  remain in their per-item menus. Current verification is 230 frontend tests,
+  remain in their per-item menus. Current verification is 225 frontend tests,
   typecheck and production build passed, plus a real local-browser check of the
   intake popover on port 5173. This is a presentation and interaction fix; it
   does not promote an unqualified CAD source or claim a new professional GLB.
@@ -540,16 +540,16 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current assets
 
-- 16 manifests: 14 generation-eligible internal/technical assets and two
+- 15 manifests: 13 generation-eligible internal/technical assets and two
   real-source candidates kept as `reference_only`.
-- 14 GLB files present on this installation, including the locally quarantined
+- 13 GLB files present on this installation, including the locally quarantined
   OpenCellular chassis review derivative. The number can decrease in a fresh
   checkout because reference evidence is ignored by Git.
 - The procedural-only dual-band panel intentionally has no companion file and
   is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
-- 14 manifests are generation-eligible: 4 authorize an exact GLB import and 10
+- 13 manifests are generation-eligible: 3 authorize an exact GLB import and 10
   authorize SceneSpec-driven parametric generation; two real STEP candidates are
   `reference_only`.
   The cable-tray family is now qualified through its typed parametric route,
@@ -567,14 +567,6 @@ not manufacturer fidelity, physical fastening or collision certification.
 - Towers are generated parametrically by default. In the product planning path,
   GLB import happens only when the manifest authorizes and the planner selects
   `imported_glb_exact`.
-- One CC BY complete-site GLB is admitted for exact, unchanged reuse by the
-  generic cognitive route under the role `telecom_site`. A controlled planner
-  plus real Blender proves triangle/material identity, transform preservation,
-  QA and certificate issuance. The asset already contains dishes and installed
-  equipment, is `technical_generic`, and is intentionally incompatible with
-  `support_structure`; it cannot be scaled, decomposed or used as a bare tower.
-  This proves the execution path, not a live Groq selection or professional CAD
-  fidelity.
 - The scene planner now stamps the manifest-authorized generation mode and
   reason into `SceneSpec`. A 4G scene can therefore assemble qualified panel and
   GPS GLBs while keeping the tower, RRU and power cabinet parametric. The 5G
@@ -1096,7 +1088,7 @@ certification, or acceptance of every generic 3D scenario.
 `FRONTEND_PRODUCT_BASELINE_VERIFIED_LIMITED`
 
 The backend contract is consolidated around `/designs` + `workflow_id`. The
-frontend now has a verified chat-first/3D-first product baseline and 230 passing
+frontend now has a verified chat-first/3D-first product baseline and 225 passing
 component/contract tests. Current-tree connected creation, real GLB picking,
 targeted edit/version, durable conversation restoration and explicit rollback
 have each passed in the isolated product path. The 2026-09-12 current-tree smoke

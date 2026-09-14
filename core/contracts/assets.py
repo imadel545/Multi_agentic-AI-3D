@@ -135,7 +135,9 @@ class AssetUsageRights(StrictModel):
         if self.status == "project_authorized" and not (
             self.project_use_authorized and self.evidence
         ):
-            raise ValueError("project-authorized rights require project use and evidence")
+            raise ValueError(
+                "project-authorized rights require project use and evidence"
+            )
         if self.status != "project_authorized" and (
             self.project_use_authorized
             or self.derivative_use_authorized
@@ -484,11 +486,6 @@ class AssetManifest(StrictModel):
     qa_evidence: AssetQaEvidence = Field(default_factory=AssetQaEvidence)
     qualification_version: str | None = Field(default=None, min_length=1, max_length=64)
     cognitive_reuse_enabled: bool = False
-    cognitive_reuse_strategies: list[Literal["reuse", "compose"]] | None = Field(
-        default=None,
-        min_length=1,
-        max_length=2,
-    )
     height_m: float | None = Field(default=None, gt=0)
     dimensions_m: DimensionsM | None = None
     compatible_networks: list[NetworkType]
@@ -626,12 +623,6 @@ class AssetManifest(StrictModel):
                 raise ValueError("cognitive reuse requires generation-qualified geometry")
             if not self.compatibility_rules.compatible_roles:
                 raise ValueError("cognitive reuse requires declared compatible roles")
-            if self.cognitive_reuse_strategies is not None and len(
-                self.cognitive_reuse_strategies
-            ) != len(set(self.cognitive_reuse_strategies)):
-                raise ValueError("cognitive reuse strategies must be unique")
-        elif self.cognitive_reuse_strategies is not None:
-            raise ValueError("cognitive reuse strategies require cognitive reuse to be enabled")
         if self.is_generation_eligible and self.builder_profile_id is None:
             raise ValueError("generation-eligible assets require a builder_profile_id")
         if self.allows_generation_mode("imported_glb_exact"):

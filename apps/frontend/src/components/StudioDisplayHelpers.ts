@@ -3,9 +3,7 @@ import type { ComponentProofs } from "../api/schemas";
 const semanticRoleLabels: Record<string, string> = {
   antenna: "antenne",
   antenna_mount: "support d’antenne",
-  antenna_support: "support d’antenne",
   cable: "chemin de câble",
-  ground_equipment: "équipement au sol",
   mount_bracket: "support d’antenne",
   radio: "unité radio",
   remote_radio: "unité radio",
@@ -15,7 +13,6 @@ const semanticRoleLabels: Record<string, string> = {
   sector_cable_route: "chemin de câble du secteur",
   support_structure: "structure porteuse",
   technical_shelter: "abri technique",
-  timing_antenna: "antenne de synchronisation",
   tower: "pylône",
   tower_access: "accès et maintenance du pylône"
 };

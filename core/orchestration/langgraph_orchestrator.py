@@ -70,7 +70,6 @@ from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import BlenderRunner, GenerationResult
 from core.services.cognitive_scene_compiler import CognitiveSceneCompiler, cognitive_plan_hash
 from core.validation import validate_scene_spec
-from core.validation.catalog_only import catalog_only_scene_violations
 from core.validation.completion_certificate import build_completion_certificate
 from core.validation.design_blueprint import (
     evaluate_blueprint_requirement_coverage,
@@ -116,6 +115,8 @@ class WorkflowState(TypedDict, total=False):
     memory_recall: dict
     memory_writeback: dict
     asset_error: str
+    asset_fallback_failed: bool
+    asset_fallback_warnings: list[ValidationIssue]
     tower: AssetManifest
     antenna: AssetManifest
     radio: AssetManifest | None
@@ -216,7 +217,6 @@ class DesignOrchestrator:
         design_domain_router: DesignDomainRouteClient | None = None,
         cognitive_design_planner: CognitiveDesignPlanner | None = None,
         cognitive_scene_compiler: CognitiveSceneCompiler | None = None,
-        catalog_only_generation: bool = False,
     ) -> None:
         self.registry = registry
         self.extractor = extractor
@@ -232,7 +232,6 @@ class DesignOrchestrator:
         self.geometry_program_planner = geometry_program_planner
         self.design_domain_router = design_domain_router
         self.cognitive_design_planner = cognitive_design_planner
-        self.catalog_only_generation = catalog_only_generation
         self.cognitive_scene_compiler = cognitive_scene_compiler or CognitiveSceneCompiler(
             registry=registry
         )
@@ -468,6 +467,10 @@ class DesignOrchestrator:
             )
         graph.add_node("select_assets", self._runtime_node("select_assets", self._select_assets))
         graph.add_node(
+            "asset_fallback_handler",
+            self._runtime_node("asset_fallback_handler", self._asset_fallback_handler),
+        )
+        graph.add_node(
             "validate_requirements",
             self._runtime_node("validate_requirements", self._validate_requirements),
         )
@@ -601,6 +604,11 @@ class DesignOrchestrator:
         graph.add_conditional_edges(
             "select_assets",
             _asset_route,
+            {"continue": "validate_requirements", "asset_fallback": "asset_fallback_handler"},
+        )
+        graph.add_conditional_edges(
+            "asset_fallback_handler",
+            _asset_fallback_route,
             {"continue": "validate_requirements", "blocked": terminal_node},
         )
         graph.add_conditional_edges(
@@ -955,8 +963,8 @@ class DesignOrchestrator:
                 "plan_cognitive_geometry",
                 f"programs={len(programs)};nodes={sum(len(item.nodes) for item in programs)}",
                 started,
-                actor_kind="llm_decision" if programs else "deterministic_specialist",
-                decision_authority="llm_bounded" if programs else "deterministic",
+                actor_kind="llm_decision",
+                decision_authority="llm_bounded",
             ),
         }
 
@@ -1603,11 +1611,121 @@ class DesignOrchestrator:
             ),
         }
 
+    def _asset_fallback_handler(self, state: WorkflowState) -> dict:
+        started = time.perf_counter()
+        requirements = state["requirements"]
+        warnings: list[ValidationIssue] = []
+        try:
+            tower = self.registry.select_tower_fallback(
+                requirements.tower_type,
+                requirements.network_type,
+                requirements.tower_height_m,
+            )
+            warnings.append(
+                ValidationIssue(
+                    code="ASSET_FALLBACK_TOWER_SELECTED",
+                    message=f"Fallback tower selected: {tower.asset_id}.",
+                    severity="warning",
+                )
+            )
+            tower_type = (
+                tower.compatible_tower_types[0]
+                if tower.compatible_tower_types
+                else requirements.tower_type
+            )
+            antenna = self.registry.select_asset_fallback(
+                "antenna",
+                requirements.network_type,
+                tower_type,
+            )
+            warnings.append(
+                ValidationIssue(
+                    code="ASSET_FALLBACK_ANTENNA_SELECTED",
+                    message=f"Fallback antenna selected: {antenna.asset_id}.",
+                    severity="warning",
+                )
+            )
+            radio = None
+            if requirements.include_rru:
+                radio = self.registry.select_asset_fallback(
+                    "radio",
+                    requirements.network_type,
+                    tower_type,
+                )
+                warnings.append(
+                    ValidationIssue(
+                        code="ASSET_FALLBACK_RADIO_SELECTED",
+                        message=f"Fallback radio selected: {radio.asset_id}.",
+                        severity="warning",
+                    )
+                )
+            accessory_assets = _select_accessory_assets(
+                self.registry,
+                requirements,
+                fallback=True,
+                tower_type=tower_type,
+            )
+        except LookupError as exc:
+            route = _route_event(state, "asset_fallback_handler", "asset_fallback")
+            report = _failed_report(
+                design_id=state["workflow_id"],
+                code="ASSET_FALLBACK_FAILED",
+                message=str(exc),
+            )
+            return {
+                "asset_fallback_failed": True,
+                "report": report,
+                "route_history": route,
+                "trace": _trace(
+                    state,
+                    "asset_fallback_handler",
+                    "blocked:asset_fallback_failed",
+                    started,
+                    status="failed",
+                    errors=[error.code for error in report.errors],
+                    route="asset_fallback",
+                    attempt=state.get("repair_attempts", 0),
+                ),
+            }
+        selected_assets = [
+            asset for asset in [tower, antenna, radio, *accessory_assets] if asset is not None
+        ]
+        route = _route_event(
+            state,
+            "asset_fallback_handler",
+            "asset_fallback",
+            events=[warning.model_dump() for warning in warnings],
+        )
+        return {
+            "tower": tower,
+            "antenna": antenna,
+            "radio": radio,
+            "accessory_assets": accessory_assets,
+            "selected_assets": selected_assets,
+            "asset_fallback_failed": False,
+            "asset_fallback_warnings": warnings,
+            "cache_metrics": self._cache_metrics(),
+            "route_history": route,
+            "trace": _trace(
+                state,
+                "asset_fallback_handler",
+                ",".join(asset.asset_id for asset in selected_assets),
+                started,
+                warnings=[warning.code for warning in warnings],
+                route="asset_fallback",
+                attempt=state.get("repair_attempts", 0),
+            ),
+        }
+
     def _validate_requirements(self, state: WorkflowState) -> dict:
         started = time.perf_counter()
         report = self.rule_engine.validate_requirements(
             state["requirements"], state["selected_assets"]
         )
+        if state.get("asset_fallback_warnings"):
+            report = report.model_copy(
+                update={"warnings": [*report.warnings, *state["asset_fallback_warnings"]]}
+            )
         # Multi-agent domain validation in parallel
         with ThreadPoolExecutor(max_workers=2) as executor:
             tower_future = executor.submit(
@@ -1981,27 +2099,6 @@ class DesignOrchestrator:
                 max_repair_attempts=state.get("max_repair_attempts", 2),
                 requirement_coverage=state.get("requirement_coverage"),
             )
-        if self.catalog_only_generation:
-            violations = catalog_only_scene_violations(state["scene"], registry=self.registry)
-            if violations:
-                gate = gate.model_copy(
-                    update={
-                        "passed": False,
-                        "checks": {**gate.checks, "catalog_only_assets": False},
-                        "details": {
-                            **gate.details,
-                            "catalog_only_violations": violations,
-                        },
-                        "critical_errors": [
-                            *gate.critical_errors,
-                            "CATALOG_ONLY_ASSET_REQUIRED",
-                        ],
-                    }
-                )
-            else:
-                gate = gate.model_copy(
-                    update={"checks": {**gate.checks, "catalog_only_assets": True}}
-                )
         report = (
             state["report"]
             if gate.passed
@@ -2678,6 +2775,23 @@ def _scene_with_asset_metadata(scene: SceneSpec, assets: list[AssetManifest]) ->
     )
 
 
+def _select_accessory_assets(
+    registry: AssetRegistry,
+    requirements: RequirementSpec,
+    *,
+    fallback: bool = False,
+    tower_type: str | None = None,
+) -> list[AssetManifest]:
+    assets: list[AssetManifest] = []
+    selector = registry.select_asset_fallback if fallback else registry.select_asset
+    selected_tower_type = tower_type or requirements.tower_type
+    if requirements.include_power_cabinet:
+        assets.append(selector("cabinet", requirements.network_type, selected_tower_type))
+    if requirements.include_gps_antenna:
+        assets.append(selector("gps", requirements.network_type, selected_tower_type))
+    return assets
+
+
 def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry) -> SceneSpec:
     """Rebind derived assets and placements after a validated SceneSpec edit."""
 
@@ -2850,7 +2964,11 @@ def _runtime_asset_metadata(asset: AssetManifest) -> RuntimeAssetMetadata:
 
 
 def _asset_route(state: WorkflowState) -> str:
-    return "blocked" if state.get("asset_error") else "continue"
+    return "asset_fallback" if state.get("asset_error") else "continue"
+
+
+def _asset_fallback_route(state: WorkflowState) -> str:
+    return "blocked" if state.get("asset_fallback_failed") else "continue"
 
 
 def _requirements_route(state: WorkflowState) -> str:
@@ -3074,7 +3192,7 @@ def _phase_for_node(node: str) -> str:
         return "rag"
     if node in {"memory_recall", "memory_writeback"}:
         return "memory"
-    if node == "select_assets":
+    if node in {"select_assets", "asset_fallback_handler"}:
         return "assets"
     if node in {
         "plan_scene",
@@ -3104,6 +3222,7 @@ def _human_label_for_node(node: str) -> str:
         "decide_planning_context": "Arbitrage des preuves de conception",
         "memory_recall": "Rappel mémoire projet",
         "select_assets": "Sélection des assets telecom",
+        "asset_fallback_handler": "Sélection d'un asset alternatif",
         "validate_requirements": "Validation des contraintes telecom",
         "rule_violation_handler": "Blocage par règle métier",
         "plan_scene": "Construction de la scène 3D",
@@ -3232,12 +3351,7 @@ def _merge_quality_gate_report(
         *[
             ValidationIssue(
                 code=f"{gate.stage.upper()}_{error.upper()}",
-                message=(
-                    "Un composant demandé ne dispose pas encore d’un modèle 3D de bibliothèque "
-                    "admis pour cette utilisation. Aucun remplacement n’a été fabriqué."
-                    if error == "CATALOG_ONLY_ASSET_REQUIRED"
-                    else f"Quality gate failed: {gate.stage}.{error}"
-                ),
+                message=f"Quality gate failed: {gate.stage}.{error}",
                 severity="error",
             )
             for error in gate.critical_errors
@@ -3380,6 +3494,7 @@ def _workflow_metrics(
                 "validate_scene",
                 "scene_repair_handler",
                 "rule_violation_handler",
+                "asset_fallback_handler",
             },
         ),
         "blender_duration_ms": generation.duration_ms

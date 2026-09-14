@@ -8,7 +8,7 @@ from core.agents.cognitive_supervisor import CognitiveSupervisor, GroqSpecialist
 from core.contracts.cognitive_design import SpecialistDescriptor
 from core.llm.groq import GroqStructuredClient
 from core.services.asset_registry import AssetRegistry
-from core.services.cognitive_asset_reuse import asset_admission_registry
+from core.services.geometry_capabilities import geometry_capability_registry
 from core.services.qualified_asset_retriever import QualifiedAssetCandidateRetriever
 
 
@@ -16,13 +16,14 @@ def build_cognitive_design_planner(
     client: GroqStructuredClient,
     asset_registry: AssetRegistry,
 ) -> CognitiveDesignPlanner:
-    capability_registry = asset_admission_registry(asset_registry)
+    capability_registry = geometry_capability_registry()
     capability_ids = [item.capability_id for item in capability_registry.discover()]
     descriptors = [
         SpecialistDescriptor(
-            specialist_id="qualified_asset_reuse_specialist",
+            specialist_id="geometry_program_specialist",
             description=(
-                "Selects only admitted catalog assets and preserves their source evidence."
+                "Authors bounded declarative geometry programs for components that are absent "
+                "from the qualified catalog."
             ),
             compatible_domains=["generic"],
             capability_ids=capability_ids,
@@ -34,7 +35,7 @@ def build_cognitive_design_planner(
             ),
             compatible_domains=["generic"],
             capability_ids=capability_ids,
-            depends_on=["qualified_asset_reuse_specialist"],
+            depends_on=["geometry_program_specialist"],
         ),
         SpecialistDescriptor(
             specialist_id="geometry_qa_gate",
@@ -49,9 +50,7 @@ def build_cognitive_design_planner(
     ]
     return CognitiveDesignPlanner(
         planning_client=GroqCognitivePlanningClient(client),
-        candidate_retriever=QualifiedAssetCandidateRetriever(
-            asset_registry, external_sources_only=True
-        ),
+        candidate_retriever=QualifiedAssetCandidateRetriever(asset_registry),
         supervisor=CognitiveSupervisor(
             descriptors,
             GroqSpecialistRouteClient(client),

@@ -34,37 +34,6 @@
   line-height: 1.45;
 }
 
-.composition-evidence {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.composition-evidence > div {
-  display: grid;
-  gap: 1px;
-  padding: 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-soft);
-}
-
-.composition-evidence strong {
-  font-size: 18px;
-}
-
-.composition-evidence span,
-.composition-evidence p {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.composition-evidence p {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-
 .scene-plan-summary small,
 .scene-tree-group small,
 .scene-tree-group p {

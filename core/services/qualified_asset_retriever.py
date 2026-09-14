@@ -29,32 +29,9 @@ class QualifiedAssetCandidateRetriever:
     def __init__(
         self,
         registry: AssetRegistry,
-        *,
-        external_sources_only: bool = False,
     ) -> None:
-        self.external_sources_only = external_sources_only
         self.registry = registry
         self.evidence_verifier = registry.evidence_verifier
-
-    def _source_allowed(self, manifest: AssetManifest) -> bool:
-        from core.validation.catalog_only import has_external_geometry_source
-
-        return not self.external_sources_only or has_external_geometry_source(manifest)
-
-    def available_semantic_roles(self) -> list[str]:
-        """Expose only roles backed by an admitted cognitive-reuse manifest."""
-
-        return sorted(
-            {
-                role.strip().lower()
-                for manifest in self.registry.list_assets()
-                if manifest.cognitive_reuse_enabled
-                and self.registry.is_generation_admitted(manifest)
-                and self._source_allowed(manifest)
-                for role in manifest.compatibility_rules.compatible_roles
-                if role.strip()
-            }
-        )
 
     def rank_telecom(
         self,
@@ -103,8 +80,6 @@ class QualifiedAssetCandidateRetriever:
         query_tokens = _component_tokens(component)
         evidence: list[AssetCandidateEvidence] = []
         for manifest in self.registry.list_assets():
-            if not self._source_allowed(manifest):
-                continue
             if not manifest.cognitive_reuse_enabled or not self.registry.is_generation_admitted(
                 manifest
             ):
@@ -287,7 +262,7 @@ def _supports_telecom_role(
 
 def _cognitive_strategies(manifest: AssetManifest) -> list[str]:
     return (
-        list(manifest.cognitive_reuse_strategies or ["reuse", "compose"])
+        ["reuse", "compose"]
         if manifest.cognitive_reuse_enabled
         and manifest.is_generation_eligible
         and manifest.allows_generation_mode("imported_glb_exact")

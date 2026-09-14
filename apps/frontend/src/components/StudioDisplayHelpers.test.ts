@@ -1,15 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { humanSemanticRole, serviceStatusLabel } from "./StudioDisplayHelpers";
-
-describe("semantic role labels", () => {
-  it.each([
-    ["ground_equipment", "équipement au sol"],
-    ["timing_antenna", "antenne de synchronisation"],
-    ["antenna_support", "support d’antenne"]
-  ])("translates %s for the user", (role, label) => {
-    expect(humanSemanticRole(role)).toBe(label);
-  });
-});
+import { serviceStatusLabel } from "./StudioDisplayHelpers";
 
 describe("service availability labels", () => {
   it.each(["unavailable", "reranker_unavailable", "disabled", "missing", "available_with_error"])(

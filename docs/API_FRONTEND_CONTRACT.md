@@ -72,9 +72,9 @@ Supprimer ce classement conserve le design et son historique. Aucun modèle
 | `GET` | `/assets/{asset_id}/previews/{view}` | Preview qualifiée publiée par le manifest; existence et hash sont vérifiés avant service. |
 | `GET` | `/assets/adaptation-capabilities` | Catalogue versionné des profils d'adaptation. |
 | `GET` | `/designs/{id}/adaptation-capabilities` | Paramètres réellement modifiables dans la version active. |
-| `GET` | `/assets/library/summary` | État technique du catalogue CAD local et compte de fichiers éligibles. Endpoint d'inspection, absent du parcours utilisateur principal. |
-| `GET` | `/assets/library/search?q=...` | Recherche metadata-only pour audit/qualification; expose quarantaine et liens d'aperçus, sans rendre le fichier sélectionnable par Blender. |
-| `POST` | `/assets/library/{file_id}/probe` | Inspection explicite d'un candidat CAD. Retourne unités, entités, présence ACIS/maillage et route de conversion; ne promeut pas le fichier et n'est pas une action du chat utilisateur. |
+| `GET` | `/assets/library/summary` | État honnête du catalogue CAD local et compte de fichiers éligibles; chargé au démarrage pour le drawer Bibliothèque. |
+| `GET` | `/assets/library/search?q=...` | Recherche metadata-only consommée par le drawer Bibliothèque; expose quarantaine et liens d'aperçus, sans bouton de sélection Blender tant que `generation_eligible=false`. |
+| `POST` | `/assets/library/{file_id}/probe` | Action explicite du drawer Bibliothèque. Retourne unités, entités, présence ACIS/maillage et route de conversion; ne promeut pas le fichier. |
 | `POST` | `/document-packs` | Uploader un ZIP brut ou plusieurs fichiers via `multipart/form-data`. |
 | `GET` | `/document-packs/{pack_id}` | Résumé du pack. |
 | `DELETE` | `/document-packs/{pack_id}?chat_id=...` | Détacher puis supprimer les pièces locales de la conversation. |
@@ -237,7 +237,7 @@ Les entrées qui ont une identité externe exposent également `family`, `subtyp
 la preuve disponible et ne confèrent aucun droit de réutilisation.
 Les entrées M1 peuvent aussi exposer `preview_set`, `provenance_url`,
 `geometry_status`, `fidelity_status`, `milestone_evidence_eligible` et
-`milestone_evidence_failures`. Le catalogue courant contient 16 assets
+`milestone_evidence_failures`. Le catalogue courant contient 15 assets
 runtime mais 0 preuve professionnelle M1; le frontend ne doit donc pas les
 présenter comme composants constructeur qualifiés.
 
@@ -490,7 +490,7 @@ documents et versions ont des états de chargement/erreur/retry indépendants. L
 frontière HTTP reste mono-utilisateur/loopback: les hosts sont allowlistés et une
 mutation avec un `Origin` navigateur étranger échoue avant le service. Ce garde
 ne constitue pas une authentification utilisateur et n'ajoute aucun JWT.
-La suite courante compte 230 tests Vitest et passe le typecheck/build. Le smoke
+La suite courante compte 233 tests Vitest et passe le typecheck/build. Le smoke
 HTTP du 2026-09-14 confirme l'upload lié au chat, le contexte hashé, l'absence de
 workflow créé par l'import, le rejet de l'ancienne route de génération autonome
 et la suppression avec détachement. Un Chrome neuf charge le GLB courant sans

@@ -106,7 +106,7 @@ export function GlbObjectSummary({
   return (
     <div className="viewer-object-summary" aria-label="Résumé du modèle 3D">
       <strong>
-        <Layers3 size={14} aria-hidden="true" /> Intégrité 3D vérifiée
+        <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
       </strong>
       <small>
         {summary.evidenceMode === "semantic_extras"

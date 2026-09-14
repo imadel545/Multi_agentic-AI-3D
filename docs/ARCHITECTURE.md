@@ -50,7 +50,7 @@ active SceneSpec + prompt
 
 ## Modules
 
-Le frontend sépare l'inventaire runtime utilisé par Composition et les preuves de composition
+Le frontend sépare la bibliothèque (`AssetLibraryPanel`) et les preuves de composition
 avec sélection sémantique (`SceneCompositionPanel`) du shell `StudioKernel`.
 Les primitives de drawer et les libellés partagés résident dans `StudioPrimitives`
 et `StudioDisplayHelpers`; ces modules ne dépendent pas du shell. Les statuts
@@ -182,20 +182,15 @@ des événements ne dépend plus de ces services.
   specialists, services, quality gates and external tools. A routed specialist
   registry exists, but its domains and dependencies remain declared
   deterministically; it is not an autonomous supervisor.
-- The active inventory has 16 manifests: 14 internal/technical runtime
+- The active inventory has 15 manifests: 13 internal/technical runtime
   manifests and two real-source reference candidates. Exact imports remain
-  hash-pinned and every fallback is visible, but none of the 14 generation-
+  hash-pinned and every fallback is visible, but none of the 13 generation-
   eligible internal/technical manifests passes the stronger professional M1
   evidence gate. The public flag is owned
   by `ProfessionalAssetVerifier`, which re-hashes and inspects the evidence
   bytes at inventory/retrieval/provenance boundaries; manifest completeness is
   only a declaration precondition. Runtime eligibility must not be presented as
   manufacturer qualification.
-- Four manifests authorize hash-pinned exact GLB reuse. One is a complete CC BY
-  site template restricted to the `telecom_site` role; the other three are
-  component assets. The complete template is executed through the generic
-  cognitive exact-asset compiler and cannot enter the telecom assembly's bare
-  support slot.
 - The separate 11,974-file CAD library is not part of that active inventory.
   Its 11,531 unique contents remain quarantined until licence, units, B-Rep
   conversion and geometry QA produce a validated manifest. Only validated,

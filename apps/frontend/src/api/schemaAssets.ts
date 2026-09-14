@@ -45,9 +45,7 @@ export const QualifiedAssetInventoryEntrySchema = publicSchema(
     visual_review_status: z
       .enum(["not_requested", "passed_advisory", "review_required", "failed"])
       .nullish(),
-    fidelity_status: z
-      .enum(["schematic", "technical_generic", "vendor_qualified"])
-      .nullish(),
+    fidelity_status: z.string().nullish(),
     qualification_version: z.string().nullish(),
     milestone_evidence_eligible: z.boolean().default(false),
     milestone_evidence_failures: z.array(z.string()).default([])
