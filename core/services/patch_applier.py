@@ -3,6 +3,10 @@ from typing import Any
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import PatchOperation, ScenePatch
 from core.contracts.validation import ValidationIssue, ValidationReport
+from core.services.platform_edit_resolution import (
+    apply_platform_edit_resolution,
+    resolve_platform_edit,
+)
 
 
 class PatchApplier:
@@ -41,6 +45,27 @@ class PatchApplier:
                 errors=errors,
             )
             # Return original on failure
+            return scene, report
+
+        try:
+            platform_resolution = resolve_platform_edit(scene, patch)
+            apply_platform_edit_resolution(data, platform_resolution)
+        except (ValueError, IndexError, KeyError, TypeError) as exc:
+            errors.append(
+                ValidationIssue(
+                    code="PATCH_APPLY_ERROR",
+                    message=f"Failed to reconcile platform edit: {exc}",
+                    severity="error",
+                )
+            )
+            report = ValidationReport(
+                design_id=scene.scene_id,
+                status="failed",
+                score=0.0,
+                checks={"patch_applied": False},
+                warnings=warnings,
+                errors=errors,
+            )
             return scene, report
 
         try:

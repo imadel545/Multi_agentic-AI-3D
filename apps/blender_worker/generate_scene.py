@@ -357,6 +357,7 @@ def _create_tower(
     base_width = float(characteristics.get("base_width_m") or 4.0)
     strategy = scene["tower"].get("generation_strategy", "parametric_generated")
     material_name = str(characteristics.get("material") or "galvanized_steel")
+    paint_color_hex = characteristics.get("paint_color_hex") or None
     semantic_root = f"tower_{scene['tower']['asset_id']}"
 
     if strategy == "parametric_generated":
@@ -370,6 +371,7 @@ def _create_tower(
             top_width=characteristics.get("top_width_m"),
             leg_count=int(characteristics.get("leg_count") or 4),
             material_name=material_name,
+            paint_color_hex=paint_color_hex,
         )
         tower_root = _create_semantic_group(
             bpy,
@@ -467,6 +469,7 @@ def _create_tower(
                 top_width=characteristics.get("top_width_m"),
                 leg_count=int(characteristics.get("leg_count") or 4),
                 material_name=material_name,
+                paint_color_hex=paint_color_hex,
             )
             _create_semantic_group(
                 bpy,

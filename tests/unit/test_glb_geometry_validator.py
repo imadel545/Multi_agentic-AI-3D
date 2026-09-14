@@ -162,6 +162,21 @@ def test_geometry_validation_requires_requested_accessories(tmp_path: Path) -> N
     assert "power_cabinet" in missing.missing_objects
 
 
+def test_geometry_validation_allows_label_disabled_for_one_sector(tmp_path: Path) -> None:
+    scene = _accessory_scene()
+    scene.sectors[1].include_label = False
+
+    report = GLBGeometryValidator().validate(
+        scene,
+        _glb_report(_object_names(scene)),
+        _metadata_path(tmp_path, scene),
+    )
+
+    assert report.status == "passed"
+    assert report.checks["label_count_valid"] is True
+    assert "label:S2" not in report.missing_objects
+
+
 def test_geometry_validation_requires_supported_non_concrete_foundation(tmp_path: Path) -> None:
     base_scene = _scene()
     scene = base_scene.model_copy(
@@ -365,7 +380,7 @@ def _object_names(scene) -> list[str]:
             names.append(f"sector_beam_{sector.sector_id}")
         if scene.visual_elements.include_azimuth_arrows:
             names.append(f"azimuth_arrow_{sector.sector_id}")
-        if scene.visual_elements.include_labels:
+        if scene.visual_elements.include_labels and sector.include_label:
             names.append(f"label_sector_{sector.sector_id}_{int(sector.azimuth_deg)}deg")
     for accessory in scene.accessory_assets:
         if accessory.asset_type == "gps":

@@ -6,6 +6,7 @@ from typing import Protocol
 from core.contracts.assembly import AssemblyComponentSelection, AssemblyConnection, AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.requirements import RequirementSpec
+from core.contracts.scene import SceneSpec
 from core.services.asset_registry import AssetRegistry
 from core.services.builder_registry import BuilderRegistry
 from core.services.qualified_asset_retriever import QualifiedAssetCandidateRetriever
@@ -158,6 +159,145 @@ class AssetAssemblyPlanner:
             manifest_catalog_sha256=self.registry.manifest_hash,
         )
         return AssemblyPlanningResult(plan=plan, assets_by_role=assets_by_role)
+
+    def reconcile_with_scene(
+        self,
+        plan: AssemblyPlan,
+        *,
+        scene: SceneSpec,
+        requirements: RequirementSpec,
+    ) -> AssemblyPlan:
+        """Realign a persisted plan with the composition of an edited SceneSpec.
+
+        The scene is the authority after an edit: an optional slot whose
+        accessory, radio or cable disappeared is dropped with its connections,
+        and a slot the edit re-enabled is added back deterministically from the
+        asset the scene already carries. Connections stay stable when the role
+        topology is unchanged and are recomputed when roles are added or removed.
+        """
+
+        required_roles = {
+            role_id: (asset_type, required)
+            for role_id, asset_type, required in self._required_slots(requirements)
+        }
+        scene_asset_by_role = _scene_asset_by_role(scene)
+        previous_roles = {component.role_id for component in plan.components}
+        required_role_ids = set(required_roles)
+        topology_changed = previous_roles != required_role_ids
+        kept: list[AssemblyComponentSelection] = []
+        components_changed = False
+        for component in plan.components:
+            if component.role_id not in required_roles:
+                continue
+            scene_asset_id = scene_asset_by_role.get(component.role_id)
+            if scene_asset_id is not None and scene_asset_id != component.selected_asset_id:
+                continue
+            refreshed = component
+            if component.selected_asset_id is not None:
+                asset = self.registry.get(component.selected_asset_id)
+                parameter_values = _parameter_values(asset, requirements)
+                if parameter_values != component.parameter_values:
+                    refreshed = component.model_copy(update={"parameter_values": parameter_values})
+                    components_changed = True
+            kept.append(refreshed)
+        kept_roles = {component.role_id for component in kept}
+        added: list[AssemblyComponentSelection] = []
+        for role_id, (asset_type, required) in required_roles.items():
+            if role_id in kept_roles:
+                continue
+            asset_id = scene_asset_by_role.get(role_id)
+            candidates = self.candidate_retriever.rank_telecom(
+                asset_type=asset_type,
+                network_type=requirements.network_type,
+                tower_type=requirements.tower_type,
+                min_height_m=requirements.tower_height_m if asset_type == "tower" else None,
+                role_id=role_id,
+                required_connectors=_required_candidate_connectors(role_id, requirements),
+            )
+            if not candidates:
+                raise LookupError(f"no validated {asset_type} asset for {role_id}")
+            if asset_id is None:
+                asset = candidates[0].manifest
+            else:
+                asset = next(
+                    (item.manifest for item in candidates if item.manifest.asset_id == asset_id),
+                    None,
+                )
+                if asset is None:
+                    raise LookupError(f"scene asset is not admitted for {role_id}: {asset_id}")
+            scores = [candidate.score for candidate in candidates]
+            added.append(
+                self._deterministic_component(
+                    role_id, asset_type, required, asset, scores, requirements
+                )
+            )
+        if not added and not topology_changed and not components_changed:
+            return plan
+        components = [*kept, *added]
+        update = {
+            "components": components,
+            "connections": _connections(components) if topology_changed else plan.connections,
+            "operations": [],
+            "compilation_status": (
+                "declared" if plan.schema_version == "1.1.0" else "legacy_uncompiled"
+            ),
+        }
+        if added:
+            update.update(
+                {
+                    "selection_authority": "deterministic_fallback",
+                    "selection_provider": "deterministic",
+                    "selection_model": None,
+                    "llm_fallback_used": True,
+                    "llm_fallback_reason": (
+                        "scene_revision_role_reconciled_without_new_llm_selection"
+                    ),
+                }
+            )
+        return plan.model_copy(update=update)
+
+    def _deterministic_component(
+        self,
+        role_id: str,
+        asset_type: str,
+        required: bool,
+        asset: AssetManifest,
+        candidate_scores: list,
+        requirements: RequirementSpec,
+    ) -> AssemblyComponentSelection:
+        strategy = _deterministic_generation_strategy(asset)
+        semantic_strategy = _deterministic_semantic_strategy(asset, strategy)
+        manifest_generation_mode = (
+            "imported_glb_exact" if strategy == "imported_glb_exact" else "parametric_generated"
+        )
+        if asset.builder_profile_id is None:
+            raise ValueError(f"ASSET_BUILDER_PROFILE_MISSING:{asset.asset_id}")
+        builder_profile = self.builder_registry.resolve(asset.builder_profile_id)
+        selected_packet = self.candidate_retriever.packet_for(asset)
+        return AssemblyComponentSelection(
+            role_id=role_id,
+            asset_type=asset_type,
+            required=required,
+            candidate_scores=candidate_scores,
+            selected_asset_id=asset.asset_id,
+            builder_profile_id=asset.builder_profile_id,
+            generation_strategy=strategy,
+            semantic_strategy=semantic_strategy,
+            allowed_parameter_ids=[item.parameter_id for item in asset.allowed_parameters],
+            parameter_values=_parameter_values(asset, requirements),
+            manifest_snapshot=self.registry.manifest_snapshot(
+                asset.asset_id,
+                generation_mode=manifest_generation_mode,
+            ),
+            builder_profile=builder_profile,
+            requirement_links=_requirement_links(role_id),
+            blueprint_links=[f"component:{asset.type}:1"],
+            selection_risks=selected_packet.rejection_risks,
+            selection_reason=(
+                "Composant réaligné de manière déterministe sur la scène éditée ; "
+                "compatibilité et permissions vérifiées."
+            ),
+        )
 
     def _required_slots(self, requirements: RequirementSpec) -> list[tuple[str, str, bool]]:
         slots = [
@@ -344,6 +484,22 @@ def _deterministic_semantic_strategy(
         "reuse_component" if generation_strategy == "imported_glb_exact" else "compose_assets"
     )
     return preferred if preferred in strategies else strategies[0]
+
+
+def _scene_asset_by_role(scene: SceneSpec) -> dict[str, str | None]:
+    """Map assembly roles to the asset the edited scene actually carries."""
+
+    by_role: dict[str, str | None] = {"support_structure": scene.tower.asset_id}
+    antenna_ids = {sector.antenna_asset_id for sector in scene.sectors}
+    radio_ids = {sector.radio_asset_id for sector in scene.sectors if sector.radio_asset_id}
+    by_role["sector_antenna"] = next(iter(antenna_ids)) if len(antenna_ids) == 1 else None
+    by_role["remote_radio"] = next(iter(radio_ids)) if len(radio_ids) == 1 else None
+    for accessory in scene.accessory_assets:
+        if accessory.asset_type == "cabinet":
+            by_role["ground_equipment"] = accessory.asset_id
+        elif accessory.asset_type == "gps":
+            by_role["timing_antenna"] = accessory.asset_id
+    return by_role
 
 
 def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyConnection]:

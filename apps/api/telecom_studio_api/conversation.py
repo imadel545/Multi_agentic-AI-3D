@@ -4,11 +4,24 @@ Only recorded user text is attributed to the user. Execution notices are system
 messages, never fabricated LLM answers or a second authority for design versions.
 """
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from core.services.dependent_constraints import edit_failure_user_text
 from core.services.event_log import EventLogReadResult
+
+_TECHNICAL_EDIT_FAILURE = re.compile(
+    r"(?:traceback|\b(?:key|type|value|validation|runtime|lookup)error\b|exception|"
+    r"scenespec|fallback patch|platform_count|platform_levels_m|mount_zones_valid|"
+    r"assembly_[a-z0-9_]+|blueprint_not_compiled|requirement_not_covered|"
+    r"not grounded in (?:the )?(?:edit )?prompt|unrequested sector|undeclared capability|"
+    r"unknown adaptation capability|contradicts the prompt|"
+    r"\[type=|\b(?:does not|could not|cannot|must match|mismatch|invalid|unavailable)\b|"
+    r"/(?:tower|sectors|visual_elements|accessory_assets)/|\.py(?::\d+)?)",
+    re.IGNORECASE,
+)
 
 
 class ConversationMessage(BaseModel):
@@ -53,6 +66,9 @@ def project_conversation(workflow_id: str, journal: EventLogReadResult) -> Conve
             continue
         if not isinstance(text, str) or not text.strip():
             continue
+        failed_edit_notice = _is_failed_edit_notice(event.event_type, role, payload)
+        if failed_edit_notice and _TECHNICAL_EDIT_FAILURE.search(text):
+            text = _project_edit_failure(text, payload)
         # New edits already have a durable request message before validation.
         if event.event_type == "edit_patch_created" and any(
             item.operation_id == payload.get("edit_id") and item.role == "user" for item in messages
@@ -81,3 +97,26 @@ def project_conversation(workflow_id: str, journal: EventLogReadResult) -> Conve
         else ("recorded" if recorded else "legacy_partial"),
         messages=messages,
     )
+
+
+def _is_failed_edit_notice(event_type: str, role: str, payload: dict) -> bool:
+    return (
+        event_type == "edit_outcome"
+        and role == "system"
+        and (
+            payload.get("status") == "failed"
+            or payload.get("edit_result_status") in {"failed", "rejected"}
+        )
+    )
+
+
+def _project_edit_failure(text: str, payload: dict) -> str:
+    detail = edit_failure_user_text(text).strip()
+    if detail and detail[-1] not in ".!?":
+        detail = f"{detail}."
+    prefix = (
+        "La modification a été refusée : "
+        if payload.get("edit_result_status") == "rejected"
+        else "La modification n’a pas pu être appliquée : "
+    )
+    return f"{prefix}{detail} La version précédente reste disponible."

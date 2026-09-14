@@ -262,7 +262,17 @@ def _component_intents(
                 semantic_role_id=role_id,
                 asset_type=asset.type,
                 instance_strategy_id="per_sector" if per_sector else "single",
-                quantity=requirements.sector_count if per_sector else 1,
+                quantity=(
+                    sum(
+                        requirements.sector_values(
+                            "sector_include_cables", requirements.include_cables
+                        )
+                    )
+                    if asset.type == "cable"
+                    else requirements.sector_count
+                    if per_sector
+                    else 1
+                ),
                 asset_query=BlueprintAssetQuery(
                     asset_type=asset.type,
                     network_type=requirements.network_type,
@@ -288,7 +298,9 @@ def _component_intents(
                 semantic_role_id="sector_cable_route",
                 asset_type="cable",
                 instance_strategy_id="per_sector",
-                quantity=requirements.sector_count,
+                quantity=sum(
+                    requirements.sector_values("sector_include_cables", requirements.include_cables)
+                ),
                 asset_query=BlueprintAssetQuery(
                     asset_type="cable",
                     network_type=requirements.network_type,
@@ -397,25 +409,41 @@ def _constraints(
         (
             "sectors.install_height_m",
             "equals",
-            effective("antenna_install_height_m", requirements.antenna_install_height_m),
+            (
+                tuple(requirements.sector_install_heights_m)
+                if requirements.sector_install_heights_m is not None
+                else effective("antenna_install_height_m", requirements.antenna_install_height_m)
+            ),
             _source("antenna_install_height_m", resolution),
         ),
         (
             "sectors.beamwidth_deg",
             "equals",
-            effective("beamwidth_deg", requirements.beamwidth_deg),
+            (
+                tuple(requirements.sector_beamwidths_deg)
+                if requirements.sector_beamwidths_deg is not None
+                else effective("beamwidth_deg", requirements.beamwidth_deg)
+            ),
             _source("beamwidth_deg", resolution),
         ),
         (
             "sectors.mechanical_tilt_deg",
             "equals",
-            effective("mechanical_tilt_deg", requirements.mechanical_tilt_deg),
+            (
+                tuple(requirements.sector_mechanical_tilts_deg)
+                if requirements.sector_mechanical_tilts_deg is not None
+                else effective("mechanical_tilt_deg", requirements.mechanical_tilt_deg)
+            ),
             _source("mechanical_tilt_deg", resolution),
         ),
         (
             "sectors.electrical_tilt_deg",
             "equals",
-            effective("electrical_tilt_deg", requirements.electrical_tilt_deg),
+            (
+                tuple(requirements.sector_electrical_tilts_deg)
+                if requirements.sector_electrical_tilts_deg is not None
+                else effective("electrical_tilt_deg", requirements.electrical_tilt_deg)
+            ),
             _source("electrical_tilt_deg", resolution),
         ),
     ]

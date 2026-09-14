@@ -93,6 +93,11 @@ def evaluate_requirement_coverage(
             scene.tower.characteristics.material,
         ),
         _check(
+            "tower.characteristics.paint_color_hex",
+            requirements.tower_characteristics.paint_color_hex,
+            scene.tower.characteristics.paint_color_hex,
+        ),
+        _check(
             "tower.characteristics.has_platform",
             requirements.tower_characteristics.has_platform,
             scene.tower.characteristics.has_platform,
@@ -130,25 +135,28 @@ def evaluate_requirement_coverage(
         ),
         _check(
             "sectors.install_height_m",
-            [effective["antenna_install_height_m"]] * requirements.sector_count,
+            requirements.sector_install_heights_m
+            or [effective["antenna_install_height_m"]] * requirements.sector_count,
             [sector.install_height_m for sector in scene.sectors],
             source=_source_for("antenna_install_height_m", applied_decisions),
         ),
         _check(
             "sectors.mechanical_tilt_deg",
-            [effective["mechanical_tilt_deg"]] * requirements.sector_count,
+            requirements.sector_mechanical_tilts_deg
+            or [effective["mechanical_tilt_deg"]] * requirements.sector_count,
             [sector.mechanical_tilt_deg for sector in scene.sectors],
             source=_source_for("mechanical_tilt_deg", applied_decisions),
         ),
         _check(
             "sectors.electrical_tilt_deg",
-            [effective["electrical_tilt_deg"]] * requirements.sector_count,
+            requirements.sector_electrical_tilts_deg
+            or [effective["electrical_tilt_deg"]] * requirements.sector_count,
             [sector.electrical_tilt_deg for sector in scene.sectors],
             source=_source_for("electrical_tilt_deg", applied_decisions),
         ),
         _check(
             "sectors.beamwidth_deg",
-            [effective["beamwidth_deg"]] * requirements.sector_count,
+            requirements.sector_values("sector_beamwidths_deg", effective["beamwidth_deg"]),
             [sector.beamwidth_deg for sector in scene.sectors],
             source=_source_for("beamwidth_deg", applied_decisions),
         ),
@@ -159,13 +167,13 @@ def evaluate_requirement_coverage(
         ),
         _check(
             "sectors.include_cable",
-            [effective["include_cables"]] * requirements.sector_count,
+            requirements.sector_values("sector_include_cables", effective["include_cables"]),
             [sector.include_cable for sector in scene.sectors],
             source=_source_for("include_cables", applied_decisions),
         ),
         _check(
             "sectors.include_label",
-            [requirements.include_labels] * requirements.sector_count,
+            requirements.sector_values("sector_include_labels", requirements.include_labels),
             [sector.include_label for sector in scene.sectors],
         ),
         _check(

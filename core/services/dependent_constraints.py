@@ -15,9 +15,10 @@ from dataclasses import dataclass, field
 
 from core.contracts.scene import SceneSpec
 from core.contracts.scene_edit import PatchOperation, ScenePatch
+from core.services.platform_edit_resolution import resolve_platform_edit
+from core.validation.scene_validator import parametric_tower_mount_envelope
 
 TOWER_HEIGHT_PATH = "/tower/height_m"
-MIN_INSTALL_HEIGHT_M = 1.0
 
 
 @dataclass(frozen=True)
@@ -52,11 +53,15 @@ def derive_dependent_operations(
     explicit_sector_paths = {op.path for op in patch.operations}
     operations: list[PatchOperation] = []
     moved: list[tuple[str, float, float]] = []
+    # Mirror the practical mounting envelope enforced by the scene validator for
+    # parametric towers: antennas must stay below 98 % of the tower height.
+    min_install, max_install = parametric_tower_mount_envelope(new_height)
+    max_install = min(max_install, new_height)
     for index, sector in enumerate(scene.sectors):
         path = f"/sectors/{index}/install_height_m"
         if path in explicit_sector_paths:
             continue
-        if sector.install_height_m <= new_height:
+        if sector.install_height_m <= max_install:
             continue
         if allowed_paths is not None and path not in allowed_paths:
             raise ValueError(
@@ -64,8 +69,8 @@ def derive_dependent_operations(
                 f"({sector.install_height_m:g} > {new_height:g}) and cannot be adapted"
             )
         top_offset = max(old_height - float(sector.install_height_m), 0.0)
-        derived = round(max(new_height - top_offset, MIN_INSTALL_HEIGHT_M), 2)
-        derived = min(derived, new_height)
+        derived = round(max(new_height - top_offset, min_install), 2)
+        derived = min(derived, max_install)
         operations.append(PatchOperation(op="replace", path=path, value=derived))
         moved.append((sector.sector_id, float(sector.install_height_m), derived))
     assumptions: list[str] = []
@@ -94,13 +99,20 @@ def with_dependent_operations(
     allowed_paths: set[str] | None = None,
 ) -> ScenePatch:
     derived = derive_dependent_operations(scene, patch, allowed_paths=allowed_paths)
-    if not derived.operations:
+    platform_resolution = resolve_platform_edit(scene, patch)
+    platform_assumptions = (
+        list(platform_resolution.assumptions) if platform_resolution is not None else []
+    )
+    new_assumptions = list(dict.fromkeys([*derived.assumptions, *platform_assumptions]))
+    if not derived.operations and not new_assumptions:
         return patch
     return patch.model_copy(
         update={
             "operations": [*patch.operations, *derived.operations],
-            "assumptions": [*patch.assumptions, *derived.assumptions],
-            "derived_assumptions": [*patch.derived_assumptions, *derived.assumptions],
+            "assumptions": list(dict.fromkeys([*patch.assumptions, *new_assumptions])),
+            "derived_assumptions": list(
+                dict.fromkeys([*patch.derived_assumptions, *new_assumptions])
+            ),
         }
     )
 
@@ -142,6 +154,47 @@ def edit_failure_user_text(message: str) -> str:
         )
     if "dépasse les capacités du composant sélectionné" in lowered:
         return "la demande dépasse ce que le composant sélectionné permet de modifier."
+    if "fallback patch could not interpret prompt" in lowered:
+        return (
+            "je n’ai pas compris quelle modification appliquer. Nommez l’élément et la "
+            "valeur souhaitée (par exemple « supprime l’armoire », « hauteur du pylône à 36 m » "
+            "ou « azimut du secteur 1 à 90 degrés »)."
+        )
+    if "does not compile blueprint intent" in lowered or "blueprint_not_compiled" in lowered:
+        return "la modification n’a pas pu être vérifiée avec les composants du design."
+    if "does not preserve requirement" in lowered or "requirement_not_covered" in lowered:
+        return (
+            "la modification contredit une exigence confirmée du design. Précisez la "
+            "nouvelle exigence pour que le design soit mis à jour de façon cohérente."
+        )
+    if "contradicts the prompt" in lowered:
+        return (
+            "je n’ai pas su déterminer s’il fallait ajouter ou retirer cet élément ; précisez-le."
+        )
+    if "platform_count must match len(platform_levels_m)" in lowered:
+        return (
+            "le nombre de plateformes ne correspond pas aux niveaux indiqués. "
+            "Indiquez un niveau pour chaque plateforme."
+        )
+    if (
+        "mount_zones_valid" in lowered
+        or "mount zone" in lowered
+        or "mounting zone" in lowered
+        or "connector_tolerance_exceeded" in lowered
+        or "mount-to-support" in lowered
+    ):
+        return (
+            "la position demandée ne respecte pas la zone de montage du composant. "
+            "Indiquez une hauteur compatible avec le support."
+        )
+    if "antenna_install_height_m cannot exceed tower_height_m" in lowered:
+        return (
+            "la hauteur d’installation des antennes dépasse celle du pylône. "
+            "Indiquez une hauteur d’antenne inférieure."
+        )
     if not cleaned:
         return "la demande n’a pas pu être interprétée."
-    return cleaned[0].lower() + cleaned[1:] if len(cleaned) > 1 else cleaned
+    return (
+        "une erreur technique a empêché la vérification de cette modification. "
+        "Réessayez ou reformulez la demande."
+    )

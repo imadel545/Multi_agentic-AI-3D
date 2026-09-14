@@ -667,3 +667,15 @@ son édition ciblée reste indisponible.
 - La prise en charge du nombre décimal LibreDWG `123.` corrige la lecture du
   diagnostic de `Radio_2260.dwg`; elle ne convertit aucun solide et ne change
   aucune décision d'admission.
+
+## Édition par chat — 2026-09-14
+
+- Les modifications restent bornées aux capacités du modèle sélectionné. Le
+  contrôle du patch vérifie champs, secteurs, unités et direction ; il ne
+  constitue pas un interpréteur linguistique général. Une demande composée
+  avec des directions opposées peut nécessiter plusieurs messages.
+- Le mode lexical de secours reconnaît notamment « supprime boite alimentation »
+  et le masquage des flèches/étiquettes. Il ne remplace pas toutes les capacités
+  d'interprétation de Groq. Les refus conservent la version vérifiée.
+- La visibilité globale des étiquettes domine les préférences de chaque
+  secteur ; masquer l'ensemble ne supprime pas ces préférences.

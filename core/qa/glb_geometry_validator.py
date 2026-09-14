@@ -222,11 +222,15 @@ def _missing_sector_objects(
             semantic_sector_ids.get("beam", []),
         ):
             missing.append(f"beam:{sector.sector_id}")
-        if scene.visual_elements.include_labels and not _has_sector_object(
-            normalized,
-            ("label",),
-            sector_token,
-            semantic_sector_ids.get("label", []),
+        if (
+            scene.visual_elements.include_labels
+            and sector.include_label
+            and not _has_sector_object(
+                normalized,
+                ("label",),
+                sector_token,
+                semantic_sector_ids.get("label", []),
+            )
         ):
             missing.append(f"label:{sector.sector_id}")
     if scene.visual_elements.include_power_cabinet and semantic_counts.get("power_cabinet", 0) < 1:

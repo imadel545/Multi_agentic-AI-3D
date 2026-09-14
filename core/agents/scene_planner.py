@@ -123,17 +123,27 @@ class ScenePlanner:
                 radio_generation_reason=_component_generation_reason(radio, radio_strategy)
                 if radio
                 else "no radio requested",
-                install_height_m=install_height,
+                install_height_m=requirements.sector_values(
+                    "sector_install_heights_m", install_height
+                )[index],
                 azimuth_deg=azimuth,
-                mechanical_tilt_deg=mechanical_tilt,
-                electrical_tilt_deg=electrical_tilt,
-                beamwidth_deg=beamwidth,
+                mechanical_tilt_deg=requirements.sector_values(
+                    "sector_mechanical_tilts_deg", mechanical_tilt
+                )[index],
+                electrical_tilt_deg=requirements.sector_values(
+                    "sector_electrical_tilts_deg", electrical_tilt
+                )[index],
+                beamwidth_deg=requirements.sector_values("sector_beamwidths_deg", beamwidth)[index],
                 antenna_dimensions_m=antenna.dimensions_m,
                 radio_dimensions_m=radio.dimensions_m if radio else None,
                 antenna_geometry_profile=antenna_geometry_profile,
                 radio_geometry_profile=radio_geometry_profile,
-                include_cable=include_cables,
-                include_label=requirements.include_labels,
+                include_cable=requirements.sector_values("sector_include_cables", include_cables)[
+                    index
+                ],
+                include_label=requirements.sector_values(
+                    "sector_include_labels", requirements.include_labels
+                )[index],
             )
             for index, azimuth in enumerate(requirements.azimuths_deg)
         ]

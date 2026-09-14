@@ -709,10 +709,29 @@ class SceneEditAgent:
         # Tilt changes
         tilt_match = _target_value_match(
             text,
-            ("tilt", "inclinaison", "mécanique", "mecanique", "électrique", "electrique"),
+            (
+                "tilt",
+                "inclinaison",
+                "incline",
+                "incliner",
+                "mécanique",
+                "mecanique",
+                "électrique",
+                "electrique",
+            ),
         )
         if tilt_match and any(
-            k in text for k in ("tilt", "inclinaison", "mécanique", "mécanique", "electrique")
+            k in text
+            for k in (
+                "tilt",
+                "inclinaison",
+                "incline",
+                "incliner",
+                "mécanique",
+                "mecanique",
+                "électrique",
+                "electrique",
+            )
         ):
             val = float(tilt_match.group(1))
             sector_idx = self._extract_sector_index(text)
@@ -811,11 +830,28 @@ class SceneEditAgent:
             operations.append(
                 PatchOperation(op="replace", path="/visual_elements/include_gps_antenna", value=val)
             )
-        if any(k in text for k in ("power cabinet", "armoire", "cabinet")):
-            val = not ("supprime" in text or "remove" in text or "enlève" in text)
+        normalized_text = _normalized_words(edit_prompt)
+        if _contains_any_phrase(normalized_text, _POWER_CABINET_TERMS):
+            val = not _contains_any_phrase(normalized_text, _REMOVAL_MARKERS)
             operations.append(
                 PatchOperation(
                     op="replace", path="/visual_elements/include_power_cabinet", value=val
+                )
+            )
+        if _contains_any_phrase(normalized_text, _ARROW_NOUN_TERMS):
+            operations.append(
+                PatchOperation(
+                    op="replace",
+                    path="/visual_elements/include_azimuth_arrows",
+                    value=not _contains_any_phrase(normalized_text, _REMOVAL_MARKERS),
+                )
+            )
+        if _contains_any_phrase(normalized_text, _LABEL_TERMS):
+            operations.append(
+                PatchOperation(
+                    op="replace",
+                    path="/visual_elements/include_labels",
+                    value=not _contains_any_phrase(normalized_text, _REMOVAL_MARKERS),
                 )
             )
         if any(k in text for k in ("câble", "cable")):
@@ -990,52 +1026,194 @@ def _adaptation_plan_schema(capabilities: SceneAdaptationCapabilities) -> dict[s
     }
 
 
+_COLOR_TERMS: tuple[str, ...] = (
+    "couleur",
+    "color",
+    "colour",
+    "peins",
+    "peint",
+    "peindre",
+    "repeins",
+    "teinte",
+    "rouge",
+    "bleu",
+    "vert",
+    "blanc",
+    "noir",
+    "gris",
+    "jaune",
+    "orange",
+    "violet",
+    "rose",
+    "marron",
+    "red",
+    "blue",
+    "green",
+    "white",
+    "black",
+    "grey",
+    "gray",
+    "yellow",
+    "ral",
+    "#",
+)
+
+_POWER_CABINET_TERMS: tuple[str, ...] = (
+    "power cabinet",
+    "armoire",
+    "cabinet",
+    "boîte alimentation",
+    "boite alimentation",
+    "boîtier alimentation",
+    "boitier alimentation",
+    "coffret alimentation",
+)
+_AZIMUTH_ARROW_TERMS: tuple[str, ...] = (
+    "azimut",
+    "azimuth",
+    "flèche",
+    "fleche",
+    "flèches",
+    "fleches",
+    "arrow",
+    "arrows",
+)
+_ARROW_NOUN_TERMS: tuple[str, ...] = (
+    "flèche",
+    "fleche",
+    "flèches",
+    "fleches",
+    "arrow",
+    "arrows",
+)
+_LABEL_TERMS: tuple[str, ...] = (
+    "label",
+    "labels",
+    "étiquette",
+    "etiquette",
+    "étiquettes",
+    "etiquettes",
+)
+
 _PATH_TERMS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("/tower/height_m", ("hauteur", "height", "tour", "tower", "pylône", "pylone")),
+    (
+        "/tower/height_m",
+        (
+            "hauteur",
+            "height",
+            "mets la tour",
+            "met la tour",
+            "tour à",
+            "set tower to",
+            "raccourcis pylône",
+            "raccourcis pylone",
+            "raccourcis le pylône",
+            "raccourcis le pylone",
+            "raccourcis la tour",
+            "shorten tower",
+        ),
+    ),
     ("/tower/characteristics/structure", ("structure", "treillis", "lattice", "monopole")),
     ("/tower/characteristics/leg_count", ("jambe", "pied", "leg")),
     ("/tower/characteristics/base_width_m", ("largeur", "base", "width")),
     ("/tower/characteristics/top_width_m", ("largeur", "sommet", "top", "width")),
     ("/tower/characteristics/foundation_type", ("fondation", "dalle", "foundation", "base")),
-    ("/tower/characteristics/has_platform", ("plateforme", "platform")),
-    ("/tower/characteristics/platform_count", ("plateforme", "platform")),
+    (
+        "/tower/characteristics/has_platform",
+        ("plateforme", "plateformes", "platform", "platforms"),
+    ),
+    (
+        "/tower/characteristics/platform_count",
+        ("plateforme", "plateformes", "platform", "platforms"),
+    ),
     ("/tower/characteristics/has_ladder", ("échelle", "echelle", "ladder")),
     ("/tower/characteristics/has_lightning_rod", ("paratonnerre", "lightning")),
     ("/tower/characteristics/has_aviation_light", ("balisage", "aviation")),
     (
+        "/tower/characteristics/paint_color_hex",
+        _COLOR_TERMS,
+    ),
+    (
         "/tower/characteristics/material",
-        ("matériau", "materiau", "material", "acier", "béton", "beton"),
+        (
+            "matériau",
+            "materiau",
+            "material",
+            "acier",
+            "béton",
+            "beton",
+            "galvanis",
+        ),
     ),
     ("/visual_elements/include_gps_antenna", ("gps", "gnss")),
-    ("/visual_elements/include_power_cabinet", ("armoire", "cabinet", "alimentation", "power")),
+    ("/visual_elements/include_power_cabinet", _POWER_CABINET_TERMS),
     ("/visual_elements/include_sector_beams", ("faisceau", "beam", "secteur")),
-    ("/visual_elements/include_azimuth_arrows", ("azimut", "azimuth", "flèche", "fleche", "arrow")),
+    ("/visual_elements/include_azimuth_arrows", _AZIMUTH_ARROW_TERMS),
     (
         "/visual_elements/include_height_markers",
         ("hauteur", "height", "marker", "repère", "repere"),
     ),
-    ("/visual_elements/include_labels", ("label", "étiquette", "etiquette")),
+    ("/visual_elements/include_labels", _LABEL_TERMS),
 )
 
 _SECTOR_FIELD_TERMS: dict[str, tuple[str, ...]] = {
-    "azimuth_deg": ("azimut", "azimuth", "orientation", "diriger", "oriente"),
-    "install_height_m": ("hauteur", "height", "hba", "antenne", "antenna"),
-    "mechanical_tilt_deg": ("tilt", "inclinaison", "mécanique", "mecanique"),
+    "azimuth_deg": (
+        "azimut",
+        "azimuth",
+        "orientation",
+        "diriger",
+        "oriente",
+        "tourne",
+        "tourner",
+        "pivote",
+        "rotate",
+        "rotation",
+        "vers le nord",
+        "vers le sud",
+        "vers l est",
+        "vers l ouest",
+    ),
+    "install_height_m": (
+        "hauteur",
+        "height",
+        "hba",
+        "antenne à",
+        "antenna to",
+        "monte",
+        "remonte",
+        "baisse",
+        "descend",
+        "abaisse",
+        "rehausse",
+        "plus haut",
+        "plus bas",
+    ),
+    "mechanical_tilt_deg": (
+        "tilt",
+        "inclinaison",
+        "incline",
+        "incliner",
+        "mécanique",
+        "mecanique",
+    ),
     "electrical_tilt_deg": ("tilt", "inclinaison", "électrique", "electrique"),
     "beamwidth_deg": ("beamwidth", "ouverture", "faisceau", "beam"),
     "include_cable": ("câble", "cable"),
-    "include_label": ("label", "étiquette", "etiquette"),
+    "include_label": _LABEL_TERMS,
     "vertical_offset_m": (
-        "rru",
-        "radio",
         "décalage vertical",
         "decalage vertical",
         "vertical offset",
         "distance verticale",
+        "baisse",
+        "descend",
+        "abaisse",
+        "monte",
+        "remonte",
+        "plus bas",
+        "plus haut",
     ),
     "radial_inset_m": (
-        "rru",
-        "radio",
         "retrait radial",
         "radial inset",
         "distance radiale",
@@ -1044,9 +1222,38 @@ _SECTOR_FIELD_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 _ACCESSORY_FIELD_TERMS: dict[str, tuple[str, ...]] = {
-    "position": ("position", "déplace", "deplace", "move", "x", "y", "z"),
-    "rotation_deg": ("rotation", "tourne", "rotate", "orientation"),
-    "scale": ("taille", "échelle", "echelle", "scale", "agrandis", "réduis", "reduis"),
+    "position": (
+        "position",
+        "déplace",
+        "deplace",
+        "move",
+        "x",
+        "y",
+        "z",
+        "rapproche",
+        "éloigne",
+        "eloigne",
+        "recule",
+        "avance",
+        "décale",
+        "decale",
+    ),
+    "rotation_deg": ("rotation", "tourne", "rotate", "orientation", "pivote"),
+    "scale": (
+        "taille",
+        "échelle",
+        "echelle",
+        "scale",
+        "agrandis",
+        "agrandir",
+        "réduis",
+        "reduis",
+        "réduire",
+        "plus grand",
+        "plus petit",
+        "grossis",
+        "dimension",
+    ),
 }
 
 
@@ -1092,19 +1299,221 @@ def _normalized_words(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", ascii_value.lower()).strip()
 
 
+_DECREASE_MARKERS = (
+    "diminue",
+    "decrease",
+    "reduit",
+    "reduis",
+    "lower",
+    "baisse",
+    "abaisse",
+    "descend",
+    "raccourci",
+    "raccourcis",
+    "raccourcit",
+    "raccourcir",
+    "plus bas",
+    "plus court",
+    "plus petit",
+    "moins",
+)
+_INCREASE_MARKERS = (
+    "augmente",
+    "increase",
+    "ajoute",
+    "raise",
+    "monte",
+    "remonte",
+    "rehausse",
+    "allonge",
+    "agrandi",
+    "plus haut",
+    "plus long",
+    "plus grand",
+    "hausse",
+)
+_REMOVAL_MARKERS = (
+    "supprime",
+    "retire",
+    "enleve",
+    "remove",
+    "sans ",
+    "masque",
+    "cache",
+    "desactive",
+    "ote ",
+    "otez",
+    "delete",
+    "hide",
+    "efface",
+    "vire",
+)
+
+
+def _normalized_numeric_text(value: str) -> str:
+    ascii_value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return ascii_value.lower()
+
+
+_NUMBER_WORDS: dict[str, float] = {
+    "deux": 2,
+    "trois": 3,
+    "quatre": 4,
+    "cinq": 5,
+    "six": 6,
+    "sept": 7,
+    "huit": 8,
+    "neuf": 9,
+    "dix": 10,
+    "douze": 12,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "half": 0.5,
+    "demi": 0.5,
+    "moitie": 0.5,
+    "double": 2,
+}
+
+
+def _contains_phrase(normalized_text: str, phrase: str) -> bool:
+    normalized_phrase = _normalized_words(phrase)
+    if not normalized_phrase:
+        return False
+    return re.search(rf"(?:^| ){re.escape(normalized_phrase)}(?: |$)", normalized_text) is not None
+
+
+def _contains_any_phrase(normalized_text: str, phrases: tuple[str, ...]) -> bool:
+    return any(_contains_phrase(normalized_text, phrase) for phrase in phrases)
+
+
+def _quantity_mode(prompt: str, start: int, *, directional: bool) -> str:
+    prefix = prompt[:start].rstrip()
+    if re.search(r"(?:\ba|\bto|=)\s*$", prefix):
+        return "absolute"
+    if directional:
+        return "delta"
+    return "absolute"
+
+
+def _prompt_quantities(normalized_prompt: str) -> list[tuple[float, str, str]]:
+    """Return typed prompt quantities, excluding component indices.
+
+    Each tuple is ``(value, canonical_unit, mode)``. ``mode`` distinguishes an
+    absolute target (``à 30 m``) from a relative delta (``baisse de 40 cm``).
+    """
+
+    normalized_words = _normalized_words(normalized_prompt)
+    directional = _contains_any_phrase(
+        normalized_words, (*_DECREASE_MARKERS, *_INCREASE_MARKERS, *_REMOVAL_MARKERS)
+    )
+    quantities: list[tuple[float, str, str]] = []
+    for word, number in _NUMBER_WORDS.items():
+        for match in re.finditer(rf"\b{re.escape(word)}\b", normalized_prompt):
+            prefix = normalized_prompt[: match.start()]
+            if re.search(r"(?:\bsecteur|\bsector|\bs)\s*$", prefix):
+                continue
+            quantities.append(
+                (
+                    float(number),
+                    "",
+                    _quantity_mode(normalized_prompt, match.start(), directional=directional),
+                )
+            )
+    for match in re.finditer(
+        r"(-?\d+(?:[.,]\d+)?)\s*(millimetres?|mm|centimetres?|cm|metres?|meters?|m\b|deg(?:rees?)?|degres?|°|%|pourcent)?",
+        normalized_prompt,
+    ):
+        prefix = normalized_prompt[: match.start()]
+        if re.search(r"(?:\bsecteur|\bsector|\bs)\s*$", prefix):
+            continue
+        value = float(match.group(1).replace(",", "."))
+        raw_unit = (match.group(2) or "").strip()
+        if raw_unit.startswith("mm") or raw_unit.startswith("millimetre"):
+            unit = "mm"
+        elif raw_unit.startswith("cm") or raw_unit.startswith("centimetre"):
+            unit = "cm"
+        elif raw_unit == "m" or raw_unit.startswith(("metre", "meter")):
+            unit = "m"
+        elif raw_unit.startswith(("deg",)) or raw_unit == "°":
+            unit = "deg"
+        elif raw_unit in {"%", "pourcent"}:
+            unit = "percent"
+        else:
+            unit = ""
+        quantities.append(
+            (
+                value,
+                unit,
+                _quantity_mode(normalized_prompt, match.start(), directional=directional),
+            )
+        )
+    return quantities
+
+
+def _candidate_values_for_path(
+    path: str,
+    quantities: list[tuple[float, str, str]],
+    *,
+    mode: str | None = None,
+) -> list[float]:
+    """Convert compatible prompt quantities into the edited field's unit."""
+
+    values: list[float] = []
+    metres = path.endswith("_m") or "/position" in path or "/translation_m/" in path
+    degrees = path.endswith("_deg") or "/rotation_deg" in path
+    count = path.endswith("_count")
+    for value, unit, quantity_mode in quantities:
+        if mode is not None and quantity_mode != mode:
+            continue
+        if unit == "percent":
+            continue
+        if metres:
+            if unit == "cm":
+                values.append(value / 100.0)
+            elif unit == "mm":
+                values.append(value / 1000.0)
+            elif unit in {"", "m"}:
+                values.append(value)
+        elif degrees:
+            if unit in {"", "deg"}:
+                values.append(value)
+        elif count:
+            if unit == "":
+                values.append(value)
+        else:
+            if unit == "":
+                values.append(value)
+    return values
+
+
 def _validate_patch_alignment(scene: SceneSpec, edit_prompt: str, patch: ScenePatch) -> None:
-    normalized = edit_prompt.lower()
-    source_numbers = [
-        float(value.replace(",", ".")) for value in re.findall(r"-?\d+(?:[.,]\d+)?", normalized)
-    ]
+    """Reject LLM operations the prompt never asked for.
+
+    The guard is deliberately tolerant to vocabulary: an operation is grounded
+    when the prompt names the edited field and, for numeric fields, a quantity
+    explains the value. Naming a component family cannot authorize a different
+    field on that component.
+    """
+
+    normalized = _normalized_words(edit_prompt)
+    # Quantities are read from an accent-stripped copy that keeps "1,6" / "0.4".
+    quantities = _prompt_quantities(_normalized_numeric_text(edit_prompt))
     mentioned_sectors = {
         int(value) - 1
         for value in re.findall(r"(?:secteur|sector|s)\s*(\d+)", normalized)
         if int(value) > 0
     }
     for operation in patch.operations:
-        terms = _terms_for_path(operation.path)
-        if not terms or not any(term in normalized for term in terms):
+        terms = tuple(_normalized_words(term) for term in _terms_for_path(operation.path))
+        grounded_by_term = any(_contains_phrase(normalized, term) for term in terms)
+        numeric = isinstance(operation.value, int | float) and not isinstance(operation.value, bool)
+        grounded_by_number = numeric and _numeric_value_is_grounded(
+            scene, operation, quantities, normalized
+        )
+        if not grounded_by_term:
             raise ValueError(
                 f"Patch operation is not grounded in the edit prompt: {operation.path}"
             )
@@ -1112,16 +1521,8 @@ def _validate_patch_alignment(scene: SceneSpec, edit_prompt: str, patch: ScenePa
         if operation.path.startswith("/sectors/") and parts[2].isdigit() and mentioned_sectors:
             if int(parts[2]) not in mentioned_sectors:
                 raise ValueError(f"Patch targets an unrequested sector: {operation.path}")
-        if isinstance(operation.value, int | float) and not isinstance(operation.value, bool):
-            if not _numeric_value_is_grounded(
-                scene,
-                operation,
-                source_numbers,
-                normalized,
-            ):
-                raise ValueError(
-                    f"Patch numeric value is not grounded in the prompt: {operation.path}"
-                )
+        if numeric and not grounded_by_number:
+            raise ValueError(f"Patch numeric value is not grounded in the prompt: {operation.path}")
         if (
             isinstance(operation.value, list)
             and operation.value
@@ -1130,18 +1531,20 @@ def _validate_patch_alignment(scene: SceneSpec, edit_prompt: str, patch: ScenePa
                 for item in operation.value
             )
         ):
-            if not all(
-                any(abs(float(item) - source) <= 0.01 for source in source_numbers)
-                for item in operation.value
-            ):
+            if not _vector_value_is_grounded(scene, operation, quantities, normalized):
                 raise ValueError(
                     f"Patch vector value is not grounded in the prompt: {operation.path}"
                 )
+        if operation.path == "/tower/characteristics/paint_color_hex" and isinstance(
+            operation.value, str
+        ):
+            expected_colors = _expected_paint_colors(edit_prompt)
+            if not expected_colors or operation.value.lower() not in expected_colors:
+                raise ValueError(
+                    f"Patch colour value is not grounded in the prompt: {operation.path}"
+                )
         if isinstance(operation.value, bool):
-            expected = not any(
-                marker in normalized
-                for marker in ("supprime", "retire", "enlève", "enleve", "remove", "sans ")
-            )
+            expected = not _contains_any_phrase(normalized, _REMOVAL_MARKERS)
             if operation.value is not expected:
                 raise ValueError(f"Patch boolean value contradicts the prompt: {operation.path}")
 
@@ -1200,22 +1603,167 @@ def _target_value_match(text: str, keywords: tuple[str, ...]) -> re.Match[str] |
 def _numeric_value_is_grounded(
     scene: SceneSpec,
     operation: PatchOperation,
-    source_numbers: list[float],
+    quantities: list[tuple[float, str, str]],
     normalized_prompt: str,
 ) -> bool:
     value = float(operation.value)
-    if any(abs(value - source) <= 0.01 for source in source_numbers):
-        return True
     current = _current_numeric_value(scene, operation.path)
+    absolute_values = _candidate_values_for_path(operation.path, quantities, mode="absolute")
+    delta_values = _candidate_values_for_path(operation.path, quantities, mode="delta")
+    decrease = _contains_any_phrase(normalized_prompt, _DECREASE_MARKERS)
+    increase = _contains_any_phrase(normalized_prompt, _INCREASE_MARKERS)
+    removal = _contains_any_phrase(normalized_prompt, _REMOVAL_MARKERS)
+
+    if any(abs(value - target) <= 0.01 for target in absolute_values):
+        return True
     if current is None:
         return False
-    if any(term in normalized_prompt for term in ("augmente", "increase", "ajoute", "raise")):
-        return any(abs(value - (current + delta)) <= 0.01 for delta in source_numbers)
-    if any(
-        term in normalized_prompt for term in ("diminue", "decrease", "réduit", "reduit", "lower")
-    ):
-        return any(abs(value - (current - delta)) <= 0.01 for delta in source_numbers)
+    if isinstance(operation.value, int) and operation.path.endswith("_count"):
+        # Articles are not general-purpose quantities. They mean one only for a
+        # named count field with an explicit add/remove direction.
+        remove_all = removal and _contains_any_phrase(
+            normalized_prompt, ("tous", "toutes", "all", "every")
+        )
+        if remove_all:
+            return value == 0.0
+        steps = delta_values or [1.0]
+        if (
+            increase
+            and not decrease
+            and any(abs(value - (current + step)) <= 0.01 for step in steps)
+        ):
+            return True
+        if (
+            (decrease or removal)
+            and not increase
+            and any(abs(value - (current - step)) <= 0.01 for step in steps)
+        ):
+            return True
+        return False
+
+    direction = _relative_direction(operation.path, normalized_prompt)
+    if direction == 0:
+        return False
+    for delta in delta_values:
+        expected = current + direction * delta
+        if abs(value - expected) <= 0.01:
+            return True
+    for percent, unit, mode in quantities:
+        if unit != "percent" or mode != "delta":
+            continue
+        factor = 1.0 + direction * percent / 100.0
+        if abs(value - current * factor) <= 0.01:
+            return True
     return False
+
+
+def _vector_value_is_grounded(
+    scene: SceneSpec,
+    operation: PatchOperation,
+    quantities: list[tuple[float, str, str]],
+    normalized_prompt: str,
+) -> bool:
+    current = _current_vector_value(scene, operation.path)
+    if current is None or not isinstance(operation.value, list):
+        return False
+    values = [float(item) for item in operation.value]
+    changed = [index for index, item in enumerate(values) if abs(item - current[index]) > 1e-9]
+    if not changed:
+        return False
+
+    axis_indices = {
+        index
+        for index, axis in enumerate(("x", "y", "z"))
+        if _contains_phrase(normalized_prompt, axis)
+    }
+    if axis_indices and any(index not in axis_indices for index in changed):
+        return False
+
+    absolute_values = _candidate_values_for_path(operation.path, quantities, mode="absolute")
+    delta_values = _candidate_values_for_path(operation.path, quantities, mode="delta")
+    direction = _relative_direction(operation.path, normalized_prompt)
+    for index in changed:
+        if any(abs(values[index] - target) <= 0.01 for target in absolute_values):
+            continue
+        if direction == 0:
+            return False
+        if any(
+            abs(values[index] - (current[index] + direction * delta)) <= 0.01
+            for delta in delta_values
+        ):
+            continue
+        percent_match = False
+        for percent, unit, mode in quantities:
+            if unit != "percent" or mode != "delta":
+                continue
+            factor = 1.0 + direction * percent / 100.0
+            if abs(values[index] - current[index] * factor) <= 0.01:
+                percent_match = True
+                break
+        if not percent_match:
+            return False
+    return True
+
+
+def _relative_direction(path: str, normalized_prompt: str) -> int:
+    """Return +1/-1 for a requested change in the stored field's semantics."""
+
+    increase = _contains_any_phrase(normalized_prompt, _INCREASE_MARKERS)
+    decrease = _contains_any_phrase(normalized_prompt, _DECREASE_MARKERS)
+    if path.endswith("/vertical_offset_m"):
+        # This field is the downward distance from antenna to radio: lowering
+        # the radio increases the stored offset and raising it decreases it.
+        increase, decrease = decrease, increase
+    elif path.endswith("/radial_inset_m"):
+        closer = _contains_any_phrase(normalized_prompt, ("rapproche", "closer"))
+        farther = _contains_any_phrase(
+            normalized_prompt, ("eloigne", "éloigne", "farther", "further")
+        )
+        increase = increase or closer
+        decrease = decrease or farther
+    if increase == decrease:
+        return 0
+    return 1 if increase else -1
+
+
+_NAMED_PAINT_COLORS: dict[str, str] = {
+    "rouge": "#c62828",
+    "red": "#c62828",
+    "bleu": "#1e5aa8",
+    "blue": "#1e5aa8",
+    "blanc": "#f2f2f2",
+    "white": "#f2f2f2",
+    "gris": "#8a8f94",
+    "grey": "#8a8f94",
+    "gray": "#8a8f94",
+    "vert": "#2e7d32",
+    "green": "#2e7d32",
+    "jaune": "#f9c80e",
+    "yellow": "#f9c80e",
+    "orange": "#ef6c00",
+    "noir": "#1a1a1a",
+    "black": "#1a1a1a",
+}
+
+
+def _expected_paint_colors(edit_prompt: str) -> set[str]:
+    explicit = {match.lower() for match in re.findall(r"#[0-9a-fA-F]{6}\b", edit_prompt)}
+    if explicit:
+        return explicit
+    normalized = _normalized_words(edit_prompt)
+    return {
+        color for name, color in _NAMED_PAINT_COLORS.items() if _contains_phrase(normalized, name)
+    }
+
+
+def _current_vector_value(scene: SceneSpec, path: str) -> list[float] | None:
+    match = re.fullmatch(r"/accessory_assets/(\d+)/(position|rotation_deg|scale)", path)
+    if match is None:
+        return None
+    index = int(match.group(1))
+    if index >= len(scene.accessory_assets):
+        return None
+    return [float(item) for item in getattr(scene.accessory_assets[index], match.group(2))]
 
 
 def _current_numeric_value(scene: SceneSpec, path: str) -> float | None:

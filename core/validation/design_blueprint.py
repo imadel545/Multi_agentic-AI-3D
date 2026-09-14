@@ -45,7 +45,7 @@ def evaluate_blueprint_requirement_coverage(
         ),
         _check(
             "cable.quantity",
-            requirements.sector_count if requirements.include_cables else 0,
+            sum(requirements.sector_values("sector_include_cables", requirements.include_cables)),
             _quantity(intents, "cable"),
         ),
         _check(
@@ -73,22 +73,38 @@ def evaluate_blueprint_requirement_coverage(
         ),
         _check(
             "constraints.sectors.install_height_m",
-            effective["antenna_install_height_m"],
+            (
+                tuple(requirements.sector_install_heights_m)
+                if requirements.sector_install_heights_m is not None
+                else effective["antenna_install_height_m"]
+            ),
             constraints.get("sectors.install_height_m"),
         ),
         _check(
             "constraints.sectors.beamwidth_deg",
-            effective["beamwidth_deg"],
+            (
+                tuple(requirements.sector_beamwidths_deg)
+                if requirements.sector_beamwidths_deg is not None
+                else effective["beamwidth_deg"]
+            ),
             constraints.get("sectors.beamwidth_deg"),
         ),
         _check(
             "constraints.sectors.mechanical_tilt_deg",
-            effective["mechanical_tilt_deg"],
+            (
+                tuple(requirements.sector_mechanical_tilts_deg)
+                if requirements.sector_mechanical_tilts_deg is not None
+                else effective["mechanical_tilt_deg"]
+            ),
             constraints.get("sectors.mechanical_tilt_deg"),
         ),
         _check(
             "constraints.sectors.electrical_tilt_deg",
-            effective["electrical_tilt_deg"],
+            (
+                tuple(requirements.sector_electrical_tilts_deg)
+                if requirements.sector_electrical_tilts_deg is not None
+                else effective["electrical_tilt_deg"]
+            ),
             constraints.get("sectors.electrical_tilt_deg"),
         ),
     ]

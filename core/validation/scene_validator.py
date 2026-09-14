@@ -3,6 +3,11 @@ from core.contracts.scene import SceneSpec
 from core.contracts.validation import ValidationIssue, ValidationReport
 
 
+def parametric_tower_mount_envelope(height_m: float) -> tuple[float, float]:
+    practical_min = max(3.0, height_m * 0.2)
+    return practical_min, max(practical_min, height_m * 0.98)
+
+
 def _mount_zones_valid(scene: SceneSpec, assets_by_id: dict[str, AssetManifest]) -> bool:
     tower_asset = assets_by_id.get(scene.tower.asset_id)
     if tower_asset and tower_asset.mount_zones:
@@ -38,8 +43,7 @@ def _scaled_tower_mount_zones(
     if scene.tower.generation_strategy != "parametric_generated":
         return [(zone.min_height_m, zone.max_height_m) for zone in tower_asset.mount_zones]
 
-    practical_min = max(3.0, scene.tower.height_m * 0.2)
-    practical_max = max(practical_min, scene.tower.height_m * 0.98)
+    practical_min, practical_max = parametric_tower_mount_envelope(scene.tower.height_m)
     zones = [(practical_min, practical_max)]
 
     if tower_asset.dimensions_m is not None and tower_asset.dimensions_m.height > 0:
@@ -121,8 +125,6 @@ def validate_scene_spec(scene: SceneSpec, assets: list[AssetManifest]) -> Valida
         "power_cabinet_asset_present_when_requested": (
             not scene.visual_elements.include_power_cabinet or _has_accessory(scene, "cabinet")
         ),
-        "cable_option_consistent": all(sector.include_cable for sector in scene.sectors)
-        or not any(sector.include_cable for sector in scene.sectors),
         "mount_zones_valid": _mount_zones_valid(scene, assets_by_id),
         "units_meters": scene.units == "meters",
     }

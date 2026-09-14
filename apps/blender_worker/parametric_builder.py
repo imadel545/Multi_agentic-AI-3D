@@ -268,6 +268,7 @@ def apply_sector_pose(
 
 def tower_material_profile(
     material_name: str,
+    paint_color_hex: str | None = None,
 ) -> tuple[tuple[float, float, float, float], float, float]:
     profiles = {
         "galvanized_steel": ((0.62, 0.68, 0.72, 1.0), 0.28, 0.68),
@@ -275,7 +276,19 @@ def tower_material_profile(
         "concrete": ((0.56, 0.57, 0.55, 1.0), 0.82, 0.0),
         "unknown": ((0.56, 0.59, 0.61, 1.0), 0.55, 0.18),
     }
-    return profiles.get(material_name, profiles["unknown"])
+    color, roughness, metallic = profiles.get(material_name, profiles["unknown"])
+    if paint_color_hex:
+        # An explicit paint colour renders as painted steel in that colour
+        # (sRGB hex converted to linear for the Principled base colour).
+        raw = paint_color_hex.lstrip("#")
+        srgb = [int(raw[index : index + 2], 16) / 255.0 for index in (0, 2, 4)]
+        linear = [
+            channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+            for channel in srgb
+        ]
+        color = (linear[0], linear[1], linear[2], 1.0)
+        _painted, roughness, metallic = profiles["painted_steel"]
+    return color, roughness, metallic
 
 
 def tower_envelope_radius_at_height(
@@ -316,15 +329,21 @@ def build_parametric_tower(
     top_width: float | None,
     leg_count: int,
     material_name: str = "galvanized_steel",
+    paint_color_hex: str | None = None,
 ) -> list[object]:
     """Generate a tower mesh from engineering parameters.
 
     Returns the list of created objects.
     """
-    color, roughness, metallic = tower_material_profile(material_name)
+    color, roughness, metallic = tower_material_profile(material_name, paint_color_hex)
+    material_key = (
+        f"{material_name}_{paint_color_hex.lstrip('#').lower()}"
+        if paint_color_hex
+        else material_name
+    )
     steel = _material(
         bpy,
-        f"tower_{material_name}",
+        f"tower_{material_key}",
         color,
         roughness=roughness,
         metallic=metallic,
@@ -384,7 +403,7 @@ def build_parametric_tower(
         # Reinforcing rings every 5 m
         ring_mat = _material(
             bpy,
-            f"tower_{material_name}_ring",
+            f"tower_{material_key}_ring",
             color,
             roughness=roughness,
             metallic=metallic,

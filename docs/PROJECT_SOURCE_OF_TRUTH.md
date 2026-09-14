@@ -1227,3 +1227,28 @@ L'ouverture directe de l'image a été bloquée par le client navigateur : cette
 étape visuelle n'est donc pas déclarée acceptée. Aucune nouvelle génération
 LLM, composition professionnelle ou édition de ce candidat n'est prouvée par
 ce contrôle de consultation. Le candidat reste reference_only.
+
+## Reprise des modifications par chat — 2026-09-14
+
+La révision recalcule la composition depuis le `SceneSpec` édité : retirer une
+armoire retire aussi son rôle du plan, ses liaisons et son intention blueprint.
+Les choix d'assets conservés ne sont pas resélectionnés. Un rôle ajouté sans
+nouvelle décision LLM expose une réconciliation déterministe. La réconciliation
+des plans 1.0 conserve leur schéma et leurs snapshots historiques.
+Les valeurs propres aux secteurs (HBA, inclinaisons, ouverture, câbles et
+étiquettes) survivent à la reconstruction des exigences et du blueprint.
+
+Le test `test_chat_composition_revisions.py` exécute Blender réel pour créer,
+retirer puis remettre l'armoire via l'API, et vérifie qu'une hauteur invalide
+ne change ni la version active ni son GLB. Le fallback lexical y est explicite.
+Un essai distinct depuis Chrome, avec Groq `openai/gpt-oss-120b`, a appliqué
+« supprime les flèches et les étiquettes » à la version existante : certificat
+1.5 émis, zéro flèche et zéro étiquette dans le GLB, paramètres sectoriels
+préservés. Ces preuves concernent le catalogue technique actuel ; aucune
+nouvelle qualification professionnelle CAD n'est revendiquée.
+
+L'essai Chrome « mets deux plateformes » a ensuite produit `v7a0b867c`, avec
+Groq sans fallback et Blender réel : plateforme existante conservée à 21,5 m,
+nouveau niveau à 13,2 m dérivé du profil d'accès déclaré. Le GLB exporté contient
+les deux plateformes ; leurs niveaux, garde-corps, supports et dégagements
+sont contrôlés dans `tower_access_evidence.json`, lié au certificat 1.5.

@@ -182,7 +182,15 @@ def _connection_instances(scene: SceneSpec, source, target) -> list[SectorSpec |
         component.builder_profile and component.builder_profile.instance_strategy == "per_sector"
         for component in (source, target)
     )
-    return list(scene.sectors) if per_sector else [None]
+    if not per_sector:
+        return [None]
+    roles = {source.role_id, target.role_id}
+    return [
+        sector
+        for sector in scene.sectors
+        if ("sector_cable_route" not in roles or sector.include_cable)
+        and ("remote_radio" not in roles or sector.radio_asset_id is not None)
+    ]
 
 
 def _validate_connector_pair(

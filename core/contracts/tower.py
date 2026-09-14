@@ -70,6 +70,12 @@ class TowerCharacteristics(StrictModel):
     has_lightning_rod: bool = False
     has_aviation_light: bool = False
     material: TowerMaterial = "galvanized_steel"
+    paint_color_hex: str | None = Field(
+        default=None,
+        pattern=r"^#[0-9a-fA-F]{6}$",
+        exclude_if=lambda value: value is None,
+        description="Optional paint colour applied to the structure (painted steel).",
+    )
 
     @model_validator(mode="before")
     @classmethod

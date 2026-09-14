@@ -122,3 +122,86 @@ def test_projected_applied_edit_links_the_system_outcome_to_its_verified_version
 
     assert restored.messages[-1].text == "La modification a été appliquée et vérifiée."
     assert restored.messages[-1].version_id == "v1234abcd"
+
+
+def test_projection_sanitizes_historical_technical_edit_failures_without_rewriting_journal(
+    tmp_path: Path,
+) -> None:
+    log = EventLogService(tmp_path)
+    failures = [
+        (
+            "sceneSpec does not compile blueprint intent: scene.accessory_asset_ids",
+            "composants du design",
+        ),
+        ("fallback patch could not interpret prompt", "je n’ai pas compris"),
+        (
+            "platform_count must match len(platform_levels_m)",
+            "nombre de plateformes",
+        ),
+        ("SceneSpec check failed: mount_zones_valid", "zone de montage"),
+        (
+            "Traceback: KeyError at /sectors/0/install_height_m in worker.py:42",
+            "une erreur technique",
+        ),
+    ]
+    for index, (raw, _expected) in enumerate(failures):
+        log.emit(
+            "wf_historical_failures",
+            "edit_outcome",
+            {
+                "status": "failed",
+                "edit_result_status": "failed",
+                "edit_id": f"edit_{index}",
+                "conversation_message": {"role": "system", "text": raw},
+            },
+        )
+
+    journal = log.read_events("wf_historical_failures")
+    projected = project_conversation("wf_historical_failures", journal)
+
+    assert [event.payload["conversation_message"]["text"] for event in journal.events] == [
+        raw for raw, _expected in failures
+    ]
+    assert all(event.payload["status"] == "failed" for event in journal.events)
+    for message, (raw, expected) in zip(projected.messages, failures, strict=True):
+        assert message.role == "system"
+        assert expected in message.text
+        assert raw not in message.text
+        assert "La version précédente reste disponible." in message.text
+    assert "Traceback" not in projected.messages[-1].text
+    assert "/sectors/" not in projected.messages[-1].text
+    assert ".py:42" not in projected.messages[-1].text
+    assert projected.history_status == "legacy_partial"
+
+
+def test_projection_preserves_user_text_and_clean_historical_failure_notice(tmp_path: Path) -> None:
+    log = EventLogService(tmp_path)
+    raw_user_text = "Pourquoi /sectors/0/install_height_m est refusé ?"
+    log.emit(
+        "wf_clean_notice",
+        "edit_requested",
+        {
+            "edit_id": "edit_clean",
+            "conversation_message": {"role": "user", "text": raw_user_text},
+        },
+    )
+    log.emit(
+        "wf_clean_notice",
+        "edit_outcome",
+        {
+            "status": "failed",
+            "edit_result_status": "rejected",
+            "edit_id": "edit_clean",
+            "conversation_message": {
+                "role": "system",
+                "text": "La modification a été refusée. La version précédente est conservée.",
+            },
+        },
+    )
+
+    projected = project_conversation("wf_clean_notice", log.read_events("wf_clean_notice"))
+
+    assert projected.messages[0].text == raw_user_text
+    assert projected.messages[1].text == (
+        "La modification a été refusée. La version précédente est conservée."
+    )

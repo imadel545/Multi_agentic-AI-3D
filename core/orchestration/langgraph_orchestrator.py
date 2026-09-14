@@ -1198,14 +1198,26 @@ class DesignOrchestrator:
         try:
             scene = _scene_with_revision_dependencies(scene, self.registry)
             selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
+            requirements = _requirements_from_scene(
+                scene, tower, antenna, radio, state["detail_level"]
+            )
+            if scene.assembly_plan is not None:
+                # The edited scene is the authority: drop plan components whose
+                # accessory/radio/cable was removed and add back re-enabled ones,
+                # otherwise the blueprint would still expect the removed asset.
+                reconciled = self.assembly_planner.reconcile_with_scene(
+                    scene.assembly_plan,
+                    scene=scene,
+                    requirements=requirements,
+                )
+                if reconciled is not scene.assembly_plan:
+                    scene = scene.model_copy(update={"assembly_plan": reconciled})
+                    selected_assets, tower, antenna, radio = self._assets_for_scene_revision(scene)
             scene = _scene_with_asset_metadata(scene, selected_assets)
             scene = scene.model_copy(deep=True)
             resolved_assembly = resolve_scene_assembly(scene)
             if resolved_assembly is not None:
                 scene = scene.model_copy(update={"assembly_plan": resolved_assembly})
-            requirements = _requirements_from_scene(
-                scene, tower, antenna, radio, state["detail_level"]
-            )
         except (KeyError, LookupError, ValueError) as exc:
             report = _failed_report(
                 design_id=state["workflow_id"],
@@ -2685,7 +2697,13 @@ def _requirements_from_scene(
         azimuths_deg=[sector.azimuth_deg for sector in scene.sectors],
         mechanical_tilt_deg=first_sector.mechanical_tilt_deg,
         electrical_tilt_deg=first_sector.electrical_tilt_deg,
+        sector_install_heights_m=[sector.install_height_m for sector in scene.sectors],
+        sector_mechanical_tilts_deg=[sector.mechanical_tilt_deg for sector in scene.sectors],
+        sector_electrical_tilts_deg=[sector.electrical_tilt_deg for sector in scene.sectors],
         beamwidth_deg=first_sector.beamwidth_deg,
+        sector_beamwidths_deg=[sector.beamwidth_deg for sector in scene.sectors],
+        sector_include_cables=[sector.include_cable for sector in scene.sectors],
+        sector_include_labels=[sector.include_label for sector in scene.sectors],
         include_rru=radio is not None,
         include_cables=any(sector.include_cable for sector in scene.sectors),
         include_beams=scene.visual_elements.include_sector_beams,
@@ -2796,7 +2814,12 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
     """Rebind derived assets and placements after a validated SceneSpec edit."""
 
     tower_type = _tower_type_for_structure(scene.tower.characteristics.structure)
-    tower_asset = registry.select_tower(tower_type, scene.network_type, scene.tower.height_m)
+    tower_asset = registry.get(scene.tower.asset_id)
+    tower_changed = bool(
+        tower_asset.compatible_tower_types and tower_type not in tower_asset.compatible_tower_types
+    )
+    if tower_changed:
+        tower_asset = registry.select_tower(tower_type, scene.network_type, scene.tower.height_m)
     tower = scene.tower.model_copy(
         update={
             "asset_id": tower_asset.asset_id,
@@ -2805,9 +2828,19 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
             "asset_metadata": _runtime_asset_metadata(tower_asset),
             "import_fallback_allowed": tower_asset.import_fallback_allowed,
             "dimensions_m": tower_asset.dimensions_m,
-            "generation_strategy": "parametric_generated",
-            "geometry_source": "parametric_generated",
-            "generation_reason": "revision dependencies normalized from tower structure",
+            **(
+                {
+                    "generation_strategy": "parametric_generated"
+                    if tower_asset.allows_generation_mode("parametric_generated")
+                    else "imported_glb_exact",
+                    "geometry_source": "parametric_generated"
+                    if tower_asset.allows_generation_mode("parametric_generated")
+                    else "imported_glb_exact",
+                    "generation_reason": "revision dependencies normalized from tower structure",
+                }
+                if tower_changed
+                else {}
+            ),
         }
     )
 
@@ -2837,7 +2870,16 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
     top_width = float(characteristics.top_width_m or min(base_width, base_width * 0.25))
     accessories = []
     if scene.visual_elements.include_power_cabinet:
-        cabinet = registry.select_asset("cabinet", scene.network_type, tower_type)
+        existing = next(
+            (item for item in scene.accessory_assets if item.asset_type == "cabinet"), None
+        )
+        cabinet = (
+            registry.get(existing.asset_id)
+            if existing
+            else registry.select_asset("cabinet", scene.network_type, tower_type)
+        )
+        if cabinet.compatible_tower_types and tower_type not in cabinet.compatible_tower_types:
+            cabinet = registry.select_asset("cabinet", scene.network_type, tower_type)
         accessories.append(
             _rebind_revision_accessory(
                 scene,
@@ -2847,7 +2889,14 @@ def _scene_with_revision_dependencies(scene: SceneSpec, registry: AssetRegistry)
             )
         )
     if scene.visual_elements.include_gps_antenna:
-        gps = registry.select_asset("gps", scene.network_type, tower_type)
+        existing = next((item for item in scene.accessory_assets if item.asset_type == "gps"), None)
+        gps = (
+            registry.get(existing.asset_id)
+            if existing
+            else registry.select_asset("gps", scene.network_type, tower_type)
+        )
+        if gps.compatible_tower_types and tower_type not in gps.compatible_tower_types:
+            gps = registry.select_asset("gps", scene.network_type, tower_type)
         gps_height = max(0.5, scene.tower.height_m - 0.5)
         tower_width = base_width + (top_width - base_width) * (
             gps_height / max(scene.tower.height_m, 1e-6)
@@ -2895,6 +2944,8 @@ def _rebind_revision_accessory(
     position = (
         existing.position if existing.placement_policy == "user_defined" else default_position
     )
+    if existing.asset_id == asset.asset_id and existing.asset_file is not None:
+        rebound = existing
     return rebound.model_copy(
         update={
             "position": position,

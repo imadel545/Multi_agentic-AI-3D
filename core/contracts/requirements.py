@@ -147,6 +147,27 @@ class RequirementSpec(StrictModel):
     mechanical_tilt_deg: float = Field(default=3.0, ge=-15, le=30)
     electrical_tilt_deg: float = Field(default=0.0, ge=-15, le=30)
     beamwidth_deg: float = Field(default=65.0, gt=0, le=360)
+    # Per-sector overrides. ``None`` means every sector uses the scalar value
+    # above; a list must have one entry per sector. They let a revision keep a
+    # design where one sector was edited without contradicting the others.
+    sector_install_heights_m: list[float] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
+    sector_mechanical_tilts_deg: list[float] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
+    sector_electrical_tilts_deg: list[float] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
+    sector_beamwidths_deg: list[float] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
+    sector_include_cables: list[bool] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
+    sector_include_labels: list[bool] | None = Field(
+        default=None, max_length=12, exclude_if=lambda value: value is None
+    )
     include_rru: bool = True
     include_cables: bool = True
     include_beams: bool = True
@@ -174,12 +195,46 @@ class RequirementSpec(StrictModel):
             raise ValueError(f"azimuths must be in [0, 360): {invalid}")
         return value
 
+    def sector_values(self, field: str, scalar_value: Any) -> list:
+        """Resolve explicit sector values before a shared planning default."""
+        overrides = getattr(self, field)
+        return list(overrides) if overrides is not None else [scalar_value] * self.sector_count
+
     @model_validator(mode="after")
     def validate_consistency(self) -> "RequirementSpec":
         if len(self.azimuths_deg) != self.sector_count:
             raise ValueError("sector_count must match len(azimuths_deg)")
         if self.antenna_install_height_m > self.tower_height_m:
             raise ValueError("antenna_install_height_m cannot exceed tower_height_m")
+        for name, values, low, high in (
+            ("sector_install_heights_m", self.sector_install_heights_m, 0.0, self.tower_height_m),
+            ("sector_mechanical_tilts_deg", self.sector_mechanical_tilts_deg, -15.0, 30.0),
+            ("sector_electrical_tilts_deg", self.sector_electrical_tilts_deg, -15.0, 30.0),
+            ("sector_beamwidths_deg", self.sector_beamwidths_deg, 0.0, 360.0),
+        ):
+            if values is None:
+                continue
+            if len(values) != self.sector_count:
+                raise ValueError(f"{name} must have one value per sector")
+            if any(
+                value <= low
+                if name in {"sector_install_heights_m", "sector_beamwidths_deg"}
+                else value < low
+                for value in values
+            ):
+                raise ValueError(f"{name} values are out of range")
+            if any(value > high for value in values):
+                raise ValueError(f"{name} values are out of range")
+        for name, enabled in (
+            ("sector_include_cables", self.include_cables),
+            ("sector_include_labels", self.include_labels),
+        ):
+            values = getattr(self, name)
+            if values is not None and (
+                len(values) != self.sector_count
+                or (name == "sector_include_cables" and any(values) and not enabled)
+            ):
+                raise ValueError(f"{name} must match sector count and its enabled option")
         if any(
             level >= self.tower_height_m for level in self.tower_characteristics.platform_levels_m
         ):
