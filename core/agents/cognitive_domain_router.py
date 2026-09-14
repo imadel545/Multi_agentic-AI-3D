@@ -40,10 +40,13 @@ class GroqDesignDomainRouter:
                     {
                         "role": "system",
                         "content": (
-                            "Classify one 3D design request. Choose telecom_v1 only when the "
-                            "requested primary product is a telecom radio site, tower, mast or "
-                            "cellular/RF installation. Choose generic_cognitive_v1 for all other "
-                            "physical designs, including architecture, stairs, furniture, terrain, "
+                            "Classify one 3D design request for a catalog-only product. Choose "
+                            "generic_cognitive_v1 for every physical design request, including a "
+                            "telecom site, tower, mast, radio installation, architecture or "
+                            "equipment. That route must discover, reuse or rigidly compose only "
+                            "qualified catalog assets. Never choose telecom_v1 because its legacy "
+                            "parametric construction is disabled by product policy. Choose "
+                            "generic_cognitive_v1 also for stairs, furniture, terrain, "
                             "landscape and mixed environments. Choose blocked only when the "
                             "request is not a physical 3D design or is too ambiguous to model "
                             "safely. Infer "
@@ -55,11 +58,7 @@ class GroqDesignDomainRouter:
                         "content": json.dumps(
                             {
                                 "request": normalized,
-                                "allowed_routes": [
-                                    "telecom_v1",
-                                    "generic_cognitive_v1",
-                                    "blocked",
-                                ],
+                                "allowed_routes": ["generic_cognitive_v1", "blocked"],
                                 "output": {
                                     "route": "allowed route",
                                     "inferred_domain": "lowercase domain identifier",
@@ -85,7 +84,10 @@ class GroqDesignDomainRouter:
                 "fallback_reason": None,
             }
         )
-        return DesignRouteDecision.model_validate(pinned)
+        decision = DesignRouteDecision.model_validate(pinned)
+        if decision.route == "telecom_v1":
+            raise ValueError("CATALOG_ONLY_ROUTER_REJECTED_LEGACY_TELECOM_ROUTE")
+        return decision
 
 
 class ConservativeDesignDomainRouter:
@@ -118,15 +120,16 @@ class ConservativeDesignDomainRouter:
         )
         if has_explicit_telecom or has_telecom_installation:
             return DesignRouteDecision(
-                route="telecom_v1",
+                route="blocked",
                 inferred_domain="telecom",
-                rationale=(
-                    "Explicit telecom vocabulary permits the established deterministic route."
-                ),
+                rationale="Catalog-only planning requires the configured bounded LLM router.",
                 provider="deterministic_conservative",
                 model="none",
                 fallback_used=True,
-                fallback_reason="LLM domain router unavailable; only explicit telecom is accepted.",
+                fallback_reason=(
+                    "LLM domain router unavailable; legacy parametric telecom generation is "
+                    "disabled by catalog-only product policy."
+                ),
             )
         return DesignRouteDecision(
             route="blocked",

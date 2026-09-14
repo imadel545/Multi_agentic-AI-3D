@@ -368,7 +368,7 @@ describe("studio kernel evidence and composition", () => {
             }],
             provenance_url: "/assets/ANT_REAL_1/provenance",
             visual_review_status: "passed_advisory",
-            fidelity_status: "exact_import",
+            fidelity_status: "technical_generic",
             qualification_version: "1.0"
           }],
           missing_files: []
@@ -380,6 +380,13 @@ describe("studio kernel evidence and composition", () => {
 
     expect(screen.getByText("Modèle source conservé")).toBeInTheDocument();
     expect(screen.getByText("Créé pour ce projet")).toBeInTheDocument();
+    expect(screen.getByLabelText("Origine et fidélité des éléments exécutés"))
+      .toHaveTextContent("1source exacte0paramétrique1créé pour ce projet");
+    expect(screen.getByText("source exacte")).toBeInTheDocument();
+    expect(screen.getByText("créé pour ce projet")).toBeInTheDocument();
+    expect(screen.getByText(/Aucune géométrie constructeur qualifiée/)).toBeInTheDocument();
+    expect(screen.getByText(/1 élément de fidélité technique générique/)).toBeInTheDocument();
+    expect(screen.getByText(/Fidélité non classée pour 1 élément/)).toBeInTheDocument();
     expect(screen.getByText("Source : Radio Systems · Panel 800")).toBeInTheDocument();
     expect(screen.getByText("L × P × H : 0,3 × 0,12 × 1,4 m")).toBeInTheDocument();
     expect(screen.queryByText(/qualification professionnelle/i)).not.toBeInTheDocument();

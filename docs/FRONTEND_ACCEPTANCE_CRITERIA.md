@@ -103,14 +103,15 @@ WebGL. Il ne ferme pas les cases de mutations navigateur encore ouvertes.
 - [x] Le 2026-09-12, la suite frontend passe avec 211 tests; typecheck et build
   production passent. Chrome charge un canvas WebGL réel sans exception console,
   échec réseau ni réponse HTTP en erreur.
-- [x] Le 2026-09-14, la suite frontend passe avec 225 tests; typecheck et build
+- [x] Le 2026-09-14, la suite frontend passe avec 230 tests; typecheck et build
   production passent. Tous les fichiers TypeScript, TSX et CSS sous
   `apps/frontend/src` restent sous la limite de 700 lignes. Le smoke HTTP couvre
   ajout, liaison au chat, contexte hashé et suppression réelle d'une pièce; un
   onglet Chrome neuf charge le studio sans erreur ni alerte console.
-- [x] Le drawer Bibliothèque permet d'examiner un candidat constructeur réel,
-  affiche son exclusion de la génération et les preuves manquantes en langage
-  utilisateur, sans proposer d'action d'ajout ou d'utilisation.
+- [x] La Composition distingue l'import exact, la construction paramétrique et
+  la création du projet; elle ne déduit aucune fidélité quand la preuve asset
+  n'est pas chargée et ne présente jamais une identité constructeur sans gate
+  professionnel valide.
 - [x] Le smoke layout current-tree en lecture seule charge le GLB certifié à
   1440 x 1000 et 1047 x 2748 sans scroll desktop concurrent; ce contrôle ne
   remplace pas le replay navigateur des mutations ni un smoke de conversion CAD.

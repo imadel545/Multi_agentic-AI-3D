@@ -109,7 +109,7 @@ _REQUIRED_COMPLETION_CHECKS_V1_3 = {
     "artifact_hashes_recorded",
     "qa_report_passed",
     "glb_binary_integrity_passed",
-    "semantic_mesh_coverage_complete",
+    "geometry_program_mesh_coverage_complete",
     "geometry_validation_passed",
     "mesh_qa_passed",
     "preview_qa_passed",
@@ -1044,6 +1044,31 @@ def _valid_trusted_inputs(payload: dict, scene: SceneSpec) -> bool:
         if component.manifest_snapshot is not None
         and component.manifest_snapshot.generation_mode == "imported_glb_exact"
     ]
+    # Exact cognitive programs pin their sources directly instead of carrying
+    # legacy AssemblyPlan snapshots. Verify them against the certified scene.
+    for program in scene.geometry_programs:
+        for node in program.nodes:
+            if node.kind != "exact_asset":
+                continue
+            role = f"geometry_program:{program.program_id}"
+            manifests.append(
+                {
+                    "role_id": role,
+                    "asset_id": node.asset_id,
+                    "file": f"assets/manifests/{node.manifest_file_name}",
+                    "source_sha256": node.manifest_sha256,
+                    "generation_mode": "imported_glb_exact",
+                }
+            )
+            exact_assets.append(
+                {
+                    "role_id": role,
+                    "asset_id": node.asset_id,
+                    "file": node.asset_file,
+                    "sha256": node.asset_sha256,
+                    "units": "meters",
+                }
+            )
     operations = [
         {
             "operation_id": operation.operation_id,

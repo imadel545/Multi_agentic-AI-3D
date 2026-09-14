@@ -74,12 +74,11 @@ export function BackendStatusBar({
         ) : bundle ? (
           <span className={integrityVerified ? "topbar-proof ok" : "topbar-proof warn"}>
             {integrityVerified ? <CheckCircle2 size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
-            {integrityVerified ? "Modèle vérifié" : workflowStatusLabel(bundle.status)}
+            {integrityVerified ? "Intégrité 3D vérifiée" : workflowStatusLabel(bundle.status)}
           </span>
         ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
       </div>
     </header>
   );
 }
-
 

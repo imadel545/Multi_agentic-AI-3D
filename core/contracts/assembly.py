@@ -40,6 +40,7 @@ class BuilderProfileSnapshot(StrictModel):
         "cable_route",
         "ground_cabinet",
         "gps_radome",
+        "exact_asset",
     ]
     geometry_family: Literal["panel", "microwave_dish"] | None = None
     instance_strategy: Literal["single", "per_sector"]

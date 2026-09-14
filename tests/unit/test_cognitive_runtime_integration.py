@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from core.agents.cognitive_domain_router import ConservativeDesignDomainRouter
+from core.agents.cognitive_domain_router import (
+    ConservativeDesignDomainRouter,
+    GroqDesignDomainRouter,
+)
 from core.agents.requirement_extractor import RequirementExtractor
 from core.contracts.cognitive_design import CognitiveDesignPlan, DesignRouteDecision
 from core.contracts.geometry_program import GeometryProgram
@@ -25,6 +28,21 @@ class GenericRoute:
             provider="groq",
             model="openai/gpt-oss-120b",
         )
+
+
+class CompleteCatalogReuseRouteClient:
+    model = "openai/gpt-oss-120b"
+
+    def request_json(self, payload, *, policy):
+        assert policy.capability == "design_domain_routing"
+        system_prompt = payload["messages"][0]["content"]
+        assert "catalog-only product" in system_prompt
+        assert "qualified catalog assets" in system_prompt
+        return {
+            "route": "generic_cognitive_v1",
+            "inferred_domain": "telecom_asset_reuse",
+            "rationale": "The request asks to preserve one admitted complete catalog design.",
+        }
 
 
 class FakeCognitivePlanner:
@@ -152,16 +170,43 @@ class FakeGeometryPlanner:
         )
 
 
-def test_conservative_router_preserves_only_explicit_telecom() -> None:
+def test_conservative_router_blocks_when_catalog_planning_is_unavailable() -> None:
     router = ConservativeDesignDomainRouter()
 
-    assert router.route("Créer un site 5G avec trois antennes").route == "telecom_v1"
-    assert router.route("Tour 5000m avec 100 secteurs").route == "telecom_v1"
-    assert router.route("Tower 30m with 3 sectors").route == "telecom_v1"
+    assert router.route("Créer un site 5G avec trois antennes").route == "blocked"
+    assert router.route("Tour 5000m avec 100 secteurs").route == "blocked"
+    assert router.route("Tower 30m with 3 sectors").route == "blocked"
     blocked = router.route("Créer un escalier et un jardin")
     assert blocked.route == "blocked"
     assert blocked.fallback_used is True
     assert router.route("Créer une tour résidentielle de 20 étages").route == "blocked"
+
+
+def test_llm_router_can_send_complete_telecom_catalog_reuse_to_cognitive_graph() -> None:
+    decision = GroqDesignDomainRouter(CompleteCatalogReuseRouteClient()).route(  # type: ignore[arg-type]
+        "Réutilise tel quel le meilleur site télécom complet déjà qualifié dans le catalogue."
+    )
+
+    assert decision.route == "generic_cognitive_v1"
+    assert decision.inferred_domain == "telecom_asset_reuse"
+    assert decision.provider == "groq"
+    assert decision.fallback_used is False
+
+
+def test_llm_router_rejects_legacy_parametric_telecom_route() -> None:
+    class LegacyRouteClient:
+        model = "openai/gpt-oss-120b"
+
+        def request_json(self, payload, *, policy):
+            assert payload["messages"][1]["content"].find("telecom_v1") == -1
+            return {
+                "route": "telecom_v1",
+                "inferred_domain": "telecom",
+                "rationale": "Attempt to use the retired component generator.",
+            }
+
+    with pytest.raises(ValueError, match="CATALOG_ONLY_ROUTER_REJECTED"):
+        GroqDesignDomainRouter(LegacyRouteClient()).route("Créer un site 5G")  # type: ignore[arg-type]
 
 
 @pytest.mark.blender_runtime

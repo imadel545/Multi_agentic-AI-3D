@@ -737,7 +737,7 @@ def test_memory_failures_are_visible_but_do_not_abort_the_graph(tmp_path: Path) 
     }
 
 
-def test_asset_fallback_recovers_selection_before_blender(tmp_path: Path) -> None:
+def test_asset_selection_failure_stops_before_blender(tmp_path: Path) -> None:
     registry = MissingRadioRegistry(Path("assets/manifests"))
     orchestrator = DesignOrchestrator(
         registry=registry,
@@ -763,11 +763,12 @@ def test_asset_fallback_recovers_selection_before_blender(tmp_path: Path) -> Non
 
     nodes = [entry["node"] for entry in result.trace]
     assert result.status == "failed"
-    assert result.generation is not None
-    assert result.generation.mode == "fallback_no_blender"
-    assert "asset_fallback_handler" in nodes
-    assert "generate_blender" in nodes
-    assert result.route_history[0]["route"] == "asset_fallback"
+    assert result.generation is None
+    assert result.scene is None
+    assert result.assembly_plan is None
+    assert "asset_fallback_handler" not in nodes
+    assert "generate_blender" not in nodes
+    assert [error.code for error in result.report.errors] == ["ASSET_SELECTION_FAILED"]
 
 
 def test_pre_blender_quality_gate_blocks_blender(tmp_path: Path) -> None:

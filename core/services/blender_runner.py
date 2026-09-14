@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -10,11 +12,16 @@ import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from core.contracts.scene import SceneSpec
+
+if TYPE_CHECKING:
+    from core.services.asset_registry import AssetRegistry
 from core.services.blender_runtime import has_qualified_blender_runtime
+from core.validation.catalog_only import catalog_only_scene_violations
 
 _SECTOR_PREVIEW_FILE_NAME = re.compile(r"^preview_sector_[a-f0-9]{16}\.png$")
 
@@ -43,7 +50,9 @@ class BlenderRunner:
         project_root: Path,
         blender_binary: str = "blender",
         timeout_s: int = 180,
+        catalog_only_registry: AssetRegistry | None = None,
     ) -> None:
+        self.catalog_only_registry = catalog_only_registry
         self.project_root = project_root
         self.blender_binary = blender_binary
         self.timeout_s = timeout_s
@@ -55,6 +64,17 @@ class BlenderRunner:
 
     def generate(self, scene: SceneSpec, output_dir: Path) -> GenerationResult:
         started = time.perf_counter()
+        if self.catalog_only_registry is not None:
+            violations = catalog_only_scene_violations(scene, registry=self.catalog_only_registry)
+            if violations:
+                return GenerationResult(
+                    status="failed",
+                    mode="catalog_only_rejected",
+                    blender_available=False,
+                    duration_ms=0,
+                    artifacts={},
+                    error="CATALOG_ONLY_ASSET_REQUIRED",
+                )
         output_dir.mkdir(parents=True, exist_ok=True)
         scene_spec_path = output_dir / "scene_spec.json"
         scene_spec_content = json.dumps(scene.model_dump(), indent=2, ensure_ascii=False)

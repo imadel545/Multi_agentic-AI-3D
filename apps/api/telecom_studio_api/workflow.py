@@ -3187,7 +3187,7 @@ def _glb_inspection_summary(result: OrchestratorResult) -> dict | None:
 
 
 def _tower_characteristics_summary(result: OrchestratorResult) -> dict | None:
-    if result.scene is None:
+    if result.scene is None or result.scene.tower is None:
         return None
     return result.scene.tower.characteristics.model_dump()
 

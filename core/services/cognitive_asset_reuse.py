@@ -34,10 +34,8 @@ class ExactAssetAdmission(StrictModel):
     sources: list[GeometryExactAssetNode]
 
 
-def observe_asset_admission(
-    registry: AssetRegistry, workflow_id: str, program: GeometryProgram
-) -> CapabilityObservation:
-    """Execute catalog/file validation; this does not claim Blender has run."""
+def asset_admission_registry(registry: AssetRegistry) -> CapabilityRegistry:
+    """Expose the same executable source checks to planning and compilation."""
 
     def validate(value: GeometryProgram) -> ExactAssetAdmission:
         records = validate_exact_program(
@@ -51,15 +49,12 @@ def observe_asset_admission(
             sources=value.nodes,
         )
 
-    capability_id = "catalog.validate_exact_source@1.0.0"
-    admission_registry = CapabilityRegistry(
+    return CapabilityRegistry(
         [
             CapabilityRegistration(
                 definition=CapabilityDefinition(
-                    capability_id=capability_id,
-                    description=(
-                        "Validate catalog qualification, permissions and source hashes."
-                    ),
+                    capability_id="catalog.validate_exact_source@1.0.0",
+                    description=("Validate catalog qualification, permissions and source hashes."),
                     input_schema=GeometryProgram.model_json_schema(),
                     output_schema=ExactAssetAdmission.model_json_schema(),
                     compatible_domains=["generic"],
@@ -77,9 +72,16 @@ def observe_asset_admission(
             )
         ]
     )
-    return admission_registry.execute(
+
+
+def observe_asset_admission(
+    registry: AssetRegistry, workflow_id: str, program: GeometryProgram
+) -> CapabilityObservation:
+    """Execute catalog/file validation; this does not claim Blender has run."""
+
+    return asset_admission_registry(registry).execute(
         CapabilityInvocation(
-            capability_id=capability_id,
+            capability_id="catalog.validate_exact_source@1.0.0",
             arguments=program.model_dump(mode="json"),
             requested_permissions=["read_catalog"],
             correlation_id=f"{workflow_id}:reuse:{program.program_id}"[:120],
@@ -170,7 +172,5 @@ def compile_asset_reuse(
             )
         ),
     )
-    validate_exact_program(
-        program.model_dump(mode="json"), registry.evidence_verifier.project_root
-    )
+    validate_exact_program(program.model_dump(mode="json"), registry.evidence_verifier.project_root)
     return program

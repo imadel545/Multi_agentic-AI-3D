@@ -291,8 +291,8 @@ requirements_text or document pack
 ## Status
 
 - Backend: functional local-first pipeline with real Blender output when Blender is installed.
-- Assets: 14 manifests, 12 local GLBs, 13 generation-eligible, 3 exact imports,
-  10 parametric generation profiles, 1 reference-only, and 0 professional M1
+- Assets: 16 manifests, 14 local GLBs, 14 generation-eligible, 4 exact imports,
+  10 parametric generation profiles, 2 reference-only, and 0 professional M1
   evidence asset after runtime byte verification; `qualified_mixed_catalog`,
   not vendor-grade.
 - Product API: `/studio/summary`, `/designs/{id}`, `/designs/{id}/user-summary`, `/current-operation`, `/user-issues`, `/viewer-bundle`, `/timeline-summary`, `/versions`, and `/edit` are frontend-safe and expose artifact URLs, not local filesystem paths.

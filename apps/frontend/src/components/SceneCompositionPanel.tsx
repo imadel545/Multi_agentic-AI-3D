@@ -14,6 +14,84 @@ export function sceneInstanceCount(proofs: ComponentProofs): number {
     proofs.geometry_programs.reduce((count, program) => count + program.quantity, 0);
 }
 
+type CompositionEvidenceSummary = {
+  exactCatalog: number;
+  parametric: number;
+  procedural: number;
+  schematic: number;
+  technicalGeneric: number;
+  vendorQualified: number;
+  unclassified: number;
+};
+
+function fidelityFor(asset: QualifiedAssetInventoryEntry | undefined) {
+  if (asset?.fidelity_status === "vendor_qualified" && asset.milestone_evidence_eligible) {
+    return "vendor_qualified";
+  }
+  if (asset?.fidelity_status === "schematic") return "schematic";
+  if (asset?.fidelity_status === "technical_generic") return "technical_generic";
+  return "unclassified";
+}
+
+export function compositionEvidenceSummary(
+  proofs: ComponentProofs,
+  inventoryByAssetId: Map<string, QualifiedAssetInventoryEntry>
+): CompositionEvidenceSummary {
+  const summary: CompositionEvidenceSummary = {
+    exactCatalog: 0,
+    parametric: 0,
+    procedural: 0,
+    schematic: 0,
+    technicalGeneric: 0,
+    vendorQualified: 0,
+    unclassified: 0
+  };
+  const recordFidelity = (
+    quantity: number,
+    asset: QualifiedAssetInventoryEntry | undefined
+  ) => {
+    const fidelity = fidelityFor(asset);
+    if (fidelity === "vendor_qualified") summary.vendorQualified += quantity;
+    else if (fidelity === "schematic") summary.schematic += quantity;
+    else if (fidelity === "technical_generic") summary.technicalGeneric += quantity;
+    else summary.unclassified += quantity;
+  };
+  for (const component of proofs.components) {
+    const asset = component.asset_id
+      ? inventoryByAssetId.get(component.asset_id)
+      : undefined;
+    if (component.instances.length > 0) {
+      for (const instance of component.instances) {
+        if (["asset_glb", "imported_glb_exact"].includes(instance.geometry_source)) {
+          summary.exactCatalog += 1;
+        } else if (instance.geometry_source.includes("parametric")) {
+          summary.parametric += 1;
+        } else {
+          summary.procedural += 1;
+        }
+      }
+    } else if (component.generation_strategy === "imported_glb_exact") {
+      summary.exactCatalog += component.quantity;
+    } else if (component.generation_strategy.includes("parametric")) {
+      summary.parametric += component.quantity;
+    } else {
+      summary.procedural += component.quantity;
+    }
+    recordFidelity(component.quantity, asset);
+  }
+  for (const program of proofs.geometry_programs) {
+    const sourceAssetId = program.exact_asset_sources?.[0]?.asset_id;
+    const asset = sourceAssetId ? inventoryByAssetId.get(sourceAssetId) : undefined;
+    if (program.origin === "catalog_asset" && sourceAssetId) {
+      summary.exactCatalog += program.quantity;
+    } else {
+      summary.procedural += program.quantity;
+    }
+    recordFidelity(program.quantity, asset);
+  }
+  return summary;
+}
+
 function constructionLabel(strategy: string): string {
   const labels: Record<string, string> = {
     reuse: "Modèle source conservé",
@@ -102,6 +180,9 @@ export function SceneCompositionPanel({
     ? "accès et maintenance du pylône"
     : humanComponentInstanceLabel(componentProofs, selectedSemanticRoot);
   const elementCount = componentProofs ? sceneInstanceCount(componentProofs) : 0;
+  const evidenceSummary = componentProofs
+    ? compositionEvidenceSummary(componentProofs, inventoryByAssetId)
+    : null;
 
   return (
     <section className="drawer-section" aria-label="Composition de la scène">
@@ -111,6 +192,37 @@ export function SceneCompositionPanel({
         <div className="composition-overview" aria-label="Résumé de la composition">
           <strong>{elementCount} élément{elementCount > 1 ? "s" : ""} présent{elementCount > 1 ? "s" : ""}</strong>
           <small>Sélectionnez un élément pour le retrouver dans la vue 3D et le modifier depuis le chat.</small>
+        </div>
+      ) : null}
+
+      {evidenceSummary ? (
+        <div className="composition-evidence" aria-label="Origine et fidélité des éléments exécutés">
+          <div>
+            <strong>{evidenceSummary.exactCatalog}</strong>
+            <span>source{evidenceSummary.exactCatalog > 1 ? "s" : ""} exacte{evidenceSummary.exactCatalog > 1 ? "s" : ""}</span>
+          </div>
+          <div>
+            <strong>{evidenceSummary.parametric}</strong>
+            <span>paramétrique{evidenceSummary.parametric > 1 ? "s" : ""}</span>
+          </div>
+          <div>
+            <strong>{evidenceSummary.procedural}</strong>
+            <span>créé{evidenceSummary.procedural > 1 ? "s" : ""} pour ce projet</span>
+          </div>
+          <p>
+            {evidenceSummary.vendorQualified > 0
+              ? `${evidenceSummary.vendorQualified} élément${evidenceSummary.vendorQualified > 1 ? "s" : ""} avec géométrie constructeur qualifiée.`
+              : "Aucune géométrie constructeur qualifiée dans cette version."}
+            {evidenceSummary.technicalGeneric > 0
+              ? ` ${evidenceSummary.technicalGeneric} élément${evidenceSummary.technicalGeneric > 1 ? "s" : ""} de fidélité technique générique.`
+              : ""}
+            {evidenceSummary.schematic > 0
+              ? ` ${evidenceSummary.schematic} représentation${evidenceSummary.schematic > 1 ? "s" : ""} schématique${evidenceSummary.schematic > 1 ? "s" : ""}.`
+              : ""}
+            {evidenceSummary.unclassified > 0
+              ? ` Fidélité non classée pour ${evidenceSummary.unclassified} élément${evidenceSummary.unclassified > 1 ? "s" : ""}.`
+              : ""}
+          </p>
         </div>
       ) : null}
 

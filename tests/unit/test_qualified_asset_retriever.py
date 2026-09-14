@@ -60,6 +60,34 @@ def test_legacy_manifests_load_and_emit_truthful_decision_packets() -> None:
     )
 
 
+def test_complete_site_template_is_reusable_only_for_its_complete_site_role() -> None:
+    retriever = QualifiedAssetCandidateRetriever(AssetRegistry(MANIFESTS_DIR))
+    assert "telecom_site" in retriever.available_semantic_roles()
+    component = {
+        "component_id": "complete_site",
+        "semantic_role": "telecom_site",
+        "description": "Complete telecom site with its installed equipment.",
+        "target_dimensions_m": {"x": 7.147688, "y": 8.096867, "z": 30.0},
+        "minimum_detail_parts": 1,
+        "material_intent": [],
+    }
+
+    complete_site = retriever.search(component)
+    bare_support = retriever.search({**component, "semantic_role": "support_structure"})
+
+    selected = next(
+        candidate
+        for candidate in complete_site
+        if candidate.candidate_id == "TELECOM_SITE_TEMPLATE_CC_BY_001"
+    )
+    assert selected.allowed_strategies == ["reuse"]
+    assert selected.decision_packet is not None
+    assert selected.decision_packet.allowed_generation_modes == ["imported_glb_exact"]
+    assert all(
+        candidate.candidate_id != "TELECOM_SITE_TEMPLATE_CC_BY_001" for candidate in bare_support
+    )
+
+
 def test_raw_dwg_acis_cannot_be_promoted_to_generation() -> None:
     with pytest.raises(ValidationError, match="non-executable asset geometry"):
         AssetManifest(
@@ -374,9 +402,7 @@ def test_telecom_ranking_rejects_exact_radio_without_role_and_interfaces(
                 required_connector_kinds=["mechanical"],
             ),
             "connectors": [
-                connector
-                for connector in generic.connectors
-                if connector.connector_id != "rf_port"
+                connector for connector in generic.connectors if connector.connector_id != "rf_port"
             ],
             "qualification": exact_qualification,
             "import_fallback_allowed": False,

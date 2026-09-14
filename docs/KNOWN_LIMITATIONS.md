@@ -111,7 +111,7 @@ frontend.
   2026-08-04 Docker smoke restored a certified real GLB and two-version design
   without browser console errors. Document-context generation, rollback and
   relevant degraded/retry paths still need a recorded browser acceptance pass.
-- The 2026-09-14 current-tree frontend suite passes 225 Vitest tests, typecheck
+- The 2026-09-14 current-tree frontend suite passes 230 Vitest tests, typecheck
   and production build. The attachment HTTP smoke proves upload, chat binding,
   bounded context hashing, absence of import-only workflow creation and guarded
   deletion. A fresh Chrome tab loaded the current GLB with no console warning or
@@ -480,8 +480,8 @@ frontend.
 - Five scene-level Blender views now include a close-up. Only the primary view
   has the current framing gate; role-specific close-up visibility/contrast and
   per-asset previews remain future work.
-- The curated manifest catalog is intentionally small: it contains 15 manifests,
-  of which 13 are generation-eligible, with 3 GLBs qualified for exact import,
+- The curated manifest catalog is intentionally small: it contains 16 manifests,
+  of which 14 are generation-eligible, with 4 GLBs qualified for exact import,
   10 component/tower profiles qualified for controlled parametric generation and
   two real STEP candidates kept `reference_only`. The 5G panel and RRU
   companion GLBs have not passed orientation qualification and are therefore
@@ -509,9 +509,15 @@ frontend.
   `4829995130a43c09c5fb0c23d4216ed007e2d2c2` and tag
   `cognitive-3d-m1-baseline-20260808`; current convergence continues directly
   on the sole local branch `main`.
-- All 14 current runtime manifests fail the professional proof gate. The 13
+- All 16 current runtime manifests fail the professional proof gate. The 14
   internal/technical assets retain their existing generation contract; Sierra
-  Wireless/Semtech `6001124` remains `reference_only`.
+  Wireless/Semtech `6001124` and the OpenCellular chassis remain
+  `reference_only`.
+- The complete-site exact asset is a CC BY technical-generic visual template.
+  Its Blender proof establishes unchanged triangles/materials and certificate
+  integrity, not manufacturer identity, RF validity, structural capacity or
+  the ability to edit individual installed components. It is not selectable as
+  a bare tower in the structured telecom assembly route.
 - A manifest claiming a vendor source, vendor-qualified fidelity, manufacturer
   or reference is no longer executable from declaration alone. The registry,
   snapshots, decision packets, cognitive reuse, exact-asset worker and trusted
@@ -683,3 +689,22 @@ son édition ciblée reste indisponible.
 - La prise en charge du nombre décimal LibreDWG `123.` corrige la lecture du
   diagnostic de `Radio_2260.dwg`; elle ne convertit aucun solide et ne change
   aucune décision d'admission.
+
+## Réutilisation catalogue stricte — 2026-09-14
+
+Le parcours de production actif est fermé aux composants physiques synthétiques :
+la scène doit contenir des programmes `exact_asset` dont le manifest, le GLB,
+les droits, les dimensions et les hashes sont vérifiés avant Blender. Le gabarit
+`TELECOM_SITE_TEMPLATE_CC_BY_001` est le premier design complet réutilisable de
+bout en bout ; il est technique-générique sous CC BY et ne constitue pas un
+modèle constructeur. Les anciens GLB `internal_project_generated` restent
+consultables pour compatibilité historique mais sont exclus de la sélection
+produit.
+
+Le corpus CAD brut contient de nombreux candidats 3D déclarés, principalement
+DWG. Leur chemin ou leur nom ne prouve ni une géométrie exploitable ni des
+droits. Les DWG ACIS, dessins 2D et fichiers sans licence restent en
+quarantaine jusqu'à une conversion B-Rep/maillage vérifiable, une preuve de
+provenance, des repères/interfaces et une QA Blender. Le système refuse
+explicitement de les remplacer par des boîtes, cylindres ou équipements
+inventés.

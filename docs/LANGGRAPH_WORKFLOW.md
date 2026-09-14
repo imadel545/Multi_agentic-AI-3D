@@ -42,7 +42,6 @@ retrieve_rag_context
 decide_planning_context
 memory_recall
 select_assets
-asset_fallback_handler
 validate_requirements
 compose_design_blueprint
 plan_scene

@@ -73,6 +73,9 @@ class PlanningClient:
 
 
 class CandidateRetriever:
+    def available_semantic_roles(self) -> list[str]:
+        return []
+
     def search(self, component: dict) -> list[AssetCandidateEvidence]:
         assert component["component_id"] == "access_structure"
         return []
@@ -139,6 +142,7 @@ def test_planner_pins_llm_decomposition_assets_capabilities_and_route() -> None:
         CandidateRetriever(),
         _supervisor(),
         [_capability()],
+        allow_generated_geometry=True,
     ).plan(
         workflow_id="wf_123456789abc",
         request="Créer un accès paramétrique entre deux niveaux.",
@@ -197,10 +201,93 @@ def test_planner_pins_llm_decomposition_assets_capabilities_and_route() -> None:
     assert scene.cognitive_plan_sha256 is not None
 
 
+def test_catalog_only_planner_does_not_offer_generated_geometry() -> None:
+    class CatalogPolicyClient(PlanningClient):
+        def decide_assets(self, payload: dict) -> dict:
+            assert payload["required_strategies"] == [
+                "reuse",
+                "compose",
+                "clarify",
+                "unsupported",
+            ]
+            return {
+                "decisions": [
+                    {
+                        "strategy": "unsupported",
+                        "selected_candidate_ids": [],
+                        "selected_parameter_values": {},
+                        "required_capability_ids": [],
+                        "rationale": "No admitted catalog asset can satisfy this component.",
+                    }
+                ]
+            }
+
+    plan = CognitiveDesignPlanner(
+        CatalogPolicyClient(),
+        CandidateRetriever(),
+        _supervisor(),
+        [_capability()],
+    ).plan(
+        workflow_id="wf_catalog_only_001",
+        request="Créer un accès qui n'existe pas encore dans le catalogue.",
+    )
+
+    assert plan.asset_decision_plan.decisions[0].strategy == "unsupported"
+
+
 def test_llm_and_runtime_share_the_same_component_fanout_bound() -> None:
     schema = _llm_component_graph_schema()
 
     assert schema["properties"]["components"]["maxItems"] == 24
+
+
+def test_asset_decision_uses_strict_owned_shape_and_normalizes_parameters() -> None:
+    class StructuredAssetClient:
+        model = "openai/gpt-oss-120b"
+
+        def request_json(self, payload, *, policy):
+            assert policy.capability == "generic_asset_strategy"
+            assert payload["response_format"]["type"] == "json_schema"
+            decision = payload["response_format"]["json_schema"]["schema"]["properties"][
+                "decisions"
+            ]["items"]
+            assert set(decision["required"]) == {
+                "strategy",
+                "selected_candidate_ids",
+                "selected_parameters",
+                "placement",
+                "required_capability_ids",
+                "rationale",
+            }
+            return {
+                "decisions": [
+                    {
+                        "strategy": "adapt",
+                        "selected_candidate_ids": ["tower_candidate"],
+                        "selected_parameters": [{"parameter_id": "height_m", "value": 32}],
+                        "placement": None,
+                        "required_capability_ids": [],
+                        "rationale": "Use the qualified candidate at the requested height.",
+                    }
+                ]
+            }
+
+    client = GroqCognitivePlanningClient(StructuredAssetClient())  # type: ignore[arg-type]
+    result = client.decide_assets(
+        {
+            "required_strategies": ["reuse", "adapt", "procedural_generate"],
+            "candidates": [
+                {
+                    "candidate_id": "tower_candidate",
+                    "allowed_parameter_ids": ["height_m"],
+                }
+            ],
+            "capabilities": [],
+        }
+    )
+
+    assert result["decisions"][0]["selected_parameter_values"] == {"height_m": 32.0}
+    assert "selected_parameters" not in result["decisions"][0]
 
 
 def test_cognitive_strict_400_from_shared_transport_reaches_json_object_fallback() -> None:

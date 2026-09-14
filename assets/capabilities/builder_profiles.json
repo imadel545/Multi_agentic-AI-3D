@@ -12,6 +12,16 @@
       "allowed_parameter_ids": ["height_m", "base_width_m"]
     },
     {
+      "profile_id": "telecom_site_exact_v1",
+      "version": "1.0.0",
+      "asset_types": ["tower"],
+      "allowed_generation_modes": ["imported_glb_exact"],
+      "worker_handler": "exact_asset",
+      "geometry_family": null,
+      "instance_strategy": "single",
+      "allowed_parameter_ids": []
+    },
+    {
       "profile_id": "sector_panel_v1",
       "version": "1.0.0",
       "asset_types": ["antenna"],
