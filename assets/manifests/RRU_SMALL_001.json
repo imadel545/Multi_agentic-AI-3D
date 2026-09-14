@@ -26,6 +26,11 @@
   "adaptation_profile_id": "rru_installation_v1",
   "builder_profile_id": "rru_enclosure_v1",
   "capability_tags": ["4g", "5g", "rru", "rf"],
+  "compatibility_rules": {
+    "compatible_roles": ["remote_radio"],
+    "required_connector_kinds": ["mechanical", "rf", "routing"],
+    "maximum_adaptation_effort": "low"
+  },
   "anchors": [
     {"anchor_id": "rear_mount", "position_m": [0, -0.09, 0], "normal": [0, -1, 0], "roles": ["mechanical_mount"]},
     {"anchor_id": "rf_port", "position_m": [0, 0, -0.3], "normal": [0, 0, -1], "up": [0, 1, 0], "roles": ["rf", "routing"]}

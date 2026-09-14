@@ -329,6 +329,93 @@ def test_current_catalog_does_not_fake_generic_reuse_without_authorization() -> 
     )
 
 
+def test_telecom_ranking_rejects_exact_radio_without_role_and_interfaces(
+    tmp_path: Path,
+) -> None:
+    source_registry = AssetRegistry(MANIFESTS_DIR)
+    generic = source_registry.get("RRU_SMALL_001")
+    project_root = tmp_path / "project"
+    manifests_dir = project_root / "assets" / "manifests"
+    runtime_file = project_root / generic.file
+    manifests_dir.mkdir(parents=True)
+    runtime_file.parent.mkdir(parents=True)
+    shutil.copy2(Path(generic.file), runtime_file)
+    runtime_sha256 = hashlib.sha256(runtime_file.read_bytes()).hexdigest()
+
+    exact_qualification = generic.qualification.model_copy(
+        update={
+            "allowed_generation_modes": ["imported_glb_exact"],
+            "verified_file_sha256": runtime_sha256,
+            "mesh_integrity_verified": True,
+            "dimensions_verified": True,
+            "pivot_verified": True,
+            "orientation_verified": True,
+        }
+    )
+    roleless_chassis = generic.model_copy(
+        update={
+            "asset_id": "OPENCELLULAR_ROLELESS_CHASSIS",
+            "compatibility_rules": AssetCompatibilityRules(),
+            "qualification": exact_qualification,
+            "import_fallback_allowed": False,
+            "transform_permissions": AssetTransformPermissions(
+                translation_axes=["x", "y", "z"],
+                rotation_axes=["z"],
+                maximum_translation_m=100.0,
+                maximum_rotation_deg=360.0,
+            ),
+        }
+    )
+    incomplete_chassis = generic.model_copy(
+        update={
+            "asset_id": "OPENCELLULAR_CHASSIS_WITHOUT_RF",
+            "compatibility_rules": AssetCompatibilityRules(
+                compatible_roles=["remote_radio"],
+                required_connector_kinds=["mechanical"],
+            ),
+            "connectors": [
+                connector
+                for connector in generic.connectors
+                if connector.connector_id != "rf_port"
+            ],
+            "qualification": exact_qualification,
+            "import_fallback_allowed": False,
+            "transform_permissions": AssetTransformPermissions(
+                translation_axes=["x", "y", "z"],
+                rotation_axes=["z"],
+                maximum_translation_m=100.0,
+                maximum_rotation_deg=360.0,
+            ),
+        }
+    )
+    for manifest in (generic, roleless_chassis, incomplete_chassis):
+        (manifests_dir / f"{manifest.asset_id}.json").write_text(
+            manifest.model_dump_json(indent=2),
+            encoding="utf-8",
+        )
+
+    retriever = QualifiedAssetCandidateRetriever(AssetRegistry(manifests_dir))
+    unbounded = retriever.rank_telecom(
+        asset_type="radio",
+        network_type="5G",
+        tower_type="lattice_tower",
+    )
+    bounded = retriever.rank_telecom(
+        asset_type="radio",
+        network_type="5G",
+        tower_type="lattice_tower",
+        role_id="remote_radio",
+        required_connectors={
+            "rear_mount": "mechanical",
+            "rf_port": "rf",
+            "cable_exit": "routing",
+        },
+    )
+
+    assert unbounded[0].manifest.asset_id.startswith("OPENCELLULAR_")
+    assert [candidate.manifest.asset_id for candidate in bounded] == ["RRU_SMALL_001"]
+
+
 class _RuntimeClientStub:
     model = "openai/gpt-oss-120b"
 

@@ -70,6 +70,8 @@ class AssetAssemblyPlanner:
                 network_type=requirements.network_type,
                 tower_type=requirements.tower_type,
                 min_height_m=requirements.tower_height_m if asset_type == "tower" else None,
+                role_id=role_id,
+                required_connectors=_required_candidate_connectors(role_id, requirements),
             )
             ranked[role_id] = [
                 (candidate.manifest, candidate.score) for candidate in qualified_candidates
@@ -402,6 +404,21 @@ def _connections(components: list[AssemblyComponentSelection]) -> list[AssemblyC
             )
         )
     return connections
+
+
+def _required_candidate_connectors(
+    role_id: str,
+    requirements: RequirementSpec,
+) -> dict[str, str]:
+    if role_id != "remote_radio":
+        return {}
+    connectors = {
+        "rear_mount": "mechanical",
+        "rf_port": "rf",
+    }
+    if requirements.include_cables:
+        connectors["cable_exit"] = "routing"
+    return connectors
 
 
 def _parameter_values(asset: AssetManifest, requirements: RequirementSpec) -> dict:
