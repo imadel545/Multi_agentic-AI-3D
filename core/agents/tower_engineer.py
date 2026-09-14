@@ -148,3 +148,77 @@ def _resolved_tower_widths(
     }[characteristics.structure]
     top_width = float(characteristics.top_width_m or (base_width * default_top_ratio))
     return base_width, top_width
+
+
+# --- Consequential application of the specialist recommendation ---------------
+
+_PLATFORM_TERMS = ["plateforme", "platform", "palier", "niveau d'accès", "access level"]
+_LADDER_TERMS = ["échelle", "echelle", "ladder"]
+_LIGHTNING_TERMS = ["paratonnerre", "lightning rod"]
+_PLATFORM_BELOW_ANTENNA_M = 2.5  # deck below the antenna+RRU envelope; verified post-Blender
+
+
+def apply_tower_engineer_recommendations(
+    requirements: RequirementSpec,
+    report: TowerValidationReport,
+    *,
+    requirements_text: str,
+) -> tuple[RequirementSpec, list[str]]:
+    """Turn the tower engineer's access recommendations into the design.
+
+    Only lattice structures are handled: their profiled access assembly
+    (platform, guardrails, ladder with rungs) is built and inspected post-Blender.
+    A user who explicitly declined an accessory keeps that decision; every
+    applied recommendation is returned as a readable assumption so the
+    conversation can state what the specialist changed.
+    """
+
+    from core.services.requirement_parser import contains_negation_for
+
+    characteristics = requirements.tower_characteristics
+    if characteristics.structure != "lattice":
+        return requirements, []
+    recommended = report.recommended_accessories
+    updates: dict = {}
+    assumptions: list[str] = []
+    if (
+        recommended.get("has_platform")
+        and not characteristics.has_platform
+        and not contains_negation_for(requirements_text, _PLATFORM_TERMS)
+    ):
+        level = round(
+            min(
+                max(requirements.antenna_install_height_m - _PLATFORM_BELOW_ANTENNA_M, 1.0),
+                requirements.tower_height_m - 0.5,
+            ),
+            2,
+        )
+        updates.update(has_platform=True, platform_count=1, platform_levels_m=[level])
+        assumptions.append(
+            f"Plateforme de travail ajoutée à {level:g} m sous les antennes "
+            f"(pylône treillis de {requirements.tower_height_m:g} m, recommandation du "
+            "spécialiste structure)."
+        )
+    if (
+        recommended.get("has_ladder")
+        and not characteristics.has_ladder
+        and not contains_negation_for(requirements_text, _LADDER_TERMS)
+    ):
+        updates["has_ladder"] = True
+        assumptions.append("Échelle d'accès ajoutée le long du pylône.")
+    if (
+        recommended.get("has_lightning_rod")
+        and not characteristics.has_lightning_rod
+        and not contains_negation_for(requirements_text, _LIGHTNING_TERMS)
+    ):
+        updates["has_lightning_rod"] = True
+        assumptions.append("Paratonnerre ajouté au sommet du pylône.")
+    if not updates:
+        return requirements, []
+    applied = requirements.model_copy(
+        update={
+            "tower_characteristics": characteristics.model_copy(update=updates),
+            "assumptions": [*requirements.assumptions, *assumptions],
+        }
+    )
+    return RequirementSpec.model_validate(applied.model_dump(mode="json")), assumptions

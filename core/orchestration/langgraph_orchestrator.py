@@ -22,7 +22,7 @@ from core.agents.cognitive_domain_router import (
 )
 from core.agents.requirement_extractor import RequirementExtractor
 from core.agents.rf_engineer import RfEngineerAgent
-from core.agents.tower_engineer import TowerEngineerAgent
+from core.agents.tower_engineer import TowerEngineerAgent, apply_tower_engineer_recommendations
 from core.contracts.assembly import AssemblyPlan
 from core.contracts.assets import AssetManifest
 from core.contracts.capabilities import CapabilityObservation
@@ -1013,12 +1013,14 @@ class DesignOrchestrator:
     def _cognitive_assets_for_scene(self, scene: SceneSpec) -> list[AssetManifest]:
         return [
             self.registry.get(asset_id)
-            for asset_id in sorted({
-                node.asset_id
-                for program in scene.geometry_programs
-                for node in program.nodes
-                if node.kind == "exact_asset"
-            })
+            for asset_id in sorted(
+                {
+                    node.asset_id
+                    for program in scene.geometry_programs
+                    for node in program.nodes
+                    if node.kind == "exact_asset"
+                }
+            )
         ]
 
     def _validate_cognitive_scene(self, state: WorkflowState) -> dict:
@@ -1732,6 +1734,28 @@ class DesignOrchestrator:
             rf_future = executor.submit(self.rf_engineer.validate, state["requirements"])
             tower_report = tower_future.result()
             rf_report = rf_future.result()
+        requirements, applied_assumptions = apply_tower_engineer_recommendations(
+            state["requirements"],
+            tower_report,
+            requirements_text=state.get("requirements_text") or "",
+        )
+        if applied_assumptions:
+            tower_report = tower_report.model_copy(
+                update={
+                    "warnings": [
+                        issue
+                        for issue in tower_report.warnings
+                        if issue.code != "TOWER_PLATFORM_RECOMMENDED"
+                    ]
+                    + [
+                        ValidationIssue(
+                            code="TOWER_ACCESS_APPLIED_BY_TOWER_ENGINEER",
+                            message=" ".join(applied_assumptions),
+                            severity="info",
+                        )
+                    ]
+                }
+            )
         merged_warnings = [
             *report.warnings,
             *tower_report.warnings,
@@ -1756,6 +1780,7 @@ class DesignOrchestrator:
             "report": report,
             "tower_validation": tower_report,
             "rf_validation": rf_report,
+            **({"requirements": requirements} if applied_assumptions else {}),
             "trace": _trace(
                 state,
                 "validate_requirements",

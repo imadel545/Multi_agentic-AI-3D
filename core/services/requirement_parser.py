@@ -558,3 +558,9 @@ def _contains_negation_for(text: str, terms: list[str]) -> bool:
         if re.search(rf"\bni\s+(?:de\s+|d[' ]\s*)?{escaped}", normalized):
             return True
     return False
+
+
+def contains_negation_for(text: str, terms: list[str]) -> bool:
+    """Public alias: True when the text explicitly declines any of the terms."""
+
+    return _contains_negation_for(text, terms)
