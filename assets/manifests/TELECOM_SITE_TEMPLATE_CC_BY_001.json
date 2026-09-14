@@ -1,9 +1,9 @@
 {
-  "asset_id": "EQUIPPED_LATTICE_TOWER_CC_BY_001",
+  "asset_id": "TELECOM_SITE_TEMPLATE_CC_BY_001",
   "type": "tower",
   "file": "assets/towers/tower_lattice_30m.glb",
-  "family": "equipped_tower_assembly",
-  "subtype": "generic_lattice_tower_with_dishes",
+  "family": "complete_telecom_site",
+  "subtype": "lattice_tower_with_installed_equipment",
   "source_provenance": "Cell Tower Replica by poly by google, downloaded from GetGLB and normalized to a 30 metre base-grounded GLB for this project.",
   "source_format": "glb",
   "source_file_sha256": "d9634d82e8fd262c1e24f71f73b346508c84dc9e4b87e26f36b68385ccdae854",
@@ -16,38 +16,19 @@
     "height": 29.999999256943738
   },
   "bounding_box_m": {
-    "minimum": [
-      -3.573844046831823,
-      -4.04843352772582,
-      0.0
-    ],
-    "maximum": [
-      3.573844046831823,
-      4.04843352772582,
-      29.999999256943738
-    ]
+    "minimum": [-3.573844046831823, -4.04843352772582, 0.0],
+    "maximum": [3.573844046831823, 4.04843352772582, 29.999999256943738]
   },
-  "compatible_networks": [],
+  "compatible_networks": ["4G", "5G", "MW"],
   "compatible_tower_types": [],
   "compatibility_rules": {
-    "compatible_roles": [
-      "equipped_tower",
-      "equipped_tower_assembly"
-    ],
+    "compatible_roles": ["telecom_site", "telecom_site_template", "radio_site_template"],
     "required_connector_kinds": [],
-    "incompatible_roles": [
-      "support_structure",
-      "tower_structure",
-      "bare_tower",
-      "telecom_site",
-      "complete_telecom_site"
-    ],
+    "incompatible_roles": ["support_structure", "tower_structure", "bare_tower"],
     "maximum_adaptation_effort": "none"
   },
   "cognitive_reuse_enabled": true,
-  "cognitive_reuse_strategies": [
-    "reuse"
-  ],
+  "cognitive_reuse_strategies": ["reuse"],
   "mount_zones": [],
   "status": "validated",
   "version": "1.0.0",
@@ -69,47 +50,22 @@
   "pivot_policy": "base_center_ground",
   "front_axis": "+Y",
   "import_fallback_allowed": false,
-  "builder_profile_id": "equipped_tower_exact_v1",
-  "capability_tags": [
-    "equipped_tower",
-    "lattice_tower",
-    "preinstalled_dishes",
-    "exact_glb"
-  ],
+  "builder_profile_id": "telecom_site_exact_v1",
+  "capability_tags": ["complete_site", "lattice_tower", "preinstalled_equipment", "exact_glb"],
   "anchors": [
     {
-      "anchor_id": "base_origin",
-      "position_m": [
-        0,
-        0,
-        0
-      ],
-      "normal": [
-        0,
-        0,
-        1
-      ],
-      "up": [
-        0,
-        1,
-        0
-      ],
-      "roles": [
-        "ground_reference"
-      ]
+      "anchor_id": "site_origin",
+      "position_m": [0, 0, 0],
+      "normal": [0, 0, 1],
+      "up": [0, 1, 0],
+      "roles": ["ground_reference"]
     }
   ],
   "connectors": [],
   "allowed_parameters": [],
   "transform_permissions": {
-    "translation_axes": [
-      "x",
-      "y",
-      "z"
-    ],
-    "rotation_axes": [
-      "z"
-    ],
+    "translation_axes": ["x", "y", "z"],
+    "rotation_axes": ["z"],
     "maximum_translation_m": 1000,
     "maximum_rotation_deg": 360,
     "uniform_scale_allowed": false,
@@ -124,17 +80,15 @@
       "Material preservation"
     ],
     "limitations": [
-      "Technical-generic equipped tower; no manufacturer identity, RF specification or engineering certification.",
-      "Geometry contains lattice structure, dishes and foot blocks, not a complete site: no verified shelter, cabinet, site layout or utility connections.",
-      "Individual equipment and mounts are not semantically separable."
+      "Technical-generic source; no manufacturer identity or engineering certification.",
+      "The mesh already contains dishes and installed equipment and must be reused only as a complete site template.",
+      "Individual equipment, mounts and connectors are not semantically separable."
     ]
   },
   "qualification_version": "1.0.0",
   "qualification": {
     "status": "qualified_for_generation",
-    "allowed_generation_modes": [
-      "imported_glb_exact"
-    ],
+    "allowed_generation_modes": ["imported_glb_exact"],
     "verified_file_sha256": "282f0e30449090901cd0e7b44e27d2c726d7b64f697fe9e63d67a63104df86b1",
     "units": "meters",
     "mesh_integrity_verified": true,
@@ -143,8 +97,8 @@
     "orientation_verified": true,
     "qualification_method": "Blender 5.1 import inspection plus independent GLB vertex-buffer bounds and SHA-256 verification.",
     "limitations": [
-      "Exact reuse of one generic equipped tower assembly, not a complete telecom site.",
-      "No manufacturer or RF compatibility certification; no scaling or decomposition. Rigid placement is allowed within manifest permissions."
+      "Admitted only for exact reuse as one complete technical-generic site template.",
+      "Not eligible for the support_structure slot and cannot be scaled, decomposed or adapted."
     ]
   }
 }

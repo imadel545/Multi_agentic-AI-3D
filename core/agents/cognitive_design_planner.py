@@ -49,7 +49,6 @@ class CognitiveDesignPlanner:
         capabilities: list[CapabilityDefinition],
         *,
         allow_generated_geometry: bool = False,
-        project_specific_roles: frozenset[str] = frozenset(),
     ) -> None:
         capability_ids = [item.capability_id for item in capabilities]
         if len(capability_ids) != len(set(capability_ids)):
@@ -59,7 +58,6 @@ class CognitiveDesignPlanner:
         self.supervisor = supervisor
         self.capabilities = list(capabilities)
         self.allow_generated_geometry = allow_generated_geometry
-        self.project_specific_roles = project_specific_roles
 
     def plan(self, *, workflow_id: str, request: str) -> CognitiveDesignPlan:
         normalized_request = request.strip()
@@ -83,7 +81,6 @@ class CognitiveDesignPlanner:
                     "no_assets_or_blender_code": True,
                     "qualified_candidate_ranking_is_downstream_authority": True,
                 },
-                "project_specific_roles": sorted(self.project_specific_roles),
                 "available_catalog_roles": self.candidate_retriever.available_semantic_roles(),
                 "design_intent_schema": _llm_design_intent_schema(),
                 # The LLM receives the semantic subset it owns. Runtime-only defaults,
@@ -172,9 +169,6 @@ class CognitiveDesignPlanner:
                             "unsupported",
                         ]
                         if self.allow_generated_geometry
-                        else ["reuse", "compose", "procedural_generate", "clarify", "unsupported"]
-                        if component.semantic_role in self.project_specific_roles
-                        and not candidates_by_component[component.component_id]
                         else ["reuse", "compose", "clarify", "unsupported"]
                     ),
                 }
@@ -214,21 +208,12 @@ class CognitiveDesignPlanner:
                 for item in candidates_by_component[component.component_id]
             ]
             decision = ComponentAssetDecision.model_validate(pinned)
-            if (
-                not self.allow_generated_geometry
-                and not (
-                    decision.strategy == "procedural_generate"
-                    and component.semantic_role in self.project_specific_roles
-                    and not candidates_by_component[component.component_id]
-                )
-                and decision.strategy
-                not in {
-                    "reuse",
-                    "compose",
-                    "clarify",
-                    "unsupported",
-                }
-            ):
+            if not self.allow_generated_geometry and decision.strategy not in {
+                "reuse",
+                "compose",
+                "clarify",
+                "unsupported",
+            }:
                 raise ValueError(
                     "CATALOG_ONLY_POLICY_REJECTED_GENERATED_GEOMETRY:"
                     f"{component.component_id}:{decision.strategy}"

@@ -2,14 +2,6 @@ import type { ComponentProofs } from "../api/schemas";
 
 const semanticRoleLabels: Record<string, string> = {
   antenna: "antenne",
-  equipped_tower: "pylône équipé",
-  equipped_tower_assembly: "ensemble de pylône équipé",
-  terrain: "terrain",
-  cable_route: "chemin de câble",
-  foundation: "fondation",
-  custom_adapter: "adaptateur propre au projet",
-  project_support: "support propre au projet",
-  connecting_geometry: "liaison propre au projet",
   antenna_mount: "support d’antenne",
   antenna_support: "support d’antenne",
   cable: "chemin de câble",

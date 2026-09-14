@@ -102,8 +102,8 @@ def test_invalid_design_fails_cleanly(tmp_path: Path) -> None:
         status = client.get(f"/designs/{response['workflow_id']}").json()
         assert status["status"] == "failed"
         error_codes = {error["code"] for error in status.get("errors", [])}
-        assert "DESIGN_DOMAIN_ROUTING_BLOCKED" in error_codes
-        assert status["llm_fallback_used"] is True
-        assert status["completion_certificate_status"] != "issued"
+        assert "INVALID_REQUIREMENTS" in error_codes
+        assert "tower_height_m" in str(status["errors"])
+        assert "sector_count" in str(status["errors"])
     finally:
         workflow_service.outputs_dir = original_outputs
