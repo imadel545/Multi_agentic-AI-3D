@@ -204,6 +204,8 @@ class WorkflowStatus(BaseModel):
     requirement_coverage_passed: bool | None = None
     requirement_coverage_ratio: float | None = None
     completion_certificate_status: Literal["issued", "rejected"] | None = None
+    certificate_contract_version: str | None = None
+    certificate_coverage_gaps: list[str] = Field(default_factory=list)
     design_domain: str | None = None
     cognitive_plan_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     download_url: str | None = None

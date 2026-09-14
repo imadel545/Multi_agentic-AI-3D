@@ -134,6 +134,22 @@ class VerifiedActiveVersion:
     version: SceneVersion
     artifact_dir: Path
     status_path: Path
+    certificate_contract_version: str = "1.0.0"
+    coverage_gaps: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PersistedVersionVerification:
+    """What a persisted version proves under the contract it was certified with.
+
+    ``coverage_gaps`` lists evidence families the current software would
+    certify for this scene but which did not exist when the version was
+    certified.  They are reported, never silently assumed.
+    """
+
+    evidence: list[dict]
+    certificate_contract_version: str
+    coverage_gaps: tuple[str, ...]
 
 
 class SceneVersioningService:
@@ -356,11 +372,12 @@ class SceneVersioningService:
             raise ValueError("ACTIVE_DESIGN_VERSION_INVALID")
         if Path(target.artifact_dir).resolve() != artifact_dir:
             raise ValueError("ACTIVE_DESIGN_VERSION_ARTIFACT_DIR_MISMATCH")
-        evidence = verify_persisted_version(
+        verification = verify_persisted_version_detailed(
             artifact_dir,
             workflow_id=workflow_id,
             expected_scene=target.scene,
         )
+        evidence = verification.evidence
         status_path = artifact_dir / "status.json"
         certificate_path = artifact_dir / "completion_certificate.json"
         if manifest.get("status_sha256") != _sha256(status_path):
@@ -386,6 +403,8 @@ class SceneVersioningService:
             version=target,
             artifact_dir=artifact_dir,
             status_path=status_path,
+            certificate_contract_version=verification.certificate_contract_version,
+            coverage_gaps=verification.coverage_gaps,
         )
 
     def active_design_manifest(self, workflow_id: str) -> dict | None:
@@ -462,6 +481,30 @@ def verify_persisted_version(
 ) -> list[dict]:
     """Fail closed unless a persisted Blender result proves its full completion chain."""
 
+    return verify_persisted_version_detailed(
+        artifact_dir,
+        workflow_id=workflow_id,
+        expected_scene=expected_scene,
+        require_report_proof=require_report_proof,
+    ).evidence
+
+
+def verify_persisted_version_detailed(
+    artifact_dir: Path,
+    *,
+    workflow_id: str,
+    expected_scene: SceneSpec | None = None,
+    require_report_proof: bool = True,
+) -> PersistedVersionVerification:
+    """Verify a persisted version under the certificate contract it was issued with.
+
+    Every hash, check set and artifact set recorded by the certificate is still
+    enforced.  Evidence families introduced by a later contract (component
+    proofs, assembly constraint evidence, tower access evidence) are reported
+    as coverage gaps for older certificates instead of retroactively turning a
+    once-verified design into an integrity failure.
+    """
+
     if not artifact_dir.is_dir():
         raise ValueError("ACTIVE_VERSION_ARTIFACT_DIR_MISSING")
     certificate_path = artifact_dir / "completion_certificate.json"
@@ -492,23 +535,25 @@ def verify_persisted_version(
         scene.assembly_plan is not None and scene.assembly_plan.schema_version == "1.1.0"
     )
     tower_access_required = tower_access_evidence_required(scene)
+    contract = certificate_contract(certificate.schema_version)
+    coverage_gaps: list[str] = []
+    # Evidence the certificate's contract never covered is a documented gap, not
+    # corruption: the version is still verified against everything it declared.
+    if component_proof_required and not contract.covers_component_proofs:
+        component_proof_required = False
+        coverage_gaps.append("component_proofs")
+    if constraint_evidence_required and not contract.covers_constraint_evidence:
+        constraint_evidence_required = False
+        coverage_gaps.append("constraint_evidence")
+    if tower_access_required and not contract.covers_tower_access_evidence:
+        tower_access_required = False
+        coverage_gaps.append("tower_access_evidence")
     required_checks = _required_completion_checks(
         certificate.schema_version,
         constraint_evidence_required=constraint_evidence_required,
     )
     if set(certificate.checks) != required_checks or not all(certificate.checks.values()):
         raise ValueError("ACTIVE_VERSION_COMPLETION_CHECKS_INVALID")
-    if tower_access_required and certificate.schema_version != "1.5.0":
-        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
-    if constraint_evidence_required and certificate.schema_version not in {"1.4.0", "1.5.0"}:
-        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
-    if component_proof_required and certificate.schema_version not in {
-        "1.2.0",
-        "1.3.0",
-        "1.4.0",
-        "1.5.0",
-    }:
-        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE")
     if certificate.schema_version == "1.4.0" and not constraint_evidence_required:
         raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_INVALID")
     if certificate.schema_version == "1.5.0" and not tower_access_required:
@@ -602,12 +647,56 @@ def verify_persisted_version(
     build_lock_schema = _verify_build_lock(artifact_dir, scene=scene)
     if component_proof_required and build_lock_schema not in {"1.2.0", "1.3.0"}:
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SCHEMA_DOWNGRADE")
-    if build_lock_schema == "1.3.0" and sector_preview_required(scene):
-        verify_sector_preview_evidence(artifact_dir, scene)
+    if sector_preview_required(scene):
+        if build_lock_schema == "1.3.0" and _build_lock_declares(
+            artifact_dir, "sector_preview_profile"
+        ):
+            verify_sector_preview_evidence(artifact_dir, scene)
+        else:
+            coverage_gaps.append("sector_preview_evidence")
     if require_report_proof and build_lock_schema in {"1.1.0", "1.2.0", "1.3.0"}:
         _verify_critical_report_proof(artifact_dir)
     _verify_terminal_status(artifact_dir / "status.json", workflow_id=workflow_id)
-    return sorted(evidence, key=lambda item: item["logical_name"])
+    return PersistedVersionVerification(
+        evidence=sorted(evidence, key=lambda item: item["logical_name"]),
+        certificate_contract_version=certificate.schema_version,
+        coverage_gaps=tuple(coverage_gaps),
+    )
+
+
+@dataclass(frozen=True)
+class CertificateContract:
+    """Which evidence families a completion certificate schema version covers."""
+
+    schema_version: str
+    covers_component_proofs: bool
+    covers_constraint_evidence: bool
+    covers_tower_access_evidence: bool
+
+
+_CERTIFICATE_CONTRACTS: dict[str, CertificateContract] = {
+    "1.0.0": CertificateContract("1.0.0", False, False, False),
+    "1.1.0": CertificateContract("1.1.0", False, False, False),
+    "1.2.0": CertificateContract("1.2.0", True, False, False),
+    "1.3.0": CertificateContract("1.3.0", True, False, False),
+    "1.4.0": CertificateContract("1.4.0", True, True, False),
+    "1.5.0": CertificateContract("1.5.0", True, True, True),
+}
+
+
+def certificate_contract(schema_version: str) -> CertificateContract:
+    try:
+        return _CERTIFICATE_CONTRACTS[schema_version]
+    except KeyError as exc:
+        raise ValueError("ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_UNKNOWN") from exc
+
+
+COVERAGE_GAP_LABELS = {
+    "component_proofs": "preuves de composants",
+    "constraint_evidence": "mesures d’assemblage post-export",
+    "tower_access_evidence": "vérification de l’accès au pylône",
+    "sector_preview_evidence": "aperçus par secteur",
+}
 
 
 def _required_completion_checks(
@@ -798,6 +887,16 @@ def _verify_critical_report_proof(artifact_dir: Path) -> dict:
     return payload
 
 
+def _build_lock_declares(artifact_dir: Path, profile_key: str) -> bool:
+    """True when the persisted build lock carries the given evidence profile key."""
+
+    try:
+        payload = json.loads((artifact_dir / "build.lock.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and profile_key in payload
+
+
 def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     lock_path = artifact_dir / "build.lock.json"
     scene_path = artifact_dir / "scene_spec.json"
@@ -823,23 +922,30 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
             raise ValueError("ACTIVE_VERSION_BUILD_LOCK_WORKER_BUNDLE_INVALID")
     if schema_version in {"1.2.0", "1.3.0"} and not _valid_trusted_inputs(payload, scene):
         raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TRUSTED_INPUTS_INVALID")
+    lock_declares_tower_access = False
     if schema_version == "1.3.0":
-        expected_sector_preview_profile = {
-            "required": sector_preview_required(scene),
-            "evidence_file": "sector_preview_evidence.json"
-            if sector_preview_required(scene)
-            else None,
-        }
-        if payload.get("sector_preview_profile") != expected_sector_preview_profile:
-            raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID")
-        expected_tower_access_profile = {
-            "required": tower_access_evidence_required(scene),
-            "evidence_file": "tower_access_evidence.json"
-            if tower_access_evidence_required(scene)
-            else None,
-        }
-        if payload.get("tower_access_profile") != expected_tower_access_profile:
-            raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TOWER_ACCESS_PROFILE_INVALID")
+        # A build lock only vouches for the evidence profiles it declared. Locks
+        # written before a profile existed omit the key and are verified under
+        # their own contract; a declared profile must match the scene exactly.
+        if "sector_preview_profile" in payload:
+            expected_sector_preview_profile = {
+                "required": sector_preview_required(scene),
+                "evidence_file": "sector_preview_evidence.json"
+                if sector_preview_required(scene)
+                else None,
+            }
+            if payload.get("sector_preview_profile") != expected_sector_preview_profile:
+                raise ValueError("ACTIVE_VERSION_BUILD_LOCK_SECTOR_PREVIEW_PROFILE_INVALID")
+        if "tower_access_profile" in payload:
+            expected_tower_access_profile = {
+                "required": tower_access_evidence_required(scene),
+                "evidence_file": "tower_access_evidence.json"
+                if tower_access_evidence_required(scene)
+                else None,
+            }
+            if payload.get("tower_access_profile") != expected_tower_access_profile:
+                raise ValueError("ACTIVE_VERSION_BUILD_LOCK_TOWER_ACCESS_PROFILE_INVALID")
+            lock_declares_tower_access = bool(expected_tower_access_profile["required"])
     if payload.get("command_profile") != {
         "background": True,
         "factory_startup": True,
@@ -863,7 +969,7 @@ def _verify_build_lock(artifact_dir: Path, *, scene: SceneSpec) -> str:
     artifact_names = ["design.glb", "preview.png", "scene_metadata.json"]
     if (artifact_dir / "component_proofs.json").is_file():
         artifact_names.append("component_proofs.json")
-    if tower_access_evidence_required(scene):
+    if lock_declares_tower_access:
         artifact_names.append("tower_access_evidence.json")
     for name in artifact_names:
         item = artifacts.get(name)

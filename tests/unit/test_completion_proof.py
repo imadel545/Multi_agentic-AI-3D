@@ -21,6 +21,7 @@ from core.services.requirement_parser import parse_requirements_text
 from core.services.scene_versioning import (
     _verify_constraint_evidence,
     verify_persisted_version,
+    verify_persisted_version_detailed,
 )
 from core.validation.completion_certificate import (
     _constraint_evidence_verified,
@@ -305,16 +306,17 @@ def test_persisted_version_accepts_v1_4_set_and_rejects_constraint_tamper(
         json.dumps(downgraded),
         encoding="utf-8",
     )
-    with pytest.raises(
-        ValueError,
-        match="ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE",
-    ):
-        verify_persisted_version(
-            tmp_path,
-            workflow_id=scene.scene_id,
-            expected_scene=scene,
-            require_report_proof=False,
-        )
+    # Without the activation manifest, a 1.2 certificate is verified under its own
+    # contract and the newer evidence family is reported as a coverage gap. The
+    # manifest hash binding (SceneVersioningService) is what rejects a rewrite.
+    downgraded_verification = verify_persisted_version_detailed(
+        tmp_path,
+        workflow_id=scene.scene_id,
+        expected_scene=scene,
+        require_report_proof=False,
+    )
+    assert downgraded_verification.certificate_contract_version == "1.2.0"
+    assert "constraint_evidence" in downgraded_verification.coverage_gaps
     (tmp_path / "completion_certificate.json").write_text(
         certificate.model_dump_json(),
         encoding="utf-8",

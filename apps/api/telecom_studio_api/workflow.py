@@ -964,16 +964,16 @@ class WorkflowService:
                 )
             return root_status, None
         try:
-            if include_viewer_snapshot:
-                verified_active = self.versioning.verified_active_version(workflow_id)
-                candidate_status = verified_active.status_path
-                snapshot = self._viewer_snapshot_from_verified_version(
+            verified_active = self.versioning.verified_active_version(workflow_id)
+            candidate_status = verified_active.status_path
+            snapshot = (
+                self._viewer_snapshot_from_verified_version(
                     verified_active.version,
                     verified_active.artifact_dir,
                 )
-            else:
-                candidate_status = self.versioning.verified_active_status_path(workflow_id)
-                snapshot = None
+                if include_viewer_snapshot
+                else None
+            )
         except ValueError as exc:
             return (
                 _quarantined_status(
@@ -986,9 +986,14 @@ class WorkflowService:
                 ),
                 None,
             )
-        return _normalized_input_analysis_status(
+        verified_status = _normalized_input_analysis_status(
             json.loads(candidate_status.read_text(encoding="utf-8"))
-        ), snapshot
+        )
+        verified_status["certificate_contract_version"] = (
+            verified_active.certificate_contract_version
+        )
+        verified_status["certificate_coverage_gaps"] = list(verified_active.coverage_gaps)
+        return verified_status, snapshot
 
     def get_public_status(self, workflow_id: str) -> dict:
         """Return a frontend-safe status payload without local filesystem paths."""

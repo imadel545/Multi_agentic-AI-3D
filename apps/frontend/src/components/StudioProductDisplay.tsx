@@ -61,9 +61,9 @@ export function summarySignals(bundle: ViewerBundle | null, issueCount: number):
 
 export function analysisProviderLabel(provider?: string | null, extractionProvider?: string | null): string {
   const normalized = `${provider ?? ""} ${extractionProvider ?? ""}`.toLowerCase();
-  if (normalized.includes("groq") || normalized.includes("gpt")) return "intelligence décisionnelle";
-  if (normalized.includes("fallback") || normalized.includes("determin")) return "mode de secours contrôlé";
-  return "analyse structurée";
+  if (normalized.includes("groq") || normalized.includes("gpt")) return "analyse assistée de votre demande";
+  if (normalized.includes("fallback") || normalized.includes("determin")) return "extraction directe de votre demande";
+  return "analyse structurée de votre demande";
 }
 
 export function workflowStatusLabel(status?: string | null): string {

@@ -207,7 +207,7 @@ export function RequirementsUnderstanding({
       <small>
         Source d’analyse : {analysisProviderLabel(analysis.provider, analysis.extraction_provider)}
       </small>
-      {analysis.fallback_used ? (
+      {analysis.fallback_used && !/groq|gpt/i.test(`${analysis.provider ?? ""} ${analysis.extraction_provider ?? ""}`) ? (
         <p className="inline-alert">
           <AlertTriangle size={15} aria-hidden="true" /> {humanExtractionFallback(
             analysis.llm_fallback_reason

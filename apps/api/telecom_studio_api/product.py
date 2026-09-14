@@ -30,6 +30,7 @@ from core.contracts.sector_preview import SectorPreviewEvidence
 from core.contracts.tower_access_evidence import TowerAccessEvidence
 from core.services.asset_inventory import AssetInventoryService
 from core.services.blender_runtime import output_reports_qualified_blender
+from core.services.scene_versioning import COVERAGE_GAP_LABELS
 
 
 class ProductService:
@@ -352,9 +353,7 @@ class ProductService:
         scene_spec = _artifact_by_name(viewer_artifacts, "scene_spec.json")
         assembly_plan = _artifact_by_name(viewer_artifacts, "assembly_plan.json")
         constraint_evidence = _artifact_by_name(viewer_artifacts, "constraint_evidence.json")
-        tower_access_evidence = _artifact_by_name(
-            viewer_artifacts, "tower_access_evidence.json"
-        )
+        tower_access_evidence = _artifact_by_name(viewer_artifacts, "tower_access_evidence.json")
         qa_report = _artifact_by_name(viewer_artifacts, "qa_report.json")
         generation_report = _artifact_by_name(viewer_artifacts, "generation_report.json")
         rag_evidence = _artifact_by_name(viewer_artifacts, "rag_evidence.json")
@@ -934,9 +933,7 @@ def _sector_preview_summaries_from_path(
     return result
 
 
-def _tower_access_summary_from_path(
-    path: Path | None, *, scene: SceneSpec | None
-) -> dict | None:
+def _tower_access_summary_from_path(path: Path | None, *, scene: SceneSpec | None) -> dict | None:
     """Expose tower access only after the persisted GLB proof is internally coherent."""
 
     if path is None or not path.is_file() or scene is None:
@@ -945,8 +942,10 @@ def _tower_access_summary_from_path(
         evidence = TowerAccessEvidence.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return None
-    if evidence.scene_id != scene.scene_id or evidence.status != "passed" or not all(
-        evidence.checks.values()
+    if (
+        evidence.scene_id != scene.scene_id
+        or evidence.status != "passed"
+        or not all(evidence.checks.values())
     ):
         return None
     return {
@@ -1340,6 +1339,17 @@ def _asset_quality_summary(status: dict) -> str | None:
 
 def _collect_limitations(status: dict) -> list[str]:
     limitations = []
+    coverage_gaps = [
+        COVERAGE_GAP_LABELS.get(str(gap), str(gap))
+        for gap in status.get("certificate_coverage_gaps") or []
+    ]
+    if coverage_gaps:
+        limitations.append(
+            "Version vérifiée selon un contrat de certification antérieur "
+            f"({status.get('certificate_contract_version') or 'inconnu'}) : "
+            f"non couvert par cette version — {', '.join(coverage_gaps)}. "
+            "Régénérez le design pour obtenir ces vérifications."
+        )
     if status.get("completion_certificate_status") != "issued":
         limitations.append(
             "La preuve de complétion n'est pas vérifiable : ce résultat n'est pas certifié "

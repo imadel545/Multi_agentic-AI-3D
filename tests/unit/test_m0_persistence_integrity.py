@@ -25,7 +25,12 @@ from core.performance import issue_requirement_analysis_receipt
 from core.services.asset_registry import AssetRegistry
 from core.services.blender_runner import GenerationResult
 from core.services.requirement_parser import parse_requirements_text
-from core.services.scene_versioning import SceneVersioningService, _verify_build_lock
+from core.services.scene_versioning import (
+    _REQUIRED_COMPLETION_CHECKS_V1_1,
+    SceneVersioningService,
+    _verify_build_lock,
+    verify_persisted_version_detailed,
+)
 from core.validation.completion_certificate import (
     build_completion_certificate,
     verify_completion_certificate,
@@ -265,7 +270,9 @@ def test_m0_persistence_rejects_component_proof_schema_downgrade(
             item for item in payload["artifacts"] if item["logical_name"] != "component_proofs"
         ]
         _write_json(certificate_path, payload)
-        expected_error = "ACTIVE_VERSION_COMPLETION_CERTIFICATE_SCHEMA_DOWNGRADE"
+        # A rewritten certificate no longer matches the hash bound at activation;
+        # the contract-aware verifier does not need a heuristic downgrade rule.
+        expected_error = "ACTIVE_DESIGN_COMPLETION_CERTIFICATE_HASH_MISMATCH"
     else:
         build_lock_path = bundle.artifact_dir / "build.lock.json"
         payload = json.loads(build_lock_path.read_text(encoding="utf-8"))
@@ -308,13 +315,14 @@ def _create_certified_bundle(
     tmp_path: Path,
     *,
     certificate_schema: str,
+    prompt: str = (
+        "Créer un site 5G sur pylône treillis 30m avec 1 secteur à 24m. "
+        "Azimut : 0°. Ajouter une RRU."
+    ),
 ) -> _CertifiedBundle:
     workflow_id = "wf_aaaaaaaaaaaa"
     include_geometry_program = certificate_schema == "1.2.0"
-    requirements = parse_requirements_text(
-        "Créer un site 5G sur pylône treillis 30m avec 1 secteur à 24m. "
-        "Azimut : 0°. Ajouter une RRU."
-    )
+    requirements = parse_requirements_text(prompt)
     if include_geometry_program:
         requirements = requirements.model_copy(
             update={
@@ -510,6 +518,23 @@ def _create_certified_bundle(
                 "design_blueprint_sha256": None,
                 "scene_spec_sha256": _canonical_json_sha256(scene_payload),
                 "checks": {name: True for name in _CHECKS_V1},
+            }
+        )
+    if certificate_schema == "1.1.0" and certificate.schema_version != "1.1.0":
+        # Emulate the historical 1.1.0 issuer: no evidence families beyond the base set.
+        certificate = certificate.model_copy(
+            update={
+                "schema_version": "1.1.0",
+                "checks": {name: True for name in _REQUIRED_COMPLETION_CHECKS_V1_1},
+                "artifacts": [
+                    item
+                    for item in certificate.artifacts
+                    if item.logical_name in {"glb", "preview", "metadata", "build_lock"}
+                ],
+                "constraint_evidence_sha256": None,
+                "tower_access_evidence_sha256": None,
+                "status": "issued",
+                "blockers": [],
             }
         )
     assert certificate.schema_version == certificate_schema
@@ -795,3 +820,36 @@ def _write_json(path: Path, payload: object) -> None:
         json.dumps(payload, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def test_legacy_certificate_is_verified_under_its_own_contract(tmp_path: Path) -> None:
+    """A design certified before tower-access evidence existed stays verified.
+
+    The current software would certify this lattice scene (platform + ladder)
+    under contract 1.5.0. The historical 1.1.0 certificate is verified against
+    everything it declared and the newer evidence family is a reported gap.
+    """
+
+    bundle = _create_certified_bundle(
+        tmp_path,
+        certificate_schema="1.1.0",
+        prompt=(
+            "Créer un site 5G sur pylône treillis 30m avec 1 secteur à 24m, "
+            "une plateforme et une échelle. Azimut : 0°. Ajouter une RRU."
+        ),
+    )
+    assert bundle.service.get_version(bundle.workflow_id, bundle.version_id) is not None
+
+    verification = verify_persisted_version_detailed(
+        bundle.artifact_dir, workflow_id=bundle.workflow_id
+    )
+    assert verification.certificate_contract_version == "1.1.0"
+    assert "tower_access_evidence" in verification.coverage_gaps
+    restored = bundle.service.verified_active_version(bundle.workflow_id)
+    assert restored.version.version_id == bundle.version_id
+    assert restored.coverage_gaps == verification.coverage_gaps
+
+    # Integrity is still enforced under that contract.
+    (bundle.artifact_dir / "design.glb").write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="ACTIVE_VERSION_ARTIFACT_HASH_MISMATCH:glb"):
+        bundle.service.verified_active_version(bundle.workflow_id)

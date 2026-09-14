@@ -29,7 +29,7 @@ describe("studio kernel conversation command", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmer et générer" }));
 
     expect(onConfirm).toHaveBeenCalledOnce();
-    expect(screen.getByText(/Source d’analyse : intelligence décisionnelle/)).toBeInTheDocument();
+    expect(screen.getByText(/Source d’analyse : analyse assistée de votre demande/)).toBeInTheDocument();
     expect(screen.queryByText(/groq:openai\/gpt-oss-120b/)).not.toBeInTheDocument();
     expect(screen.queryByText("Prélecture locale")).not.toBeInTheDocument();
   });
@@ -498,7 +498,7 @@ describe("studio kernel conversation command", () => {
         message: "LLM values conflicting with explicit source requirements were ignored: ['azimuths_deg']."
       })
     ).toBe(
-      "Une proposition du LLM contredisait une valeur explicite. Le cahier de charge utilisateur a été conservé."
+      "Une valeur proposée automatiquement contredisait votre demande ; votre valeur a été conservée."
     );
     expect(
       humanRequirementWarning({
@@ -534,7 +534,7 @@ describe("studio kernel conversation command", () => {
 
     expect(
       screen.getByText(
-        /L’analyse intelligente n’a pas répondu à temps; une extraction déterministe vérifiable a été utilisée/
+        /L’analyse assistée n’a pas répondu à temps ; les paramètres ont été extraits directement de votre demande/
       )
     ).toBeInTheDocument();
     expect(screen.queryByText("Groq timeout")).not.toBeInTheDocument();

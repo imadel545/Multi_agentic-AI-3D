@@ -409,8 +409,8 @@ export function humanRequirementWarning(warning: { code: string; message: string
     DEFAULT_CABLES_USED: "Les câbles ont été ajoutés à la scène faute d’instruction contraire.",
     DEFAULT_BEAMS_USED: "La visualisation des faisceaux a été activée.",
     DEFAULT_LABELS_USED: "Les labels techniques ont été activés.",
-    LLM_FIELD_REPAIRED: "Des champs LLM manquants ou invalides ont été restaurés depuis l’analyse déterministe. Vérifiez les valeurs affichées.",
-    LLM_SOURCE_FIELD_PROTECTED: "Une proposition du LLM contredisait une valeur explicite. Le cahier de charge utilisateur a été conservé."
+    LLM_FIELD_REPAIRED: "Des valeurs manquantes ont été complétées à partir de votre texte. Vérifiez les valeurs affichées.",
+    LLM_SOURCE_FIELD_PROTECTED: "Une valeur proposée automatiquement contredisait votre demande ; votre valeur a été conservée."
   };
   if (messages[warning.code]) {
     return messages[warning.code];
@@ -419,7 +419,7 @@ export function humanRequirementWarning(warning: { code: string; message: string
     return "Une valeur par défaut a été proposée par le backend. Vérifiez les paramètres affichés avant génération.";
   }
   if (warning.code.startsWith("LLM_")) {
-    return "Le système a sécurisé une proposition du LLM. Vérifiez les paramètres affichés avant génération.";
+    return "Une valeur proposée automatiquement a été vérifiée et corrigée. Contrôlez les paramètres affichés avant génération.";
   }
   return warning.message;
 }
@@ -427,15 +427,15 @@ export function humanRequirementWarning(warning: { code: string; message: string
 export function humanExtractionFallback(reason: string | null | undefined): string {
   const normalized = (reason ?? "").toLowerCase();
   if (normalized.includes("requested")) {
-    return "L’analyse déterministe a été demandée explicitement; vérifiez les hypothèses affichées.";
+    return "Les paramètres ont été extraits directement de votre demande, comme demandé. Vérifiez-les avant génération.";
   }
   if (normalized.includes("timeout")) {
-    return "L’analyse intelligente n’a pas répondu à temps; une extraction déterministe vérifiable a été utilisée.";
+    return "L’analyse assistée n’a pas répondu à temps ; les paramètres ont été extraits directement de votre demande. Vérifiez-les avant génération.";
   }
   if (normalized.includes("unavailable") || normalized.includes("disabled")) {
-    return "L’analyse intelligente n’est pas disponible; une extraction déterministe vérifiable a été utilisée.";
+    return "L’analyse assistée n’est pas disponible ; les paramètres ont été extraits directement de votre demande. Vérifiez-les avant génération.";
   }
-  return "L’analyse intelligente n’a pas abouti; une extraction déterministe vérifiable a été utilisée.";
+  return "L’analyse assistée n’a pas pu être utilisée ; les paramètres ont été extraits directement de votre demande. Vérifiez-les avant génération.";
 }
 
 export function humanExtractionError(error: { code: string; message: string }): string {
