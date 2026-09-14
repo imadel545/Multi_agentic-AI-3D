@@ -69,7 +69,6 @@ export function useDocumentDesignFlow({
   const [submittedRequirementsHash, setSubmittedRequirementsHash] = useState<string | null>(null);
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [submissionBusy, setSubmissionBusy] = useState(false);
-  const [creationPath, setCreationPath] = useState<"telecom" | "free">("telecom");
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [multimodalConsent, setMultimodalConsent] = useState<MultimodalConsent>("disabled");
 
@@ -315,14 +314,16 @@ export function useDocumentDesignFlow({
 
   const analysisIsCurrent = analyzedPrompt === state.prompt.trim() &&
     requirementsAnalysis?.requirements != null && requirementsAnalysis.requirements_hash != null;
+  const freeDesignAvailable = analyzedPrompt === state.prompt.trim() &&
+    requirementsAnalysis !== null && requirementsAnalysis.requirements == null;
   const analysisWasSubmitted = analysisIsCurrent &&
     submittedRequirementsHash === requirementsAnalysis?.requirements_hash;
 
   return {
-    analysisBusy, analysisError, analysisIsCurrent, analysisWasSubmitted, analyzePrompt,
-    changePrompt, clearAnalysis, creationPath, detachDocumentPack, documentPackBusy,
+    analysisBusy, analysisError, analysisIsCurrent, analysisWasSubmitted, analyzePrompt, freeDesignAvailable,
+    changePrompt, clearAnalysis, detachDocumentPack, documentPackBusy,
     documentPackMessage, documentPackSummary, multimodalConsent, multimodalConsentAvailable,
-    multimodalIntelligence, requirementsAnalysis, retryDocumentPackSummary, setCreationPath,
+    multimodalIntelligence, requirementsAnalysis, retryDocumentPackSummary,
     setMultimodalConsent, submissionBusy, submitFreeIntent, submitPrompt, uploadDocumentPack
   };
 }

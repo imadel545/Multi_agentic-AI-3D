@@ -64,18 +64,26 @@ describe("studio kernel conversation command", () => {
     expect(screen.queryByRole("button", { name: /Confirmer/ })).not.toBeInTheDocument();
   });
 
-  it("preserves queued attachments when closing the panel and keeps free-intention creation available in a chat", () => {
+  it("offers unconfirmed free design only when the request cannot be structured", () => {
+    const freeDesign = vi.fn();
+    const { rerender } = render(<ChatCommandPanel {...commandDefaults} onFreeDesign={freeDesign}
+      analysisError="La demande n’a pas pu être structurée pour confirmation." analysis={null} />);
+    expect(screen.queryByRole("button", { name: /Télécom avec validation|Intention libre/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Concevoir sans confirmation télécom" }));
+    expect(freeDesign).toHaveBeenCalledTimes(1);
+    rerender(<ChatCommandPanel {...commandDefaults} analysisError="Erreur réseau" analysis={null} />);
+    expect(screen.queryByRole("button", { name: "Concevoir sans confirmation télécom" })).not.toBeInTheDocument();
+  });
+
+  it("preserves queued attachments when closing the panel", () => {
     const upload = vi.fn().mockResolvedValue(true);
-    const choosePath = vi.fn();
     render(<ChatCommandPanel {...commandDefaults}
-      onNewChat={vi.fn()} onCreationPathChange={choosePath}
+      onNewChat={vi.fn()}
       onDocumentPackUpload={upload}
       documentCapabilities={{
         document_pack_status: "limited", supported_upload_format: "zip_or_multiple_files",
         supported_extensions: [".pdf"], limitations: [], limits: {}, truth: {}, capabilities: {}
       }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
-    expect(choosePath).toHaveBeenCalledWith("free");
     const trigger = screen.getByRole("button", { name: "Ajouter des pièces jointes" });
     fireEvent.click(trigger);
     const files = [new File(["document"], "plan.pdf", { type: "application/pdf" })];

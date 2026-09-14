@@ -74,7 +74,7 @@ describe("studio kernel QA and design truth", () => {
   });
   it("keeps component geometry fidelity visible independently from QA proof", () => {
     render(
-      <BackendStatusBar
+      <QaPanel
         bundle={{
           ...bundle,
           generation_mode: "real_blender",
@@ -94,14 +94,6 @@ describe("studio kernel QA and design truth", () => {
             }
           }
         }}
-        health={{
-          status: "ok",
-          service: "agentic_telecom_3d_studio_api",
-          version: "1.0.0",
-          api_contract_version: "2026-07-29"
-        }}
-        issues={null}
-        phase="completed"
       />
     );
 

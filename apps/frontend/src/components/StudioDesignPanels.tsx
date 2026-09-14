@@ -9,7 +9,8 @@ import type {
   StudioSummary
 } from "../api/schemas";
 import { List, Metric, PanelTitle, ResourceRecovery, formatInteger } from "./StudioPrimitives";
-import { humanSemanticRole, serviceStatusLabel, visualReviewStatusLabel } from "./StudioDisplayHelpers";
+import { compactFidelityLabel, humanSemanticRole, serviceStatusLabel, visualReviewStatusLabel } from "./StudioDisplayHelpers";
+import { geometryFidelityBadge } from "../features/three-viewer/viewerRules";
 import {
   artifactKindLabel,
   artifactLabel,
@@ -219,6 +220,7 @@ export function QaPanel({
   const assembly = bundle?.assembly_constraint_summary;
   const assemblyEvidenceUrl = toAbsoluteUrl(bundle?.constraint_evidence_url);
   const passed = bundle?.mesh_qa_passed === true;
+  const fidelityBadge = geometryFidelityBadge(bundle);
   const qaExecuted =
     qa?.qa_executed !== false &&
     bundle?.status === "completed" &&
@@ -264,6 +266,14 @@ export function QaPanel({
               label="Preuve d’intégrité"
               value={completionCertificateLabel(bundle.completion_certificate_status)}
             />
+            {fidelityBadge ? (
+              <div className="metric">
+                <small>Fidélité des composants</small>
+                <strong data-geometry-fidelity={fidelityBadge.fidelity}>
+                  {compactFidelityLabel(fidelityBadge.fidelity)}
+                </strong>
+              </div>
+            ) : null}
           </div>
           <List title="Échecs QA" items={stringArray(qa?.checks_failed)} empty="Aucun échec QA remonté." />
           <details className="drawer-disclosure">

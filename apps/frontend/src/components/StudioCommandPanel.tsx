@@ -20,8 +20,7 @@ import { failureRecoveryMessage, humanizeUserIssue } from "./StudioWorkflowDispl
 export function ChatCommandPanel({
   conversation,
   activity,
-  creationPath = "telecom",
-  onCreationPathChange,
+  onFreeDesign,
   activeRequirements,
   analysis,
   analysisBusy,
@@ -63,8 +62,7 @@ export function ChatCommandPanel({
   onNewChat?: (draft?: string) => void;
   conversation?: ReactNode;
   activity?: ReactNode;
-  creationPath?: "telecom" | "free";
-  onCreationPathChange?: (path: "telecom" | "free") => void;
+  onFreeDesign?: () => void;
   activeRequirements?: RequirementSpec | null;
   analysis: ParseRequirementsResponse | null;
   analysisBusy: boolean;
@@ -170,8 +168,7 @@ export function ChatCommandPanel({
         ? "Inspectez le modèle, demandez une modification ou démarrez un nouveau site."
         : phase === "failed"
           ? "Les artefacts non vérifiés restent indisponibles. Corrigez la demande ou relancez une génération vérifiée."
-          : creationPath === "free" ? "Décrivez l’objet et ses contraintes. Le moteur choisit le domaine et contrôle la construction avant de publier un résultat."
-          : "Les contraintes sont extraites puis confirmées avant toute construction du modèle 3D.";
+          : "Décrivez le site ou l’objet à concevoir. Les contraintes comprises sont confirmées avant toute construction du modèle 3D.";
   const failedIssue = phase === "failed" && failureIssue
     ? humanizeUserIssue(failureIssue)
     : null;
@@ -267,7 +264,16 @@ export function ChatCommandPanel({
             submitting={disabled}
           />
         ) : null}
-        {analysisError ? <p className="inline-alert"><AlertTriangle size={16} aria-hidden="true" /> {analysisError}</p> : null}
+        {analysisError ? (
+          <p className="inline-alert">
+            <AlertTriangle size={16} aria-hidden="true" /> {analysisError}
+            {onFreeDesign && !revisionMode ? (
+              <button className="inline-alert-action" disabled={disabled || analysisBusy} onClick={onFreeDesign} type="button">
+                Concevoir sans confirmation télécom
+              </button>
+            ) : null}
+          </p>
+        ) : null}
 
         {editMessage ? (
           <p
@@ -287,13 +293,6 @@ export function ChatCommandPanel({
       </ConversationTray>
 
       <div className="command-dock">
-        {!revisionMode && onCreationPathChange ? (
-          <div className="command-mode" role="group" aria-label="Parcours de conception">
-            <button type="button" aria-pressed={creationPath === "telecom"} disabled={disabled || analysisBusy} onClick={() => onCreationPathChange("telecom")}>Télécom avec validation</button>
-            <button type="button" aria-pressed={creationPath === "free"} disabled={disabled || analysisBusy} onClick={() => onCreationPathChange("free")}>Intention libre</button>
-          </div>
-        ) : null}
-        {!revisionMode && creationPath === "free" ? <p className="composer-hint">Objets et aménagements — parcours expérimental, sans confirmation télécom préalable.</p> : null}
         {canEdit && !onNewChat ? (
           <div className="command-mode" role="group" aria-label="Type de commande">
             <button className={!revisionMode ? "active" : ""} disabled={disabled || revisionBusy} onClick={() => setCommandMode("new")} type="button">Nouveau design</button>
@@ -409,9 +408,7 @@ export function ChatCommandPanel({
                 ? "Reprendre dans une nouvelle conversation"
                 : revisionMode
                   ? "Appliquer la révision"
-                  : creationPath === "free"
-                    ? "Concevoir depuis cette intention"
-                    : "Analyser la demande"
+                  : "Analyser la demande"
             }
             className="composer-submit"
             disabled={disabled || (revisionMode ? revisionBusy || !revisionPrompt.trim() : analysisBusy || !prompt.trim())}
@@ -421,9 +418,7 @@ export function ChatCommandPanel({
                 ? "Conserver cette demande dans une nouvelle conversation"
                 : revisionMode
                   ? "Appliquer la modification"
-                  : creationPath === "free"
-                    ? "Concevoir depuis cette intention"
-                    : "Analyser les contraintes"
+                  : "Analyser les contraintes"
             }
             type="button"
           >
@@ -439,7 +434,6 @@ export function ChatCommandPanel({
         <p className="composer-hint">
           {revisionMode
             ? revisionBusy ? "Révision et validation en cours…" : "⌘ Entrée pour appliquer · la version actuelle reste protégée."
-            : creationPath === "free" ? "⌘ Entrée pour lancer la conception · le moteur publiera les contrôles et limites."
             : analysisBusy ? "Analyse de la demande en cours…" : analysis ? "Modifiez le texte puis réanalysez si nécessaire." : "⌘ Entrée pour analyser · les paramètres seront confirmés avant génération."}
         </p>
       </div>

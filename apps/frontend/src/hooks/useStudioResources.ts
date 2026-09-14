@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ViewerBundle } from "../api/schemas";
 import type { TelecomStudioApi } from "../api/client";
 import type {
   AdaptationCapabilityCatalog,
@@ -133,8 +134,11 @@ export function useStudioResources({ apiClient, dispatch, state }: UseStudioReso
     void loadDocumentCapabilities().catch(() => undefined);
   }, [loadAssetInventory, loadAssetLibrarySummary, loadDocumentCapabilities, loadHealth, loadStudioSummary]);
 
+  const viewerBundleRef = useRef(state.viewerBundle);
+  viewerBundleRef.current = state.viewerBundle;
+  const evidenceKey = viewerEvidenceKey(state.viewerBundle);
   useEffect(() => {
-    const bundle = state.viewerBundle;
+    const bundle = viewerBundleRef.current;
     for (const resource of ["assembly_plan", "component_proofs", "qa_evidence", "requirements_context", "llm_provenance", "rag_evidence"]) {
       resourceRequestRef.current[resource] = (resourceRequestRef.current[resource] ?? 0) + 1;
     }
@@ -158,7 +162,8 @@ export function useStudioResources({ apiClient, dispatch, state }: UseStudioReso
     if (bundle.qa_report_url) {
       void loadSurfaceResource("qa_evidence", () => apiClient.artifactJson(bundle.qa_report_url), setQaEvidence, "resource", () => setQaEvidence(null)).catch(() => undefined);
     } else dispatch({ type: "RESOURCE_RECOVERED", resource: "qa_evidence" });
-  }, [apiClient, dispatch, loadSurfaceResource, state.viewerBundle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- evidence follows the bundle identity, not its object reference
+  }, [apiClient, dispatch, loadSurfaceResource, evidenceKey]);
 
   const searchAssetLibrary = useCallback(async (query: string) => {
     const normalizedQuery = query.trim();
@@ -237,4 +242,19 @@ export function useStudioResources({ apiClient, dispatch, state }: UseStudioReso
     retryCognitiveEvidence, retryQaEvidence, searchAssetLibrary, sectorFocusSemanticRoots,
     selectedSemanticRoot, selectedVersionId, selectSemanticRoot, towerAccess
   };
+}
+
+
+/** Evidence artifacts are keyed by what they describe, so re-receiving an identical bundle never refetches them. */
+export function viewerEvidenceKey(bundle: ViewerBundle | null): string {
+  if (!bundle) return "";
+  return [
+    bundle.workflow_id,
+    bundle.version_id ?? "",
+    bundle.status,
+    bundle.assembly_plan_url ?? "",
+    bundle.component_proofs_url ?? "",
+    bundle.requirements_spec_url ?? "",
+    bundle.qa_report_url ?? ""
+  ].join("|");
 }

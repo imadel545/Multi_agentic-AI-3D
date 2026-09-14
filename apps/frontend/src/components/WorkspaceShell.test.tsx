@@ -5,7 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import WorkspaceShell from "./WorkspaceShell";
 
@@ -399,4 +399,21 @@ it("keeps the new conversation action beside the selected project menu", async (
     }),
   );
   expect(await screen.findByText("Conversation vide")).toBeInTheDocument();
+});
+
+describe("workspace selection memory", () => {
+  it("reopens the last project and conversation after a reload without a hash", async () => {
+    const { readLastWorkspaceSelection, writeLastWorkspaceSelection } = await import("./WorkspaceShell");
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => void store.set(key, value),
+      removeItem: (key: string) => void store.delete(key),
+    } as unknown as Storage;
+    writeLastWorkspaceSelection("project_a", "chat_b", storage);
+    expect(readLastWorkspaceSelection(storage)).toEqual({ projectId: "project_a", chatId: "chat_b" });
+    writeLastWorkspaceSelection(null, null, storage);
+    expect(readLastWorkspaceSelection(storage)).toBeNull();
+    expect(readLastWorkspaceSelection({ getItem: () => "{broken" } as unknown as Storage)).toBeNull();
+  });
 });

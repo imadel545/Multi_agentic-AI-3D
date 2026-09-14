@@ -1,8 +1,6 @@
-import { AlertTriangle, Boxes, CheckCircle2, Loader2, RadioTower } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RadioTower } from "lucide-react";
 import type { Health, UserIssues, ViewerBundle } from "../api/schemas";
 import type { WorkflowPhase } from "../state/workflowMachine";
-import { geometryFidelityBadge } from "../features/three-viewer/viewerRules";
-import { compactFidelityLabel } from "./StudioDisplayHelpers";
 import { workflowStatusLabel, phaseLabel } from "./StudioProductDisplay";
 import { displayIssueCount } from "./StudioWorkflowDisplay";
 
@@ -24,7 +22,6 @@ export function BackendStatusBar({
   issues: UserIssues | null;
 }) {
   const issueCount = displayIssueCount(issues, bundle);
-  const fidelityBadge = geometryFidelityBadge(bundle);
   const workflowActive =
     phase === "submitting" || phase === "streaming" || phase === "running";
   const integrityVerified =
@@ -80,24 +77,6 @@ export function BackendStatusBar({
             {integrityVerified ? "Modèle vérifié" : workflowStatusLabel(bundle.status)}
           </span>
         ) : phase !== "idle" ? <span className="workflow-truth">{phaseLabel(phase)}</span> : null}
-        {fidelityBadge ? (
-          <span
-            className={
-              fidelityBadge.fidelity === "vendor_qualified"
-                ? "topbar-proof ok"
-                : "topbar-proof warn"
-            }
-            data-geometry-fidelity={fidelityBadge.fidelity}
-            title={fidelityBadge.label}
-          >
-            <Boxes size={14} aria-hidden="true" /> {compactFidelityLabel(fidelityBadge.fidelity)}
-          </span>
-        ) : null}
-        {issueCount ? (
-          <span className="topbar-issue-count">
-            <AlertTriangle size={14} aria-hidden="true" /> {issueCount} limite{issueCount > 1 ? "s" : ""} à examiner
-          </span>
-        ) : null}
       </div>
     </header>
   );

@@ -214,12 +214,8 @@ export function StudioApp({
             editMessage={revisions.revisionMessage}
             error={state.error}
             failureIssue={state.userIssues?.human_readable_issues.find((issue) => issue.severity === "error") ?? state.userIssues?.human_readable_issues[0] ?? null}
-            creationPath={documents.creationPath}
-            onCreationPathChange={(path) => {
-              documents.setCreationPath(path);
-              documents.clearAnalysis();
-            }}
-            onAnalyze={documents.creationPath === "free" ? documents.submitFreeIntent : documents.analyzePrompt}
+            onAnalyze={documents.analyzePrompt}
+            onFreeDesign={documents.freeDesignAvailable ? documents.submitFreeIntent : undefined}
             onConfirm={documents.submitPrompt}
             onDocumentPackDetach={documents.detachDocumentPack}
             onDocumentPackRetry={documents.retryDocumentPackSummary}

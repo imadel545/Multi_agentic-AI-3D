@@ -73,25 +73,28 @@ describe("frontend runtime selection", () => {
     }));
   });
 
-  it("submits free intent directly without manufacturing telecom requirements", async () => {
+  it("falls back to unconfirmed free design only after analysis cannot structure the request", async () => {
     const pendingCreation = deferredPromise<never>();
     const createDesign = vi.fn().mockReturnValue(pendingCreation.promise);
     const onMutationBusyChange = vi.fn();
-    const parseRequirements = vi.fn();
+    const parseRequirements = vi.fn().mockResolvedValue({
+      requirements: null, requirements_hash: null, warnings: [], errors: [],
+      provider: "groq", extraction_provider: "groq", fallback_used: false
+    });
     render(createElement(App, { apiClient: bootstrapApi({ createDesign, parseRequirements }), onMutationBusyChange }));
-    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
+    expect(screen.queryByRole("button", { name: /Intention libre|Télécom avec validation/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Design prompt"), { target: { value: "Un escalier avec deux paliers" } });
-    fireEvent.click(screen.getByRole("button", { name: "Concevoir depuis cette intention" }));
+    fireEvent.click(screen.getByRole("button", { name: "Analyser la demande" }));
+    await waitFor(() => expect(parseRequirements).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Concevoir sans confirmation télécom" }));
     await waitFor(() => expect(createDesign).toHaveBeenCalledWith({
       requirements_text: "Un escalier avec deux paliers",
       options: { detail_level: "high", use_llm: true, multimodal_consent: "disabled" }
     }));
-    expect(parseRequirements).not.toHaveBeenCalled();
     await waitFor(() => expect(onMutationBusyChange).toHaveBeenLastCalledWith(true));
     await act(async () => pendingCreation.reject(new ApiClientError(503, "/designs", "unavailable")));
     await waitFor(() => expect(onMutationBusyChange).toHaveBeenLastCalledWith(false));
     await waitFor(() => expect(screen.getByLabelText("Design prompt")).toBeEnabled());
-    fireEvent.click(screen.getByRole("button", { name: "Télécom avec validation" }));
     expect(screen.getByRole("button", { name: "Analyser la demande" })).toBeEnabled();
   });
 
@@ -213,6 +216,10 @@ describe("frontend runtime selection", () => {
       Promise.resolve(workflowId === newWorkflow.workflow_id ? newWorkflow : historicalWorkflow)
     );
     const apiClient = bootstrapApi({
+      parseRequirements: vi.fn().mockResolvedValue({
+        requirements: null, requirements_hash: null, warnings: [], errors: [],
+        provider: "groq", extraction_provider: "groq", fallback_used: false
+      }),
       listDesigns: vi.fn(() => delayedDesignList.promise),
       createDesign: vi.fn().mockResolvedValue({ workflow_id: newWorkflow.workflow_id, status: "pending" }),
       workflowStatus,
@@ -255,11 +262,11 @@ describe("frontend runtime selection", () => {
     render(createElement(App, { apiClient }));
 
     await waitFor(() => expect(apiClient.listDesigns).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "Intention libre" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Design prompt" }), {
       target: { value: "Créer un support d'antenne modifiable" }
     });
-    fireEvent.click(screen.getByRole("button", { name: "Concevoir depuis cette intention" }));
+    fireEvent.click(screen.getByRole("button", { name: "Analyser la demande" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Concevoir sans confirmation télécom" }));
 
     await waitFor(() =>
       expect(apiClient.createDesign).toHaveBeenCalledWith({
