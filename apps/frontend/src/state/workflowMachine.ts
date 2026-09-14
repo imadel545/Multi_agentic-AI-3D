@@ -186,9 +186,11 @@ export function workflowReducer(
     case "REVISION_FINISHED":
       return {
         ...state,
-        phase: state.status
-          ? phaseFromStatus(state.status, state.viewerBundle, "completed")
-          : "completed",
+        phase: state.viewerBundle
+          ? phaseFromViewerBundle(state.viewerBundle, "completed")
+          : state.status && isTerminalStatus(state.status.status)
+            ? phaseFromStatus(state.status, null, "completed")
+            : "completed",
         runtimeMode: "idle",
         currentOperation: null,
         transportError: null

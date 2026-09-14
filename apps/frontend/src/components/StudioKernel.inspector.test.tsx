@@ -15,32 +15,6 @@ describe("studio kernel contextual inspection", () => {
       <InspectorDock
         bundle={bundle}
         canRollback={false}
-        events={[
-          {
-            event_id: "evt_1",
-            event_type: "node_started",
-            workflow_id: "wf_1",
-            timestamp: "2026-06-16T10:00:00Z",
-            phase: "planning",
-            status: "running",
-            node: "plan_scene",
-            human_label: "Construction du plan",
-            progress_message: "Planification en cours.",
-            warnings: [],
-            errors: [],
-            artifact_refs: [],
-            raw: {
-              event_id: "evt_1",
-              event_type: "node_started",
-              workflow_id: "wf_1",
-              timestamp: "2026-06-16T10:00:00Z",
-              payload: { artifact_refs: [], errors: [], warnings: [] }
-            }
-          }
-        ]}
-        issues={null}
-        summary={null}
-        timeline={null}
         toAbsoluteUrl={(url) => url ?? null}
         onRollbackVersion={vi.fn()}
         rollbackBusyVersionId={null}
@@ -49,18 +23,21 @@ describe("studio kernel contextual inspection", () => {
       />
     );
 
-    expect(screen.queryByLabelText("Résumé produit")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Composition de la scène")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-modal");
-    expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    expect(screen.queryByRole("button", { name: "Progression" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Système" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Composition de la scène")).toHaveTextContent("Aucun élément 3D disponible");
+    expect(screen.getAllByRole("button").filter((button) =>
+      ["Composition", "Livrables", "Versions"].includes(button.textContent ?? "")
+    )).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Vue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Vérification" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bibliothèque" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("keeps the library accessible without the removed developer panel", () => {
+  it("keeps the inspector limited to composition, deliverables and versions when inventory is loaded", () => {
     render(
       <InspectorDock
         assetInventory={{
@@ -82,10 +59,6 @@ describe("studio kernel contextual inspection", () => {
           rag_retrieval_status: "degraded_local_lexical"
         }}
         canRollback={false}
-        events={[]}
-        issues={null}
-        summary={null}
-        timeline={null}
         toAbsoluteUrl={(url) => url ?? null}
         onRollbackVersion={vi.fn()}
         rollbackBusyVersionId={null}
@@ -95,12 +68,14 @@ describe("studio kernel contextual inspection", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
-    expect(screen.getByRole("button", { name: "Bibliothèque" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Détails avancés" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Sources et décisions")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Composition" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Livrables" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Versions" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Bibliothèque" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Vérification" })).not.toBeInTheDocument();
   });
 
-  it("keeps a repeated workflow failure out of the closed QA drawer and renders it once when opened", () => {
+  it("does not turn workflow limits into a global inspector section", () => {
     const repeatedFailure = "La géométrie demandée hors catalogue n'a pas pu être produite; Blender n'a pas été lancé.";
     render(
       <InspectorDock
@@ -122,20 +97,6 @@ describe("studio kernel contextual inspection", () => {
           }
         }}
         canRollback={false}
-        events={[]}
-        issues={{
-          workflow_id: "wf_1",
-          status: "failed",
-          human_readable_issues: [{
-            title: repeatedFailure,
-            severity: "error",
-            impact: repeatedFailure,
-            recommended_action: repeatedFailure,
-            technical_code: "GEOMETRY_PROGRAM_GENERATION_FAILED"
-          }]
-        }}
-        summary={null}
-        timeline={null}
         toAbsoluteUrl={(url) => url ?? null}
         onRollbackVersion={vi.fn()}
         rollbackBusyVersionId={null}
@@ -146,8 +107,8 @@ describe("studio kernel contextual inspection", () => {
 
     expect(screen.queryByText(repeatedFailure)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
-    fireEvent.click(screen.getByRole("button", { name: /Vérification/ }));
-    expect(screen.getAllByText(repeatedFailure)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Vérification/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(repeatedFailure)).not.toBeInTheDocument();
     expect(screen.queryByText("GEOMETRY_PROGRAM_GENERATION_FAILED")).not.toBeInTheDocument();
   });
 

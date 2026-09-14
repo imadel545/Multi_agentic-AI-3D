@@ -205,7 +205,8 @@ export function useWorkflowLifecycle({
 
   const restoreTarget = useRef(initialWorkflowId);
   const restoreLatestDesign = useCallback(async () => {
-    if (restoreTarget.current === null || restoredWorkflowRef.current || state.workflowId || state.phase !== "idle") return;
+    const targetWorkflowId = restoreTarget.current;
+    if (targetWorkflowId === null || restoredWorkflowRef.current || state.workflowId || state.phase !== "idle") return;
     const restoreEpoch = bootstrapRestoreEpochRef.current;
     const restoreRequestIsCurrent = () => !restoredWorkflowRef.current &&
       !submissionInFlightRef.current && activeWorkflowRef.current === null &&
@@ -225,8 +226,8 @@ export function useWorkflowLifecycle({
         void loadTerminalBundle(latest.workflow_id).catch((error) => dispatch({ type: "RESOURCE_FAILED", resource: "terminal_bundle", message: userFacingError(error, "resource") }));
       }
     };
-    if (restoreTarget.current) {
-      await loadSurfaceResource("workflow_status", () => apiClient.workflowStatus(restoreTarget.current as string), restoreWorkflow, "bootstrap");
+    if (targetWorkflowId) {
+      await loadSurfaceResource("workflow_status", () => apiClient.workflowStatus(targetWorkflowId), restoreWorkflow, "bootstrap");
       return;
     }
     await loadSurfaceResource("design_list", () => apiClient.listDesigns(), (designs) => {
@@ -236,8 +237,12 @@ export function useWorkflowLifecycle({
   }, [activateWorkflow, apiClient, dispatch, loadLiveStatus, loadSurfaceResource, loadTerminalBundle, state.phase, state.workflowId, submissionInFlightRef]);
 
   useEffect(() => {
+    if (restoreTarget.current !== initialWorkflowId) {
+      bootstrapRestoreEpochRef.current += 1;
+      restoreTarget.current = initialWorkflowId;
+    }
     void restoreLatestDesign().catch(() => undefined);
-  }, [restoreLatestDesign]);
+  }, [initialWorkflowId, restoreLatestDesign]);
   useEffect(() => {
     if (!state.workflowId || state.runtimeMode !== "sse") return;
     const cursor = streamCursorRef.current;

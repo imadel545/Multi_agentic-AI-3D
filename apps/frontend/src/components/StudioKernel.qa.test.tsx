@@ -11,6 +11,44 @@ import { bundle, parsedRequirements } from "./StudioKernel.testFixtures";
 afterEach(() => cleanup());
 
 describe("studio kernel QA and design truth", () => {
+  it("keeps technical fidelity and issue totals out of the global status bar", () => {
+    render(
+      <BackendStatusBar
+        health={{
+          status: "ok",
+          service: "agentic_telecom_3d_studio_api",
+          version: "1.0.0",
+          api_contract_version: "2026-07-29"
+        }}
+        phase="completed"
+        bundle={{
+          ...bundle,
+          geometry_fidelity_summary: {
+            component_count: 12,
+            counts: { schematic: 0, technical_generic: 12, vendor_qualified: 0 },
+            roles: { schematic: [], technical_generic: ["antenna"], vendor_qualified: [] }
+          }
+        }}
+        issues={{
+          workflow_id: "wf_1",
+          status: "completed",
+          human_readable_issues: Array.from({ length: 12 }, (_, index) => ({
+            title: `Limite ${index + 1}`,
+            severity: "warning" as const,
+            impact: "À examiner",
+            recommended_action: "Vérifier la composition",
+            technical_code: `LIMIT_${index + 1}`
+          }))
+        }}
+      />
+    );
+
+    const globalStatus = screen.getByLabelText("Studio runtime status");
+    expect(globalStatus).toHaveTextContent("terminée");
+    expect(globalStatus).not.toHaveTextContent(/Fidélité technique générique/i);
+    expect(globalStatus).not.toHaveTextContent(/12 limites à examiner/i);
+  });
+
   it("restores user-authored version instructions chronologically as user messages", () => {
     const entries = conversationHistoryEntries({
       activeRequirements: parsedRequirements.requirements,

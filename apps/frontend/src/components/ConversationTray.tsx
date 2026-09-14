@@ -23,6 +23,7 @@ export function ConversationTray({
   const panel = useRef<HTMLDivElement>(null);
   const feed = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
+  const lastAttention = useRef<unknown>(null);
 
   const changeOpen = useCallback((next: boolean) => {
     if (!isControlled) setInternalOpen(next);
@@ -30,7 +31,9 @@ export function ConversationTray({
   }, [isControlled, onOpenChange]);
 
   useEffect(() => {
-    if (attention && !open) changeOpen(true);
+    const isNewAttention = Boolean(attention) && attention !== lastAttention.current;
+    lastAttention.current = attention;
+    if (isNewAttention && !open) changeOpen(true);
   }, [attention, changeOpen, open]);
   useEffect(() => {
     if (!open) return;

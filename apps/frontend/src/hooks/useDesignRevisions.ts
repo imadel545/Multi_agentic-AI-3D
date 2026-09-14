@@ -59,6 +59,10 @@ export function useDesignRevisions({
     onDraftChange?.(value);
   }, [onDraftChange]);
 
+  const refreshSettledRevision = useCallback((workflowId: string) => {
+    void reconcileAfterAmbiguousMutation(() => loadTerminalBundle(workflowId));
+  }, [loadTerminalBundle]);
+
   const submitRevision = useCallback(async () => {
     if (!state.workflowId || !revisionPrompt.trim() || revisionBusy || revisionInFlightRef.current) return;
     revisionInFlightRef.current = true;
@@ -98,26 +102,24 @@ export function useDesignRevisions({
       const result = await apiClient.editDesign(workflowId, { edit_prompt: submittedRevisionPrompt, ...target });
       const outcome = revisionOutcomeMessage(result, submittedRevisionPrompt);
       setRevisionMessage([outcome, streamNotice].filter(Boolean).join(" · "));
-      if (result.status !== "applied") {
-        dispatch({ type: "REVISION_FINISHED" });
-        await loadTerminalBundle(workflowId);
-        return;
+      if (result.status === "applied") {
+        setRevisionPrompt("");
+        onDraftChange?.("");
+        clearAnalysis();
       }
-      setRevisionPrompt("");
-      onDraftChange?.("");
-      clearAnalysis();
       dispatch({ type: "REVISION_FINISHED" });
-      await loadTerminalBundle(workflowId);
+      refreshSettledRevision(workflowId);
     } catch (error) {
       const message = userFacingError(error, "edit");
       setRevisionMessage(message);
       dispatch({ type: "REQUEST_FAILED", message });
-      await reconcileAfterAmbiguousMutation(() => loadTerminalBundle(workflowId));
+      dispatch({ type: "REVISION_FINISHED" });
+      refreshSettledRevision(workflowId);
     } finally {
       revisionInFlightRef.current = false;
       setRevisionBusy(false);
     }
-  }, [apiClient, clearAnalysis, dispatch, loadTerminalBundle, onDraftChange, rememberEventSequence, revisionBusy, revisionPrompt, selectedSemanticRoot, selectedVersionId, state.workflowId, streamCursorRef, towerAccess?.semantic_root]);
+  }, [apiClient, clearAnalysis, dispatch, onDraftChange, refreshSettledRevision, rememberEventSequence, revisionBusy, revisionPrompt, selectedSemanticRoot, selectedVersionId, state.workflowId, streamCursorRef, towerAccess?.semantic_root]);
 
   const rollbackVersion = useCallback(async (versionId: string) => {
     if (!state.workflowId || rollbackBusyVersionId) return;

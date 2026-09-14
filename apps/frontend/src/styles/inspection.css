@@ -20,6 +20,20 @@
   background: var(--surface-soft);
 }
 
+.composition-overview,
+.composition-empty {
+  display: grid;
+  gap: 4px;
+  padding: 2px 1px 8px;
+}
+
+.composition-overview small,
+.composition-empty p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .scene-plan-summary small,
 .scene-tree-group small,
 .scene-tree-group p {
@@ -529,5 +543,3 @@
   opacity: 0.58;
   cursor: not-allowed;
 }
-
-

@@ -480,6 +480,22 @@ describe("workflow reducer", () => {
     expect(state.runtimeMode).toBe("polling");
   });
 
+  it("restores the verified viewer after a transient revision status was observed", () => {
+    const state = workflowReducer(
+      {
+        ...initialWorkflowState,
+        phase: "running",
+        workflowId: "wf_1",
+        status: { ...runningStatus, status: "running" },
+        viewerBundle: baseBundle
+      },
+      { type: "REVISION_FINISHED" }
+    );
+
+    expect(state.phase).toBe("completed");
+    expect(state.runtimeMode).toBe("idle");
+  });
+
   it("does not expose unsupported actions as available", () => {
     expect(actionIsSupported("rollback", [{ action: "rollback" }])).toBe(false);
     expect(actionIsSupported("download_artifacts", [{ action: "rollback" }])).toBe(true);

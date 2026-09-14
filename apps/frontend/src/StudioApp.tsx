@@ -115,9 +115,6 @@ export function StudioApp({
   const canEditCurrentDesign = state.viewerBundle?.status === "completed" &&
     state.viewerBundle.available_actions.includes("edit_design") &&
     actionIsSupported("edit_design", state.viewerBundle.unsupported_actions);
-  const persistedInputAnalysis = state.viewerBundle?.input_analysis ?? state.status?.input_analysis ?? null;
-  const persistedInputAnalysisStatus = state.viewerBundle?.input_analysis_status ??
-    state.status?.input_analysis_status ?? "unavailable";
   const operationNotice = Array.from(new Set([
     state.transportError,
     state.resourceErrors.workflow_status,
@@ -271,54 +268,17 @@ export function StudioApp({
             intent={revisions.rollbackBusyVersionId ? "rollback" : revisions.revisionBusy ? "revision" : "generation"}
           />
           <InspectorDock
-            adaptationCapabilities={resources.adaptationCapabilities}
-            adaptationCapabilitiesError={state.resourceErrors.adaptation_scene ?? null}
-            adaptationLoading={state.resourceLoads.adaptation_scene?.status === "loading" || state.resourceLoads.adaptation_catalog?.status === "loading"}
-            adaptationCatalog={resources.adaptationCatalog}
-            adaptationCatalogError={state.resourceErrors.adaptation_catalog ?? null}
             assetInventory={resources.assetInventory}
-            assetInventoryError={state.resourceErrors.asset_inventory ?? null}
-            assetLibraryLoading={state.resourceLoads.asset_inventory?.status === "loading" || state.resourceLoads.asset_library?.status === "loading"}
-            assetLibrarySearch={resources.assetLibrarySearch}
-            assetLibrarySearchBusy={resources.assetLibrarySearchBusy}
-            assetLibrarySearchError={resources.assetLibrarySearchError}
-            assetLibraryProbe={resources.assetLibraryProbe}
-            assetLibraryProbeBusy={resources.assetLibraryProbeBusy}
-            assetLibraryProbeError={resources.assetLibraryProbeError}
-            assetLibrarySummary={resources.assetLibrarySummary}
-            assetLibrarySummaryError={state.resourceErrors.asset_library ?? null}
             bundle={state.viewerBundle}
-            assemblyPlan={resources.assemblyPlan}
             canRollback={revisions.canRollbackVersions}
-            events={state.events}
             componentProofs={resources.componentProofs}
             towerAccess={resources.towerAccess}
-            cognitiveEvidenceError={[state.resourceErrors.assembly_plan, state.resourceErrors.component_proofs, state.resourceErrors.requirements_context].filter(Boolean).join(" ") || null}
-            cognitiveEvidenceLoading={state.resourceLoads.assembly_plan?.status === "loading" || state.resourceLoads.component_proofs?.status === "loading" || state.resourceLoads.requirements_context?.status === "loading"}
-            documentCapabilities={resources.documentCapabilities}
-            issues={state.userIssues}
-            qaEvidence={resources.qaEvidence}
-            qaEvidenceError={state.resourceErrors.qa_evidence ?? null}
-            qaEvidenceLoading={state.resourceLoads.qa_evidence?.status === "loading"}
-            inputAnalysis={persistedInputAnalysis}
-            inputAnalysisStatus={persistedInputAnalysisStatus}
-            viewerBundleError={state.resourceErrors.viewer_bundle ?? null}
-            viewerBundleLoading={state.resourceLoads.viewer_bundle?.status === "loading"}
-            summary={state.summary}
-            timeline={state.timeline}
+            cognitiveEvidenceError={[state.resourceErrors.component_proofs, state.resourceErrors.requirements_context].filter(Boolean).join(" ") || null}
+            cognitiveEvidenceLoading={state.resourceLoads.component_proofs?.status === "loading" || state.resourceLoads.requirements_context?.status === "loading"}
             toAbsoluteUrl={toArtifactUrl}
             onRollbackVersion={revisions.rollbackVersion}
             onSelectSceneComponent={resources.selectSemanticRoot}
-            onRetryAdaptation={() => void resources.retryAdaptationSurfaces()}
-            onRetryAssets={() => void resources.retryAssetSurfaces()}
-            onRetryAssetSearch={() => void resources.retryAssetSearch()}
-            onRetryAssetProbe={() => void resources.retryAssetProbe()}
-            onRetryQaEvidence={() => void resources.retryQaEvidence().catch(() => undefined)}
             onRetryCognitiveEvidence={() => void resources.retryCognitiveEvidence()}
-            onRetryViewerBundle={() => void resources.reloadViewerBundle().catch(() => undefined)}
-            onSearchAssetLibrary={resources.searchAssetLibrary}
-            onProbeAssetLibrary={resources.probeAssetLibrary}
-            onReviewAsset={(assetId) => apiClient.assetProvenance(assetId)}
             rollbackBusyVersionId={revisions.rollbackBusyVersionId}
             selectedSemanticRoot={resources.selectedSemanticRoot}
             versionMessage={revisions.versionMessage}

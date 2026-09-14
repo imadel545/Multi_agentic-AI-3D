@@ -138,21 +138,6 @@
   backdrop-filter: blur(8px);
 }
 
-.viewer-object-summary > summary {
-  display: grid;
-  gap: 3px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.viewer-object-summary > summary::-webkit-details-marker {
-  display: none;
-}
-
-.viewer-object-summary[open] > summary {
-  padding-bottom: 6px;
-}
-
 .viewer-object-summary strong {
   display: inline-flex;
   align-items: center;
@@ -162,19 +147,6 @@
 
 .viewer-object-summary small {
   color: #b9c9cd;
-}
-
-.viewer-object-summary div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.viewer-object-summary span {
-  border: 1px solid rgba(219, 230, 232, 0.25);
-  border-radius: 999px;
-  padding: 3px 7px;
-  font-size: 11px;
 }
 
 .viewer-loading-overlay {
@@ -472,5 +444,4 @@
 .viewer-selection button {
   pointer-events: auto;
 }
-
 

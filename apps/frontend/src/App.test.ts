@@ -112,19 +112,9 @@ describe("frontend runtime selection", () => {
       entries: [],
       missing_files: []
     });
-    const assetLibrarySummary = vi.fn().mockResolvedValue({
-      status: "catalogued_quarantined",
-      schema_version: "1.1.0",
-      catalog_available: true,
-      file_count: 11974,
-      generation_eligible_count: 0,
-      limitations: []
-    });
-
-    render(createElement(App, { apiClient: bootstrapApi({ assetInventory, assetLibrarySummary }) }));
+    render(createElement(App, { apiClient: bootstrapApi({ assetInventory }) }));
 
     await waitFor(() => expect(assetInventory).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(assetLibrarySummary).toHaveBeenCalledTimes(1));
   });
 
   it("resumes a running workflow before selecting terminal history", () => {

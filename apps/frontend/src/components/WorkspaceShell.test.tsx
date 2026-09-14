@@ -403,7 +403,7 @@ it("keeps the new conversation action beside the selected project menu", async (
 
 describe("workspace selection memory", () => {
   it("reopens the last project and conversation after a reload without a hash", async () => {
-    const { readLastWorkspaceSelection, writeLastWorkspaceSelection } = await import("./WorkspaceShell");
+    const { readLastWorkspaceSelection, writeLastWorkspaceSelection } = await import("./workspaceSelection");
     const store = new Map<string, string>();
     const storage = {
       getItem: (key: string) => store.get(key) ?? null,

@@ -103,29 +103,17 @@ export function GlbObjectSummary({
   if (!summary) {
     return null;
   }
-  const rows = Object.entries(summary.roles).filter(([, count]) => count > 0);
   return (
-    <details className="viewer-object-summary" aria-label="Résumé du modèle 3D">
-      <summary>
-        <strong>
-          <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
-        </strong>
-        <small>
-          {summary.evidenceMode === "semantic_extras"
-            ? `${summary.physicalEntityCount} composants physiques${
-                summary.technicalAidCount ? ` · ${summary.technicalAidCount} aides d’inspection` : ""
-              }`
-            : "Structure 3D inspectable"} · {viewerHealthLabel(health)}
-        </small>
-      </summary>
-      <div>
-        {rows.map(([role, count]) => (
-          <span key={role}>
-            {role}: {count}
-          </span>
-        ))}
-      </div>
-    </details>
+    <div className="viewer-object-summary" aria-label="Résumé du modèle 3D">
+      <strong>
+        <Layers3 size={14} aria-hidden="true" /> Modèle 3D vérifié
+      </strong>
+      <small>
+        {summary.evidenceMode === "semantic_extras"
+          ? `${summary.physicalEntityCount} composants physiques`
+          : "Structure 3D inspectable"} · {viewerHealthLabel(health)}
+      </small>
+    </div>
   );
 }
 

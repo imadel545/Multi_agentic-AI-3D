@@ -206,17 +206,16 @@ describe("studio kernel evidence and composition", () => {
 
   it("explains selection scope and clears the inspection context", () => {
     const onSelect = vi.fn();
-    render(<SceneCompositionPanel assemblyPlan={null} componentProofs={null}
+    render(<SceneCompositionPanel componentProofs={null}
       selectedSemanticRoot="antenna_S1_REAL_1" onSelect={onSelect} />);
-    expect(screen.getByRole("status")).toHaveTextContent("limitée à ce composant");
-    fireEvent.click(screen.getByRole("button", { name: "Désélectionner" }));
+    expect(screen.getByRole("status")).toHaveTextContent("changements demandés dans le chat viseront cet élément");
+    fireEvent.click(screen.getByRole("button", { name: "Revenir au design complet" }));
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
   it("shows a product label from component evidence instead of the backend identity", () => {
     render(
       <SceneCompositionPanel
-        assemblyPlan={null}
         componentProofs={{
           schema_version: "1.0",
           workflow_id: "wf_labels",
@@ -251,7 +250,6 @@ describe("studio kernel evidence and composition", () => {
   it("shows a version-bound Blender sector inspection only for the selected exported component", () => {
     render(
       <SceneCompositionPanel
-        assemblyPlan={null}
         componentProofs={null}
         selectedSemanticRoot="antenna_S1_ANT_PANEL_5G_001"
         sectorPreviews={[{
@@ -276,12 +274,12 @@ describe("studio kernel evidence and composition", () => {
         "src",
         "http://127.0.0.1:8000/designs/wf_1/sector-previews/3696ad59777e09d5?version_id=v12345678"
       );
-    expect(screen.getByText("Identité dans le modèle 3D : vérifiée")).toBeInTheDocument();
-    expect(screen.getByText(/qualification constructeur ni une validation de pose/)).toBeInTheDocument();
+    expect(screen.getByText("Vue issue du modèle 3D de la version active")).toBeInTheDocument();
+    expect(screen.getByText(/ne valide pas la pose ni les caractéristiques du constructeur/)).toBeInTheDocument();
   });
 
   it("identifies exact imports as reused source geometry without a constructor qualification claim", () => {
-    render(<SceneCompositionPanel assemblyPlan={null} componentProofs={{
+    render(<SceneCompositionPanel componentProofs={{
       schema_version: "1.0", workflow_id: "wf_reuse", components: [],
       geometry_programs: [{
         component_id: "geometry_program:reuse.antenna", role_id: "antenna",
@@ -293,52 +291,16 @@ describe("studio kernel evidence and composition", () => {
         }]
       }]
     }} />);
-    expect(screen.getByText("Réutilisé · géométrie source importée")).toBeInTheDocument();
-    expect(screen.getByText(/Source : ANT_PANEL_4G_001/)).toHaveTextContent("ne constitue pas une qualification constructeur");
-    expect(screen.queryByText(/programme géométrique/)).not.toBeInTheDocument();
+    expect(screen.getByText("Modèle source conservé")).toBeInTheDocument();
+    expect(screen.getByText("Source : Source du catalogue du projet")).toBeInTheDocument();
+    expect(screen.queryByText("ANT_PANEL_4G_001")).not.toBeInTheDocument();
+    expect(screen.queryByText(/manifest|sha|programme géométrique/i)).not.toBeInTheDocument();
   });
 
   it("exposes the real assembly strategy and synchronizes a proof instance selection", () => {
     const onSelect = vi.fn();
     render(
       <SceneCompositionPanel
-        assetDecisionSummary={{
-          components: [{
-            component_id: "antenna_component",
-            role_id: "antenna",
-            strategy: "reuse_component",
-            strategy_evidence: "planned_not_execution_verified",
-            asset_id: "ANT_REAL_1",
-            considered_count: 2,
-            rejected_count: 1,
-            rationale: "Meilleur candidat compatible avec les connecteurs requis.",
-            risks: ["Professional asset QA has not passed."]
-          }],
-          considered_asset_count: 2,
-          selected_asset_count: 1,
-          decision_authority: "llm_bounded",
-          fallback_used: false,
-          fallback_reason: null
-        }}
-        assemblyPlan={{
-          schema_version: "1.0",
-          workflow_id: "wf_1",
-          selection_authority: "bounded_llm",
-          selection_provider: "groq",
-          selection_model: "openai/gpt-oss-120b",
-          components: [{
-            role_id: "antenna",
-            asset_type: "antenna",
-            required: true,
-            candidate_scores: [],
-            selected_asset_id: "ANT_REAL_1",
-            generation_strategy: "reuse",
-            selection_risks: ["Professional asset QA has not passed."],
-            selection_reason: "Meilleur candidat compatible avec les connecteurs requis."
-          }],
-          connections: [{}],
-          operations: []
-        }}
         componentProofs={{
           schema_version: "1.0",
           workflow_id: "wf_1",
@@ -383,7 +345,10 @@ describe("studio kernel evidence and composition", () => {
           entries: [{
             asset_id: "ANT_REAL_1",
             type: "antenna",
+            manufacturer: "Radio Systems",
+            reference: "Panel 800",
             source: "Catalogue qualifié",
+            dimensions_m: { width: 0.3, depth: 0.12, height: 1.4 },
             generation_eligible: true,
             qualification_status: "qualified",
             milestone_evidence_eligible: false,
@@ -413,21 +378,15 @@ describe("studio kernel evidence and composition", () => {
       />
     );
 
-    expect(screen.getAllByText("Réutilisé").length).toBeGreaterThan(0);
-    expect(screen.getByText("Généré")).toBeInTheDocument();
-    expect(screen.getAllByText(/Meilleur candidat compatible/)).toHaveLength(2);
-    expect(screen.queryByRole("img", { name: /Aperçu front/i })).not.toBeInTheDocument();
-    expect(screen.getByText("Asset technique — preuve professionnelle incomplète")).toBeInTheDocument();
-    expect(screen.getByText("Le rapport QA professionnel est absent.")).toBeInTheDocument();
-    expect(screen.getByText("Stratégie planifiée, non certifiée par l’exécution")).toBeInTheDocument();
-    expect(screen.getByText("La QA professionnelle de l’asset n’a pas réussi.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Consulter la provenance" })).toHaveAttribute(
-      "href",
-      "/assets/ANT_REAL_1/provenance"
-    );
+    expect(screen.getByText("Modèle source conservé")).toBeInTheDocument();
+    expect(screen.getByText("Créé pour ce projet")).toBeInTheDocument();
+    expect(screen.getByText("Source : Radio Systems · Panel 800")).toBeInTheDocument();
+    expect(screen.getByText("L × P × H : 0,3 × 0,12 × 1,4 m")).toBeInTheDocument();
+    expect(screen.queryByText(/qualification professionnelle/i)).not.toBeInTheDocument();
     expect(screen.queryByText("groq")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /choisir|sélectionner/i })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("treeitem", { name: /antenna/i }));
+    expect(screen.queryByText("ANT_REAL_1")).not.toBeInTheDocument();
+    expect(screen.queryByText(/QA|manifest|hash|agent/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("treeitem", { name: /antenne/i }));
     expect(onSelect).toHaveBeenCalledWith("antenna_S1_REAL_1");
   });
 

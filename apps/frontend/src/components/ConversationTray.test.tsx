@@ -25,6 +25,31 @@ it("keeps messages mounted when folded and reveals a new actionable error", () =
   expect(screen.getByRole("textbox")).toBe(draft);
   expect(draft).toHaveValue("Keep this");
 });
+it("keeps an acknowledged alert closed until a different alert arrives", () => {
+  const { rerender } = render(
+    <ConversationTray attention="Modification refusée">
+      <p>La version précédente reste active.</p>
+    </ConversationTray>
+  );
+
+  expect(screen.getByText("La version précédente reste active.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Fermer la conversation" }));
+  expect(screen.getByRole("button", { name: "Conversation" })).toHaveAttribute("aria-expanded", "false");
+
+  rerender(
+    <ConversationTray attention="Modification refusée">
+      <p>La version précédente reste active.</p>
+    </ConversationTray>
+  );
+  expect(screen.getByRole("button", { name: "Conversation" })).toHaveAttribute("aria-expanded", "false");
+
+  rerender(
+    <ConversationTray attention="Nouvelle erreur de synchronisation">
+      <p>La version précédente reste active.</p>
+    </ConversationTray>
+  );
+  expect(screen.getByRole("button", { name: "Conversation" })).toHaveAttribute("aria-expanded", "true");
+});
 it("updates chat activity from observed events without claiming completion while running", () => {
   const { rerender } = render(
     <ChatProgress events={[]} phase="idle" editing={false} />
