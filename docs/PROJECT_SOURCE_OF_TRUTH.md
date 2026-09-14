@@ -286,9 +286,9 @@ not manufacturer fidelity, physical fastening or collision certification.
   deterministically. The generic cognitive route can expose qualified
   candidates. This earlier compiler limitation was superseded on 2026-09-10
   for opted-in exact `reuse` and bounded rigid `compose`; `adapt` remains open.
-- The current runtime catalog contains 14 manifests: 13 usable
-  internal/technical manifests and one real professional candidate kept as
-  `reference_only`. **0 of 14 passes the new professional M1 proof gate**.
+- The current runtime catalog contains 15 manifests: 13 usable
+  internal/technical manifests and two real-source candidates kept as
+  `reference_only`. **0 of 15 passes the professional M1 proof gate**.
   Generation eligibility is now an effective runtime decision rather than the
   qualification declaration alone: any manifest claiming a vendor source,
   vendor-qualified fidelity, manufacturer or reference must pass
@@ -540,15 +540,17 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current assets
 
-- 14 manifests: 13 generation-eligible internal/technical assets and one
-  manufacturer candidate kept as `reference_only`.
-- 12 GLB files present.
+- 15 manifests: 13 generation-eligible internal/technical assets and two
+  real-source candidates kept as `reference_only`.
+- 13 GLB files present on this installation, including the locally quarantined
+  OpenCellular chassis review derivative. The number can decrease in a fresh
+  checkout because reference evidence is ignored by Git.
 - The procedural-only dual-band panel intentionally has no companion file and
   is not reported as a missing asset file.
 - 0 tower without a local GLB.
 - Expected `/assets/inventory` status: `qualified_mixed_catalog`.
 - 13 manifests are generation-eligible: 3 authorize an exact GLB import and 10
-  authorize SceneSpec-driven parametric generation; one real STEP candidate is
+  authorize SceneSpec-driven parametric generation; two real STEP candidates are
   `reference_only`.
   The cable-tray family is now qualified through its typed parametric route,
   not through an exact mesh import. The bracket companion GLB is not imported,
@@ -560,8 +562,8 @@ not manufacturer fidelity, physical fastening or collision certification.
 - The three historically missing towers (monopole, rooftop, small-cell) are now
   internal project generated assets produced with Blender.
 - The generation catalog remains internal/CC-BY and not vendor-grade. The
-  Sierra Wireless/Semtech candidate is visible for provenance review, but is
-  not part of the generation catalog.
+  Sierra Wireless/Semtech and OpenCellular reference candidates are visible
+  for provenance review, but are not part of the generation catalog.
 - Towers are generated parametrically by default. In the product planning path,
   GLB import happens only when the manifest authorizes and the planner selects
   `imported_glb_exact`.
@@ -708,7 +710,9 @@ not manufacturer fidelity, physical fastening or collision certification.
   real-Blender mode, requirement coverage, both quality gates, GLB binary
   integrity, geometry QA and preview QA. The persistence boundary re-verifies
   those hashes before activation.
-- Certificate schema `1.4.0` is required for `AssemblyPlan 1.1`. It certifies
+- Certificate schema `1.4.0` is required for `AssemblyPlan 1.1` without the
+  tower-access profile; `1.5.0` also binds the measured tower-access evidence
+  when that profile is used. The assembly contract certifies
   `component_proofs.json`, `constraint_evidence.json`, their checks, the final
   GLB hash and the canonical plan hash. Schema `1.2.0` remains the component-
   proof certificate for non-assembly GeometryPrograms; schema `1.3.0` remains

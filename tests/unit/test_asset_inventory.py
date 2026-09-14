@@ -171,6 +171,29 @@ def test_reference_manifest_without_local_quarantine_reports_missing_evidence(
     assert all(preview["available"] is False for preview in entry["preview_set"])
 
 
+def test_opencellular_chassis_reference_cannot_enter_generation() -> None:
+    registry = AssetRegistry(Path("assets/manifests"))
+    manifest = registry.get("RADIO_OPENCELLULAR_CONNECT1_CHASSIS_REF")
+    entry = AssetInventoryService(Path.cwd(), registry).inspect_asset(
+        "RADIO_OPENCELLULAR_CONNECT1_CHASSIS_REF"
+    )
+
+    local_source = Path(manifest.master_representation.file)
+    if local_source.is_file():
+        assert entry["local_evidence_status"] == "available"
+        assert entry["asset_file_exists"] is True
+        assert all(preview["available"] for preview in entry["preview_set"])
+    else:
+        assert entry["local_evidence_status"] == "unavailable"
+        assert entry["asset_file_exists"] is False
+        assert all(not preview["available"] for preview in entry["preview_set"])
+    assert entry["qualification_status"] == "reference_only"
+    assert entry["asset_import_mode"] == "reference_only"
+    assert entry["generation_eligible"] is False
+    assert entry["allowed_generation_modes"] == []
+    assert registry.is_generation_admitted(manifest) is False
+
+
 def test_asset_inventory_does_not_publish_or_read_outside_root_paths(tmp_path: Path) -> None:
     manifests_dir = tmp_path / "assets" / "manifests"
     manifests_dir.mkdir(parents=True)
