@@ -338,9 +338,11 @@
 .product-workspace .attachment-popover {
   position: absolute;
   left: 0;
-  right: 0;
+  right: auto;
   bottom: calc(100% + 8px);
-  max-height: min(56vh, 560px);
+  width: min(680px, calc(100vw - 32px));
+  max-height: min(54dvh, 560px);
+  z-index: 30;
 }
 .product-workspace .command-composer textarea {
   min-height: 60px;
@@ -480,3 +482,89 @@ button:disabled {
 .product-workspace .command-mode button {
   width: auto;
 }
+
+/* Keep conversation expansion independent of the canvas grid row. */
+.product-workspace .command-center { position: relative; }
+.conversation-tray { min-width: 0; }
+.conversation-tray-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 14px; }
+.conversation-tray-bar > button { display: flex; align-items: center; gap: 8px; min-height: 38px; border: 0; border-radius: 8px; padding: 6px 8px; background: transparent; color: #425d65; cursor: pointer; font-size: 12px; }
+.conversation-tray-bar > button:hover { background: #eef4f4; }
+.conversation-tray-bar svg { flex-shrink: 0; transition: transform 160ms ease; }
+.conversation-tray-bar .expanded { transform: rotate(180deg); }
+.conversation-popover { position: absolute; left: 0; right: 0; bottom: calc(100% + 10px); height: min(430px, 52dvh); display: flex; flex-direction: column; overflow: hidden; border: 1px solid #d5e2e3; border-radius: 16px; background: #fff; box-shadow: 0 14px 42px #122f3a26; animation: conversation-enter 160ms ease-out; }
+.conversation-popover[hidden], .project-sidebar[hidden] { display: none; }
+.conversation-popover > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #e9eeee; font-size: 13px; }
+.conversation-popover > header button, .sidebar-toggle { display: grid; place-items: center; width: 38px; height: 38px; flex-shrink: 0; border: 0; border-radius: 9px; background: transparent; color: #425d65; cursor: pointer; }
+.conversation-popover > header button:hover, .sidebar-toggle:hover { background: #e6efef; }
+.product-workspace .conversation-popover .conversation-feed { flex: 1; min-height: 0; max-height: none; overflow: auto; padding: 16px; overscroll-behavior: contain; scroll-padding-bottom: 16px; }
+.product-workspace .conversation-entry { padding: 12px 14px; border: 0; box-shadow: none; gap: 5px; }
+.product-workspace .conversation-entry strong { font-size: 11px; font-weight: 600; color: #577078; }
+.product-workspace .conversation-entry p { color: #293f47; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.product-workspace .conversation-entry.user { margin-left: 36px; background: #eaf5f3; border-radius: 14px 14px 4px 14px; }
+.product-workspace .conversation-entry.system, .product-workspace .conversation-entry.assistant { margin: 0 28px 0 0; background: #f5f7f8; border-radius: 14px 14px 14px 4px; }
+.chat-progress { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 11px; color: #4c646c; }
+.chat-progress span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-progress.busy { color: #216a65; }
+.product-workspace .command-composer textarea { resize: none; min-height: 58px; padding-top: 12px; padding-bottom: 12px; }
+.product-workspace .composer-hint { padding-left: 8px; }
+.workspace-brand { gap: 7px; padding: 0; }
+.workspace-brand > svg, .workspace-project > svg, .workspace-chat-row > button > svg { flex-shrink: 0; }
+.workspace-brand strong { min-width: 0; flex: 1; font-size: 14px; }
+.workspace-brand span { font-size: 10px; }
+.workspace-chats { border-left: 1px solid #dbe5e7; margin: 2px 0 12px 18px; padding: 0 0 0 5px; }
+.workspace-section-title { letter-spacing: 0; text-transform: none; margin: 0; font-size: 11px; padding-left: 10px; }
+.workspace-chat-row > button:first-child { font-size: 12px; padding: 10px 8px; }
+.product-shell.sidebar-collapsed { grid-template-columns: minmax(0, 1fr); }
+.sidebar-restore { position: absolute; top: 10px; left: 10px; z-index: 25; background: #fff; border: 1px solid #dce4e8; }
+.sidebar-collapsed .product-workspace .topbar { padding-left: 58px; }
+.product-workspace .context-drawer { width: min(420px, calc(100vw - 36px)); }
+.product-workspace .drawer-navigation { gap: 4px; }
+.pack-summary-compact {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8e5e4;
+  border-radius: 10px;
+  background: #f7fbfa;
+}
+.pack-summary-compact > div { display: grid; gap: 3px; min-width: 0; }
+.pack-summary-compact small { color: #5f7378; line-height: 1.35; }
+.pack-summary-compact .secondary-action { white-space: nowrap; }
+.document-review-disclosure {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d8e5e4;
+  border-radius: 10px;
+  background: #fbfdfd;
+  overflow: hidden;
+}
+.document-review-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 12px;
+  color: #2e5960;
+  cursor: pointer;
+  font-weight: 700;
+  list-style-position: inside;
+}
+.document-review-disclosure > summary::marker { color: #5c8e8d; }
+.document-review-disclosure > summary small { color: #6c8184; font-weight: 500; }
+.document-review-disclosure[open] > summary { border-bottom: 1px solid #e1ebeb; background: #f4faf8; }
+.document-review-content {
+  min-height: 0;
+  max-height: min(42dvh, 430px);
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+.document-review-content .document-review-panel { margin: 0; }
+.document-review-content .pack-summary { gap: 8px; }
+@keyframes conversation-enter { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .conversation-popover { animation: none; } .conversation-tray-bar svg { transition: none; } }
+@media (max-width: 640px) { .product-shell.sidebar-collapsed { grid-template-rows: minmax(0, 1fr); } .conversation-tray-bar { gap: 4px; padding: 4px 8px; } .chat-progress { font-size: 10px; } .conversation-popover { height: min(400px, 55dvh); } .product-workspace .attachment-popover { width: 100%; } .workspace-brand { min-width: 0; } }
+/* Leave the center of the model visible while reading the conversation. */
+.conversation-popover { right: auto; width: min(400px, 100%); }
+@media (max-width: 640px) { .conversation-popover { width: 100%; } }

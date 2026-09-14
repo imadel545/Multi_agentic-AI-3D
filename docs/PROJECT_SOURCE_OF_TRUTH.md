@@ -417,6 +417,23 @@ not manufacturer fidelity, physical fastening or collision certification.
 
 ## Current frontend
 
+- 2026-09-14 conversation and intake hardening: the attachment action now opens
+  a bounded brief-intake surface on demand; a retained document pack or its
+  review never opens over the viewer by itself. The primary surface shows a
+  human summary (document count, confirmation points and QA percentage), while
+  pack identifiers, backend enum values and detailed extraction evidence stay
+  behind an explicit, scrollable review disclosure. The conversation history is
+  kept in a bounded tray that can be opened or folded without changing the
+  viewer layout. Progress labels are derived from the observed workflow phase
+  and SSE events; the UI does not claim token streaming. The developer-facing
+  Progression and Détails avancés entries were removed from the main inspector;
+  QA, documents, assets, composition and versions remain contextual surfaces.
+  The project sidebar remains collapsible and destructive project/chat actions
+  remain in their per-item menus. Current verification is 226 frontend tests,
+  typecheck and production build passed, plus a real local-browser check of the
+  intake popover on port 5173. This is a presentation and interaction fix; it
+  does not promote an unqualified CAD source or claim a new professional GLB.
+
 - The 2026-09-14 input follow-up closes a reproduced mismatch: the image-analysis
   question associated with `wf_f615060277a7` had produced a confirmed telecom site
   made of defaults. Parsing now withholds confirmation when no explicit site

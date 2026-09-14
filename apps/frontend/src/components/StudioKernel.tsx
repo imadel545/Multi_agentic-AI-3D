@@ -1,3 +1,4 @@
+import { ConversationTray } from "./ConversationTray";
 import {
   AlertTriangle,
   Boxes,
@@ -9,7 +10,6 @@ import {
   Layers3,
   LibraryBig,
   Loader2,
-  MessageSquareText,
   PanelRightOpen,
   Paperclip,
   Plus,
@@ -164,6 +164,7 @@ export function BackendStatusBar({
 
 export function ChatCommandPanel({
   conversation,
+  activity,
   creationPath = "telecom",
   onCreationPathChange,
   activeRequirements,
@@ -211,6 +212,7 @@ export function ChatCommandPanel({
 }: {
   onNewChat?: (draft?: string) => void;
   conversation?: ReactNode;
+  activity?: ReactNode;
   creationPath?: "telecom" | "free";
   onCreationPathChange?: (path: "telecom" | "free") => void;
   activeRequirements?: RequirementSpec | null;
@@ -276,11 +278,6 @@ export function ChatCommandPanel({
     previousCanEdit.current = canEdit;
   }, [canEdit, commandMode]);
   useEffect(() => {
-    if (documentPackReviewError || documentPackSummary) {
-      setAttachmentsOpen(true);
-    }
-  }, [documentPackReviewError, documentPackSummary]);
-  useEffect(() => {
     if (!attachmentsOpen) return;
     attachmentCloseRef.current?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -298,7 +295,7 @@ export function ChatCommandPanel({
     const composer = composerRef.current;
     if (!composer) return;
     composer.style.height = "auto";
-    composer.style.height = `${Math.min(Math.max(composer.scrollHeight, 92), 210)}px`;
+    composer.style.height = `${Math.min(Math.max(composer.scrollHeight, 58), 150)}px`;
   }, [composerValue]);
   const assistantTitle = revisionBusy
     ? "Modification et contrôles en cours"
@@ -355,14 +352,13 @@ export function ChatCommandPanel({
         ) : null}
       </div>
 
-      <div className="conversation-feed" aria-label="Conversation et cahier des charges">
-        <details className="chat-history-disclosure"><summary><MessageSquareText size={15} /> Conversation</summary>
+      <ConversationTray activity={activity} attention={analysisError || error || bootstrapError || editMessage || (phase === "failed" ? phase : null) || (analysis && !analysisSubmitted && !revisionMode ? analysis : null)}>
+
         {conversation ?? <ConversationHistory
           activeRequirements={prompt.trim() ? null : activeRequirements ?? null}
           currentPrompt={analysis || analysisSubmitted ? prompt : ""}
           versions={versions ?? []}
         />}
-        </details>
 
         {phase === "failed" ? (
           <article className="workflow-recovery" role="alert">
@@ -428,7 +424,7 @@ export function ChatCommandPanel({
             <AlertTriangle size={16} aria-hidden="true" /> {error}
           </p>
         ) : null}
-      </div>
+      </ConversationTray>
 
       <div className="command-dock">
         {!revisionMode && onCreationPathChange ? (
@@ -882,12 +878,12 @@ function DocumentPackIntake({
       <div className="document-intake-body">
         <div className="document-intake-copy">
           <span className="eyebrow">Cahier de charge</span>
-          <strong>Pièces techniques et cahier de charge</strong>
+          <strong>Ajouter des pièces au brief</strong>
           <p>
             {capabilitiesError
               ? "Les limites d’import ne sont pas disponibles; aucun fichier n’est envoyé sans ce contrat."
               : capabilities?.document_pack_status === "limited"
-              ? "Joignez directement plusieurs PDF, images, plans et tableaux, ou déposez un ZIP. Les informations utiles seront extraites et présentées pour confirmation avant la conception."
+              ? "Ajoutez des PDF, images, plans, tableaux ou un ZIP. Le studio les lit, puis vous montre les informations à confirmer avant la conception."
               : capabilitiesLoading
                 ? "Capacités documentaires en cours de chargement."
                 : "Capacités documentaires indisponibles."}
@@ -915,23 +911,35 @@ function DocumentPackIntake({
           onSubmit={onUpload}
         />
         {summary ? (
-        <div className="pack-summary">
-          <strong>{summary.pack_id}</strong>
-          <small>
-            {summary.document_count} documents · {summary.missing_blocking_count} champs bloquants · QA {formatScore(summary.qa_score)}
-          </small>
-          <button className="secondary-action" disabled={!canGenerate || busy} onClick={onGenerate} type="button">
-            Générer depuis le pack
-          </button>
-        </div>
+          <div className="pack-summary pack-summary-compact" aria-label="Cahier de charge chargé">
+            <div>
+              <strong>{summary.status === "failed" ? "Cahier de charge à revoir" : "Cahier de charge chargé"}</strong>
+              <small>
+                {summary.document_count} document(s) · {summary.missing_blocking_count} point(s) à confirmer · contrôle {formatScore(summary.qa_score)}
+              </small>
+            </div>
+            <button className="secondary-action" disabled={!canGenerate || busy} onClick={onGenerate} type="button">
+              Générer le design
+            </button>
+          </div>
         ) : null}
         {review ? (
-        <DocumentPackReviewPanel
-          busy={busy || correctionBusy}
-          onCorrect={onCorrect}
-          onRetry={onReviewRetry}
-          review={review}
-        />
+          <details className="document-review-disclosure">
+            <summary>
+              <span>Revoir les informations extraites</span>
+              <small>
+                {reviewComplete ? "Vérification disponible" : "Confirmation nécessaire"}
+              </small>
+            </summary>
+            <div className="document-review-content">
+              <DocumentPackReviewPanel
+                busy={busy || correctionBusy}
+                onCorrect={onCorrect}
+                onRetry={onReviewRetry}
+                review={review}
+              />
+            </div>
+          </details>
         ) : null}
         {!review && reviewError ? (
           <ResourceRecovery
@@ -1091,8 +1099,8 @@ function DocumentPackReviewPanel({
         <small>
           {consolidatedSpec
             ? consolidatedSpec.source_mode === "groq" || consolidatedSpec.source_mode === "mixed"
-              ? `Compréhension structurée${consolidatedSpec.llm_fallback_used ? " avec mode de secours signalé" : " validée"}.`
-              : "Extraction déterministe; aucun raisonnement LLM n’est revendiqué."
+              ? `Lecture structurée${consolidatedSpec.llm_fallback_used ? " avec un mode de secours signalé" : " validée par le modèle configuré"}.`
+              : "Lecture locale des pièces; aucun modèle distant n’a été utilisé."
             : "La synthèse consolidée n’a pas pu être chargée."}
         </small>
         {criticalEvidence.length ? (
@@ -1131,7 +1139,7 @@ function DocumentPackReviewPanel({
       {processingWarnings.length ? (
         <List
           title="Limites de lecture détectées"
-          items={processingWarnings}
+          items={processingWarnings.map(humanDocumentWarning)}
           empty="Aucune limite de traitement signalée."
         />
       ) : null}
@@ -1145,7 +1153,7 @@ function DocumentPackReviewPanel({
                 <li key={document.document_id}>
                   <strong>{document.filename}</strong>
                   <span>{document.why_used_or_ignored || document.reason}</span>
-                  <small>{document.category} · {document.extraction_status}</small>
+                  <small>{humanDocumentCategory(document.category)} · {humanDocumentStatus(document.extraction_status)}</small>
                 </li>
               ))}
           </ul>
@@ -1176,7 +1184,7 @@ function DocumentPackReviewPanel({
       ) : null}
       <List
         title="Actions recommandées"
-        items={qa?.recommended_user_actions ?? []}
+        items={(qa?.recommended_user_actions ?? []).map(humanDocumentAction)}
         empty={qa ? "Aucune action documentaire supplémentaire." : "Actions indisponibles tant que la QA documentaire n’est pas resynchronisée."}
       />
     </div>
@@ -1454,12 +1462,10 @@ export function AgentTimeline({ events, timeline }: { events: NormalizedWorkflow
 
 type DrawerId =
   | "summary"
-  | "agents"
   | "scene"
   | "quality"
   | "artifacts"
   | "library"
-  | "system"
   | "versions";
 type DrawerDefinition = { id: DrawerId; label: string; badge?: string; icon: ReactNode };
 
@@ -1490,15 +1496,9 @@ export function InspectorDock({
   cognitiveEvidenceError = null,
   cognitiveEvidenceLoading = false,
   issues,
-  ragEvidence = null,
-  ragEvidenceError = null,
-  ragEvidenceLoading = false,
   qaEvidence = null,
   qaEvidenceError = null,
   qaEvidenceLoading = false,
-  llmProvenance = null,
-  llmProvenanceError = null,
-  llmProvenanceLoading = false,
   inputAnalysis = null,
   inputAnalysisStatus = "unavailable",
   viewerBundleError = null,
@@ -1511,9 +1511,7 @@ export function InspectorDock({
   onRetryAssets,
   onRetryAssetProbe,
   onRetryAssetSearch,
-  onRetryLlmProvenance,
   onRetryQaEvidence,
-  onRetryRagEvidence,
   onRetryCognitiveEvidence,
   onRetryViewerBundle,
   onProbeAssetLibrary,
@@ -1551,15 +1549,9 @@ export function InspectorDock({
   cognitiveEvidenceError?: string | null;
   cognitiveEvidenceLoading?: boolean;
   issues: UserIssues | null;
-  ragEvidence?: unknown | null;
-  ragEvidenceError?: string | null;
-  ragEvidenceLoading?: boolean;
   qaEvidence?: unknown | null;
   qaEvidenceError?: string | null;
   qaEvidenceLoading?: boolean;
-  llmProvenance?: LLMDecisionProvenance | null;
-  llmProvenanceError?: string | null;
-  llmProvenanceLoading?: boolean;
   inputAnalysis?: RequirementAnalysisReceipt | null;
   inputAnalysisStatus?: InputAnalysisStatus;
   viewerBundleError?: string | null;
@@ -1572,9 +1564,7 @@ export function InspectorDock({
   onRetryAssets?: () => void;
   onRetryAssetProbe?: () => void;
   onRetryAssetSearch?: () => void;
-  onRetryLlmProvenance?: () => void;
   onRetryQaEvidence?: () => void;
-  onRetryRagEvidence?: () => void;
   onRetryCognitiveEvidence?: () => void;
   onRetryViewerBundle?: () => void;
   onProbeAssetLibrary?: (fileId: string) => void | Promise<void>;
@@ -1596,7 +1586,6 @@ export function InspectorDock({
   const issueCount = displayIssueCount(issues, bundle);
   const drawers: DrawerDefinition[] = [];
   if (bundle || viewerBundleError || viewerBundleLoading) drawers.push({ id: "summary", label: "Vue", icon: <CheckCircle2 size={16} /> });
-  if (events.length || timeline) drawers.push({ id: "agents", label: "Progression", icon: <Sparkles size={16} /> });
   if (assemblyPlan || componentProofs || towerAccess || cognitiveEvidenceError || cognitiveEvidenceLoading) {
     drawers.push({
       id: "scene",
@@ -1616,9 +1605,6 @@ export function InspectorDock({
   if (bundle?.viewer_artifacts.length) drawers.push({ id: "artifacts", label: "Livrables", icon: <FileArchive size={16} /> });
   if (assetInventory || assetInventoryError || assetLibraryLoading) {
     drawers.push({ id: "library", label: "Bibliothèque", icon: <LibraryBig size={16} /> });
-  }
-  if (bundle?.rag_evidence_url || bundle?.llm_decision_provenance_url || summary) {
-    drawers.push({ id: "system", label: "Détails avancés", icon: <Cpu size={16} /> });
   }
   if (versions.length) drawers.push({ id: "versions", label: "Versions", badge: String(versions.length), icon: <Layers3 size={16} /> });
   const drawerOpen = activeDrawer !== null;
@@ -1703,7 +1689,6 @@ export function InspectorDock({
               />
             </>
           ) : null}
-          {activeDrawer === "agents" ? <AgentTimeline events={events} timeline={timeline} /> : null}
           {activeDrawer === "scene" ? (
             <SceneCompositionPanel
               assemblyPlan={assemblyPlan}
@@ -1755,36 +1740,6 @@ export function InspectorDock({
               summaryError={assetLibrarySummaryError}
               toAbsoluteUrl={toAbsoluteUrl}
             />
-          ) : null}
-          {activeDrawer === "system" ? (
-            <>
-              <RuntimeCapabilitiesPanel
-                adaptationCapabilities={adaptationCapabilities}
-                adaptationCapabilitiesError={adaptationCapabilitiesError}
-                adaptationLoading={adaptationLoading}
-                adaptationCatalog={adaptationCatalog}
-                adaptationCatalogError={adaptationCatalogError}
-                bundle={bundle}
-                documentCapabilities={documentCapabilities ?? null}
-                inventory={assetInventory}
-                onRetryAdaptation={onRetryAdaptation}
-                summary={summary}
-              />
-              <RagEvidencePanel
-                bundle={bundle}
-                error={ragEvidenceError}
-                evidence={ragEvidence}
-                loading={ragEvidenceLoading}
-                onRetry={onRetryRagEvidence}
-              />
-              <LlmProvenancePanel
-                bundle={bundle}
-                error={llmProvenanceError}
-                loading={llmProvenanceLoading}
-                onRetry={onRetryLlmProvenance}
-                provenance={llmProvenance}
-              />
-            </>
           ) : null}
           {activeDrawer === "versions" ? (
             <VersionSummary
@@ -3104,7 +3059,12 @@ function humanDocumentField(field: string): string {
     "radio.network_type": "Technologie radio",
     "tower.tower_height_m": "Hauteur du pylône",
     "tower.tower_type": "Type de pylône",
-    "tower.foundation_type": "Type de fondation"
+    "tower.foundation_type": "Type de fondation",
+    "tower.color_ral": "Couleur RAL du pylône",
+    "coordinates.coordinate_system": "Système de coordonnées",
+    "coordinates.altitude_m": "Altitude du site",
+    "coordinates.latitude": "Latitude",
+    "coordinates.longitude": "Longitude"
   };
   return labels[field] ?? field.replaceAll(".", " › ").replaceAll("_", " ");
 }
@@ -3114,9 +3074,80 @@ function documentFieldReason(field: DocumentPackField): string {
     return `valeurs contradictoires ${field.values.map(displayDocumentValue).join(" / ")}`;
   }
   if (field.reason) {
+    if (/no confirmed value with provenance found in document pack/i.test(field.reason)) {
+      return "Aucune valeur confirmée avec une source exploitable n’a été trouvée dans les pièces jointes.";
+    }
+    if (/missing required value/i.test(field.reason)) {
+      return "Cette information obligatoire est absente des pièces jointes.";
+    }
     return field.reason;
   }
-  return field.severity === "blocking" ? "valeur obligatoire absente" : "valeur à confirmer";
+  return field.severity === "blocking"
+    ? "information obligatoire absente des pièces jointes"
+    : "information à confirmer";
+}
+
+function humanDocumentAction(action: string): string {
+  let readable = action;
+  const fields = [
+    "radio.hba_m",
+    "radio.azimuths_deg",
+    "radio.sector_count",
+    "radio.network_type",
+    "tower.tower_height_m",
+    "tower.tower_type",
+    "tower.foundation_type",
+    "tower.color_ral",
+    "coordinates.coordinate_system",
+    "coordinates.altitude_m",
+    "coordinates.latitude",
+    "coordinates.longitude"
+  ];
+  for (const field of fields) {
+    readable = readable.replaceAll(field, humanDocumentField(field));
+  }
+  if (/no confirmed value with provenance found in document pack/i.test(readable)) {
+    return "Confirmer la valeur à partir d’une pièce jointe lisible.";
+  }
+  return readable
+    .replace(/^correct or add blocking fields:/i, "Confirmer les informations obligatoires :")
+    .replace(/^confirm a supported radio type .*$/i, "Confirmer une technologie radio prise en charge avec une preuve documentaire.");
+}
+
+function humanDocumentWarning(warning: string): string {
+  if (/image ocr skipped because the file is not high\/medium priority technical evidence/i.test(warning)) {
+    return "Une image n’a pas été lue automatiquement car elle n’est pas classée comme preuve technique prioritaire.";
+  }
+  if (/no bounded document chunks selected for groq extraction/i.test(warning)) {
+    return "Aucun extrait documentaire suffisamment fiable n’a été transmis au modèle distant.";
+  }
+  return warning.replace(/^groq:\s*/i, "");
+}
+
+function humanDocumentCategory(category: string): string {
+  const labels: Record<string, string> = {
+    elevation_plan: "plan d’élévation",
+    site_plan: "plan de site",
+    technical_drawing: "plan technique",
+    equipment_schedule: "tableau d’équipements",
+    survey: "relevé",
+    administrative: "document administratif",
+    image: "image",
+    unknown: "document non classé"
+  };
+  return labels[category] ?? category.replaceAll("_", " ");
+}
+
+function humanDocumentStatus(status: string): string {
+  const labels: Record<string, string> = {
+    extracted: "lecture terminée",
+    processed: "traitement terminé",
+    pending: "en attente de lecture",
+    failed: "lecture impossible",
+    unavailable: "indisponible",
+    unsupported: "format non pris en charge"
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
 }
 
 function displayDocumentValue(value: unknown): string {

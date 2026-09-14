@@ -6,6 +6,8 @@ import {
   ArrowUpRight,
   MoreHorizontal,
   RadioTower,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import App from "../App";
 import { api } from "../api/client";
@@ -36,6 +38,13 @@ export default function WorkspaceShell() {
   const [projectTitle, setProjectTitle] = useState(""),
     [newProject, setNewProject] = useState(false);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarControl = useRef<HTMLButtonElement>(null);
+  const toggleSidebar = () => {
+    setOpenMenu(null);
+    setSidebarOpen((open) => !open);
+    requestAnimationFrame(() => sidebarControl.current?.focus());
+  };
   const menuTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [history, setHistory] = useState<WorkflowStatus[] | null>(null);
   const [restored, setRestored] = useState(false);
@@ -162,8 +171,8 @@ export default function WorkspaceShell() {
     await flushDraft(true);
   }
   async function selectProject(id: string) {
-    await saveDraft();
     const token = ++epoch.current;
+    await saveDraft();
     const items = await client.chats(id);
     if (token !== epoch.current) return;
     setProjectId(id);
@@ -221,8 +230,8 @@ export default function WorkspaceShell() {
     };
   }, [client]);
   async function chooseChat(value: Chat) {
-    await saveDraft();
     const token = ++epoch.current;
+    await saveDraft();
     const fresh = await client.chat(value.chat_id);
     if (token !== epoch.current) return;
     setChat(fresh);
@@ -291,13 +300,18 @@ export default function WorkspaceShell() {
     );
   }
   return (
-    <div className="product-shell" aria-busy={navigationLocked || !restored}>
-      <aside className="project-sidebar" aria-label="Projets et conversations">
+    <div className={`product-shell${sidebarOpen ? "" : " sidebar-collapsed"}`} aria-busy={navigationLocked || !restored}>
+      <aside className="project-sidebar" id="workspace-sidebar" hidden={!sidebarOpen} aria-label="Projets et conversations">
         <div className="workspace-brand">
           <RadioTower size={22} />
           <strong>
             Telecom Studio<span>Conception assistée par IA</span>
           </strong>
+          <button ref={sidebarControl} className="sidebar-toggle" type="button" aria-label="Replier les projets"
+            aria-controls="workspace-sidebar" aria-expanded={sidebarOpen}
+            onClick={toggleSidebar}>
+            <PanelLeftClose size={18} />
+          </button>
         </div>
         <button
           type="button"
@@ -563,6 +577,9 @@ export default function WorkspaceShell() {
         </nav>
       </aside>
       <div className="product-workspace">
+        {!sidebarOpen ? <button ref={sidebarControl} className="sidebar-toggle sidebar-restore" type="button"
+          aria-label="Afficher les projets" aria-controls="workspace-sidebar" aria-expanded={false}
+          onClick={toggleSidebar}><PanelLeftOpen size={18} /></button> : null}
         {!restored && (
           <p className="workspace-loading" role="status" aria-live="polite">
             Chargement de votre espace…

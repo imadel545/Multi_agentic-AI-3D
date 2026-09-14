@@ -449,6 +449,16 @@ comme une sortie strictement décodée.
 
 ## Séquence frontend recommandée
 
+La commande d'ajout de pièces jointes ouvre une surface d'intake explicitement
+déclenchée par l'utilisateur. Le résumé principal peut indiquer le nombre de
+documents, les points à confirmer et le score QA, mais il ne doit pas publier le
+`pack_id`, les enums internes ou les messages bruts d'extraction. Une revue
+détaillée est une divulgation secondaire et repliable; elle reste alimentée par
+`GET /document-packs/{pack_id}`, `/consolidated-spec` et `/qa`. La conversation
+et la progression affichent les demandes enregistrées et les événements/phase
+observés; elles ne doivent pas inventer une réponse assistant ni présenter un
+flux de tokens lorsqu'aucun endpoint de token streaming n'existe.
+
 1. `GET /health`.
 2. `GET /studio/summary` pour backend, Blender, Groq, RAG NVIDIA, assets et warnings.
 3. `GET /assets/inventory` pour le drawer assets.

@@ -34,8 +34,7 @@ export function DurableConversation({
   const conversation = snapshot?.workflow_id === workflowId ? snapshot : null;
   const shouldShowActiveContext = failed || conversation?.history_status !== "recorded";
   return <div className="conversation-history" aria-label="Conversation enregistrée">
-    <span className="conversation-history-label">Conversation enregistrée</span>
-    {loading ? <p className="muted" role="status">Chargement de la conversation…</p> : null}
+    {loading && !conversation ? <p className="muted" role="status">Chargement de la conversation…</p> : null}
     {failed ? <ResourceRecovery
       label="La conversation n’a pas pu être synchronisée."
       message="Les messages déjà chargés restent visibles. Réessayez pour retrouver la suite."
@@ -48,7 +47,7 @@ export function DurableConversation({
     <div className="conversation-history-list">
       {conversation?.messages.map((message) =>
         <article className={`conversation-entry ${message.role}`} key={message.message_id}>
-          <strong>{message.role === "user" ? "Vous" : "Notification du studio"}</strong>
+          <strong>{message.role === "user" ? "Vous" : "Studio"}</strong>
           <p>{message.text}</p>
           {message.target_semantic_root ?
             <small>Composant visé : {humanComponentInstanceLabel(componentProofs, message.target_semantic_root)}</small> : null}

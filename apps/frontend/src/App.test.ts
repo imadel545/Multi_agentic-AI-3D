@@ -800,7 +800,9 @@ describe("frontend runtime selection", () => {
       )
     );
 
-    expect(await screen.findByText("pack_strict")).toBeInTheDocument();
+    const attachmentButton = await screen.findByRole("button", { name: "Ajouter des pièces jointes" });
+    fireEvent.click(attachmentButton);
+    expect(await screen.findByText("Cahier de charge chargé")).toBeInTheDocument();
     expect(documentPackReview.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 });

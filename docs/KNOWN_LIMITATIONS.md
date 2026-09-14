@@ -70,6 +70,19 @@ frontend.
 
 ## Visible during frontend build
 
+- The document-pack action is intentionally user initiated. A retained pack is
+  summarized in the composer and its detailed review is collapsed until the
+  user asks to inspect it; this prevents raw extraction diagnostics from taking
+  over the 3D workspace. The review still reflects the real document-pack API,
+  and it can report missing evidence, OCR limits or provider fallback in plain
+  language. The composer and conversation tray show workflow events and phases,
+  not provider tokens or a fabricated assistant transcript.
+- The main inspector no longer exposes developer-only Progression or Détails
+  avancés panels. Their underlying evidence remains available through the
+  product endpoints and the focused QA/assets/documents/versions/composition
+  drawers. This surface change does not improve the current technical generic
+  geometry or qualify the reference-only manufacturer asset.
+
 - Telecom confirmation requires at least one explicit, non-default site
   identity/layout field in extraction provenance. An image question with an
   all-default site returns `TELECOM_BRIEF_REQUIRED`, no requirements/hash/receipt,

@@ -1,3 +1,4 @@
+import { ChatProgress } from "./components/ChatProgress";
 import { DurableConversation } from "./components/DurableConversation";
 import {
   Suspense,
@@ -25,7 +26,6 @@ import type {
   DocumentPackReview,
   DocumentPackSummary,
   Health,
-  LLMDecisionProvenance,
   MultimodalConsent,
   AssetInventory,
   AssetLibraryProbe,
@@ -105,7 +105,6 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
   const [adaptationCapabilities, setAdaptationCapabilities] =
     useState<SceneAdaptationCapabilities | null>(null);
   const [qaEvidence, setQaEvidence] = useState<unknown | null>(null);
-  const [llmProvenance, setLlmProvenance] = useState<LLMDecisionProvenance | null>(null);
   const [componentProofs, setComponentProofs] = useState<ComponentProofs | null>(null);
   const [assemblyPlan, setAssemblyPlan] = useState<AssemblyPlanEvidence | null>(null);
   const [activeRequirements, setActiveRequirements] = useState<RequirementSpec | null>(null);
@@ -131,7 +130,6 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
     setSelectedSemanticRoot(root);
     setSelectedVersionId(root ? state.viewerBundle?.version_id ?? null : null);
   }, [state.viewerBundle]);
-  const [ragEvidence, setRagEvidence] = useState<unknown | null>(null);
   const [documentCapabilities, setDocumentCapabilities] =
     useState<DocumentPackCapabilities | null>(null);
   const [documentPackSummary, setDocumentPackSummary] = useState<DocumentPackSummary | null>(null);
@@ -371,8 +369,6 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
     setAssemblyPlan(null);
     setComponentProofs(null);
     setQaEvidence(null);
-    setLlmProvenance(null);
-    setRagEvidence(null);
     setActiveRequirements(null);
     setSelectedSemanticRoot(null);
     setSelectedVersionId(null);
@@ -422,31 +418,6 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
       ).catch(() => undefined);
     } else {
       dispatch({ type: "RESOURCE_RECOVERED", resource: "qa_evidence" });
-    }
-    if (bundle.llm_decision_provenance) {
-      setLlmProvenance(bundle.llm_decision_provenance);
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
-    } else if (bundle.llm_decision_provenance_url) {
-      void loadSurfaceResource(
-        "llm_provenance",
-        () => apiClient.llmDecisionProvenance(bundle.llm_decision_provenance_url!),
-        setLlmProvenance,
-        "resource",
-        () => setLlmProvenance(null)
-      ).catch(() => undefined);
-    } else {
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
-    }
-    if (bundle.rag_evidence_url) {
-      void loadSurfaceResource(
-        "rag_evidence",
-        () => apiClient.artifactJson(bundle.rag_evidence_url!),
-        setRagEvidence,
-        "resource",
-        () => setRagEvidence(null)
-      ).catch(() => undefined);
-    } else {
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "rag_evidence" });
     }
   }, [apiClient, loadSurfaceResource, state.viewerBundle]);
 
@@ -1426,34 +1397,6 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
       () => setQaEvidence(null)
     );
   }, [apiClient, loadSurfaceResource, state.viewerBundle?.qa_report_url]);
-  const retryLlmProvenance = useCallback(async () => {
-    const inline = state.viewerBundle?.llm_decision_provenance;
-    if (inline) {
-      setLlmProvenance(inline);
-      dispatch({ type: "RESOURCE_RECOVERED", resource: "llm_provenance" });
-      return;
-    }
-    const url = state.viewerBundle?.llm_decision_provenance_url;
-    if (!url) return;
-    await loadSurfaceResource(
-      "llm_provenance",
-      () => apiClient.llmDecisionProvenance(url),
-      setLlmProvenance,
-      "resource",
-      () => setLlmProvenance(null)
-    );
-  }, [apiClient, loadSurfaceResource, state.viewerBundle]);
-  const retryRagEvidence = useCallback(async () => {
-    const url = state.viewerBundle?.rag_evidence_url;
-    if (!url) return;
-    await loadSurfaceResource(
-      "rag_evidence",
-      () => apiClient.artifactJson(url),
-      setRagEvidence,
-      "resource",
-      () => setRagEvidence(null)
-    );
-  }, [apiClient, loadSurfaceResource, state.viewerBundle?.rag_evidence_url]);
   const retryCognitiveEvidence = useCallback(async () => {
     const bundle = state.viewerBundle;
     if (!bundle) return;
@@ -1595,6 +1538,7 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
       <main className="studio-layout">
         <aside className="left-rail">
           <ChatCommandPanel
+            activity={<ChatProgress events={state.events} phase={state.phase} editing={revisionBusy} />}
             onNewChat={onNewChat}
             conversation={
               state.workflowId ? (
@@ -1774,15 +1718,9 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
             }
             documentCapabilities={documentCapabilities}
             issues={state.userIssues}
-            ragEvidence={ragEvidence}
-            ragEvidenceError={state.resourceErrors.rag_evidence ?? null}
-            ragEvidenceLoading={state.resourceLoads.rag_evidence?.status === "loading"}
             qaEvidence={qaEvidence}
             qaEvidenceError={state.resourceErrors.qa_evidence ?? null}
             qaEvidenceLoading={state.resourceLoads.qa_evidence?.status === "loading"}
-            llmProvenance={llmProvenance}
-            llmProvenanceError={state.resourceErrors.llm_provenance ?? null}
-            llmProvenanceLoading={state.resourceLoads.llm_provenance?.status === "loading"}
             inputAnalysis={persistedInputAnalysis}
             inputAnalysisStatus={persistedInputAnalysisStatus}
             viewerBundleError={state.resourceErrors.viewer_bundle ?? null}
@@ -1796,9 +1734,7 @@ export default function App({ apiClient = api, chatId, initialWorkflowId, initia
             onRetryAssets={() => void retryAssetSurfaces()}
             onRetryAssetSearch={() => void retryAssetSearch()}
             onRetryAssetProbe={() => void retryAssetProbe()}
-            onRetryLlmProvenance={() => void retryLlmProvenance().catch(() => undefined)}
             onRetryQaEvidence={() => void retryQaEvidence().catch(() => undefined)}
-            onRetryRagEvidence={() => void retryRagEvidence().catch(() => undefined)}
             onRetryCognitiveEvidence={() => void retryCognitiveEvidence()}
             onRetryViewerBundle={() => void reloadViewerBundle().catch(() => undefined)}
             onSearchAssetLibrary={searchAssetLibrary}

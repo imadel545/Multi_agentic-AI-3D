@@ -521,7 +521,9 @@ describe("studio kernel components", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Ajouter des pièces jointes" }));
+    const attachmentButton = screen.getByRole("button", { name: "Ajouter des pièces jointes" });
+    expect(attachmentButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(attachmentButton);
     const consent = screen.getByRole("checkbox", {
       name: /Autoriser l’analyse assistée des images jointes/i
     });
@@ -786,6 +788,7 @@ describe("studio kernel components", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Conversation" }));
     expect(screen.getByRole("status")).toHaveTextContent("déjà lancé le design affiché");
     expect(screen.queryByRole("button", { name: "Confirmer et générer" })).not.toBeInTheDocument();
   });
@@ -946,9 +949,10 @@ describe("studio kernel components", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter des pièces jointes" }));
     expect(screen.getByText("Revue partielle")).toBeInTheDocument();
     expect(screen.getByText(/Sections indisponibles : QA documentaire/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Générer depuis le pack" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Générer le design" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
     expect(onReviewRetry).toHaveBeenCalledOnce();
   });
@@ -976,12 +980,15 @@ describe("studio kernel components", () => {
       />
     );
 
-    expect(screen.getByText("pack_retained")).toBeInTheDocument();
+    const attachmentButton = screen.getByRole("button", { name: "Ajouter des pièces jointes" });
+    expect(attachmentButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(attachmentButton);
+    expect(screen.getByText("Cahier de charge chargé")).toBeInTheDocument();
     expect(
       screen.getByText(/Le pack conservé n’est pas présenté comme vide/)
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Ajouter des pièces jointes" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Générer depuis le pack" })).toBeDisabled();
+    expect(attachmentButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Générer le design" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Réessayer" }));
     expect(onReviewRetry).toHaveBeenCalledOnce();
   });
@@ -1143,6 +1150,7 @@ describe("studio kernel components", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Ajouter des pièces jointes" }));
     expect(screen.getByLabelText("Ajouter des pièces techniques")).toHaveAttribute(
       "multiple"
     );
@@ -1150,6 +1158,7 @@ describe("studio kernel components", () => {
       "accept",
       ".zip"
     );
+    fireEvent.click(screen.getByText("Revoir les informations extraites"));
     expect(screen.getByText("Hauteur des antennes (HBA): HBA absente")).toBeInTheDocument();
     expect(screen.getByText("HBA antennes: 24 m")).toBeInTheDocument();
     expect(screen.getByLabelText("Tri documentaire")).toHaveTextContent("1 utile(s)");
@@ -2434,15 +2443,14 @@ describe("studio kernel components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-modal");
     expect(screen.getByLabelText("Résumé produit")).toHaveTextContent("Résumé du design");
-    fireEvent.click(screen.getByRole("button", { name: /Progression/ }));
-    expect(screen.getByLabelText("Timeline agents")).toHaveTextContent("Progression du design");
+    expect(screen.queryByRole("button", { name: "Progression" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Système" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Bibliothèque" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("exposes contextual library and intelligence drawers when their real data exists", () => {
+  it("keeps the library accessible without the removed developer panel", () => {
     render(
       <InspectorDock
         assetInventory={{
@@ -2478,9 +2486,8 @@ describe("studio kernel components", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Ouvrir le panneau d’inspection" }));
     expect(screen.getByRole("button", { name: "Bibliothèque" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Détails avancés" }));
-    expect(screen.getByText("Sources et décisions")).toBeInTheDocument();
-    expect(screen.getByText(/corpus local réel par correspondance lexicale/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Détails avancés" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Sources et décisions")).not.toBeInTheDocument();
   });
 
   it("keeps a repeated workflow failure out of the closed QA drawer and renders it once when opened", () => {
