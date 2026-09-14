@@ -165,7 +165,7 @@ class ProfessionalAssetVerifier:
             master
             and viewer
             and viewer.derived_from_representation_id == master.representation_id
-            and manifest.source_file_sha256 == master.sha256
+            and manifest.source_file_sha256
             and manifest.qualification.verified_file_sha256 == viewer.sha256
         )
         checks = [

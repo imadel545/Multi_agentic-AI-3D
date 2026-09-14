@@ -474,6 +474,183 @@ def test_professional_evidence_rejects_report_rebound_to_other_evidence(
     assert "Professional QA report has missing or failed checks: orientation." in result.failures
 
 
+def test_professional_evidence_binds_distinct_original_master_and_viewer_hashes(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    assert manifest.qa_evidence.report_file is not None
+    source_path = tmp_path / "assets" / "qualified" / "panel-original.dwg"
+    source_path.write_bytes(b"original DWG bytes\n")
+    original_source_sha256 = _sha256(source_path)
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["representations"]["source_sha256"] = original_source_sha256
+    report["representations"]["source_file"] = str(source_path.relative_to(tmp_path))
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "source_format": "dwg",
+            "source_contains_acis_3d_solids": True,
+            "source_file_sha256": original_source_sha256,
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            ),
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert original_source_sha256 != manifest.master_representation.sha256
+    assert result.eligible is True
+
+    rebound = report.copy()
+    rebound["representations"] = {
+        **report["representations"],
+        "source_sha256": "e" * 64,
+    }
+    report_path.write_text(json.dumps(rebound), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            )
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Professional QA report source hash does not match the manifest." in result.failures
+
+
+def test_professional_evidence_accepts_legacy_source_bound_to_master_bytes(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert manifest.source_file_sha256 == manifest.master_representation.sha256
+    assert result.eligible is True
+
+
+@pytest.mark.parametrize("invalid_hash", [{"sha256": "unexpected object"}, ["unexpected list"]])
+def test_professional_evidence_rejects_malformed_source_hash_without_crashing(
+    tmp_path: Path,
+    invalid_hash: object,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["representations"]["source_sha256"] = invalid_hash
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            )
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Professional QA report source hash does not match the manifest." in result.failures
+
+
+def test_professional_evidence_rejects_missing_distinct_original_source(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    assert manifest.qa_evidence.report_file is not None
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    distinct_source_sha256 = "f" * 64
+    report["representations"]["source_sha256"] = distinct_source_sha256
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "source_file_sha256": distinct_source_sha256,
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            ),
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Professional QA report original source file is missing." in result.failures
+
+
+def test_professional_evidence_rejects_altered_distinct_original_source(
+    tmp_path: Path,
+) -> None:
+    manifest = _professional_contract_fixture(tmp_path)
+    assert manifest.qa_evidence.report_file is not None
+    source_path = tmp_path / "assets" / "qualified" / "panel-original.dwg"
+    source_path.write_bytes(b"original DWG bytes\n")
+    source_sha256 = _sha256(source_path)
+    report_path = tmp_path / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["representations"].update(
+        {
+            "source_sha256": source_sha256,
+            "source_file": str(source_path.relative_to(tmp_path)),
+        }
+    )
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    source_path.write_bytes(b"altered DWG bytes\n")
+    manifest = manifest.model_copy(
+        update={
+            "source_file_sha256": source_sha256,
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            ),
+        }
+    )
+
+    result = ProfessionalAssetVerifier(tmp_path).verify(manifest)
+
+    assert result.eligible is False
+    assert "Original source representation hash does not match the manifest." in result.failures
+
+
+def test_professional_evidence_rejects_original_source_path_outside_root(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    manifest = _professional_contract_fixture(project_root)
+    assert manifest.qa_evidence.report_file is not None
+    source_path = tmp_path / "outside-original.dwg"
+    source_path.write_bytes(b"original DWG bytes\n")
+    source_sha256 = _sha256(source_path)
+    report_path = project_root / manifest.qa_evidence.report_file
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["representations"].update(
+        {
+            "source_sha256": source_sha256,
+            "source_file": "../outside-original.dwg",
+        }
+    )
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+    manifest = manifest.model_copy(
+        update={
+            "source_file_sha256": source_sha256,
+            "qa_evidence": manifest.qa_evidence.model_copy(
+                update={"report_sha256": _sha256(report_path)}
+            ),
+        }
+    )
+
+    result = ProfessionalAssetVerifier(project_root).verify(manifest)
+
+    assert result.eligible is False
+    assert "Original source representation path escapes the project evidence root." in (
+        result.failures
+    )
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 

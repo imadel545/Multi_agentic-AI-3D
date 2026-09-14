@@ -146,6 +146,11 @@ See [RAG_STRATEGY.md](RAG_STRATEGY.md) for the operational retrieval contract an
 - Exact imports pin source hash, units, dimensions, pivot, orientation, and mesh
   review and fail closed if bytes change. Parametric builders operate only through
   declared profiles and bounded parameters.
+- Original CAD, neutral master and viewer may have distinct hashes. Professional
+  QA must bind all three; a distinct original source must remain available at a
+  confined relative path and pass byte-level verification. Historical dossiers
+  where the original is the master remain compatible. Quarantine inspection
+  produces measurements, not an automatic professional-admission verdict.
 - Internal panel, RRU, tower, cable, accessory, ladder, and platform profiles are
   technical geometry. They do not establish manufacturer identity, structural
   capacity, mounting fit, or regulatory compliance.
@@ -172,6 +177,10 @@ See [RAG_STRATEGY.md](RAG_STRATEGY.md) for the operational retrieval contract an
 - Trusted `AssemblyPlan` binds catalog and builder snapshots, exact source bytes,
   allowed parameters, anchors, connectors, and operations. The isolated Blender
   worker revalidates them before construction.
+- RRU and mounting-bracket profiles permit exact qualified GLB reuse. Mounts use
+  the compiled installation transform and preserve source hierarchy and material
+  data. An exact mount requiring an unqualified generated radio adapter is
+  rejected; this capability does not qualify any raw CAD candidate by itself.
 - Blender writes the GLB, preview, scene metadata, component proofs, and any
   required constraint or tower-access evidence. A runner-owned build lock binds
   the raw SceneSpec, worker bundle, runtime identity, trusted inputs, and artifact

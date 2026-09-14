@@ -706,19 +706,14 @@ class AssetManifest(StrictModel):
             failures.append("Project usage rights are not explicitly authorized and evidenced.")
         if self.geometry_fidelity != "vendor_qualified":
             failures.append("Geometry fidelity is not vendor-qualified.")
-        if not (self.source_file_sha256 or self.qualification.verified_file_sha256):
-            failures.append("No immutable source or qualified representation hash is published.")
+        if not self.source_file_sha256:
+            failures.append("No immutable original source hash is published.")
         if self.master_representation is None or self.viewer_representation is None:
             failures.append("Master and viewer representations are not both published.")
         elif self.master_representation.format not in {"brep", "iges", "step"}:
             failures.append("Professional master representation is not a neutral CAD format.")
         elif self.viewer_representation.format != "glb":
             failures.append("Professional viewer representation is not a GLB.")
-        if (
-            self.master_representation is not None
-            and self.source_file_sha256 != self.master_representation.sha256
-        ):
-            failures.append("Published source hash does not match the master representation.")
         if self.viewer_representation is not None:
             if self.viewer_representation.file != self.file:
                 failures.append("Manifest runtime file does not match the viewer representation.")

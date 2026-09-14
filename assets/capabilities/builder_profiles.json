@@ -33,9 +33,9 @@
     },
     {
       "profile_id": "mount_bracket_v1",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "asset_types": ["bracket"],
-      "allowed_generation_modes": ["parametric_generated"],
+      "allowed_generation_modes": ["parametric_generated", "imported_glb_exact"],
       "worker_handler": "mount_bracket",
       "geometry_family": null,
       "instance_strategy": "per_sector",
@@ -43,9 +43,9 @@
     },
     {
       "profile_id": "rru_enclosure_v1",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "asset_types": ["radio"],
-      "allowed_generation_modes": ["parametric_generated"],
+      "allowed_generation_modes": ["parametric_generated", "imported_glb_exact"],
       "worker_handler": "radio_enclosure",
       "geometry_family": null,
       "instance_strategy": "per_sector",

@@ -1069,15 +1069,72 @@ def _create_sectors(
         tilt_deg = float(sector.get("mechanical_tilt_deg") or 0.0)
         sector_id = str(sector["sector_id"])
 
-        # The bracket is built in its manifest-local frame and then placed by
-        # the connector compiler.  Legacy SceneSpecs keep the previous bounded
-        # geometric placement path.
+        # The bracket is built or imported in its manifest-local frame and then
+        # placed by the connector compiler. Legacy SceneSpecs keep the previous
+        # bounded geometric placement path.
+        bracket_plan = _assembly_component(scene, "antenna_mount")
+        bracket_strategy = (
+            str(bracket_plan.get("generation_strategy"))
+            if bracket_plan is not None
+            else "internal_project_generated"
+        )
         bracket_instance = _assembly_operation_instance(
             scene,
             "mount-to-support",
             sector_id,
         )
-        if bracket_instance is not None:
+        if bracket_strategy == "imported_glb_exact":
+            if bracket_instance is None or bracket_plan is None:
+                raise RuntimeError(f"EXACT_MOUNT_BRACKET_TRANSFORM_UNRESOLVED:{sector_id}")
+            bracket_component = trusted_assembly.component_boundary(scene, "antenna_mount")
+            bracket_snapshot = bracket_component["manifest_snapshot"]
+            radio_mount_instance = _validate_exact_mount_bracket_connections(
+                scene,
+                sector_id=sector_id,
+                asset_id=bracket_component["selected_asset_id"],
+            )
+            bracket_operation_ids = ["assembly:mount-to-support"]
+            if radio_mount_instance is not None:
+                bracket_operation_ids.append("assembly:radio-to-mount")
+            bracket_name = f"mount_bracket_{sector_id}"
+            exact_boundary = trusted_assembly.exact_asset_boundary(
+                scene,
+                role_id="antenna_mount",
+                asset_id=bracket_component["selected_asset_id"],
+                project_root=Path.cwd().resolve(),
+            )
+            _try_import_glb_asset(
+                bpy=bpy,
+                asset_id=bracket_component["selected_asset_id"],
+                asset_file=exact_boundary["asset_file"],
+                asset_source="trusted_assembly_manifest",
+                asset_metadata={
+                    "verified_file_sha256": exact_boundary["verified_file_sha256"],
+                },
+                fallback_allowed=False,
+                object_role="mount_bracket",
+                object_name=bracket_name,
+                location=tuple(float(value) for value in bracket_instance["translation_m"]),
+                rotation=tuple(
+                    math.radians(float(value)) for value in bracket_instance["rotation_deg"]
+                ),
+                dimensions=bracket_snapshot.get("dimensions_m"),
+                placement_scale=tuple(
+                    float(value) for value in bracket_instance.get("scale", [1.0, 1.0, 1.0])
+                ),
+                asset_imports=asset_imports,
+                warnings=asset_warnings,
+                semantic_properties={
+                    "sector_id": sector_id,
+                    "requested_azimuth_deg": azimuth_deg,
+                    "requested_hba_m": z,
+                },
+                exact_boundary=exact_boundary,
+            )
+            bracket = bpy.data.objects.get(bracket_name)
+            if bracket is None:
+                raise RuntimeError(f"EXACT_MOUNT_BRACKET_ROOT_MISSING:{sector_id}")
+        elif bracket_instance is not None:
             bracket_component = trusted_assembly.component_boundary(scene, "antenna_mount")
             bracket_snapshot = bracket_component["manifest_snapshot"]
             anchors = {anchor["anchor_id"]: anchor for anchor in bracket_snapshot["anchors"]}
@@ -1104,10 +1161,14 @@ def _create_sectors(
                 },
             )
             _apply_resolved_instance_transform(bracket, bracket_instance)
-            radio_mount_instance = _assembly_operation_instance(
-                scene,
-                "radio-to-mount",
-                sector_id,
+            radio_mount_instance = (
+                _assembly_operation_instance(
+                    scene,
+                    "radio-to-mount",
+                    sector_id,
+                )
+                if sector.get("radio_asset_id")
+                else None
             )
             if radio_mount_instance is not None:
                 radio_mount_operation = _assembly_operation(scene, "radio-to-mount")
@@ -1156,8 +1217,7 @@ def _create_sectors(
                 expected_handler="mount_bracket",
                 operation_ids=bracket_operation_ids,
             )
-        bracket_plan = _assembly_component(scene, "antenna_mount")
-        if bracket_plan:
+        if bracket_plan and bracket_strategy != "imported_glb_exact":
             _record_asset_generation(
                 asset_imports,
                 asset_warnings,
@@ -1173,7 +1233,8 @@ def _create_sectors(
                 generation_strategy="internal_project_generated",
                 generated_object_names=_semantic_tree_names(bracket),
             )
-        procedural_objects.append(f"mount_bracket:{sector_id}")
+        if bracket_strategy != "imported_glb_exact":
+            procedural_objects.append(f"mount_bracket:{sector_id}")
 
         electrical_tilt_deg = float(sector.get("electrical_tilt_deg") or 0.0)
         beam_downtilt_deg = tilt_deg + electrical_tilt_deg
@@ -1753,6 +1814,38 @@ def _assembly_operation(scene: dict, connection_id: str) -> dict:
     if not isinstance(operation, dict):
         raise RuntimeError(f"ASSEMBLY_OPERATION_MISSING:{connection_id}")
     return operation
+
+
+def _validate_exact_mount_bracket_connections(
+    scene: dict,
+    *,
+    sector_id: str,
+    asset_id: str,
+) -> dict | None:
+    """Reject an exact mount that would need worker-generated support geometry."""
+
+    operation = next(
+        (
+            item
+            for item in (scene.get("assembly_plan") or {}).get("operations", [])
+            if item.get("connection_id") == "radio-to-mount"
+        ),
+        None,
+    )
+    if not isinstance(operation, dict):
+        return None
+    radio_instance = next(
+        (item for item in operation.get("instances", []) if item.get("instance_id") == sector_id),
+        None,
+    )
+    if not isinstance(radio_instance, dict):
+        return None
+    target_anchor = operation.get("target_anchor") or {}
+    if target_anchor.get("placement_policy", "fixed") != "fixed":
+        raise RuntimeError(
+            f"EXACT_MOUNT_BRACKET_RESOLVED_SUPPORT_UNSUPPORTED:{asset_id}:{sector_id}"
+        )
+    return radio_instance
 
 
 def _resolved_support_anchor_contract(

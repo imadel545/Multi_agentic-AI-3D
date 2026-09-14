@@ -85,6 +85,8 @@ def professional_evidence_failures(
 
     if not manifest.get("source_provenance"):
         failures.append("Source provenance is not explicitly documented.")
+    if not manifest.get("source_file_sha256"):
+        failures.append("Original source hash is not explicitly documented.")
     if not manifest.get("license"):
         failures.append("Asset licence is not explicitly documented.")
     if not (
@@ -102,8 +104,6 @@ def professional_evidence_failures(
             failures.append("Professional master representation is not a neutral CAD format.")
         if viewer.get("format") != "glb":
             failures.append("Professional viewer representation is not a GLB.")
-        if manifest.get("source_file_sha256") != master.get("sha256"):
-            failures.append("Published source hash does not match the master representation.")
         if viewer.get("file") != manifest.get("file"):
             failures.append("Manifest runtime file does not match the viewer representation.")
         if qualification.get("verified_file_sha256") != viewer.get("sha256"):
@@ -132,7 +132,8 @@ def professional_evidence_failures(
     published_views = {
         str(preview.get("view"))
         for item in previews
-        if (preview := _mapping(item)) and preview.get("qa_status") == "passed"
+        if (preview := _mapping(item))
+        and preview.get("qa_status") == "passed"
         and isinstance(preview.get("view"), str)
     }
     if published_views != expected_views or len(previews) != len(expected_views):
@@ -203,13 +204,14 @@ def professional_evidence_failures(
             report = json.loads(report_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             report = None
-        _verify_report(manifest, master, viewer, qa, report, failures)
+        _verify_report(root, manifest, master, viewer, qa, report, failures)
 
     _verify_dimensions_and_anchors(dimensions, bounds, anchors, failures)
     return tuple(dict.fromkeys(failures))
 
 
 def _verify_report(
+    root: Path,
     manifest: Mapping[str, object],
     master: Mapping[str, object],
     viewer: Mapping[str, object],
@@ -232,6 +234,33 @@ def _verify_report(
     if not representations:
         failures.append("Professional QA report representation bindings are incomplete.")
     else:
+        source_sha256 = manifest.get("source_file_sha256")
+        master_sha256 = master.get("sha256")
+        report_source_sha256 = representations.get("source_sha256")
+        if source_sha256 != master_sha256:
+            if report_source_sha256 != source_sha256:
+                failures.append("Professional QA report source hash does not match the manifest.")
+            source_file = representations.get("source_file")
+            if not isinstance(source_file, str) or not source_file:
+                failures.append("Professional QA report original source file is missing.")
+            elif Path(source_file).is_absolute():
+                failures.append("Original source representation path must be relative.")
+            else:
+                source_path = _evidence_path(
+                    root,
+                    source_file,
+                    "Original source representation",
+                    failures,
+                )
+                if source_path is not None:
+                    _verify_hash(
+                        source_path,
+                        source_sha256,
+                        "Original source representation hash does not match the manifest.",
+                        failures,
+                    )
+        elif report_source_sha256 is not None and report_source_sha256 != source_sha256:
+            failures.append("Professional QA report source hash does not match the manifest.")
         if representations.get("master_sha256") != master.get("sha256"):
             failures.append("Professional QA report master hash does not match the manifest.")
         if representations.get("viewer_sha256") != viewer.get("sha256"):

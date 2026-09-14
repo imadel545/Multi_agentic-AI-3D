@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 from pathlib import Path
 
@@ -374,9 +375,7 @@ def test_telecom_ranking_rejects_exact_radio_without_role_and_interfaces(
                 required_connector_kinds=["mechanical"],
             ),
             "connectors": [
-                connector
-                for connector in generic.connectors
-                if connector.connector_id != "rf_port"
+                connector for connector in generic.connectors if connector.connector_id != "rf_port"
             ],
             "qualification": exact_qualification,
             "import_fallback_allowed": False,
@@ -497,6 +496,84 @@ def test_telecom_planner_supplies_full_packets_to_bounded_selector() -> None:
             assert packet["generation_eligible"] is True
             assert packet["source_provenance"]
             assert packet["allowed_strategies"]
+
+
+@pytest.mark.parametrize(
+    ("asset_id", "role_id", "include_rru"),
+    [
+        ("RRU_SMALL_001", "remote_radio", True),
+        ("MOUNTING_BRACKET_001", "antenna_mount", False),
+    ],
+)
+def test_telecom_planner_accepts_qualified_exact_equipment_supported_by_worker(
+    tmp_path: Path,
+    asset_id: str,
+    role_id: str,
+    include_rru: bool,
+) -> None:
+    project_root = tmp_path / "project"
+    manifests_dir = project_root / "assets" / "manifests"
+    capabilities_dir = project_root / "assets" / "capabilities"
+    shutil.copytree(MANIFESTS_DIR, manifests_dir)
+    shutil.copytree(Path("assets/capabilities"), capabilities_dir)
+    manifest_path = manifests_dir / f"{asset_id}.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    target_asset = project_root / payload["file"]
+    target_asset.parent.mkdir(parents=True)
+    shutil.copy2(Path(payload["file"]), target_asset)
+    payload.update(
+        {
+            "source": "internal_cleaned",
+            "import_fallback_allowed": False,
+            "transform_permissions": {
+                "translation_axes": ["x", "y", "z"],
+                "rotation_axes": ["z"],
+                "maximum_translation_m": 100,
+                "maximum_rotation_deg": 360,
+                "uniform_scale_allowed": False,
+                "non_uniform_scale_allowed": False,
+            },
+            "qualification": {
+                "status": "qualified_for_generation",
+                "allowed_generation_modes": ["imported_glb_exact"],
+                "verified_file_sha256": hashlib.sha256(target_asset.read_bytes()).hexdigest(),
+                "units": "meters",
+                "mesh_integrity_verified": True,
+                "dimensions_verified": True,
+                "pivot_verified": True,
+                "orientation_verified": True,
+                "qualification_method": "Controlled exact-equipment contract fixture",
+                "limitations": ["Contract fixture; no vendor identity claimed."],
+            },
+        }
+    )
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    requirements = parse_requirements_text(
+        "Créer un site 5G sur pylône treillis 30m avec 3 secteurs à 24m, "
+        "azimuts 0, 120, 240, avec RRU et sans câbles."
+    ).model_copy(
+        update={
+            "include_rru": include_rru,
+            "include_cables": False,
+            "include_power_cabinet": False,
+            "include_gps_antenna": False,
+        }
+    )
+
+    result = AssetAssemblyPlanner(AssetRegistry(manifests_dir)).plan(
+        workflow_id="wf_exact_equipment", requirements=requirements
+    )
+
+    selected = next(
+        component for component in result.plan.components if component.role_id == role_id
+    )
+    assert selected.generation_strategy == "imported_glb_exact"
+    assert selected.semantic_strategy == "reuse_component"
+    assert selected.builder_profile.allowed_generation_modes == [
+        "parametric_generated",
+        "imported_glb_exact",
+    ]
+    assert selected.manifest_snapshot.generation_mode == "imported_glb_exact"
 
 
 class _InvalidSemanticDecisionClient(_CapturingDecisionClient):
